@@ -14,7 +14,7 @@ const Users = () => {
     email: '',
     full_name: '',
     password: '',
-    role: 'VIEWER'
+    role: 'USER'
   });
 
   const fetchUsers = async () => {
@@ -53,7 +53,7 @@ const Users = () => {
         email: '',
         full_name: '',
         password: '',
-        role: 'VIEWER'
+        role: 'USER'
       });
     }
     setShowDrawer(true);
@@ -114,8 +114,7 @@ const Users = () => {
               {[
                 { label: 'All', value: '' },
                 { label: 'Admins', value: 'ADMIN' },
-                { label: 'Managers', value: 'MANAGER' },
-                { label: 'Viewers', value: 'VIEWER' },
+                { label: 'Users', value: 'USER' },
               ].map(tab => (
                 <button 
                   key={tab.value}
@@ -151,8 +150,7 @@ const Users = () => {
                     <div className="flex items-center gap-3">
                       <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-white shadow-lg ${
                         user.role === 'ADMIN' ? 'bg-gradient-to-br from-red-600 to-orange-600 shadow-red-600/20' :
-                        user.role === 'MANAGER' ? 'bg-gradient-to-br from-blue-600 to-cyan-600 shadow-blue-600/20' :
-                        'bg-gradient-to-br from-slate-600 to-slate-700 shadow-slate-600/20'
+                        'bg-gradient-to-br from-blue-600 to-cyan-600 shadow-blue-600/20'
                       }`}>
                         {user.username.substring(0, 1).toUpperCase()}
                       </div>
@@ -165,8 +163,7 @@ const Users = () => {
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
                       {user.role === 'ADMIN' ? <ShieldAlert className="w-4 h-4 text-red-500" /> : 
-                       user.role === 'MANAGER' ? <ShieldCheck className="w-4 h-4 text-blue-500" /> : 
-                       <Shield className="w-4 h-4 text-slate-500" />}
+                       <ShieldCheck className="w-4 h-4 text-blue-500" />}
                       <span className="font-black text-[11px] uppercase tracking-widest text-slate-300">{user.role}</span>
                     </div>
                   </td>
@@ -186,7 +183,7 @@ const Users = () => {
                       <button 
                         onClick={() => handleOpenDrawer(user)}
                         className="p-2 rounded-lg bg-slate-900 border border-white/5 hover:bg-blue-500/20 hover:text-blue-400 transition-all text-slate-500"
-                        title="Edit Permissions"
+                        title="Update Policy"
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
@@ -194,7 +191,7 @@ const Users = () => {
                         onClick={() => handleDelete(user.id)}
                         disabled={!user.is_active}
                         className="p-2 rounded-lg bg-slate-900 border border-white/5 hover:bg-red-500/20 hover:text-red-400 transition-all text-slate-500 disabled:opacity-20"
-                        title="Deactivate Access"
+                        title="Terminate Access"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -274,8 +271,7 @@ const Users = () => {
               <div className="space-y-3 mt-3">
                 {[
                   { id: 'ADMIN', label: 'Global Administrator', desc: 'Full system overrides and security control', icon: ShieldAlert, color: 'text-red-500' },
-                  { id: 'MANAGER', label: 'Operations Lead', desc: 'Manage campaigns, leads and queue review', icon: ShieldCheck, color: 'text-blue-500' },
-                  { id: 'VIEWER', label: 'System Auditor', desc: 'Read-only access to metrics and reports', icon: Shield, color: 'text-slate-500' },
+                  { id: 'USER', label: 'Standard User', desc: 'Access to core features and campaign management', icon: ShieldCheck, color: 'text-blue-500' },
                 ].map(role => (
                   <label 
                     key={role.id}

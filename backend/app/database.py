@@ -130,6 +130,36 @@ def create_tables():
         created_at TIMESTAMP DEFAULT NOW()
     );
     """)
+
+    # User Management Table
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        full_name TEXT,
+        password_hash TEXT NOT NULL,
+        role TEXT DEFAULT 'USER', -- ADMIN, USER
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+    """)
+
+    # Seed default admin if empty
+    cur.execute("SELECT COUNT(*) FROM users")
+    if cur.fetchone()['count'] == 0:
+        import hashlib
+        # Default credentials for first setup (user will be prompted to change or can add more)
+        # Using a simple SHA256 for now as no bcrypt is available in current env
+        default_username = os.getenv("ADMIN_USERNAME", "admin")
+        default_password = os.getenv("ADMIN_PASSWORD", "admin123")
+        password_hash = hashlib.sha256(default_password.encode()).hexdigest()
+        
+        cur.execute("""
+            INSERT INTO users (username, email, full_name, password_hash, role)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (default_username, "admin@leadstreamai.com", "System Administrator", password_hash, "ADMIN"))
+    
     
     conn.commit()
     cur.close()

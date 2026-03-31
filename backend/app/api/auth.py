@@ -18,19 +18,38 @@ class LoginRequest(BaseModel):
 
 @router.post("/auth/login")
 def login(req: LoginRequest):
-    admin_user = os.getenv("ADMIN_USERNAME")
-    admin_pass = os.getenv("ADMIN_PASSWORD")
-    
-    if not admin_user or not admin_pass:
-        # If not configured, deny login
-        from fastapi import HTTPException
-        raise HTTPException(status_code=500, detail="Server authentication not configured")
-
-    if req.username == admin_user and req.password == admin_pass:
-        return {
-            "access_token": "dummy_token",
-            "token_type": "bearer"
-        }
-    
+    import hashlib
+    from app.database import get_db_connection
     from fastapi import HTTPException
-    raise HTTPException(status_code=401, detail="Invalid username or password")
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Query user by username
+    cur.execute("SELECT id, username, password_hash, role, is_active FROM users WHERE username = %s", (req.username,))
+    user = cur.fetchone()
+    
+    cur.close()
+    conn.close()
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+        
+    if not user['is_active']:
+        raise HTTPException(status_code=403, detail="Account is deactivated")
+        
+    # Verify password hash
+    password_hash = hashlib.sha256(req.password.encode()).hexdigest()
+    if password_hash != user['password_hash']:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+        
+    return {
+        "access_token": "dummy_token", # In a real app, generate a JWT here
+        "token_type": "bearer",
+        "user": {
+            "id": user['id'],
+            "username": user['username'],
+            "role": user['role']
+        }
+    }
+

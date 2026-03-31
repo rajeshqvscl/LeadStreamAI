@@ -37,13 +37,13 @@ const Login = () => {
       };
 
       const response = await api.post('/api/auth/login', loginData);
-      
+
       if (response.status === 200) {
         const { access_token } = response.data;
         if (access_token) {
           localStorage.setItem('token', access_token);
         }
-        
+
         setMsg('Login Successful! Redirecting to dashboard...');
         setTimeout(() => {
           navigate('/dashboard');
@@ -89,7 +89,7 @@ const Login = () => {
         <form onSubmit={handleLogin}>
           <div className="mb-5 group">
             <label htmlFor="username" className="block text-xs font-semibold text-[#9ca3b4] mb-2 tracking-[0.3px]">
-              Username or Email
+              Username
             </label>
             <div className="relative focus-within:text-blue-500 transition-transform duration-200 group-focus-within:translate-x-[2px]">
               <input
