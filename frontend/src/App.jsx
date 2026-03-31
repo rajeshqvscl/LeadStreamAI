@@ -27,11 +27,11 @@ function App() {
       <div className="orb orb-1"></div>
       <div className="orb orb-2"></div>
       <div className="orb orb-3"></div>
-      
+
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
-        
+
         {/* Authenticated Dashboard Routes */}
         <Route path="/dashboard" element={<Layout />}>
           <Route index element={<Dashboard />} />
@@ -50,7 +50,7 @@ function App() {
 
         {/* Root Redirect */}
         <Route path="/" element={<Navigate to="/login" replace />} />
-        
+
         {/* Redirect unknown routes to login */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>

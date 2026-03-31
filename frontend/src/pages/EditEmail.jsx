@@ -28,21 +28,25 @@ const EditEmail = () => {
       const lead = response.data;
       
       // Robust extraction of subject and body
-      const draftContent = lead.email_draft || "";
-      let sub = "";
-      let bd = "";
+      let draftContent = lead.email_draft || "";
+      // Normalize literal escapes
+      draftContent = draftContent.replace(/\\n/g, "\n").replace(/\\r\\n/g, "\n");
       
-      if (draftContent.includes("Subject: ")) {
-        const firstNewLine = draftContent.indexOf("\n\n");
-        if (firstNewLine !== -1) {
-          sub = draftContent.substring(0, firstNewLine).replace("Subject: ", "").trim();
-          bd = draftContent.substring(firstNewLine + 2).trim();
-        } else {
-          sub = draftContent.replace("Subject: ", "").trim();
-          bd = "";
+      let sub = "";
+      let bd = draftContent;
+      
+      if (draftContent.includes("Subject:")) {
+        const parts = draftContent.split(/\n\n|\n/, 2); // Split by double or single newline
+        if (parts.length > 0) {
+          sub = parts[0].replace(/Subject:\s*/, "").trim();
+          if (parts.length > 1) {
+            // Re-join the rest for the body if there were more than 2 parts originally
+            const bodyStart = draftContent.indexOf(parts[1]);
+            bd = draftContent.substring(bodyStart).trim();
+          } else {
+            bd = "";
+          }
         }
-      } else {
-        bd = draftContent;
       }
 
       setDraft(lead);

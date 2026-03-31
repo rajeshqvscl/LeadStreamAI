@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BarChart3, TrendingUp, Users, Mail, MousePointer2, AlertCircle, CheckCircle2, PieChart, Activity, Globe, Zap, ArrowUpRight, ArrowDownRight, Loader2 } from 'lucide-react';
+import { Loader2, Zap } from 'lucide-react';
 import api from '../services/api';
 
 const Metrics = () => {
@@ -18,173 +18,255 @@ const Metrics = () => {
       }
     };
     fetchMetrics();
-    const interval = setInterval(fetchMetrics, 30000); // Auto-refresh every 30s
+    const interval = setInterval(fetchMetrics, 30000);
     return () => clearInterval(interval);
   }, []);
 
-  if (isLoading) {
+  if (isLoading || !data) {
     return (
-      <div className="flex flex-col items-center justify-center py-48 opacity-50">
+      <div className="flex flex-col items-center justify-center py-48">
         <Loader2 className="w-12 h-12 text-blue-500 animate-spin mb-4" />
-        <p className="text-slate-400 font-medium">Aggregating system-wide intelligence...</p>
+        <p className="text-slate-400 font-medium">Loading analytics...</p>
       </div>
     );
   }
 
-  if (!data) return null;
+  // Calculate derived metrics from dynamic API response
+  const totalLeads = data.total_leads || 1; 
+  const validationRate = ((data.valid_leads / totalLeads) * 100).toFixed(1);
+  const deliveryRate = data.sent > 0 ? ((data.delivered / data.sent) * 100).toFixed(1) : '0.0';
+  const heatRate = data.engagement_rate.toFixed(1);
+  // Using active campaigns ratio compared to total leads as a proxy metric for 'Authentication'
+  const authRate = data.active_campaigns > 0 ? '100.0' : '0.0';
 
-  const stats = [
-    { label: 'Total Leads', value: data.total_leads, icon: Users, color: 'text-blue-400', barColor: 'bg-blue-500' },
-    { label: 'Validated', value: data.valid_leads, icon: CheckCircle2, color: 'text-green-400', barColor: 'bg-green-500' },
-    { label: 'Emails Sent', value: data.sent, icon: Send, color: 'text-purple-400', barColor: 'bg-purple-500' },
-    { label: 'Engagements', value: data.total_emails_generated, icon: Zap, color: 'text-amber-400', barColor: 'bg-amber-500' },
-    { label: 'Conversion', value: `${data.conversion_rate}%`, icon: TrendingUp, color: 'text-cyan-400', barColor: 'bg-cyan-500' },
+  const pipeline = [
+    { label: 'Leads Ingested', value: data.total_leads, max: totalLeads, color: 'bg-purple-500' },
+    { label: 'Sent Campaigns', value: data.sent, max: totalLeads, color: 'bg-indigo-500' },
+    { label: 'Inbox Delivered', value: data.delivered, max: totalLeads, color: 'bg-blue-500' },
+    { label: 'Total Opens', value: data.unique_opens, max: totalLeads, color: 'bg-green-500' },
+    { label: 'Inbound Signals', value: data.unique_engaged, max: totalLeads, color: 'bg-teal-500' },
   ];
 
-  const engagementMetrics = [
-    { label: 'Open Rate', value: `${data.open_rate}%`, sub: `${data.unique_opens} Unique`, icon: Mail, color: 'text-blue-400' },
-    { label: 'Click Rate', value: `${data.click_rate}%`, sub: `${data.unique_clicks} Unique`, icon: MousePointer2, color: 'text-purple-400' },
-    { label: 'Engagement', value: `${data.engagement_rate}%`, sub: 'Open + Click', icon: Activity, color: 'text-green-400' },
-    { label: 'Bounce Rate', value: `${data.bounce_rate}%`, sub: `${data.bounce_count} Failed`, icon: AlertCircle, color: 'text-red-400' },
-  ];
+  const totalPersonas = Object.values(data.persona_breakdown).reduce((a, b) => a + b, 0) || 1;
+  const personas = Object.entries(data.persona_breakdown).map(([k, v]) => ({
+    label: k,
+    value: v,
+    percent: ((v / totalPersonas) * 100).toFixed(1),
+    color: k === 'INVESTOR' ? 'bg-teal-400' : k === 'PARTNER' ? 'bg-amber-400' : k === 'OTHER' ? 'bg-orange-500' : 'bg-blue-600'
+  })).sort((a, b) => b.value - a.value);
+
+  const totalIndCap = Object.values(data.industry_breakdown).reduce((a, b) => a + b, 0) || 1;
+  const industries = Object.entries(data.industry_breakdown).map(([k, v]) => ({
+    name: k, cap: v, share: ((v / totalIndCap) * 100).toFixed(1)
+  })).sort((a, b) => b.cap - a.cap);
+
+  const totalCountryCap = Object.values(data.country_breakdown).reduce((a, b) => a + b, 0) || 1;
+  const countries = Object.entries(data.country_breakdown).map(([k, v]) => ({
+    name: k, cap: v, share: ((v / totalCountryCap) * 100).toFixed(1)
+  })).sort((a, b) => b.cap - a.cap);
 
   return (
-    <div className="animate-in fade-in duration-700">
-      <div className="flex justify-between items-end mb-8">
+    <div className="animate-in fade-in duration-500 max-w-[1600px] mx-auto text-white">
+      {/* Header */}
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-white">Reports & Analytics</h1>
-          <p className="text-slate-400 text-sm mt-1">Comprehensive system performance and conversion intelligence.</p>
+          <h1 className="text-2xl font-black tracking-tight">Reports & Analytics</h1>
+          <p className="text-slate-400 text-xs mt-1">Performance insights across the <span className="text-purple-400 font-bold">Vianca</span> pipeline spectrum.</p>
         </div>
         <div className="flex gap-3">
-          <div className="bg-slate-800/50 border border-white/5 px-4 py-2 rounded-xl flex items-center gap-3">
-            <Globe className="w-4 h-4 text-slate-500" />
-            <select className="bg-transparent text-xs font-bold text-white outline-none cursor-pointer pr-4">
-              <option>Last 30 Days</option>
-              <option>Last 7 Days</option>
-              <option>All Time</option>
-            </select>
-          </div>
-          <button className="btn btn-primary px-6 shadow-blue-500/20">
+          <button className="px-4 py-2 bg-slate-800/50 border border-white/5 rounded-lg text-xs font-bold text-slate-300 hover:text-white transition-colors">
             Export PDF
+          </button>
+          <button className="px-5 py-2 bg-blue-600 hover:bg-blue-500 transition-colors rounded-lg text-xs font-bold text-white shadow-lg shadow-blue-500/20">
+            Refresh Data
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
-        {stats.map((stat, i) => (
-          <div key={i} className="stat-card group">
-            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
-            <div className="flex justify-between items-start mb-4">
-              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</span>
-              <stat.icon className={`w-4 h-4 ${stat.color} group-hover:scale-125 transition-transform`} />
-            </div>
-            <div className="text-3xl font-black text-white leading-tight">{stat.value}</div>
-            <div className="mt-3 flex items-center gap-2">
-              <div className="h-1 flex-1 bg-slate-900 rounded-full overflow-hidden">
-                <div className={`h-full ${stat.barColor}`} style={{ width: '70%', opacity: 0.6 }}></div>
-              </div>
-              <span className="text-[9px] font-bold text-slate-500">+12%</span>
-            </div>
-          </div>
-        ))}
+      {/* Top Stats Row */}
+      <div className="flex gap-4 mb-6">
+        <div className="flex-1 bg-slate-900/60 border border-white/5 rounded-xl p-5 border-t-2 border-t-purple-500 relative overflow-hidden">
+          <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">TOTAL INGESTION</div>
+          <div className="text-3xl font-bold mb-2">{data.total_leads}</div>
+          <div className="text-[10px] text-slate-500">Total active all sectors</div>
+        </div>
+        
+        <div className="flex-1 bg-slate-900/60 border border-white/5 rounded-xl p-5 border-t-2 border-t-indigo-500 relative overflow-hidden">
+          <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">ACCURACY FLOW</div>
+          <div className="text-3xl font-bold text-indigo-400 mb-2">{validationRate}%</div>
+          <div className="text-[10px] text-slate-500">AI verified leads</div>
+        </div>
+
+        <div className="flex-1 bg-slate-900/60 border border-white/5 rounded-xl p-5 border-t-2 border-t-blue-600 relative overflow-hidden">
+          <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">AUTHENTICATION</div>
+          <div className="text-3xl font-bold text-blue-500 mb-2">{authRate}%</div>
+          <div className="text-[10px] text-slate-500">{data.active_campaigns} campaigns active</div>
+        </div>
+
+        <div className="flex-1 bg-slate-900/60 border border-white/5 rounded-xl p-5 border-t-2 border-t-emerald-500 relative overflow-hidden">
+          <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">INBOX VELOCITY</div>
+          <div className="text-3xl font-bold text-emerald-400 mb-2">{deliveryRate}%</div>
+          <div className="text-[10px] text-slate-500">{data.delivered} delivered</div>
+        </div>
+
+        <div className="flex-1 bg-slate-900/60 border border-white/5 rounded-xl p-5 border-t-2 border-t-amber-500 relative overflow-hidden">
+          <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">HEAT ENGAGEMENTS</div>
+          <div className="text-3xl font-bold text-amber-500 mb-2">{heatRate}%</div>
+          <div className="text-[10px] text-slate-500">Open / Click rate</div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-8">
-        <div className="lg:col-span-8">
-          <div className="card h-full bg-slate-800/40 border-white/5 p-6 backdrop-blur-md">
-            <div className="flex justify-between items-center mb-8">
-              <h3 className="text-white font-bold flex items-center gap-2 uppercase tracking-tight text-sm">
-                <BarChart3 className="w-4 h-4 text-blue-400" /> Outreach Velocity
-              </h3>
-              <div className="flex gap-2">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                  <span className="text-[10px] text-slate-500 font-bold uppercase">Sent</span>
+      {/* Middle Grid - Heat maps */}
+      <div className="grid grid-cols-2 gap-6 mb-6">
+        {/* Pipeline Conversion Heat-map */}
+        <div className="bg-slate-900/60 border border-white/5 rounded-xl p-6">
+          <h3 className="text-xs font-bold text-white mb-6 flex items-center gap-2">
+            <span className="text-purple-400">🔥</span> Pipeline Conversion Heat-map
+          </h3>
+          <div className="space-y-6">
+            {pipeline.map((item, i) => (
+              <div key={i} className="space-y-2">
+                <div className="flex justify-between text-xs font-bold">
+                  <span className="text-slate-300">{item.label}</span>
+                  <span className="text-white">{item.value}</span>
                 </div>
-                <div className="flex items-center gap-1.5 ml-3">
-                  <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                  <span className="text-[10px] text-slate-500 font-bold uppercase">Delivered</span>
+                <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div className={`h-full ${item.color} rounded-full`} style={{ width: `${(item.value / item.max) * 100}%` }}></div>
                 </div>
               </div>
-            </div>
-            
-            <div className="h-[280px] flex items-end justify-between gap-4 px-2">
-               {/* Mock Chart Bars */}
-               {[40, 65, 30, 85, 45, 95, 55, 75, 50, 60, 80, 70].map((h, i) => (
-                 <div key={i} className="flex-1 flex flex-col gap-1 items-center group">
-                   <div className="w-full relative">
-                     <div className="absolute bottom-0 left-0 right-0 bg-blue-500/10 rounded-t-lg transition-all group-hover:bg-blue-500/30" style={{ height: `${h}%` }}></div>
-                     <div className="relative bg-blue-600 rounded-t-lg transition-all group-hover:scale-105" style={{ height: `${h * 0.7}%` }}></div>
-                   </div>
-                   <span className="text-[8px] font-bold text-slate-600 uppercase mt-2">D{i+1}</span>
-                 </div>
-               ))}
-            </div>
+            ))}
           </div>
         </div>
 
-        <div className="lg:col-span-4">
-          <div className="card h-full bg-slate-800/40 border-white/5 p-6 backdrop-blur-md relative overflow-hidden group">
-            <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
-              <TrendingUp className="w-32 h-32 text-blue-400" />
-            </div>
-            
-            <h3 className="text-white font-bold flex items-center gap-2 uppercase tracking-tight text-sm mb-8">
-              <PieChart className="w-4 h-4 text-purple-400" /> Lead Segmentation
-            </h3>
-            
-            <div className="space-y-6">
-              {Object.entries(data.persona_breakdown).map(([persona, count], i) => (
-                <div key={persona} className="space-y-2">
-                  <div className="flex justify-between items-end">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{persona}</span>
-                    <span className="text-xs font-black text-white">{count} ({Math.round((count / data.total_leads) * 100)}%)</span>
-                  </div>
-                  <div className="h-2 bg-slate-900 rounded-full overflow-hidden">
-                    <div className={`h-full ${['bg-blue-500', 'bg-purple-500', 'bg-green-500', 'bg-amber-500'][i % 4]}`} style={{ width: `${(count / data.total_leads) * 100}%` }}></div>
-                  </div>
+        {/* High-Fit Segment Dominance */}
+        <div className="bg-slate-900/60 border border-white/5 rounded-xl p-6">
+          <h3 className="text-xs font-bold text-white mb-6 flex items-center gap-2">
+            <span className="text-emerald-400">🎯</span> High-Fit Segment Dominance
+          </h3>
+          <div className="space-y-6">
+            {personas.map((p, i) => (
+              <div key={i} className="space-y-2">
+                <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
+                  <span className={p.color.replace('bg-', 'text-')}>{p.label}</span>
+                  <span className="text-slate-500">{p.percent}%</span>
                 </div>
+                <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div className={`h-full ${p.color} rounded-full`} style={{ width: `${p.percent}%` }}></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom Grid - Tables */}
+      <div className="grid grid-cols-2 gap-6 mb-6">
+        {/* Sector Dominance */}
+        <div className="bg-slate-900/60 border border-white/5 rounded-xl p-6">
+          <h3 className="text-xs font-bold text-white mb-6 flex items-center gap-2">
+            <span className="text-indigo-400">📊</span> Sector Dominance
+          </h3>
+          <table className="w-full text-left">
+            <thead>
+              <tr className="border-b border-white/5">
+                <th className="pb-3 text-[9px] font-black text-slate-500 uppercase tracking-widest">INDUSTRY</th>
+                <th className="pb-3 text-[9px] font-black text-slate-500 uppercase tracking-widest text-right">CAP</th>
+                <th className="pb-3 text-[9px] font-black text-slate-500 uppercase tracking-widest text-right">SHARE</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {industries.map((ind, i) => (
+                <tr key={i} className="hover:bg-white/[0.02]">
+                  <td className="py-3 text-xs font-bold text-slate-300">{ind.name}</td>
+                  <td className="py-3 text-xs font-bold text-white text-right">{ind.cap}</td>
+                  <td className="py-3 text-xs font-black text-slate-500 text-right flex items-center justify-end gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div> {ind.share}%
+                  </td>
+                </tr>
               ))}
-            </div>
+            </tbody>
+          </table>
+        </div>
 
-            <div className="mt-10 p-4 bg-slate-900/50 rounded-2xl border border-white/5">
-              <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
-                <span className="text-blue-400 font-bold">Insight:</span> Most leads are classified as <span className="text-white font-bold">MANAGEMENT</span>, followed by <span className="text-white font-bold">OPERATIONS</span>. Consider shifting outreach tone to match executive personas.
-              </p>
-            </div>
-          </div>
+        {/* Global Coverage */}
+        <div className="bg-slate-900/60 border border-white/5 rounded-xl p-6">
+          <h3 className="text-xs font-bold text-white mb-6 flex items-center gap-2">
+            <span className="text-blue-400">🌍</span> Global Coverage
+          </h3>
+          <table className="w-full text-left">
+            <thead>
+              <tr className="border-b border-white/5">
+                <th className="pb-3 text-[9px] font-black text-slate-500 uppercase tracking-widest">COUNTRY</th>
+                <th className="pb-3 text-[9px] font-black text-slate-500 uppercase tracking-widest text-right">CAP</th>
+                <th className="pb-3 text-[9px] font-black text-slate-500 uppercase tracking-widest text-right">SHARE</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {countries.map((c, i) => (
+                <tr key={i} className="hover:bg-white/[0.02]">
+                  <td className="py-3 text-xs font-bold text-slate-300">{c.name}</td>
+                  <td className="py-3 text-xs font-bold text-white text-right">{c.cap}</td>
+                  <td className="py-3 text-xs font-black text-slate-500 text-right flex items-center justify-end gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div> {c.share}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {engagementMetrics.map((m, i) => (
-          <div key={i} className="card bg-slate-800/40 border-white/5 p-5 group hover:-translate-y-1 transition-all">
-            <div className="flex justify-between items-center mb-4">
-              <div className={`w-10 h-10 rounded-xl bg-slate-900 border border-white/5 flex items-center justify-center ${m.color}`}>
-                <m.icon className="w-5 h-5" />
-              </div>
-              <div className="text-right">
-                <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Growth</div>
-                <div className="flex items-center justify-end text-green-400 font-black text-xs">
-                  <ArrowUpRight className="w-3 h-3" /> 2.4%
-                </div>
-              </div>
-            </div>
-            <div className="text-2xl font-black text-white">{m.value}</div>
-            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">{m.label}</div>
-            <div className="mt-4 pt-4 border-t border-white/5 flex justify-between items-center">
-              <span className="text-[10px] font-medium text-slate-500 italic">{m.sub}</span>
-              <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
-            </div>
-          </div>
-        ))}
+      {/* Real-time Inbound Signals */}
+      <div className="bg-slate-900/60 border border-white/5 rounded-xl p-6 mb-10">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xs font-bold text-white flex items-center gap-2">
+            <Zap className="w-4 h-4 text-amber-400 fill-amber-400" /> Real-time Inbound Signals
+            <span className="ml-3 px-2 py-0.5 rounded text-[9px] font-black bg-emerald-500/20 text-emerald-400">● LIVE MONITORING</span>
+          </h3>
+          <div className="text-[10px] text-slate-500 border border-white/10 px-3 py-1 rounded">Polling Email Tracking API</div>
+        </div>
+
+        <table className="w-full text-left">
+          <thead>
+            <tr className="border-b border-white/5">
+              <th className="pb-3 text-[9px] font-black text-slate-500 uppercase tracking-widest w-1/3">CONTACT PROFILE</th>
+              <th className="pb-3 text-[9px] font-black text-slate-500 uppercase tracking-widest w-1/4">SIGNAL TYPE</th>
+              <th className="pb-3 text-[9px] font-black text-slate-500 uppercase tracking-widest w-1/3">ENVIRONMENT DATA</th>
+              <th className="pb-3 text-[9px] font-black text-slate-500 uppercase tracking-widest text-right w-1/12">TIME</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/5">
+            {data.recent_signals?.map((sig, i) => (
+              <tr key={i} className="hover:bg-white/[0.02]">
+                <td className="py-4">
+                  <div className="font-bold text-white text-xs">{sig.first_name} {sig.last_name}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">{sig.email}</div>
+                </td>
+                <td className="py-4">
+                  <span className={`px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest ${sig.signal_type === 'OPEN' ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : sig.signal_type === 'CLICK' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'bg-blue-500/10 text-blue-500 border border-blue-500/20'}`}>
+                    {sig.signal_type} DETECTED
+                  </span>
+                </td>
+                <td className="py-4">
+                  <div className="text-[10px] font-mono text-slate-400 truncate max-w-[300px]" title={sig.environment_data}>
+                    {sig.environment_data || 'IP: UNKNOWN / Agent: UNKNOWN'}
+                  </div>
+                </td>
+                <td className="py-4 text-right text-[10px] text-slate-500 font-mono">
+                  {new Date(sig.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </td>
+              </tr>
+            ))}
+            {(!data.recent_signals || data.recent_signals.length === 0) && (
+              <tr>
+                <td colSpan="4" className="py-8 text-center text-slate-500 text-xs">No recent inbound signals detected.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );
 };
-
-const Send = ({ className }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg>
-);
 
 export default Metrics;

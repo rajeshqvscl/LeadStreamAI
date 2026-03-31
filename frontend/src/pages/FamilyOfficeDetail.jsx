@@ -18,13 +18,21 @@ const FamilyOfficeDetail = () => {
   // Discovery Engine Form State
   const [jobTitle, setJobTitle] = useState('');
   const [location, setLocation] = useState('');
+  const [keywords, setKeywords] = useState('');
   const [limit, setLimit] = useState(5);
+  const [isSaving, setIsSaving] = useState(false);
 
   const fetchOfficeData = async () => {
     setIsLoading(true);
     try {
       const officeRes = await api.get(`/api/family-offices/${officeId}`);
-      setOffice(officeRes.data);
+      const officeData = officeRes.data;
+      setOffice(officeData);
+      
+      // Initialize location if not already set by user
+      if (officeData.location && !location) {
+        setLocation(officeData.location);
+      }
       
       const leadsRes = await api.get(`/api/family-offices/${officeId}/leads`);
       setLeads(leadsRes.data || []);
@@ -36,15 +44,36 @@ const FamilyOfficeDetail = () => {
   };
 
   useEffect(() => {
+    // Reset form state when changing offices
+    setJobTitle('');
+    setLocation('');
+    setKeywords('');
+    setLimit(5);
     fetchOfficeData();
   }, [officeId]);
+
+  const handleUpdateProfile = async () => {
+    setIsSaving(true);
+    try {
+      await api.patch(`/api/family-offices/${officeId}`, {
+        location: location
+      });
+      // Refresh to get updated data
+      fetchOfficeData();
+    } catch (err) {
+      console.error('Failed to update office profile', err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const handleExtractLeads = async () => {
     setIsExtracting(true);
     try {
       await api.post(`/api/family-offices/${officeId}/rocketreach`, {
         job_title: jobTitle,
-        location: location || office?.location,
+        location: location,
+        keywords: keywords,
         limit: parseInt(limit)
       });
       fetchOfficeData();
@@ -184,26 +213,28 @@ const FamilyOfficeDetail = () => {
             <input 
               type="text" 
               placeholder={`e.g. ${office.name}, Investment`} 
+              value={keywords}
+              onChange={(e) => setKeywords(e.target.value)}
               className="w-full bg-slate-950/40 border border-white/10 rounded-xl py-2.5 px-4 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-blue-500/50" 
             />
           </div>
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">FOCUS LOCATION</label>
+          <div className="space-y-1.5 relative">
+            <div className="flex justify-between items-center mb-0.5">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">FOCUS LOCATION</label>
+              <button 
+                onClick={handleUpdateProfile}
+                disabled={isSaving || location === office.location}
+                className="text-[9px] font-black text-blue-400 hover:text-blue-300 uppercase tracking-tighter disabled:opacity-0 transition-opacity"
+              >
+                {isSaving ? 'Saving...' : 'Save to Profile'}
+              </button>
+            </div>
             <input 
               type="text" 
-              placeholder="Mumbai"
-              value={location || office.location}
+              placeholder="City, Country"
+              value={location}
               onChange={(e) => setLocation(e.target.value)}
               className="w-full bg-slate-950/40 border border-white/10 rounded-xl py-2.5 px-4 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-blue-500/50" 
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">LIMIT</label>
-            <input 
-              type="number" 
-              value={limit}
-              onChange={(e) => setLimit(e.target.value)}
-              className="w-full bg-slate-950/40 border border-white/10 rounded-xl py-2.5 px-4 text-xs text-white focus:outline-none focus:border-blue-500/50" 
             />
           </div>
         </div>

@@ -5,7 +5,7 @@ import csv
 import io
 from datetime import datetime
 
-def get_all_family_offices():
+def get_all_family_offices(search_query=None):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     
@@ -14,10 +14,20 @@ def get_all_family_offices():
     SELECT fo.*, COUNT(l.id) as count 
     FROM family_offices fo
     LEFT JOIN leads_raw l ON fo.name = l.family_office_name
+    """
+    
+    params = []
+    if search_query:
+        query += " WHERE fo.name ILIKE %s OR fo.location ILIKE %s OR fo.category ILIKE %s"
+        search_param = f"%{search_query}%"
+        params.extend([search_param, search_param, search_param])
+        
+    query += """
     GROUP BY fo.id
     ORDER BY fo.name ASC
     """
-    cur.execute(query)
+    
+    cur.execute(query, params)
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -49,13 +59,13 @@ def sync_from_csv(csv_content):
     
     count = 0
     for row in reader:
-        name = row.get('Name') or row.get('name')
+        name = row.get('Family Office Name') or row.get('Name') or row.get('name')
         if not name:
             continue
             
-        location = row.get('Location') or row.get('location') or ""
-        category = row.get('Category') or row.get('category') or row.get('Sector') or row.get('sector') or ""
-        strategic_fit = row.get('Strategic Fit') or row.get('strategic_fit') or "N/A Fit"
+        location = row.get('Headquarters') or row.get('Location') or row.get('location') or ""
+        category = row.get('Investment Sectors') or row.get('Category') or row.get('category') or row.get('Sector') or row.get('sector') or ""
+        strategic_fit = row.get('Ticket Size') or row.get('Strategic Fit') or row.get('strategic_fit') or "N/A Fit"
         
         query = """
         INSERT INTO family_offices (name, location, category, strategic_fit, last_synced)
@@ -96,3 +106,28 @@ def get_office_leads(office_name):
     cur.close()
     conn.close()
     return rows
+def update_family_office(office_id, data):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    
+    fields = []
+    values = []
+    for key, value in data.items():
+        if key in ['location', 'category', 'strategic_fit']:
+            fields.append(f"{key} = %s")
+            values.append(value)
+    
+    if not fields:
+        cur.close()
+        conn.close()
+        return None
+        
+    values.append(office_id)
+    query = f"UPDATE family_offices SET {', '.join(fields)} WHERE id = %s RETURNING *"
+    cur.execute(query, values)
+    row = cur.fetchone()
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+    return row

@@ -79,6 +79,14 @@ def ingest_leads(req: LeadRequest):
     except Exception:
         page_size = 10
 
+    # Log search activity before processing
+    try:
+        from app.models.lead import add_activity_log
+        search_summary = f"{req.title or ''} at {req.company or ''}".strip() or "Discovery search"
+        add_activity_log(None, "LEAD_SEARCH", f"Search performed for: {search_summary}", "admin")
+    except:
+        pass
+
     try:
         # 1. Search leads via RocketReach
         try:
@@ -121,6 +129,15 @@ def ingest_leads(req: LeadRequest):
                 logger.error("lead_insertion_failed", error=str(e), lead_email=lead.get("email"))
                 errors += 1
                 continue
+
+        # Log bulk ingestion activity
+        if inserted > 0:
+            try:
+                from app.models.lead import add_activity_log
+                details = f"Ingested {inserted} leads from {leads[0].get('company') or 'RocketReach' if leads else 'Discovery'}"
+                add_activity_log(None, "BULK_INGESTION", details, "admin")
+            except:
+                pass
 
         return {
             "success": True,

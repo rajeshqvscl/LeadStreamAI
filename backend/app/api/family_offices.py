@@ -13,6 +13,7 @@ from app.models.family_office import (
 from app.database import get_db_connection
 import psycopg2
 from datetime import datetime
+import json
 
 router = APIRouter()
 
@@ -22,8 +23,8 @@ class RocketReachSearch(BaseModel):
     limit: Optional[int] = 10
 
 @router.get("/family-offices")
-def list_offices():
-    return get_all_family_offices()
+def list_offices(search: Optional[str] = None):
+    return get_all_family_offices(search)
 
 @router.get("/family-offices/{office_id}")
 def get_office(office_id: int):
@@ -31,6 +32,19 @@ def get_office(office_id: int):
     if not office:
         raise HTTPException(status_code=404, detail="Office not found")
     return office
+
+class FamilyOfficeUpdate(BaseModel):
+    location: Optional[str] = None
+    category: Optional[str] = None
+    strategic_fit: Optional[str] = None
+
+@router.patch("/family-offices/{office_id}")
+def update_office(office_id: int, req: FamilyOfficeUpdate):
+    from app.models.family_office import update_family_office
+    updated = update_family_office(office_id, req.dict(exclude_unset=True))
+    if not updated:
+        raise HTTPException(status_code=404, detail="Office not found or no changes made")
+    return updated
 
 @router.get("/family-offices/{office_id}/leads")
 def list_office_leads(office_id: int):
@@ -68,33 +82,64 @@ def search_rocketreach(office_id: int, req: RocketReachSearch):
     if not office:
         raise HTTPException(status_code=404, detail="Office not found")
     
-    # Logic for RocketReach search (Actual API call or simulated)
-    # For now, let's simulate adding some leads
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    # This is a placeholder for actual RocketReach integration
-    # In a real scenario, you'd use the rocketreach_service
-    
-    new_leads = [
-        {"first_name": "Investment", "last_name": "Director", "email": f"director@{office['name'].lower().replace(' ', '')}.com"},
-        {"first_name": "Portfolio", "last_name": "Manager", "email": f"pm@{office['name'].lower().replace(' ', '')}.com"}
-    ]
-    
-    added_count = 0
-    for lead in new_leads[:req.limit]:
-        cur.execute("""
-            INSERT INTO leads_raw (first_name, last_name, email, family_office_name, company_name)
-            VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT DO NOTHING
-        """, (lead['first_name'], lead['last_name'], lead['email'], office['name'], office['name']))
-        added_count += cur.rowcount
+    try:
+        from app.services.rocketreach_service import search_leads
+        from app.api.ingest import categorize_lead
         
-    conn.commit()
-    cur.close()
-    conn.close()
-    
-    return {"message": f"Found and added {added_count} leads via RocketReach"}
+        leads = search_leads(
+            employer=office['name'],
+            title=req.job_title or "",
+            location=req.location or "",
+            page_size=req.limit or 10
+        )
+        
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        added_count = 0
+        for lead in leads:
+            if not lead:
+                continue
+                
+            persona, fit_score = categorize_lead(lead.get("payload", {}))
+            
+            cur.execute("""
+                INSERT INTO leads_raw 
+                (first_name, last_name, email, domain, linkedin_url, company_name, family_office_name, source, raw_payload, fit_score, persona, phone)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (email) DO UPDATE SET family_office_name = EXCLUDED.family_office_name
+            """, (
+                lead.get("first_name", ""),
+                lead.get("last_name", ""),
+                lead.get("email", ""),
+                lead.get("domain", ""),
+                lead.get("linkedin", ""),
+                lead.get("company", ""),
+                office['name'],
+                lead.get("source", "rocketreach"),
+                json.dumps(lead.get("payload", {})),
+                fit_score,
+                persona,
+                lead.get("phone", "")
+            ))
+            
+            added_count += 1
+            
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        try:
+            from app.models.lead import add_activity_log
+            add_activity_log(None, "BULK_INGESTION", f"Extracted {added_count} leads for Family Office {office['name']}", "admin")
+        except:
+            pass
+            
+        return {"message": f"Found and added {added_count} leads via RocketReach API"}
+        
+    except Exception as e:
+        print(f"Extraction error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/family-offices/bulk-sync")
 def bulk_sync():

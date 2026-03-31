@@ -120,3 +120,9 @@ def save_email_draft(lead_id, draft):
     conn.commit()
     cur.close()
     conn.close()
+    
+    # Log activity
+    try:
+        add_activity_log(lead_id, "DRAFT_GENERATED", "AI email draft generated and saved for review", "system")
+    except:
+        pass

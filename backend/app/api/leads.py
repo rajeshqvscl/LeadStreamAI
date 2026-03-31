@@ -24,11 +24,22 @@ class LeadUpdate(BaseModel):
     campaign_id: Optional[int] = None
     family_office_name: Optional[str] = None
 
+from typing import List
+
+class BulkLabelRequest(BaseModel):
+    lead_ids: List[int]
+    labels: List[str]
+
+class LabelRemoveRequest(BaseModel):
+    label: str
+
 @router.get("/leads")
 def get_leads(
     page: int = 1,
     search: Optional[str] = "",
+    title: Optional[str] = "",
     persona: Optional[str] = "",
+    company: Optional[str] = "",
     validation_status: Optional[str] = "",
     city: Optional[str] = "",
     country: Optional[str] = "",
@@ -45,9 +56,21 @@ def get_leads(
         s = f"%{search}%"
         params.extend([s, s, s, s, s, s, s])
 
+    if title:
+        titles = [t.strip() for t in title.split(',') if t.strip()]
+        if titles:
+            title_conditions = " OR ".join(["raw_payload->>'current_title' ILIKE %s"] * len(titles))
+            query += f" AND ({title_conditions})"
+            for t in titles:
+                params.append(f"%{t}%")
+        
     if persona:
         query += " AND persona = %s"
         params.append(persona)
+        
+    if company:
+        query += " AND company_name ILIKE %s"
+        params.append(f"%{company}%")
         
     if validation_status:
         query += " AND validation_status = %s"
@@ -146,6 +169,10 @@ def get_lead_detail(lead_id: int):
     # ensure job title is included (designation)
     if payload:
         lead["designation"] = payload.get("current_title", "")
+        
+    # Normalize email_draft content to handle literal escapes
+    if lead.get("email_draft"):
+        lead["email_draft"] = lead["email_draft"].replace("\\n", "\n").replace("\\r\\n", "\n")
     
     return lead
 
@@ -165,3 +192,51 @@ def update_lead_endpoint(lead_id: int, req: LeadUpdate):
 def get_lead_activity(lead_id: int):
     logs = get_activity_log(lead_id)
     return logs
+
+@router.post("/leads/bulk-labels")
+def bulk_labels(req: BulkLabelRequest):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    try:
+        cur.execute("""
+            UPDATE leads_raw 
+            SET labels = (
+                SELECT ARRAY_AGG(DISTINCT l) 
+                FROM UNNEST(COALESCE(labels, '{}') || %s) l
+            )
+            WHERE id = ANY(%s)
+        """, (req.labels, req.lead_ids))
+        
+        conn.commit()
+        add_activity_log(None, "LABEL_ASSIGNED", f"Assigned labels {req.labels} to {len(req.lead_ids)} leads", "admin")
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+    
+    return {"message": "Labels assigned successfully"}
+
+@router.post("/leads/{lead_id}/remove-label")
+def remove_lead_label(lead_id: int, req: LabelRemoveRequest):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    try:
+        cur.execute("""
+            UPDATE leads_raw 
+            SET labels = ARRAY_REMOVE(labels, %s)
+            WHERE id = %s
+        """, (req.label, lead_id))
+        
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+    
+    return {"message": "Label removed successfully"}

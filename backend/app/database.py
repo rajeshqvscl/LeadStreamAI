@@ -23,18 +23,49 @@ def create_tables():
     cur.execute("""
     CREATE TABLE IF NOT EXISTS leads_raw (
         id SERIAL PRIMARY KEY,
-        email TEXT,
         first_name TEXT,
         last_name TEXT,
-        company_name TEXT,
+        email TEXT UNIQUE,
         domain TEXT,
+        linkedin_url TEXT,
+        company_name TEXT,
+        persona TEXT,
+        phone TEXT,
+        city TEXT,
+        country TEXT,
         source TEXT,
         raw_payload JSONB,
+        fit_score INTEGER DEFAULT 0,
+        validation_status TEXT DEFAULT 'PENDING',
+        email_status TEXT DEFAULT 'PENDING',
+        email_draft TEXT,
         family_office_name TEXT,
+        labels TEXT[] DEFAULT '{}',
         created_at TIMESTAMP DEFAULT NOW()
     );
     """)
 
+    # Ensure columns exist if table was already created with old schema
+    columns_to_add = [
+        ("persona", "TEXT"),
+        ("phone", "TEXT"),
+        ("city", "TEXT"),
+        ("country", "TEXT"),
+        ("fit_score", "INTEGER DEFAULT 0"),
+        ("validation_status", "TEXT DEFAULT 'PENDING'"),
+        ("email_status", "TEXT DEFAULT 'PENDING'"),
+        ("email_draft", "TEXT"),
+        ("linkedin_url", "TEXT"),
+        ("labels", "TEXT[] DEFAULT '{}'"),
+        ("updated_at", "TIMESTAMP DEFAULT NOW()")
+    ]
+    for col_name, col_type in columns_to_add:
+        try:
+            cur.execute(f"ALTER TABLE leads_raw ADD COLUMN {col_name} {col_type};")
+        except psycopg2.Error:
+            conn.rollback()
+            continue
+    
     cur.execute("""
     CREATE TABLE IF NOT EXISTS family_offices (
         id SERIAL PRIMARY KEY,
@@ -43,6 +74,60 @@ def create_tables():
         category TEXT,
         strategic_fit TEXT,
         last_synced TIMESTAMP
+    );
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS activity_log (
+        id SERIAL PRIMARY KEY,
+        lead_id INTEGER,
+        action TEXT NOT NULL,
+        details TEXT,
+        performed_by TEXT DEFAULT 'system',
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+    """)
+
+    # Campaigns Feature Tables
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS campaigns (
+        id SERIAL PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL,
+        description TEXT,
+        tone TEXT DEFAULT 'professional',
+        target_industry TEXT,
+        target_persona TEXT,
+        subject TEXT,
+        html_body TEXT,
+        context_prompt TEXT,
+        strategy_prompt TEXT,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+    );
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS recipients (
+        id SERIAL PRIMARY KEY,
+        campaign_id INTEGER REFERENCES campaigns(id) ON DELETE CASCADE,
+        lead_id INTEGER REFERENCES leads_raw(id) ON DELETE CASCADE,
+        status TEXT DEFAULT 'PENDING',
+        tracking_token TEXT UNIQUE NOT NULL,
+        sent_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS campaign_events (
+        id SERIAL PRIMARY KEY,
+        campaign_id INTEGER REFERENCES campaigns(id) ON DELETE CASCADE,
+        recipient_id INTEGER REFERENCES recipients(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL, -- SENT, OPEN, CLICK, UNSUBSCRIBE
+        ip_address TEXT,
+        user_agent TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
     );
     """)
     

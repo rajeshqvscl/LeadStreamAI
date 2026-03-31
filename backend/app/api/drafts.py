@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 import traceback
-from typing import Optional
+from typing import Optional, List
 
 from app.models.lead import get_lead_by_id
 from app.models.draft import insert_draft
@@ -19,6 +19,12 @@ class ApproveRequest(BaseModel):
 
 class RejectRequest(BaseModel):
     rejected_reason: Optional[str] = ""
+
+class BulkDraftRequest(BaseModel):
+    lead_ids: List[int]
+
+class BulkSendRequest(BaseModel):
+    lead_ids: List[int]
 
 def normalize_lead(lead):
     if isinstance(lead, dict):
@@ -48,18 +54,34 @@ def generate_draft(req: DraftRequest):
         subject = email_data.get("subject", "Following up")
         body = email_data.get("body", "Hello, we would love to connect.")
         
+        # Ensure proper dynamic greeting in body only
+        lines = body.split('\n')
+        if lines and any(g in lines[0].lower() for g in ['hi ', 'hello ', 'dear ']):
+            lines = lines[1:]
+        clean_body = '\n'.join(lines).lstrip()
+        
+        # Inject personalized greeting
+        first_name = lead.get('first_name', 'there')
+        email_content = f"Subject: {subject}\n\nHi {first_name},\n\n{clean_body}"
+        
         # update leads_raw.email_draft and email_status='PENDING_APPROVAL'
         conn = get_db_connection()
         cur = conn.cursor()
-        email_content = f"Subject: {subject}\n\n{body}"
         cur.execute("""
             UPDATE leads_raw 
-            SET email_draft = %s, email_status = 'PENDING_APPROVAL' 
+            SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW() 
             WHERE id = %s
         """, (email_content, req.lead_id))
         conn.commit()
         cur.close()
         conn.close()
+        
+        # Log activity
+        try:
+            from app.models.lead import add_activity_log
+            add_activity_log(req.lead_id, "DRAFT_GENERATED", "AI email draft generated and saved for review", "system")
+        except:
+            pass
 
         return {
             "message": "Draft generated",
@@ -80,7 +102,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, per_page: in
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
     query = """
-        SELECT id, first_name, last_name, email, email_draft, email_status, company_name, persona, fit_score 
+        SELECT id, first_name, last_name, email, email_draft, email_status, company_name, persona, fit_score, updated_at 
         FROM leads_raw 
         WHERE email_draft IS NOT NULL
     """
@@ -90,7 +112,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, per_page: in
         query += " AND email_status = %s"
         params.append(status)
         
-    query += " ORDER BY id DESC LIMIT %s OFFSET %s"
+    query += " ORDER BY COALESCE(updated_at, created_at) DESC LIMIT %s OFFSET %s"
     params.extend([per_page, (page - 1) * per_page])
     
     cur.execute(query, tuple(params))
@@ -111,13 +133,29 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, per_page: in
     drafts = []
     for r in rows:
         draft_content = r["email_draft"] or ""
+        # Normalize literal \n to real newlines for consistent parsing
+        draft_content = draft_content.replace("\\n", "\n").replace("\\r\\n", "\n")
+            
         subject = ""
         body = draft_content
         if "Subject: " in draft_content:
+            # First split by double newline to separate subject line from body
             parts = draft_content.split("\n\n", 1)
-            subject = parts[0].replace("Subject: ", "")
+            # If no double newline, maybe it's just a single newline after Subject:
+            if len(parts) == 1:
+                parts = draft_content.split("\n", 1)
+                
+            subject = parts[0].replace("Subject: ", "").strip()
             if len(parts) > 1:
-                body = parts[1]
+                body = parts[1].strip()
+        elif "Subject:" in draft_content:
+            # Handle missing space after Subject:
+            parts = draft_content.split("\n\n", 1)
+            if len(parts) == 1:
+                parts = draft_content.split("\n", 1)
+            subject = parts[0].replace("Subject:", "").strip()
+            if len(parts) > 1:
+                body = parts[1].strip()
                 
         drafts.append({
             "id": r["id"],
@@ -131,7 +169,8 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, per_page: in
             "body": body,
             "status": r["email_status"] or "PENDING_APPROVAL",
             "performance": {"opens": 0, "clicks": 0}, # Placeholders
-            "verifier": "admin" if r["email_status"] in ["APPROVED", "SENT"] else None
+            "verifier": "admin" if r["email_status"] in ["APPROVED", "SENT"] else None,
+            "updated_at": r.get("updated_at", "").isoformat() if r.get("updated_at") else ""
         })
 
     return {
@@ -159,7 +198,7 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest):
         new_content = f"Subject: {refined_data['subject']}\n\n{refined_data['body']}"
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("UPDATE leads_raw SET email_draft = %s WHERE id = %s", (new_content, draft_id))
+        cur.execute("UPDATE leads_raw SET email_draft = %s, updated_at = NOW() WHERE id = %s", (new_content, draft_id))
         conn.commit()
         cur.close()
         conn.close()
@@ -177,11 +216,36 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest):
 @router.post("/approve-email/{draft_id}")
 def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None):
     conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "UPDATE leads_raw SET email_status = 'APPROVED' WHERE id = %s",
-        (draft_id,)
-    )
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    # Ensure a draft exists before approving
+    cur.execute("SELECT first_name, last_name, company_name, email_draft, domain FROM leads_raw WHERE id = %s", (draft_id,))
+    lead = cur.fetchone()
+    
+    if lead and not lead.get('email_draft'):
+        from app.services.llm_services import EmailGenerator
+        generator = EmailGenerator()
+        email_data = generator.generate_email(dict(lead))
+        subject = email_data.get("subject", "Following up")
+        body = email_data.get("body", "Hello, we would love to connect.")
+        
+        lines = body.split('\n')
+        if lines and any(g in lines[0].lower() for g in ['hi ', 'hello ', 'dear ']):
+            lines = lines[1:]
+        clean_body = '\n'.join(lines).lstrip()
+        email_content = f"Subject: {subject}\n\nHi {{first_name}},\n\n{clean_body}"
+        
+        cur.execute("""
+            UPDATE leads_raw 
+            SET email_draft = REPLACE(%s, '{{first_name}}', COALESCE(NULLIF(first_name, ''), 'there')),
+                email_status = 'APPROVED', updated_at = NOW()
+            WHERE id = %s
+        """, (email_content, draft_id))
+    else:
+        cur.execute(
+            "UPDATE leads_raw SET email_status = 'APPROVED', updated_at = NOW() WHERE id = %s",
+            (draft_id,)
+        )
+        
     conn.commit()
     cur.close()
     conn.close()
@@ -197,7 +261,7 @@ def reject_draft(draft_id: int, req: Optional[RejectRequest] = None):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        "UPDATE leads_raw SET email_status = 'REJECTED' WHERE id = %s",
+        "UPDATE leads_raw SET email_status = 'REJECTED', updated_at = NOW() WHERE id = %s",
         (draft_id,)
     )
     conn.commit()
@@ -209,6 +273,86 @@ def reject_draft(draft_id: int, req: Optional[RejectRequest] = None):
     
     return {"status": "rejected", "message": "Draft rejected"}
 
+@router.post("/approve-bulk-domain-drafts")
+def approve_bulk_domain_drafts(req: BulkDraftRequest):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        if not req.lead_ids:
+            return {"message": "No leads provided"}
+            
+        format_strings = ','.join(['%s'] * len(req.lead_ids))
+        cur.execute(f"SELECT * FROM leads_raw WHERE id IN ({format_strings})", tuple(req.lead_ids))
+        leads = cur.fetchall()
+        
+        # Group leads
+        groups = {}
+        for row in leads:
+            lead_dict = dict(row)
+            domain = lead_dict.get('domain')
+            company = lead_dict.get('company_name')
+            group_key = domain if domain else (company if company else str(lead_dict['id']))
+            group_key = group_key.lower().strip()
+            
+            if group_key not in groups:
+                groups[group_key] = []
+            groups[group_key].append(lead_dict)
+            
+        total_leads_updated = 0
+        total_groups = len(groups)
+        
+        from app.models.lead import add_activity_log
+        from app.services.llm_services import EmailGenerator
+        generator = EmailGenerator()
+        
+        for key, group_leads in groups.items():
+            first_lead = group_leads[0]
+            group_ids = [l['id'] for l in group_leads]
+            id_format = ','.join(['%s'] * len(group_ids))
+            
+            # If ANY lead in group has no draft, ensure we have one to apply
+            # Or if the first lead has no draft, generate it
+            email_content = first_lead.get("email_draft")
+            if not email_content:
+                email_data = generator.generate_email(normalize_lead(first_lead))
+                subject = email_data.get("subject", "Following up")
+                body = email_data.get("body", "Hello, we would love to connect.")
+                
+                lines = body.split('\n')
+                if lines and any(g in lines[0].lower() for g in ['hi ', 'hello ', 'dear ']):
+                    lines = lines[1:]
+                clean_body = '\n'.join(lines).lstrip()
+                email_content = f"Subject: {subject}\n\nHi {{first_name}},\n\n{clean_body}"
+            
+            cur.execute(f"""
+                UPDATE leads_raw 
+                SET email_draft = CASE 
+                    WHEN email_draft IS NULL THEN REPLACE(%s, '{{first_name}}', COALESCE(NULLIF(first_name, ''), 'there'))
+                    ELSE email_draft 
+                END,
+                email_status = 'APPROVED', updated_at = NOW() 
+                WHERE id IN ({id_format})
+            """, (email_content, *group_ids))
+            
+            # Log one activity per group/domain
+            add_activity_log(None, "BULK_DOMAIN_APPROVE", f"Approved drafts for domain/group {key} ({len(group_ids)} leads)", "admin")
+            
+            total_leads_updated += len(group_ids)
+            
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return {
+            "message": f"Approved {total_groups} distinct domain draft groups ({total_leads_updated} leads).",
+            "groups_processed": total_groups,
+            "leads_updated": total_leads_updated
+        }
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e)}
+
 @router.post("/send-approved-batch")
 def send_approved_batch():
     conn = get_db_connection()
@@ -219,7 +363,7 @@ def send_approved_batch():
     ids = [r[0] for r in cur.fetchall()]
     
     cur.execute(
-        "UPDATE leads_raw SET email_status = 'SENT' WHERE email_status = 'APPROVED'"
+        "UPDATE leads_raw SET email_status = 'SENT', updated_at = NOW() WHERE email_status = 'APPROVED'"
     )
     updated = cur.rowcount
     conn.commit()
@@ -231,3 +375,157 @@ def send_approved_batch():
         add_activity_log(lid, "EMAIL_SENT", "Email dispatched in batch", "system")
         
     return {"message": f"Successfully sent {updated} approved emails."}
+
+@router.post("/generate-bulk-domain-drafts")
+def generate_bulk_domain_drafts(req: BulkDraftRequest):
+    try:
+        from app.models.lead import get_lead_by_id
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        if not req.lead_ids:
+            return {"message": "No leads provided"}
+            
+        format_strings = ','.join(['%s'] * len(req.lead_ids))
+        cur.execute(f"SELECT * FROM leads_raw WHERE id IN ({format_strings})", tuple(req.lead_ids))
+        leads = cur.fetchall()
+        
+        # Group leads
+        groups = {}
+        for row in leads:
+            lead_dict = dict(row)
+            domain = lead_dict.get('domain')
+            company = lead_dict.get('company_name')
+            group_key = domain if domain else (company if company else str(lead_dict['id']))
+            group_key = group_key.lower().strip()
+            
+            if group_key not in groups:
+                groups[group_key] = []
+            groups[group_key].append(lead_dict)
+            
+        generator = EmailGenerator()
+        total_leads_updated = 0
+        total_groups = len(groups)
+        
+        for key, group_leads in groups.items():
+            first_lead = group_leads[0]
+            
+            # Generate email using first lead as context
+            email_data = generator.generate_email(normalize_lead(first_lead))
+            subject = email_data.get("subject", "Following up")
+            body = email_data.get("body", "Hello, we would love to connect.")
+            
+            # Ensure proper dynamic greeting
+            lines = body.split('\n')
+            if lines and any(g in lines[0].lower() for g in ['hi ', 'hello ', 'dear ']):
+                lines = lines[1:]
+            clean_body = '\n'.join(lines).lstrip()
+            email_content = f"Subject: {subject}\n\nHi {{first_name}},\n\n{clean_body}"
+            
+            # Update all leads in this group
+            group_ids = [l['id'] for l in group_leads]
+            id_format = ','.join(['%s'] * len(group_ids))
+            
+            cur.execute(f"""
+                UPDATE leads_raw 
+                SET email_draft = REPLACE(%s, '{{first_name}}', COALESCE(NULLIF(first_name, ''), 'there')), 
+                    email_status = 'PENDING_APPROVAL', updated_at = NOW() 
+                WHERE id IN ({id_format})
+            """, (email_content, *group_ids))
+            
+            total_leads_updated += len(group_ids)
+            
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        # Log bulk activity
+        try:
+            from app.models.lead import add_activity_log
+            add_activity_log(None, "BULK_DRAFT_GENERATE", f"Generated domain-wise drafts for {total_leads_updated} leads across {total_groups} groups", "admin")
+        except:
+            pass
+        
+        return {
+            "message": f"Generated {total_groups} distinct domain drafts and applied to {total_leads_updated} leads.",
+            "groups_processed": total_groups,
+            "leads_updated": total_leads_updated
+        }
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e)}
+
+@router.post("/send-bulk-domain-emails")
+def send_bulk_domain_emails(req: BulkSendRequest):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        if not req.lead_ids:
+            return {"message": "No leads provided"}
+            
+        format_strings = ','.join(['%s'] * len(req.lead_ids))
+        cur.execute(f"SELECT * FROM leads_raw WHERE id IN ({format_strings})", tuple(req.lead_ids))
+        leads = cur.fetchall()
+        
+        groups = {}
+        for row in leads:
+            lead_dict = dict(row)
+            domain = lead_dict.get('domain')
+            company = lead_dict.get('company_name')
+            group_key = domain if domain else (company if company else str(lead_dict['id']))
+            group_key = group_key.lower().strip()
+            
+            if group_key not in groups:
+                groups[group_key] = []
+            groups[group_key].append(lead_dict)
+            
+        generator = EmailGenerator()
+        total_leads_updated = 0
+        total_groups = len(groups)
+        
+        from app.models.lead import add_activity_log
+        
+        for key, group_leads in groups.items():
+            first_lead = group_leads[0]
+            
+            # If draft already exists, use it. Otherwise generate.
+            email_content = first_lead.get("email_draft")
+            if not email_content:
+                email_data = generator.generate_email(normalize_lead(first_lead))
+                subject = email_data.get("subject", "Following up")
+                body = email_data.get("body", "Hello, we would love to connect.")
+                
+                lines = body.split('\n')
+                if lines and any(g in lines[0].lower() for g in ['hi ', 'hello ', 'dear ']):
+                    lines = lines[1:]
+                clean_body = '\n'.join(lines).lstrip()
+                email_content = f"Subject: {subject}\n\nHi {{first_name}},\n\n{clean_body}"
+                
+            group_ids = [l['id'] for l in group_leads]
+            id_format = ','.join(['%s'] * len(group_ids))
+            
+            cur.execute(f"""
+                UPDATE leads_raw 
+                SET email_draft = REPLACE(%s, '{{first_name}}', COALESCE(NULLIF(first_name, ''), 'there')), 
+                    email_status = 'SENT', updated_at = NOW() 
+                WHERE id IN ({id_format})
+            """, (email_content, *group_ids))
+            
+            # Log one activity per domain group to avoid dashboard clutter
+            add_activity_log(None, "BULK_DOMAIN_SEND", f"Sent emails to group {key} ({len(group_ids)} leads)", "admin")
+            
+            total_leads_updated += len(group_ids)
+            
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return {
+            "message": f"Sent {total_groups} distinct domain emails to {total_leads_updated} leads.",
+            "groups_processed": total_groups,
+            "leads_updated": total_leads_updated
+        }
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e)}

@@ -9,6 +9,19 @@ const FamilyOffices = () => {
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
+  
+  // Custom Multi-Select State
+  const availableTitles = ['Partner', 'Associate', 'Manager', 'Founder', 'Analyst'];
+  const [selectedTitles, setSelectedTitles] = useState([]);
+  const [showTitleDropdown, setShowTitleDropdown] = useState(false);
+  
+  const toggleTitle = (title) => {
+    setSelectedTitles(prev => 
+      prev.includes(title) ? prev.filter(t => t !== title) : [...prev, title]
+    );
+  };
+
   const navigate = useNavigate();
 
   const fetchOffices = async () => {
@@ -58,6 +71,32 @@ const FamilyOffices = () => {
     }
   };
 
+  const handleDiscoverySubmit = async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const officeId = formData.get('office_id');
+    if (!officeId) {
+      alert("Please select a target office.");
+      return;
+    }
+    
+    setIsExtracting(true);
+    try {
+      await api.post(`/api/family-offices/${officeId}/rocketreach`, {
+        job_title: selectedTitles.length > 0 ? selectedTitles.join(',') : '',
+        location: formData.get('location'),
+        limit: parseInt(formData.get('limit')) || 10
+      });
+      alert('Extraction completed successfully.');
+      fetchOffices();
+    } catch (err) {
+      console.error('Failed to extract leads', err);
+      alert('Extraction failed.');
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
   const getFitClass = (fit) => {
     const score = parseInt(fit) || 0;
     if (score >= 80 || fit?.toLowerCase().includes('high')) return 'badge-green bg-green-500/10 border-green-500/20 text-green-500';
@@ -94,8 +133,8 @@ const FamilyOffices = () => {
         </div>
       </div>
 
-      {/* Discovery Engine Mock Card */}
-      <div className="bg-gradient-to-br from-slate-900/80 to-slate-900/40 border border-blue-500/20 rounded-3xl p-8 mb-10 overflow-hidden relative group">
+      {/* Discovery Engine */}
+      <div className="bg-gradient-to-br from-slate-900/80 to-slate-900/40 border border-blue-500/20 rounded-3xl p-8 mb-10 relative group z-20">
         <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-500/5 blur-[120px] rounded-full pointer-events-none"></div>
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-white font-bold text-lg flex items-center gap-3 italic">
@@ -105,35 +144,70 @@ const FamilyOffices = () => {
           <span className="text-[10px] font-black text-slate-600 uppercase tracking-[2px]">Office Lead Extraction</span>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black text-blue-500 uppercase tracking-widest ml-1">Target Office</label>
-            <select className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50 appearance-none cursor-pointer">
-              <option>— Select Profile —</option>
-              {offices.map(o => <option key={o.id}>{o.name}</option>)}
-            </select>
+        <form onSubmit={handleDiscoverySubmit}>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-blue-500 uppercase tracking-widest ml-1">Target Office</label>
+              <select name="office_id" className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50 appearance-none cursor-pointer">
+                <option value="">— Select Profile —</option>
+                {offices.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5 relative">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Job Title</label>
+              <div 
+                className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50 cursor-pointer flex items-center justify-between"
+                onClick={() => setShowTitleDropdown(!showTitleDropdown)}
+              >
+                <span className={selectedTitles.length === 0 ? 'text-slate-500' : 'text-white'}>
+                  {selectedTitles.length === 0 ? 'All Titles' : selectedTitles.length <= 2 ? selectedTitles.join(', ') : `${selectedTitles.length} selected`}
+                </span>
+              </div>
+              
+              {showTitleDropdown && (
+                <>
+                  <div className="fixed inset-0 z-[100]" onClick={() => setShowTitleDropdown(false)}></div>
+                  <div className="absolute top-full left-0 mt-2 w-full bg-[#151a26] border border-[#ffffff10] rounded-xl shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                    <div className="max-h-[200px] overflow-y-auto custom-scrollbar p-2">
+                      {availableTitles.map(title => (
+                        <div 
+                          key={title}
+                          onClick={() => toggleTitle(title)}
+                          className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
+                        >
+                          <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${selectedTitles.includes(title) ? 'bg-blue-500 border-blue-500' : 'border-slate-600 bg-transparent'}`}>
+                            {selectedTitles.includes(title) && <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>}
+                          </div>
+                          <span className={`text-sm font-semibold tracking-wide ${selectedTitles.includes(title) ? 'text-white' : 'text-slate-400'}`}>
+                            {title}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Location</label>
+              <input type="text" name="location" placeholder="e.g. Dubai, London" className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Limit</label>
+              <input type="number" name="limit" defaultValue={10} className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50" />
+            </div>
           </div>
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Job Title</label>
-            <input type="text" placeholder="e.g. Managing Director" className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50" />
+          
+          <div className="mt-8 pt-6 border-t border-white/5 flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_#10b981] animate-pulse"></div>
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">RocketReach API ready</span>
+            </div>
+            <button type="submit" disabled={isExtracting} className="btn btn-primary px-10 rounded-xl disabled:opacity-50">
+              {isExtracting ? 'Extracting...' : 'Extract Portfolio Leads'}
+            </button>
           </div>
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Location</label>
-            <input type="text" placeholder="e.g. Dubai, London" className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50" />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Limit</label>
-            <input type="number" defaultValue={10} className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50" />
-          </div>
-        </div>
-        
-        <div className="mt-8 pt-6 border-t border-white/5 flex justify-between items-center">
-          <div className="flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_#10b981] animate-pulse"></div>
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">RocketReach API ready</span>
-          </div>
-          <button className="btn btn-primary px-10 rounded-xl">Extract Portfolio Leads</button>
-        </div>
+        </form>
       </div>
 
       <div className="bg-slate-800/20 border border-white/10 rounded-2xl p-4 mb-8 flex items-center gap-4">

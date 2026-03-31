@@ -177,7 +177,16 @@ const Dashboard = () => {
                       </div>
                     </div>
                     <div className="text-[10px] font-black text-[#64748b] bg-[#0f121b] px-2.5 py-1.5 rounded-md border border-[#ffffff05] tabular-nums tracking-wider">
-                      {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
+                      {(() => {
+                        const dateStr = log.created_at.endsWith('Z') ? log.created_at : log.created_at + 'Z';
+                        const diff = Date.now() - new Date(dateStr).getTime();
+                        const mins = Math.floor(diff / 60000);
+                        if (mins < 1) return 'JUST NOW';
+                        if (mins < 60) return `${mins}M AGO`;
+                        const hours = Math.floor(mins / 60);
+                        if (hours < 24) return `${hours}H AGO`;
+                        return `${Math.floor(hours / 24)}D AGO`;
+                      })()}
                     </div>
                   </div>
                 ))

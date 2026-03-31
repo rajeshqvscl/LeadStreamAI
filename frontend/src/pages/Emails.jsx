@@ -91,7 +91,7 @@ const Emails = () => {
             disabled={isBatchSending}
             className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 font-bold text-[11px] px-4 py-2 rounded-md transition-colors disabled:opacity-50"
           >
-            {isBatchSending ? 'Dispatching...' : 'Send 15 Approved (Pause)'}
+            {isBatchSending ? 'Dispatching...' : 'Send All Approved'}
           </button>
           <span className="text-[#64748b] text-[10px] font-bold tracking-widest uppercase">Total campaigns: 6/10</span>
         </div>

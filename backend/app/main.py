@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import ingest, drafts, dashboard, leads, auth, family_offices
+from app.api import ingest, drafts, dashboard, leads, auth, family_offices, campaigns
 from app.database import create_tables
 
 import os
@@ -36,9 +36,15 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
+from app.api import ingest, drafts, dashboard, leads, auth, family_offices, campaigns, metrics
+
 app.include_router(ingest.router, prefix="/api")
 app.include_router(drafts.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(leads.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(family_offices.router, prefix="/api")
+app.include_router(campaigns.router, prefix="/api")
+app.include_router(metrics.router, prefix="/api")
+
+
