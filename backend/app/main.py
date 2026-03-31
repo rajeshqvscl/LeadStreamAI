@@ -20,7 +20,7 @@ for d in dev_origins:
         allowed_origins.append(d)
 
 # Include the reported frontend URL
-reported_origin = "https://lead-gen-frontend-aps7.onrender.com"
+reported_origin = "https://lead-frontend-5new.onrender.com"
 if reported_origin not in allowed_origins:
     allowed_origins.append(reported_origin)
 
