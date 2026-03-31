@@ -143,13 +143,8 @@ def get_metrics(user_id: Optional[str] = Header(None, alias="X-User-Id")):
             sig['time'] = sig['time'].isoformat()
             
     if not recent_signals:
-        # Provide demonstration signals matching the screenshot if database is empty
-        recent_signals = [
-            {"signal_type": "UNSUBSCRIBE", "time": datetime.now(timezone.utc).isoformat(), "environment_data": "Mozilla/5.0 (Windows NT 10.0)", "email": "msravanthi090704@gmail.com", "first_name": "M", "last_name": "SRAVANTHI"},
-            {"signal_type": "UNSUBSCRIBE", "time": datetime.now(timezone.utc).isoformat(), "environment_data": "python-requests/2.32", "email": "sravanthi.m@qosf.com", "first_name": "Sravanthi", "last_name": "M"},
-            {"signal_type": "CLICK", "time": datetime.now(timezone.utc).isoformat(), "environment_data": "Mozilla/5.0 (Macintosh)", "email": "aayush.singhal@temasek.com.sg", "first_name": "Aayush", "last_name": "Singhal"},
-            {"signal_type": "OPEN", "time": datetime.now(timezone.utc).isoformat(), "environment_data": "Mozilla/5.0 (iPhone)", "email": "aayush.singhal@temasek.com.sg", "first_name": "Aayush", "last_name": "Singhal"}
-        ]
+        recent_signals = []
+
 
     cur.close()
     conn.close()
