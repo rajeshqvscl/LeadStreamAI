@@ -3,7 +3,7 @@ from app.database import get_db_connection
 import json
 
 
-def insert_lead(first_name, last_name, email, domain, linkedin, company, source, payload, fit_score=0, persona="OTHER", phone=None):
+def insert_lead(first_name, last_name, email, domain, linkedin, company, source, payload, fit_score=0, persona="OTHER", phone=None, user_id=None):
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -11,8 +11,8 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
     cur.execute(
         """
         INSERT INTO leads_raw
-        (first_name, last_name, email, domain, linkedin_url, company_name, source, raw_payload, fit_score, persona, phone)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        (first_name, last_name, email, domain, linkedin_url, company_name, source, raw_payload, fit_score, persona, phone, user_id)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """,
         (
             first_name,
@@ -25,9 +25,11 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
             json.dumps(payload),
             fit_score,
             persona,
-            phone
+            phone,
+            user_id
         )
     )
+
 
     conn.commit()
     cur.close()
@@ -80,13 +82,14 @@ def update_lead(lead_id, data):
     conn.close()
     return True
 
-def add_activity_log(lead_id, action, details=None, performed_by='system'):
+def add_activity_log(lead_id, action, details=None, performed_by='system', user_id=None):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO activity_log (lead_id, action, details, performed_by) VALUES (%s, %s, %s, %s)",
-        (lead_id, action, details, performed_by)
+        "INSERT INTO activity_log (lead_id, action, details, performed_by, user_id) VALUES (%s, %s, %s, %s, %s)",
+        (lead_id, action, details, performed_by, user_id)
     )
+
     conn.commit()
     cur.close()
     conn.close()
@@ -102,7 +105,13 @@ def get_activity_log(lead_id):
     rows = cur.fetchall()
     cur.close()
     conn.close()
-    return [dict(r) for r in rows]
+    res = []
+    for r in rows:
+        d = dict(r)
+        if d.get("created_at"):
+            d["created_at"] = d["created_at"].isoformat()
+        res.append(d)
+    return res
 
 def save_email_draft(lead_id, draft):
     conn = get_db_connection()

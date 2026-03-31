@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional
 import random
@@ -36,7 +36,7 @@ def categorize_lead(payload):
         
     # FOUNDER — top-level founders, CEOs, managing directors, C-suite execs
     founder_keywords = [
-        "founder", "co-founder", "cofounder", "co founder",
+        "founder", "co-founder", "cofounder", "co finder",
         "ceo", "chief executive",
         "md", "managing director",
         "cto", "chief technology",
@@ -68,7 +68,7 @@ def categorize_lead(payload):
 
 @router.post("/ingest")
 @router.post("/ingest-leads")
-def ingest_leads(req: LeadRequest):
+def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     # Map frontend fields to the search_leads backend logic
     employer = req.company or req.industry or ""
     job_title = req.title or req.bulk_title or ""
@@ -83,7 +83,7 @@ def ingest_leads(req: LeadRequest):
     try:
         from app.models.lead import add_activity_log
         search_summary = f"{req.title or ''} at {req.company or ''}".strip() or "Discovery search"
-        add_activity_log(None, "LEAD_SEARCH", f"Search performed for: {search_summary}", "admin")
+        add_activity_log(None, "LEAD_SEARCH", f"Search performed for: {search_summary}", "admin", user_id=user_id)
     except:
         pass
 
@@ -122,7 +122,8 @@ def ingest_leads(req: LeadRequest):
                     lead["payload"],
                     fit_score=fit_score,
                     persona=persona,
-                    phone=lead.get("phone")
+                    phone=lead.get("phone"),
+                    user_id=user_id
                 )
                 inserted += 1
             except Exception as e:
@@ -135,7 +136,7 @@ def ingest_leads(req: LeadRequest):
             try:
                 from app.models.lead import add_activity_log
                 details = f"Ingested {inserted} leads from {leads[0].get('company') or 'RocketReach' if leads else 'Discovery'}"
-                add_activity_log(None, "BULK_INGESTION", details, "admin")
+                add_activity_log(None, "BULK_INGESTION", details, "admin", user_id=user_id)
             except:
                 pass
 
@@ -150,4 +151,4 @@ def ingest_leads(req: LeadRequest):
         raise
     except Exception as e:
         logger.error("ingest_leads_critical_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Internal server error during ingestion process")
+        raise HTTPException(status_code=500, detail="Internal server error during ingestion process")

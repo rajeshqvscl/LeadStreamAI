@@ -12,7 +12,21 @@ api.interceptors.request.use((config) => {
   if (token && token !== 'undefined') {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  
+  const userStr = localStorage.getItem('user');
+  if (userStr) {
+    try {
+      const user = JSON.parse(userStr);
+      if (user && user.id) {
+        config.headers['X-User-Id'] = user.id;
+      }
+    } catch (e) {
+      console.error('Failed to parse user for X-User-Id', e);
+    }
+  }
+
   if (config.method === 'get') {
+
     config.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
     config.headers['Pragma'] = 'no-cache';
     config.headers['Expires'] = '0';

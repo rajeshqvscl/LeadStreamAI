@@ -41,6 +41,7 @@ def create_tables():
         email_draft TEXT,
         family_office_name TEXT,
         labels TEXT[] DEFAULT '{}',
+        user_id INTEGER,
         created_at TIMESTAMP DEFAULT NOW()
     );
     """)
@@ -57,6 +58,7 @@ def create_tables():
         ("email_draft", "TEXT"),
         ("linkedin_url", "TEXT"),
         ("labels", "TEXT[] DEFAULT '{}'"),
+        ("user_id", "INTEGER"),
         ("updated_at", "TIMESTAMP DEFAULT NOW()")
     ]
     for col_name, col_type in columns_to_add:
@@ -67,26 +69,23 @@ def create_tables():
             continue
     
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS family_offices (
-        id SERIAL PRIMARY KEY,
-        name TEXT UNIQUE NOT NULL,
-        location TEXT,
-        category TEXT,
-        strategic_fit TEXT,
-        last_synced TIMESTAMP
-    );
-    """)
-
-    cur.execute("""
     CREATE TABLE IF NOT EXISTS activity_log (
         id SERIAL PRIMARY KEY,
         lead_id INTEGER,
         action TEXT NOT NULL,
         details TEXT,
         performed_by TEXT DEFAULT 'system',
+        user_id INTEGER,
         created_at TIMESTAMP DEFAULT NOW()
     );
     """)
+
+    # Ensure user_id exists in activity_log
+    try:
+        cur.execute("ALTER TABLE activity_log ADD COLUMN user_id INTEGER;")
+    except psycopg2.Error:
+        conn.rollback()
+
 
     # Campaigns Feature Tables
     cur.execute("""
@@ -131,26 +130,24 @@ def create_tables():
     );
     """)
 
-    # User Management Table
+    # Family Offices Table
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS users (
+    CREATE TABLE IF NOT EXISTS family_offices (
         id SERIAL PRIMARY KEY,
-        username TEXT UNIQUE NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        full_name TEXT,
-        password_hash TEXT NOT NULL,
-        role TEXT DEFAULT 'USER', -- ADMIN, USER
-        is_active BOOLEAN DEFAULT TRUE,
-        created_at TIMESTAMP DEFAULT NOW()
+        name TEXT UNIQUE NOT NULL,
+        location TEXT,
+        category TEXT,
+        strategic_fit TEXT,
+        last_synced TIMESTAMP,
+        user_id INTEGER
     );
     """)
 
-    # Seed default admin if empty
-    cur.execute("SELECT COUNT(*) FROM users")
+    # Seed default admin if missing
+    cur.execute("SELECT COUNT(*) FROM users WHERE username = %s", (os.getenv("ADMIN_USERNAME", "admin"),))
     if cur.fetchone()['count'] == 0:
         import hashlib
-        # Default credentials for first setup (user will be prompted to change or can add more)
-        # Using a simple SHA256 for now as no bcrypt is available in current env
+        # Default credentials for first setup
         default_username = os.getenv("ADMIN_USERNAME", "admin")
         default_password = os.getenv("ADMIN_PASSWORD", "admin123")
         password_hash = hashlib.sha256(default_password.encode()).hexdigest()
@@ -164,3 +161,26 @@ def create_tables():
     conn.commit()
     cur.close()
     conn.close()
+
+    # Auto-sync family offices from Google Sheets on startup if table is empty
+    try:
+        import requests as req_lib
+        sheet_url = os.getenv("FAMILY_OFFICES_PATH")
+        if sheet_url:
+            conn2 = get_db_connection()
+            cur2 = conn2.cursor()
+            cur2.execute("SELECT COUNT(*) FROM family_offices")
+            fo_count = cur2.fetchone()['count']
+            cur2.close()
+            conn2.close()
+
+            if fo_count == 0:
+                doc_id = sheet_url.split('/d/')[1].split('/')[0]
+                export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv"
+                response = req_lib.get(export_url, timeout=15)
+                if response.ok:
+                    from app.models.family_office import sync_from_csv
+                    sync_from_csv(response.text)
+                    print(f"[startup] Auto-synced family offices from Google Sheets.")
+    except Exception as e:
+        print(f"[startup] Could not auto-sync family offices: {e}")

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Header
 from pydantic import BaseModel
 from typing import List, Optional
 from app.models.campaign import (
@@ -33,9 +33,11 @@ class CampaignUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 @router.post("/campaigns")
-def api_create_campaign(campaign: CampaignCreate):
+def api_create_campaign(campaign: CampaignCreate, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     try:
-        return create_campaign(campaign.dict())
+        data = campaign.dict()
+        data['user_id'] = user_id
+        return create_campaign(data)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -43,29 +45,32 @@ def api_create_campaign(campaign: CampaignCreate):
 def api_get_campaigns(
     limit: int = 20, 
     offset: int = 0, 
-    active_only: bool = False
+    active_only: bool = False,
+    user_id: Optional[str] = Header(None, alias="X-User-Id")
 ):
-    return get_campaigns(limit, offset, active_only)
+    return get_campaigns(limit, offset, active_only, user_id)
 
 @router.get("/campaigns/{id}")
-def api_get_campaign(id: int):
-    campaign = get_campaign_by_id(id)
+def api_get_campaign(id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    campaign = get_campaign_by_id(id, user_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
     return campaign
 
 @router.put("/campaigns/{id}")
-def api_update_campaign(id: int, campaign: CampaignUpdate):
-    updated = update_campaign(id, campaign.dict(exclude_unset=True))
+def api_update_campaign(id: int, campaign: CampaignUpdate, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    updated = update_campaign(id, campaign.dict(exclude_unset=True), user_id)
     if not updated:
         raise HTTPException(status_code=404, detail="Campaign not found")
     return updated
 
 @router.delete("/campaigns/{id}")
-def api_delete_campaign(id: int):
-    if delete_campaign(id):
+def api_delete_campaign(id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    if delete_campaign(id, user_id):
         return {"message": "Campaign deleted successfully"}
     raise HTTPException(status_code=404, detail="Campaign not found")
+
+
 
 class CampaignAddLeads(BaseModel):
     lead_ids: List[int]

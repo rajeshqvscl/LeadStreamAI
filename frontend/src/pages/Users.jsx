@@ -1,8 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, UserCircle, Shield, ShieldCheck, ShieldAlert, Mail, MoreHorizontal, Edit2, Trash2, X, Loader2, Check, AlertCircle } from 'lucide-react';
+import { Search, Plus, UserCircle, Shield, ShieldCheck, ShieldAlert, Mail, MoreHorizontal, Edit2, Trash2, X, Loader2, Check, AlertCircle, Play, RotateCcw } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
 const Users = () => {
+  const navigate = useNavigate();
+  const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+  useEffect(() => {
+    if (storedUser.username !== 'admin') {
+      navigate('/dashboard');
+    }
+  }, [storedUser, navigate]);
+
   const [users, setUsers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, total: 0 });
@@ -75,14 +85,35 @@ const Users = () => {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to deactivate this user?')) return;
+    if (!window.confirm('Are you sure you want to suspend this user?')) return;
     try {
       await api.delete(`/api/users/${id}`);
       fetchUsers();
     } catch (err) {
-      alert('Failed to deactivate user: ' + (err.response?.data?.detail || 'Unknown error'));
+      alert('Failed to suspend user: ' + (err.response?.data?.detail || 'Unknown error'));
     }
   };
+
+  const handleResume = async (id) => {
+    if (!window.confirm('Are you sure you want to resume access for this user?')) return;
+    try {
+      await api.post(`/api/users/${id}/resume`);
+      fetchUsers();
+    } catch (err) {
+      alert('Failed to resume user: ' + (err.response?.data?.detail || 'Unknown error'));
+    }
+  };
+
+  const handleHardDelete = async (id) => {
+    if (!window.confirm('CRITICAL: Permanent deletion cannot be undone. Delete this user record forever?')) return;
+    try {
+      await api.delete(`/api/users/${id}/hard`);
+      fetchUsers();
+    } catch (err) {
+      alert('Failed to delete record: ' + (err.response?.data?.detail || 'Unknown error'));
+    }
+  };
+
 
   return (
     <div className="animate-in fade-in duration-500">
@@ -91,7 +122,7 @@ const Users = () => {
           <h1 className="text-2xl font-bold text-white">System Access Control</h1>
           <p className="text-slate-400 text-sm mt-1">Manage administrative permissions and monitor system-wide user activity.</p>
         </div>
-        <button 
+        <button
           onClick={() => handleOpenDrawer()}
           className="btn btn-primary px-6 py-2.5 shadow-blue-500/20"
         >
@@ -104,9 +135,9 @@ const Users = () => {
           <div className="flex items-center gap-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-              <input 
-                type="text" 
-                placeholder="Search administrators..." 
+              <input
+                type="text"
+                placeholder="Search administrators..."
                 className="bg-slate-900/50 border border-white/10 rounded-xl py-2 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-blue-500/50 w-64 transition-all"
               />
             </div>
@@ -116,7 +147,7 @@ const Users = () => {
                 { label: 'Admins', value: 'ADMIN' },
                 { label: 'Users', value: 'USER' },
               ].map(tab => (
-                <button 
+                <button
                   key={tab.value}
                   onClick={() => setFilterRole(tab.value)}
                   className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${filterRole === tab.value ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}
@@ -148,10 +179,9 @@ const Users = () => {
                 <tr key={user.id} className="hover:bg-white/5 transition-colors group">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-white shadow-lg ${
-                        user.role === 'ADMIN' ? 'bg-gradient-to-br from-red-600 to-orange-600 shadow-red-600/20' :
-                        'bg-gradient-to-br from-blue-600 to-cyan-600 shadow-blue-600/20'
-                      }`}>
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-white shadow-lg ${user.role === 'ADMIN' ? 'bg-gradient-to-br from-red-600 to-orange-600 shadow-red-600/20' :
+                          'bg-gradient-to-br from-blue-600 to-cyan-600 shadow-blue-600/20'
+                        }`}>
                         {user.username.substring(0, 1).toUpperCase()}
                       </div>
                       <div>
@@ -162,8 +192,8 @@ const Users = () => {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
-                      {user.role === 'ADMIN' ? <ShieldAlert className="w-4 h-4 text-red-500" /> : 
-                       <ShieldCheck className="w-4 h-4 text-blue-500" />}
+                      {user.role === 'ADMIN' ? <ShieldAlert className="w-4 h-4 text-red-500" /> :
+                        <ShieldCheck className="w-4 h-4 text-blue-500" />}
                       <span className="font-black text-[11px] uppercase tracking-widest text-slate-300">{user.role}</span>
                     </div>
                   </td>
@@ -180,22 +210,42 @@ const Users = () => {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button 
+                      <button
                         onClick={() => handleOpenDrawer(user)}
                         className="p-2 rounded-lg bg-slate-900 border border-white/5 hover:bg-blue-500/20 hover:text-blue-400 transition-all text-slate-500"
                         title="Update Policy"
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      <button 
-                        onClick={() => handleDelete(user.id)}
-                        disabled={!user.is_active}
-                        className="p-2 rounded-lg bg-slate-900 border border-white/5 hover:bg-red-500/20 hover:text-red-400 transition-all text-slate-500 disabled:opacity-20"
-                        title="Terminate Access"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      
+                      {user.is_active ? (
+                        <button
+                          onClick={() => handleDelete(user.id)}
+                          className="p-2 rounded-lg bg-slate-900 border border-white/5 hover:bg-orange-500/20 hover:text-orange-400 transition-all text-slate-500"
+                          title="Suspend Access"
+                        >
+                          <AlertCircle className="w-4 h-4" />
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleResume(user.id)}
+                            className="p-2 rounded-lg bg-slate-900 border border-white/5 hover:bg-emerald-500/20 hover:text-emerald-400 transition-all text-slate-500"
+                            title="Resume Access"
+                          >
+                            <Play className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleHardDelete(user.id)}
+                            className="p-2 rounded-lg bg-slate-900 border border-white/5 hover:bg-red-500/20 hover:text-red-400 transition-all text-slate-500"
+                            title="Delete Record Permanently"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
                     </div>
+
                   </td>
                 </tr>
               ))}
@@ -223,49 +273,48 @@ const Users = () => {
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="form-group">
               <label>System Username</label>
-              <input 
-                type="text" 
-                required 
-                className="form-control bg-slate-900/50" 
+              <input
+                type="text"
+                required
+                className="form-control bg-slate-900/50"
                 placeholder="Unique Identifier"
                 value={formData.username}
-                onChange={(e) => setFormData({...formData, username: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
               />
             </div>
             <div className="form-group">
               <label>Corporate Email</label>
-              <input 
-                type="email" 
-                required 
-                className="form-control bg-slate-900/50" 
+              <input
+                type="email"
+                required
+                className="form-control bg-slate-900/50"
                 placeholder="user@organization.com"
                 value={formData.email}
-                onChange={(e) => setFormData({...formData, email: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
               />
             </div>
             <div className="form-group">
               <label>Full Identity Name</label>
-              <input 
-                type="text" 
-                className="form-control bg-slate-900/50" 
+              <input
+                type="text"
+                className="form-control bg-slate-900/50"
                 placeholder="Legal Identity"
                 value={formData.full_name}
-                onChange={(e) => setFormData({...formData, full_name: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
               />
             </div>
-            {!editingUser && (
-              <div className="form-group">
-                <label>Access Credential (Password)</label>
-                <input 
-                  type="password" 
-                  required 
-                  className="form-control bg-slate-900/50" 
-                  placeholder="Minimum 8 characters"
-                  value={formData.password}
-                  onChange={(e) => setFormData({...formData, password: e.target.value})}
-                />
-              </div>
-            )}
+            <div className="form-group">
+              <label>Access Credential (Password)</label>
+              <input
+                type="password"
+                required={!editingUser}
+                className="form-control bg-slate-900/50"
+                placeholder={editingUser ? "Leave blank to keep current" : "Minimum 8 characters"}
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+              />
+            </div>
+
             <div className="form-group">
               <label>Global Permission Role</label>
               <div className="space-y-3 mt-3">
@@ -273,16 +322,16 @@ const Users = () => {
                   { id: 'ADMIN', label: 'Global Administrator', desc: 'Full system overrides and security control', icon: ShieldAlert, color: 'text-red-500' },
                   { id: 'USER', label: 'Standard User', desc: 'Access to core features and campaign management', icon: ShieldCheck, color: 'text-blue-500' },
                 ].map(role => (
-                  <label 
+                  <label
                     key={role.id}
                     className={`flex items-center gap-4 p-4 rounded-2xl border cursor-pointer transition-all ${formData.role === role.id ? 'bg-blue-600/10 border-blue-600/50' : 'bg-slate-900 border-white/5 hover:border-white/10'}`}
                   >
-                    <input 
-                      type="radio" 
-                      name="role" 
-                      className="hidden" 
+                    <input
+                      type="radio"
+                      name="role"
+                      className="hidden"
                       checked={formData.role === role.id}
-                      onChange={() => setFormData({...formData, role: role.id})}
+                      onChange={() => setFormData({ ...formData, role: role.id })}
                     />
                     <div className={`w-10 h-10 rounded-xl bg-slate-950 flex items-center justify-center ${role.color} ${formData.role === role.id ? 'shadow-lg' : ''}`}>
                       <role.icon className="w-5 h-5" />

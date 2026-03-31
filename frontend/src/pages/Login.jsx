@@ -39,9 +39,12 @@ const Login = () => {
       const response = await api.post('/api/auth/login', loginData);
 
       if (response.status === 200) {
-        const { access_token } = response.data;
+        const { access_token, user } = response.data;
         if (access_token) {
           localStorage.setItem('token', access_token);
+        }
+        if (user) {
+          localStorage.setItem('user', JSON.stringify(user));
         }
 
         setMsg('Login Successful! Redirecting to dashboard...');

@@ -21,10 +21,10 @@ const Emails = () => {
     setIsLoading(true);
     try {
       const response = await api.get('/api/emails', {
-        params: { 
-          page: pagination.page, 
+        params: {
+          page: pagination.page,
           status: filterStatus || undefined,
-          per_page: 20 
+          per_page: 20
         }
       });
       setEmails(response.data.drafts || []);
@@ -86,7 +86,7 @@ const Emails = () => {
           </p>
         </div>
         <div className="flex items-center gap-4">
-          <button 
+          <button
             onClick={sendApprovedBatch}
             disabled={isBatchSending}
             className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 font-bold text-[11px] px-4 py-2 rounded-md transition-colors disabled:opacity-50"
@@ -101,7 +101,7 @@ const Emails = () => {
         {/* Filter Bar */}
         <div className="px-6 py-4 border-b border-[#ffffff08] flex items-center gap-3 bg-[#0f121b]/50">
           <div className="relative">
-            <select 
+            <select
               className="appearance-none bg-[#0f121b] border border-[#ffffff10] rounded-md px-3 py-1.5 pr-8 text-[10px] font-bold text-slate-300 uppercase tracking-widest outline-none focus:border-blue-500/50"
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
@@ -131,7 +131,7 @@ const Emails = () => {
             <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500 text-[8px]">▼</div>
           </div>
 
-          <button 
+          <button
             onClick={() => setFilterStatus('')}
             className="px-3 py-1.5 rounded-md text-[10px] font-bold text-slate-400 hover:text-white uppercase tracking-widest transition-colors ml-1"
           >
@@ -160,8 +160,8 @@ const Emails = () => {
               ) : emails.map(email => (
                 <tr key={email.id} className="hover:bg-white/[0.02] transition-colors group">
                   <td className="px-6 py-4">
-                     <div className="font-bold text-white text-[12px] group-hover:text-blue-400 transition-colors cursor-pointer" onClick={() => navigate(`/dashboard/leads/${email.lead_id}`)}>{email.lead_name}</div>
-                     <div className="text-[10px] text-[#64748b] font-medium tracking-wide mt-0.5">{email.lead_email}</div>
+                    <div className="font-bold text-white text-[12px] group-hover:text-blue-400 transition-colors cursor-pointer" onClick={() => navigate(`/dashboard/leads/${email.lead_id}`)}>{email.lead_name}</div>
+                    <div className="text-[10px] text-[#64748b] font-medium tracking-wide mt-0.5">{email.lead_email}</div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="text-[#94a3b8] font-medium text-[11px] max-w-[300px] truncate">{email.subject || '—'}</div>
@@ -187,20 +187,20 @@ const Emails = () => {
                     )}
                   </td>
                   <td className="px-6 py-4">
-                     <div className="flex items-center gap-3 text-[10px] text-[#64748b] font-black">
-                        <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" /> 0</span>
-                        <span className="flex items-center gap-1"><X className="w-3 h-3 text-red-500/50" /> 0</span>
-                     </div>
+                    <div className="flex items-center gap-3 text-[10px] text-[#64748b] font-black">
+                      <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" /> 0</span>
+                      <span className="flex items-center gap-1"><X className="w-3 h-3 text-red-500/50" /> 0</span>
+                    </div>
                   </td>
                   <td className="px-6 py-4">
-                     {email.verifier ? (
-                       <div className="text-[10px]">
-                         <span className="text-white font-black">{email.verifier}</span>
-                         <span className="block text-[#64748b] mt-0.5">{new Date(email.updated_at).toLocaleDateString('en-US', {month:'2-digit', day:'2-digit', year:'2-digit'})}</span>
-                       </div>
-                     ) : (
-                       <span className="text-[#64748b]">—</span>
-                     )}
+                    {email.verifier ? (
+                      <div className="text-[10px]">
+                        <span className="text-white font-black">{email.verifier}</span>
+                        <span className="block text-[#64748b] mt-0.5">{new Date(email.updated_at).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' })}</span>
+                      </div>
+                    ) : (
+                      <span className="text-[#64748b]">—</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2 items-center">
@@ -243,9 +243,8 @@ const Emails = () => {
       {/* Toast Notification */}
       {notification && (
         <div className={`fixed bottom-8 right-8 z-[2000] animate-in slide-in-from-bottom-4 duration-300`}>
-          <div className={`flex items-center gap-3 px-6 py-4 rounded-2xl shadow-2xl border backdrop-blur-md ${
-            notification.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'
-          }`}>
+          <div className={`flex items-center gap-3 px-6 py-4 rounded-2xl shadow-2xl border backdrop-blur-md ${notification.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'
+            }`}>
             <p className="text-[12px] font-bold tracking-tight">{notification.message}</p>
             <button onClick={() => setNotification(null)} className="ml-4 p-1 hover:bg-white/10 rounded-lg transition-colors">
               <X className="w-4 h-4" />

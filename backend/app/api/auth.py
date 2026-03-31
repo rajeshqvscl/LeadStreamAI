@@ -22,11 +22,15 @@ def login(req: LoginRequest):
     from app.database import get_db_connection
     from fastapi import HTTPException
     
+    username = req.username.strip()
+    password = req.password
+    
     conn = get_db_connection()
     cur = conn.cursor()
     
-    # Query user by username
-    cur.execute("SELECT id, username, password_hash, role, is_active FROM users WHERE username = %s", (req.username,))
+    # Query user by username (case-insensitive)
+    cur.execute("SELECT id, username, full_name, password_hash, role, is_active FROM users WHERE LOWER(username) = LOWER(%s)", (username,))
+
     user = cur.fetchone()
     
     cur.close()
@@ -43,12 +47,26 @@ def login(req: LoginRequest):
     if password_hash != user['password_hash']:
         raise HTTPException(status_code=401, detail="Invalid username or password")
         
+    # --- Fresh Start Implementation (Requested) ---
+    # Delete all data associated with this user every time they login
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM leads_raw WHERE user_id = %s", (user['id'],))
+    cur.execute("DELETE FROM activity_log WHERE user_id = %s", (user['id'],))
+    cur.execute("DELETE FROM campaigns WHERE user_id = %s", (user['id'],))
+    conn.commit()
+    cur.close()
+    conn.close()
+    # -----------------------------------------------
+
+        
     return {
         "access_token": "dummy_token", # In a real app, generate a JWT here
         "token_type": "bearer",
         "user": {
             "id": user['id'],
             "username": user['username'],
+            "full_name": user['full_name'],
             "role": user['role']
         }
     }

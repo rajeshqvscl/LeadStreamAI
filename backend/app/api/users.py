@@ -116,4 +116,39 @@ def delete_user(user_id: int):
     conn.commit()
     cur.close()
     conn.close()
-    return {"message": "User deactivated successfully"}
+    return {"message": "User suspended successfully"}
+
+@router.post("/users/{user_id}/resume")
+def resume_user(user_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    cur.execute("UPDATE users SET is_active = TRUE WHERE id = %s", (user_id,))
+    
+    if cur.rowcount == 0:
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"message": "User resumed successfully"}
+
+@router.delete("/users/{user_id}/hard")
+def hard_delete_user(user_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
+    
+    if cur.rowcount == 0:
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"message": "User record permanently deleted"}
+

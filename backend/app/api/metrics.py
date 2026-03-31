@@ -1,4 +1,5 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Header
+from typing import Optional
 from app.database import get_db_connection
 import psycopg2.extras
 from datetime import datetime, timezone
@@ -6,50 +7,83 @@ from datetime import datetime, timezone
 router = APIRouter(tags=["Metrics"])
 
 @router.get("/metrics")
-def get_metrics():
+def get_metrics(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Get metrics matching the requested Reports & Analytics dashboard."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
+    # Base condition
+    where_clause = "WHERE user_id = %s" if user_id else "WHERE user_id IS NULL"
+    params = (user_id,) if user_id else ()
+
     # Base counts from leads_raw
-    cur.execute("SELECT COUNT(*) as count FROM leads_raw")
+    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause}", params)
     total_leads = cur.fetchone()['count'] or 0
 
-    cur.execute("SELECT COUNT(*) as count FROM leads_raw WHERE validation_status = 'VALID'")
+    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause} AND validation_status = 'VALID'", params)
     valid_leads = cur.fetchone()['count'] or 0
 
-    cur.execute("SELECT COUNT(*) as count FROM leads_raw WHERE validation_status = 'INVALID'")
+    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause} AND validation_status = 'INVALID'", params)
     invalid_leads = cur.fetchone()['count'] or 0
 
-    cur.execute("SELECT COUNT(*) as count FROM leads_raw WHERE persona IS NOT NULL AND persona != ''")
+    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause} AND persona IS NOT NULL AND persona != ''", params)
     classified_leads = cur.fetchone()['count'] or 0
 
-    cur.execute("SELECT COUNT(*) as count FROM campaigns WHERE is_active = TRUE")
+    cur.execute(f"SELECT COUNT(*) as count FROM campaigns {where_clause} AND is_active = TRUE", params)
     active_campaigns = cur.fetchone()['count'] or 0
 
     # Mailmergo-style Engagement Metrics mapped to LeadStreamAI schema
-    # (Email events map to campaign_events and recipients)
-    cur.execute("SELECT COUNT(DISTINCT recipient_id) as count FROM campaign_events WHERE event_type = 'SENT'")
+    # Isolated via join with campaigns
+    join_where = "WHERE c.user_id = %s" if user_id else "WHERE c.user_id IS NULL"
+    
+    cur.execute(f"""
+        SELECT COUNT(DISTINCT e.recipient_id) as count 
+        FROM campaign_events e
+        JOIN campaigns c ON e.campaign_id = c.id
+        {join_where} AND e.event_type = 'SENT'
+    """, params)
     sent = cur.fetchone()['count'] or 0
     
-    # Calculate bounces
-    cur.execute("SELECT COUNT(DISTINCT recipient_id) as count FROM campaign_events WHERE event_type = 'BOUNCE'")
+    cur.execute(f"""
+        SELECT COUNT(DISTINCT e.recipient_id) as count 
+        FROM campaign_events e
+        JOIN campaigns c ON e.campaign_id = c.id
+        {join_where} AND e.event_type = 'BOUNCE'
+    """, params)
     bounce_count = cur.fetchone()['count'] or 0
     
-    # Calculate unsubs
-    cur.execute("SELECT COUNT(*) as count FROM recipients WHERE is_unsubscribed = TRUE")
+    cur.execute(f"""
+        SELECT COUNT(*) as count 
+        FROM recipients r
+        JOIN campaigns c ON r.campaign_id = c.id
+        {join_where} AND r.is_unsubscribed = TRUE
+    """, params)
     total_unsubs = cur.fetchone()['count'] or 0
 
     delivered = max(sent - bounce_count, 0)
     
-    # Unique engagements
-    cur.execute("SELECT COUNT(DISTINCT recipient_id) as count FROM campaign_events WHERE event_type = 'OPEN'")
+    cur.execute(f"""
+        SELECT COUNT(DISTINCT e.recipient_id) as count 
+        FROM campaign_events e
+        JOIN campaigns c ON e.campaign_id = c.id
+        {join_where} AND e.event_type = 'OPEN'
+    """, params)
     unique_opens = cur.fetchone()['count'] or 0
     
-    cur.execute("SELECT COUNT(DISTINCT recipient_id) as count FROM campaign_events WHERE event_type = 'CLICK'")
+    cur.execute(f"""
+        SELECT COUNT(DISTINCT e.recipient_id) as count 
+        FROM campaign_events e
+        JOIN campaigns c ON e.campaign_id = c.id
+        {join_where} AND e.event_type = 'CLICK'
+    """, params)
     unique_clicks = cur.fetchone()['count'] or 0
     
-    cur.execute("SELECT COUNT(DISTINCT recipient_id) as count FROM campaign_events WHERE event_type IN ('OPEN', 'CLICK')")
+    cur.execute(f"""
+        SELECT COUNT(DISTINCT e.recipient_id) as count 
+        FROM campaign_events e
+        JOIN campaigns c ON e.campaign_id = c.id
+        {join_where} AND e.event_type IN ('OPEN', 'CLICK')
+    """, params)
     unique_engaged = cur.fetchone()['count'] or 0
 
     # Calculate Rates
@@ -62,43 +96,45 @@ def get_metrics():
     conversion_rate = (unique_engaged / total_leads * 100) if total_leads > 0 else 0.0
 
     # Persona breakdown
-    cur.execute("SELECT persona, COUNT(*) as count FROM leads_raw WHERE persona IS NOT NULL AND persona != '' GROUP BY persona")
+    cur.execute(f"SELECT persona, COUNT(*) as count FROM leads_raw {where_clause} AND persona IS NOT NULL AND persona != '' GROUP BY persona", params)
     persona_rows = cur.fetchall()
     persona_breakdown = { r['persona']: r['count'] for r in persona_rows }
 
     # Dynamic Industry & Country Extraction
-    cur.execute('''
+    cur.execute(f'''
         SELECT raw_payload->>'current_employer_industry' as industry, COUNT(*) as count 
         FROM leads_raw 
-        WHERE raw_payload->>'current_employer_industry' IS NOT NULL 
+        {where_clause} AND raw_payload->>'current_employer_industry' IS NOT NULL 
         GROUP BY raw_payload->>'current_employer_industry' 
         ORDER BY count DESC 
         LIMIT 10
-    ''')
+    ''', params)
     industry_rows = cur.fetchall()
     industry_breakdown = { r['industry']: r['count'] for r in industry_rows }
 
-    cur.execute('''
+    cur.execute(f'''
         SELECT raw_payload->>'country' as country, COUNT(*) as count 
         FROM leads_raw 
-        WHERE raw_payload->>'country' IS NOT NULL 
+        {where_clause} AND raw_payload->>'country' IS NOT NULL 
           AND raw_payload->>'country' != '' 
           AND raw_payload->>'country' != 'None' 
         GROUP BY raw_payload->>'country' 
         ORDER BY count DESC 
         LIMIT 8
-    ''')
+    ''', params)
     country_rows = cur.fetchall()
     country_breakdown = { r['country']: r['count'] for r in country_rows }
 
     # Real-Time Inbound Signals
-    cur.execute("""
+    cur.execute(f"""
         SELECT e.event_type as signal_type, e.timestamp as time, e.user_agent as environment_data, r.email, split_part(r.name, ' ', 1) as first_name, split_part(r.name, ' ', 2) as last_name
         FROM campaign_events e
         JOIN recipients r ON e.recipient_id = r.id
+        JOIN campaigns c ON e.campaign_id = c.id
+        {join_where}
         ORDER BY e.timestamp DESC
         LIMIT 10
-    """)
+    """, params)
     recent_signals = cur.fetchall()
     
     # Serialize datetime instances
@@ -151,6 +187,7 @@ def get_metrics():
         
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
+
 
 
 

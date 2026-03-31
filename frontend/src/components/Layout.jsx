@@ -6,7 +6,7 @@ const Layout = () => {
   const pathParts = location.pathname.split('/');
   // If path is /dashboard, pathParts is ["", "dashboard"], so 2nd index is undefined.
   // If path is /dashboard/leads, pathParts is ["", "dashboard", "leads"]
-  const activePage = pathParts[2] || 'dashboard'; 
+  const activePage = pathParts[2] || 'dashboard';
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [time, setTime] = useState('');
   const [totalLeads, setTotalLeads] = useState(0);
@@ -34,13 +34,23 @@ const Layout = () => {
     return () => clearInterval(interval);
   }, []);
 
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const getInitials = (name) => {
+    if (!name) return 'AD';
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+    return name.substring(0, 2).toUpperCase();
+  };
+
   return (
     <div className="flex min-h-screen bg-[#0b0f19] text-[#e2e8f0] font-sans">
       <aside className="w-[240px] bg-[#0e121d] border-r border-[#ffffff15] fixed top-0 left-0 bottom-0 z-[200] flex flex-col overflow-y-auto overflow-x-hidden transition-all pb-14">
         <div className="flex items-center gap-2.5 p-4 border-b border-[#ffffff15] shrink-0">
           <div className="w-[34px] h-[34px] rounded-lg bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-[18px] shrink-0 shadow-[0_2px_8px_rgba(59,130,246,0.3)] relative overflow-hidden">
-             <span className="text-white relative z-10">⚡</span>
-             <div className="absolute top-[-50%] left-[-50%] w-[200%] h-[200%] bg-[radial-gradient(circle,rgba(255,255,255,0.2)_0%,transparent_70%)]"></div>
+            <span className="text-white relative z-10">⚡</span>
+            <div className="absolute top-[-50%] left-[-50%] w-[200%] h-[200%] bg-[radial-gradient(circle,rgba(255,255,255,0.2)_0%,transparent_70%)]"></div>
           </div>
           <div>
             <h2 className="text-[15px] font-bold text-white tracking-[-0.3px] leading-[1.2]">LeadStream AI</h2>
@@ -81,18 +91,24 @@ const Layout = () => {
           <Link to="/dashboard/prompts" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'prompts' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'prompts' ? 'text-white' : 'text-[#94a3b8]'}`}>🧠</span> AI Prompts
           </Link>
-          <Link to="/dashboard/users" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'users' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
-            <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'users' ? 'text-white' : 'text-[#94a3b8]'}`}>👥</span> Team Management
-          </Link>
+          {user.username === 'admin' && (
+            <Link to="/dashboard/users" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'users' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+              <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'users' ? 'text-white' : 'text-[#94a3b8]'}`}>👥</span> Team Management
+            </Link>
+          )}
         </div>
 
         <div className="mt-auto p-3.5 border-t border-[#ffffff15] shrink-0 absolute bottom-0 left-0 w-[240px] bg-[#0e121d]">
           <div className="bg-[#151a26] rounded-lg p-3">
             <div className="text-[9px] font-semibold uppercase tracking-[0.8px] text-[#64748b] mb-0.5">Logged in as</div>
-            <div className="text-[12px] font-semibold text-white mb-2">Admin</div>
+            <div className="text-[12px] font-semibold text-white mb-2">
+              {user.full_name || 'Admin'}
+            </div>
             <div className="flex items-center justify-between mt-2">
-              <span className="inline-flex items-center px-2.5 py-1 rounded-[4px] text-[9px] font-bold uppercase tracking-[0.5px] bg-blue-500/15 text-blue-500">ADMIN</span>
-              <Link to="/login?logout=success" onClick={() => localStorage.removeItem('token')} className="text-[11px] text-[#f43f5e] font-semibold transition-colors hover:text-rose-400">Logout →</Link>
+              <span className="inline-flex items-center px-2.5 py-1 rounded-[4px] text-[9px] font-bold uppercase tracking-[0.5px] bg-blue-500/15 text-blue-500">
+                {user.role || 'ADMIN'}
+              </span>
+              <Link to="/login?logout=success" onClick={() => { localStorage.removeItem('token'); localStorage.removeItem('user'); }} className="text-[11px] text-[#f43f5e] font-semibold transition-colors hover:text-rose-400">Logout →</Link>
             </div>
           </div>
         </div>
@@ -119,28 +135,46 @@ const Layout = () => {
             <input type="text" placeholder="Search leads..." className="bg-transparent border-none text-[13px] text-[#e2e8f0] w-full outline-none placeholder:text-[#64748b]" />
           </div>
           <div className="relative">
-            <div 
+            <div
               className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-[12px] font-bold text-white cursor-pointer border-2 border-transparent transition-all hover:border-blue-500"
               onClick={() => setDropdownOpen(!dropdownOpen)}
-            >AD</div>
+            >
+              {getInitials(user.full_name)}
+            </div>
             {dropdownOpen && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setDropdownOpen(false)}></div>
                 <div className="absolute right-0 top-10 w-[200px] bg-[#151a26] border border-[#ffffff15] rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.6)] z-50 overflow-hidden">
                   <div className="flex items-center gap-3 p-3.5 border-b border-white/5">
-                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-[12px] font-bold text-white">AD</div>
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-[12px] font-bold text-white">
+                      {getInitials(user.full_name)}
+                    </div>
                     <div>
-                      <div className="text-[13px] font-semibold text-white">Admin</div>
-                      <div className="text-[11px] font-medium text-[#64748b]">ADMIN</div>
+                      <div className="text-[13px] font-semibold text-white">
+                        {user.full_name || 'Admin'}
+                      </div>
+                      <div className="text-[11px] font-medium text-[#64748b]">
+                        {user.role || 'ADMIN'}
+                      </div>
                     </div>
                   </div>
-                  <Link to="/login?logout=success" onClick={() => localStorage.removeItem('token')} className="block w-full text-left px-3.5 py-2.5 text-[13px] text-[#f43f5e] font-medium hover:bg-white/5 transition-colors">🚪 Sign Out</Link>
+                  <button 
+                    onClick={() => { 
+                      localStorage.removeItem('token'); 
+                      localStorage.removeItem('user'); 
+                      window.location.href = '/login?logout=success';
+                    }} 
+                    className="block w-full text-left px-3.5 py-2.5 text-[13px] text-[#f43f5e] font-medium hover:bg-white/5 transition-colors"
+                  >
+                    🚪 Sign Out
+                  </button>
                 </div>
               </>
             )}
           </div>
         </div>
       </header>
+
 
       <main className="ml-[240px] mt-[64px] flex-1 p-6 z-[100] relative">
         <Outlet />

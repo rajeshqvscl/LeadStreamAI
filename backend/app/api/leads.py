@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional
 import json
@@ -43,13 +43,22 @@ def get_leads(
     validation_status: Optional[str] = "",
     city: Optional[str] = "",
     country: Optional[str] = "",
-    per_page: int = 25
+    per_page: int = 25,
+    user_id: Optional[str] = Header(None, alias="X-User-Id")
 ):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
     query = "SELECT * FROM leads_raw WHERE 1=1"
     params = []
+    
+    if user_id:
+        query += " AND user_id = %s"
+        params.append(user_id)
+    else:
+        # If no user_id is provided, show only orphaned leads (for safety)
+        query += " AND user_id IS NULL"
+
     
     if search:
         query += " AND (first_name ILIKE %s OR last_name ILIKE %s OR email ILIKE %s OR company_name ILIKE %s OR raw_payload->>'current_title' ILIKE %s OR persona ILIKE %s OR phone ILIKE %s)"
@@ -137,10 +146,24 @@ def get_leads(
     }
 
 @router.get("/leads/{lead_id}")
-def get_lead_detail(lead_id: int):
-    lead = get_lead_by_id(lead_id)
-    if not lead:
+def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    if user_id:
+        cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (lead_id, user_id))
+    else:
+        cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (lead_id,))
+        
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row:
         return {"error": "Lead not found"}
+    
+    # Convert to mutable dict
+    lead = dict(row)
     
     # Enrich with payload if needed
     payload = lead.get("raw_payload")
@@ -170,6 +193,10 @@ def get_lead_detail(lead_id: int):
     if payload:
         lead["designation"] = payload.get("current_title", "")
         
+    # Serialize datetime
+    if lead.get("created_at"):
+        lead["created_at"] = lead["created_at"].isoformat()
+        
     # Normalize email_draft content to handle literal escapes
     if lead.get("email_draft"):
         lead["email_draft"] = lead["email_draft"].replace("\\n", "\n").replace("\\r\\n", "\n")
@@ -177,7 +204,8 @@ def get_lead_detail(lead_id: int):
     return lead
 
 @router.patch("/leads/{lead_id}")
-def update_lead_endpoint(lead_id: int, req: LeadUpdate):
+def update_lead_endpoint(lead_id: int, req: LeadUpdate, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+
     update_data = req.dict(exclude_unset=True)
     if not update_data:
         return {"message": "No changes provided"}

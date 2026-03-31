@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Header
 from pydantic import BaseModel
 import traceback
 from typing import Optional, List
@@ -41,9 +41,18 @@ def normalize_lead(lead):
 # Supports both /generate-draft (user prompt) and /generate-email (frontend Axios)
 @router.post("/generate-draft")
 @router.post("/generate-email")
-def generate_draft(req: DraftRequest):
+def generate_draft(req: DraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     try:
-        lead = get_lead_by_id(req.lead_id)
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        if user_id:
+            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (req.lead_id, user_id))
+        else:
+            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (req.lead_id,))
+            
+        lead = cur.fetchone()
+
         if not lead:
             return {"error": "Lead not found"}
         lead = normalize_lead(lead)
@@ -97,17 +106,26 @@ def generate_draft(req: DraftRequest):
 # Supports both /pending-drafts (user prompt) and /emails (frontend Axios)
 @router.get("/pending-drafts")
 @router.get("/emails")
-def get_pending_drafts(page: int = 1, status: Optional[str] = None, per_page: int = 20):
+def get_pending_drafts(page: int = 1, status: Optional[str] = None, per_page: int = 20, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    query = """
-        SELECT id, first_name, last_name, email, email_draft, email_status, company_name, persona, fit_score, updated_at 
-        FROM leads_raw 
-        WHERE email_draft IS NOT NULL
-    """
+    # Base condition
+    where_clause = "WHERE email_draft IS NOT NULL"
     params = []
     
+    if user_id:
+        where_clause += " AND user_id = %s"
+        params.append(user_id)
+    else:
+        where_clause += " AND user_id IS NULL"
+
+    query = f"""
+        SELECT id, first_name, last_name, email, email_draft, email_status, company_name, persona, fit_score, updated_at 
+        FROM leads_raw 
+        {where_clause}
+    """
+
     if status:
         query += " AND email_status = %s"
         params.append(status)
@@ -119,12 +137,13 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, per_page: in
     rows = cur.fetchall()
     
     # count total
-    count_query = "SELECT COUNT(*) FROM leads_raw WHERE email_draft IS NOT NULL"
-    count_params = []
+    count_query = f"SELECT COUNT(*) FROM leads_raw {where_clause}"
+    count_params = [user_id] if user_id else []
     if status:
         count_query += " AND email_status = %s"
         count_params.append(status)
     cur.execute(count_query, tuple(count_params))
+
     total = cur.fetchone()[0]
     
     cur.close()
@@ -184,10 +203,19 @@ class RefineRequest(BaseModel):
     subject: Optional[str] = None
 
 @router.post("/refine-email/{draft_id}")
-def refine_email_endpoint(draft_id: int, req: RefineRequest):
+def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     try:
         # Get lead info to provide context to LLM
-        lead = get_lead_by_id(draft_id)
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        if user_id:
+            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (draft_id, user_id))
+        else:
+            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (draft_id,))
+            
+        lead = cur.fetchone()
+
         if not lead:
             return {"error": "Lead not found"}
             
@@ -214,12 +242,17 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest):
 
 @router.post("/approve-draft/{draft_id}")
 @router.post("/approve-email/{draft_id}")
-def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None):
+def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     # Ensure a draft exists before approving
-    cur.execute("SELECT first_name, last_name, company_name, email_draft, domain FROM leads_raw WHERE id = %s", (draft_id,))
+    if user_id:
+        cur.execute("SELECT first_name, last_name, company_name, email_draft, domain FROM leads_raw WHERE id = %s AND user_id = %s", (draft_id, user_id))
+    else:
+        cur.execute("SELECT first_name, last_name, company_name, email_draft, domain FROM leads_raw WHERE id = %s AND user_id IS NULL", (draft_id,))
+        
     lead = cur.fetchone()
+
     
     if lead and not lead.get('email_draft'):
         from app.services.llm_services import EmailGenerator
@@ -257,13 +290,18 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None):
     return {"status": "approved", "message": "Draft approved successfully"}
 
 @router.post("/reject-email/{draft_id}")
-def reject_draft(draft_id: int, req: Optional[RejectRequest] = None):
+def reject_draft(draft_id: int, req: Optional[RejectRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
+    
+    where_clause = "WHERE id = %s AND user_id = %s" if user_id else "WHERE id = %s AND user_id IS NULL"
+    params = (draft_id, user_id) if user_id else (draft_id,)
+    
     cur.execute(
-        "UPDATE leads_raw SET email_status = 'REJECTED', updated_at = NOW() WHERE id = %s",
-        (draft_id,)
+        f"UPDATE leads_raw SET email_status = 'REJECTED', updated_at = NOW() {where_clause}",
+        params
     )
+
     conn.commit()
     cur.close()
     conn.close()
@@ -274,7 +312,7 @@ def reject_draft(draft_id: int, req: Optional[RejectRequest] = None):
     return {"status": "rejected", "message": "Draft rejected"}
 
 @router.post("/approve-bulk-domain-drafts")
-def approve_bulk_domain_drafts(req: BulkDraftRequest):
+def approve_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -283,7 +321,11 @@ def approve_bulk_domain_drafts(req: BulkDraftRequest):
             return {"message": "No leads provided"}
             
         format_strings = ','.join(['%s'] * len(req.lead_ids))
-        cur.execute(f"SELECT * FROM leads_raw WHERE id IN ({format_strings})", tuple(req.lead_ids))
+        where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s" if user_id else f"WHERE id IN ({format_strings}) AND user_id IS NULL"
+        params = tuple(req.lead_ids) + ((user_id,) if user_id else ())
+        
+        cur.execute(f"SELECT * FROM leads_raw {where_clause}", params)
+
         leads = cur.fetchall()
         
         # Group leads
@@ -354,17 +396,22 @@ def approve_bulk_domain_drafts(req: BulkDraftRequest):
         return {"error": str(e)}
 
 @router.post("/send-approved-batch")
-def send_approved_batch():
+def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
     
-    # Get all approved lead IDs
-    cur.execute("SELECT id FROM leads_raw WHERE email_status = 'APPROVED'")
+    where_clause = "WHERE email_status = 'APPROVED' AND user_id = %s" if user_id else "WHERE email_status = 'APPROVED' AND user_id IS NULL"
+    params = (user_id,) if user_id else ()
+    
+    # Get all approved lead IDs for THIS user
+    cur.execute(f"SELECT id FROM leads_raw {where_clause}", params)
     ids = [r[0] for r in cur.fetchall()]
     
     cur.execute(
-        "UPDATE leads_raw SET email_status = 'SENT', updated_at = NOW() WHERE email_status = 'APPROVED'"
+        f"UPDATE leads_raw SET email_status = 'SENT', updated_at = NOW() {where_clause}",
+        params
     )
+
     updated = cur.rowcount
     conn.commit()
     cur.close()
@@ -377,7 +424,7 @@ def send_approved_batch():
     return {"message": f"Successfully sent {updated} approved emails."}
 
 @router.post("/generate-bulk-domain-drafts")
-def generate_bulk_domain_drafts(req: BulkDraftRequest):
+def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     try:
         from app.models.lead import get_lead_by_id
         conn = get_db_connection()
@@ -387,7 +434,11 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest):
             return {"message": "No leads provided"}
             
         format_strings = ','.join(['%s'] * len(req.lead_ids))
-        cur.execute(f"SELECT * FROM leads_raw WHERE id IN ({format_strings})", tuple(req.lead_ids))
+        where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s" if user_id else f"WHERE id IN ({format_strings}) AND user_id IS NULL"
+        params = tuple(req.lead_ids) + ((user_id,) if user_id else ())
+
+        cur.execute(f"SELECT * FROM leads_raw {where_clause}", params)
+
         leads = cur.fetchall()
         
         # Group leads
@@ -456,7 +507,7 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest):
         return {"error": str(e)}
 
 @router.post("/send-bulk-domain-emails")
-def send_bulk_domain_emails(req: BulkSendRequest):
+def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -465,7 +516,11 @@ def send_bulk_domain_emails(req: BulkSendRequest):
             return {"message": "No leads provided"}
             
         format_strings = ','.join(['%s'] * len(req.lead_ids))
-        cur.execute(f"SELECT * FROM leads_raw WHERE id IN ({format_strings})", tuple(req.lead_ids))
+        where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s" if user_id else f"WHERE id IN ({format_strings}) AND user_id IS NULL"
+        params = tuple(req.lead_ids) + ((user_id,) if user_id else ())
+
+        cur.execute(f"SELECT * FROM leads_raw {where_clause}", params)
+
         leads = cur.fetchall()
         
         groups = {}

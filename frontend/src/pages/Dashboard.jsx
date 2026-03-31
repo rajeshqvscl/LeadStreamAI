@@ -52,11 +52,14 @@ const Dashboard = () => {
     return () => clearInterval(interval);
   }, []);
 
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const displayName = user.full_name || user.username || 'User';
+
   return (
     <>
       <div className="bg-gradient-to-br from-blue-600/15 to-purple-500/15 border border-white/10 rounded-[20px] py-[60px] px-10 mb-8 flex flex-col justify-center items-center text-center shadow-[0_20px_40px_rgba(0,0,0,0.3)]">
         <h1 className="text-[36px] font-extrabold mb-3 tracking-[-0.5px] text-white">
-          Welcome back, <span className="bg-gradient-to-r from-purple-500 to-blue-500 text-transparent bg-clip-text">Admin</span>
+          Welcome back, <span className="bg-gradient-to-r from-purple-500 to-blue-500 text-transparent bg-clip-text">{displayName}</span>
         </h1>
         <p className="text-[#94a3b8] text-[16px] max-w-[600px]">
           Your pipeline is soaring. We've identified <span className="text-white font-extrabold underline decoration-blue-500">{data.total_leads}</span> potential leads today.
@@ -205,13 +208,13 @@ const Dashboard = () => {
           </div>
           <div className="p-6 pt-2 flex-1 overflow-y-auto custom-scrollbar space-y-7">
             {Object.entries(
-               Object.entries(data.persona_data || {}).reduce((acc, [k, v]) => {
-                 let norm = k || 'OTHER';
-                 if (norm === 'C-SUITE' || norm === 'EXECUTIVE') norm = 'FOUNDER';
-                 if (!['FOUNDER', 'INVESTOR', 'PARTNER', 'OTHER'].includes(norm)) norm = 'OTHER';
-                 acc[norm] = (acc[norm] || 0) + v;
-                 return acc;
-               }, {})
+              Object.entries(data.persona_data || {}).reduce((acc, [k, v]) => {
+                let norm = k || 'OTHER';
+                if (norm === 'C-SUITE' || norm === 'EXECUTIVE') norm = 'FOUNDER';
+                if (!['FOUNDER', 'INVESTOR', 'PARTNER', 'OTHER'].includes(norm)) norm = 'OTHER';
+                acc[norm] = (acc[norm] || 0) + v;
+                return acc;
+              }, {})
             ).map(([persona, count]) => {
               const personaColors = {
                 'FOUNDER': { badge: 'bg-blue-600/20 text-blue-500', bar: 'bg-blue-600' },
@@ -219,10 +222,10 @@ const Dashboard = () => {
                 'INVESTOR': { badge: 'bg-emerald-500/10 text-emerald-400', bar: 'bg-emerald-500' },
                 'OTHER': { badge: 'bg-amber-500/20 text-amber-500', bar: 'bg-amber-500' }
               };
-              
+
               const config = personaColors[persona] || personaColors['OTHER'];
               const percentage = data.total_leads ? (count / data.total_leads) * 100 : 0;
-              
+
               return (
                 <div key={persona} className="group">
                   <div className="flex justify-between items-center mb-3">
@@ -234,10 +237,10 @@ const Dashboard = () => {
                     </span>
                   </div>
                   <div className="h-1 bg-[#1e2433] rounded-full overflow-hidden relative">
-                     <div 
-                       className={`h-full rounded-full transition-all duration-1000 ease-out ${config.bar}`} 
-                       style={{ width: `${percentage}%` }}
-                     ></div>
+                    <div
+                      className={`h-full rounded-full transition-all duration-1000 ease-out ${config.bar}`}
+                      style={{ width: `${percentage}%` }}
+                    ></div>
                   </div>
                 </div>
               );
@@ -256,7 +259,7 @@ const Dashboard = () => {
             <h3 className="text-[16px] font-black text-white uppercase tracking-wider">Mission Orchestra</h3>
           </div>
         </div>
-        
+
         <div className="p-8">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {/* Lead Pipeline */}
