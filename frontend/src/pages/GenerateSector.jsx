@@ -26,9 +26,26 @@ const GenerateSector = () => {
       console.error('Failed to fetch sectors', err);
       // Mock data for UI development if API is missing
       setSectors([
-        { sector: 'TECHNOLOGY_SAAS', display_name: 'Technology SaaS', count: 12, total: 45, context: '', strategy: '' },
-        { sector: 'FINANCIAL_SERVICES', display_name: 'Financial Services', count: 0, total: 28, context: '', strategy: '' },
-        { sector: 'HEALTHCARE', display_name: 'Healthcare', count: 5, total: 15, context: '', strategy: '' }
+        // DO'S
+        { sector: 'DEEP_TECH', display_name: 'Deep Tech', count: 5, total: 12, context: '', strategy: '' },
+        { sector: 'HIGH_TECH', display_name: 'High Tech', count: 8, total: 20, context: '', strategy: '' },
+        { sector: 'SAAS', display_name: 'SAAS', count: 12, total: 45, context: '', strategy: '' },
+        { sector: 'DEFENCE_TECH', display_name: 'Defence Tech', count: 3, total: 8, context: '', strategy: '' },
+        { sector: 'TRAVEL', display_name: 'Travel', count: 0, total: 15, context: '', strategy: '' },
+        { sector: 'AUTOMOTIVE', display_name: 'Automotive', count: 2, total: 10, context: '', strategy: '' },
+        { sector: 'AI_INFRA', display_name: 'AI Infra', count: 9, total: 25, context: '', strategy: '' },
+        { sector: 'AI_INTEL', display_name: 'AI Intelligence', count: 7, total: 18, context: '', strategy: '' },
+        { sector: 'GEN_AI', display_name: 'Generative AI', count: 15, total: 50, context: '', strategy: '' },
+        { sector: 'ESPORTS', display_name: 'Esports', count: 4, total: 12, context: '', strategy: '' },
+        { sector: 'ENT_APP', display_name: 'Enterprise Applications', count: 6, total: 22, context: '', strategy: '' },
+        { sector: 'ENT_SW', display_name: 'Enterprise Software', count: 10, total: 30, context: '', strategy: '' },
+        { sector: 'EDTECH', display_name: 'EdTech', count: 1, total: 14, context: '', strategy: '' },
+        // ONLY FOR M&A
+        { sector: 'PHARMA', display_name: 'Pharmaceutical (M&A)', count: 0, total: 8, context: '', strategy: '' },
+        { sector: 'NUTRA', display_name: 'Nutraceutical (M&A)', count: 2, total: 5, context: '', strategy: '' },
+        { sector: 'CHEMICAL', display_name: 'Chemical (M&A)', count: 1, total: 7, context: '', strategy: '' },
+        { sector: 'FOOD_EXT', display_name: 'Food Extracts (M&A)', count: 0, total: 4, context: '', strategy: '' },
+        { sector: 'TEXTILE', display_name: 'Textile (Clothing/Brands)', count: 3, total: 9, context: '', strategy: '' }
       ]);
     } finally {
       setIsLoading(false);
@@ -71,7 +88,7 @@ const GenerateSector = () => {
           </h1>
           <p className="text-slate-400 text-sm mt-1">Trigger AI email drafting for specific business sectors with specialized strategies.</p>
         </div>
-        <button 
+        <button
           className="btn btn-primary px-8 rounded-xl shadow-lg shadow-blue-500/20"
           onClick={() => setShowAddModal(true)}
         >
@@ -91,7 +108,7 @@ const GenerateSector = () => {
               {s.count > 0 && (
                 <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
               )}
-              
+
               <div className="p-6 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
                 <h3 className="text-white font-black text-lg tracking-tight capitalize">{s.display_name}</h3>
                 <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border ${s.count > 0 ? 'border-blue-500/30 text-blue-400 bg-blue-500/10' : 'border-slate-500/30 text-slate-500 bg-slate-500/10'}`}>
@@ -111,11 +128,11 @@ const GenerateSector = () => {
                     Configure Strategy
                     <ChevronDown className="w-3.5 h-3.5 ml-auto group-open:rotate-180 transition-transform" />
                   </summary>
-                  
+
                   <div className="mt-4 space-y-4 animate-in slide-in-from-top-2 duration-300">
                     <div className="space-y-1.5">
                       <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-1">Context Override</label>
-                      <textarea 
+                      <textarea
                         className="form-control text-xs bg-black/40 border-white/5 rounded-xl min-h-[60px]"
                         placeholder="e.g. We help biotech firms scale their AI infra..."
                         defaultValue={s.context}
@@ -123,13 +140,13 @@ const GenerateSector = () => {
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-1">Drafting Strategy</label>
-                      <textarea 
+                      <textarea
                         className="form-control text-xs bg-black/40 border-white/5 rounded-xl min-h-[60px]"
                         placeholder="e.g. Mention specific recent industry regulations..."
                         defaultValue={s.strategy}
                       />
                     </div>
-                    <button 
+                    <button
                       className="btn btn-ghost w-full py-2 border-dashed border-blue-500/30 text-blue-400 hover:bg-blue-500/5 text-[10px] uppercase font-black"
                       onClick={() => handleSaveSettings(s.sector, {})}
                     >
@@ -158,7 +175,7 @@ const GenerateSector = () => {
                         </select>
                       </div>
                       <div className="space-y-1.5 pt-6">
-                        <button 
+                        <button
                           className="btn btn-primary w-full h-[38px] rounded-xl text-xs font-black shadow-xl shadow-blue-500/30 flex items-center justify-center gap-2"
                           onClick={() => handleBulkGenerate(s.sector, {})}
                           disabled={generatingSector === s.sector}
@@ -196,8 +213,8 @@ const GenerateSector = () => {
             <div className="p-6 space-y-6">
               <div className="space-y-1.5">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Sector Name</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   className="form-control bg-black/40 border-white/10 rounded-xl"
                   placeholder="e.g. BioTech"
                   value={newSectorName}
@@ -216,14 +233,13 @@ const GenerateSector = () => {
       {/* Toast Notification */}
       {notification && (
         <div className={`fixed bottom-8 right-8 z-[2000] animate-in slide-in-from-bottom-4 duration-300`}>
-          <div className={`flex items-center gap-3 px-6 py-4 rounded-2xl shadow-2xl border backdrop-blur-md ${
-            notification.type === 'success' 
-            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
-            : 'bg-red-500/10 border-red-500/20 text-red-400'
-          }`}>
+          <div className={`flex items-center gap-3 px-6 py-4 rounded-2xl shadow-2xl border backdrop-blur-md ${notification.type === 'success'
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+              : 'bg-red-500/10 border-red-500/20 text-red-400'
+            }`}>
             {notification.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
             <p className="text-sm font-bold tracking-tight">{notification.message}</p>
-            <button 
+            <button
               onClick={() => setNotification(null)}
               className="ml-4 p-1 hover:bg-white/10 rounded-lg transition-colors"
             >
