@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, Plus, UserCircle, Shield, ShieldCheck, ShieldAlert, Mail, MoreHorizontal, Edit2, Trash2, X, Loader2, Check, AlertCircle, Play, RotateCcw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
@@ -70,7 +71,7 @@ const Users = () => {
   };
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     try {
       if (editingUser) {
         await api.put(`/api/users/${editingUser.id}`, formData);
@@ -113,7 +114,6 @@ const Users = () => {
       alert('Failed to delete record: ' + (err.response?.data?.detail || 'Unknown error'));
     }
   };
-
 
   return (
     <div className="animate-in fade-in duration-500">
@@ -245,7 +245,6 @@ const Users = () => {
                         </>
                       )}
                     </div>
-
                   </td>
                 </tr>
               ))}
@@ -254,108 +253,113 @@ const Users = () => {
         </div>
       </div>
 
-      {/* User Provisioning Drawer */}
-      <div className={`drawer-backdrop ${showDrawer ? 'show' : ''}`} onClick={() => setShowDrawer(false)}></div>
-      <div className={`drawer ${showDrawer ? 'show' : ''}`}>
-        <div className="drawer-header bg-slate-900/50">
-          <div>
-            <h2 className="text-white font-bold text-lg flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white"><UserCircle className="w-5 h-5" /></div>
-              {editingUser ? 'Policy Modification' : 'Access Provisioning'}
-            </h2>
-            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Identity & Access Management</p>
-          </div>
-          <button onClick={() => setShowDrawer(false)} className="text-slate-500 hover:text-white transition-colors">
-            <X className="w-6 h-6" />
-          </button>
-        </div>
-        <div className="drawer-body bg-[#0a0f1a]">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="form-group">
-              <label>System Username</label>
-              <input
-                type="text"
-                required
-                className="form-control bg-slate-900/50"
-                placeholder="Unique Identifier"
-                value={formData.username}
-                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-              />
-            </div>
-            <div className="form-group">
-              <label>Corporate Email</label>
-              <input
-                type="email"
-                required
-                className="form-control bg-slate-900/50"
-                placeholder="user@organization.com"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              />
-            </div>
-            <div className="form-group">
-              <label>Full Identity Name</label>
-              <input
-                type="text"
-                className="form-control bg-slate-900/50"
-                placeholder="Legal Identity"
-                value={formData.full_name}
-                onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-              />
-            </div>
-            <div className="form-group">
-              <label>Access Credential (Password)</label>
-              <input
-                type="password"
-                required={!editingUser}
-                className="form-control bg-slate-900/50"
-                placeholder={editingUser ? "Leave blank to keep current" : "Minimum 8 characters"}
-                value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              />
-            </div>
-
-            <div className="form-group">
-              <label>Global Permission Role</label>
-              <div className="space-y-3 mt-3">
-                {[
-                  { id: 'ADMIN', label: 'Global Administrator', desc: 'Full system overrides and security control', icon: ShieldAlert, color: 'text-red-500' },
-                  { id: 'USER', label: 'Standard User', desc: 'Access to core features and campaign management', icon: ShieldCheck, color: 'text-blue-500' },
-                ].map(role => (
-                  <label
-                    key={role.id}
-                    className={`flex items-center gap-4 p-4 rounded-2xl border cursor-pointer transition-all ${formData.role === role.id ? 'bg-blue-600/10 border-blue-600/50' : 'bg-slate-900 border-white/5 hover:border-white/10'}`}
-                  >
-                    <input
-                      type="radio"
-                      name="role"
-                      className="hidden"
-                      checked={formData.role === role.id}
-                      onChange={() => setFormData({ ...formData, role: role.id })}
-                    />
-                    <div className={`w-10 h-10 rounded-xl bg-slate-950 flex items-center justify-center ${role.color} ${formData.role === role.id ? 'shadow-lg' : ''}`}>
-                      <role.icon className="w-5 h-5" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between">
-                        <span className={`text-sm font-bold ${formData.role === role.id ? 'text-white' : 'text-slate-300'}`}>{role.label}</span>
-                        {formData.role === role.id && <Check className="w-4 h-4 text-blue-500" />}
-                      </div>
-                      <p className="text-[10px] text-slate-500 font-medium mt-0.5">{role.desc}</p>
-                    </div>
-                  </label>
-                ))}
+      {/* User Provisioning Drawer — rendered via Portal to escape main's stacking context */}
+      {createPortal(
+        <>
+          <div className={`drawer-backdrop ${showDrawer ? 'show' : ''}`} onClick={() => setShowDrawer(false)}></div>
+          <div className={`drawer ${showDrawer ? 'show' : ''}`}>
+            <div className="drawer-header bg-slate-900/50">
+              <div>
+                <h2 className="text-white font-bold text-lg flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white"><UserCircle className="w-5 h-5" /></div>
+                  {editingUser ? 'Policy Modification' : 'Access Provisioning'}
+                </h2>
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Identity & Access Management</p>
               </div>
+              <button onClick={() => setShowDrawer(false)} className="text-slate-500 hover:text-white transition-colors">
+                <X className="w-6 h-6" />
+              </button>
             </div>
-          </form>
-        </div>
-        <div className="drawer-footer bg-slate-900/20">
-          <button className="btn btn-ghost px-6" onClick={() => setShowDrawer(false)}>Terminate</button>
-          <button onClick={handleSubmit} className="btn btn-primary px-8 shadow-blue-600/20">
-            {editingUser ? 'Update Policy' : 'Finalize Provisioning'}
-          </button>
-        </div>
-      </div>
+            <div className="drawer-body bg-[#0a0f1a]">
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div className="form-group">
+                  <label>System Username</label>
+                  <input
+                    type="text"
+                    required
+                    className="form-control bg-slate-900/50"
+                    placeholder="Unique Identifier"
+                    value={formData.username}
+                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Corporate Email</label>
+                  <input
+                    type="email"
+                    required
+                    className="form-control bg-slate-900/50"
+                    placeholder="user@organization.com"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Full Identity Name</label>
+                  <input
+                    type="text"
+                    className="form-control bg-slate-900/50"
+                    placeholder="Legal Identity"
+                    value={formData.full_name}
+                    onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Access Credential (Password)</label>
+                  <input
+                    type="password"
+                    required={!editingUser}
+                    className="form-control bg-slate-900/50"
+                    placeholder={editingUser ? "Leave blank to keep current" : "Minimum 8 characters"}
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Global Permission Role</label>
+                  <div className="space-y-3 mt-3">
+                    {[
+                      { id: 'ADMIN', label: 'Global Administrator', desc: 'Full system overrides and security control', icon: ShieldAlert, color: 'text-red-500' },
+                      { id: 'USER', label: 'Standard User', desc: 'Access to core features and campaign management', icon: ShieldCheck, color: 'text-blue-500' },
+                    ].map(role => (
+                      <label
+                        key={role.id}
+                        className={`flex items-center gap-4 p-4 rounded-2xl border cursor-pointer transition-all ${formData.role === role.id ? 'bg-blue-600/10 border-blue-600/50' : 'bg-slate-900 border-white/5 hover:border-white/10'}`}
+                      >
+                        <input
+                          type="radio"
+                          name="role"
+                          className="hidden"
+                          checked={formData.role === role.id}
+                          onChange={() => setFormData({ ...formData, role: role.id })}
+                        />
+                        <div className={`w-10 h-10 rounded-xl bg-slate-950 flex items-center justify-center ${role.color} ${formData.role === role.id ? 'shadow-lg' : ''}`}>
+                          <role.icon className="w-5 h-5" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between">
+                            <span className={`text-sm font-bold ${formData.role === role.id ? 'text-white' : 'text-slate-300'}`}>{role.label}</span>
+                            {formData.role === role.id && <Check className="w-4 h-4 text-blue-500" />}
+                          </div>
+                          <p className="text-[10px] text-slate-500 font-medium mt-0.5">{role.desc}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </form>
+            </div>
+            <div className="drawer-footer bg-slate-900/20">
+              <button className="btn btn-ghost px-6" onClick={() => setShowDrawer(false)}>Terminate</button>
+              <button onClick={handleSubmit} className="btn btn-primary px-8 shadow-blue-600/20">
+                {editingUser ? 'Update Policy' : 'Finalize Provisioning'}
+              </button>
+            </div>
+          </div>
+        </>,
+        document.body
+      )}
     </div>
   );
 };
