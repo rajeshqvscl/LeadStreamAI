@@ -4,8 +4,8 @@ import api from '../services/api';
 
 const Login = () => {
   const isDev = import.meta.env.MODE === 'development';
-  const [username, setUsername] = useState(isDev ? (import.meta.env.VITE_ADMIN_USER || '') : '');
-  const [password, setPassword] = useState(isDev ? (import.meta.env.VITE_ADMIN_PASS || '') : '');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');

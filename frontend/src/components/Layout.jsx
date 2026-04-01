@@ -91,7 +91,7 @@ const Layout = () => {
           <Link to="/dashboard/prompts" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'prompts' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'prompts' ? 'text-white' : 'text-[#94a3b8]'}`}>🧠</span> AI Prompts
           </Link>
-          {user.username === 'admin' && (
+          {user.role === 'ADMIN' && (
             <Link to="/dashboard/users" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'users' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
               <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'users' ? 'text-white' : 'text-[#94a3b8]'}`}>👥</span> Team Management
             </Link>

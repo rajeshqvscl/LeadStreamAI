@@ -9,7 +9,7 @@ const Users = () => {
   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
 
   useEffect(() => {
-    if (storedUser.username !== 'admin') {
+    if (storedUser.role !== 'ADMIN') {
       navigate('/dashboard');
     }
   }, [storedUser, navigate]);
