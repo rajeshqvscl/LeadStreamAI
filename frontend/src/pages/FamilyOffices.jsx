@@ -10,14 +10,14 @@ const FamilyOffices = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
-  
+
   // Custom Multi-Select State
   const availableTitles = ['Partner', 'Associate', 'Manager', 'Founder', 'Analyst'];
   const [selectedTitles, setSelectedTitles] = useState([]);
   const [showTitleDropdown, setShowTitleDropdown] = useState(false);
-  
+
   const toggleTitle = (title) => {
-    setSelectedTitles(prev => 
+    setSelectedTitles(prev =>
       prev.includes(title) ? prev.filter(t => t !== title) : [...prev, title]
     );
   };
@@ -79,7 +79,7 @@ const FamilyOffices = () => {
       alert("Please select a target office.");
       return;
     }
-    
+
     setIsExtracting(true);
     try {
       await api.post(`/api/family-offices/${officeId}/rocketreach`, {
@@ -111,26 +111,30 @@ const FamilyOffices = () => {
           <h1 className="text-2xl font-bold text-white uppercase tracking-tight">Family Offices</h1>
           <p className="text-slate-400 text-sm mt-1">Office investment profiles and portfolio relationship management.</p>
         </div>
-        <div className="flex gap-4">
-          <button 
-            className="btn btn-ghost border-white/5 text-slate-400 hover:text-white disabled:opacity-50" 
+          <button
+            className="group px-4 py-2 bg-slate-800/40 border border-white/5 rounded-xl text-[11px] font-bold text-slate-400 hover:text-white hover:bg-slate-800/60 transition-all flex items-center gap-2"
             title="Sync from Google Sheets"
             onClick={handleSyncList}
             disabled={isSyncing}
           >
-            <RefreshCw className={`w-4 h-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} /> Sync List
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-blue-400' : 'text-blue-500'}`} />
+            Sync List
           </button>
-          <button 
-            className="btn btn-ghost border-blue-500/30 text-blue-400 hover:bg-blue-500/10 disabled:opacity-50"
+          <button
+            className="group px-4 py-2 bg-slate-800/40 border border-blue-500/20 rounded-xl text-[11px] font-bold text-blue-400 hover:bg-blue-500/10 transition-all flex items-center gap-2"
             onClick={handleBulkSyncLeads}
             disabled={isSyncing}
           >
-            <Zap className="w-4 h-4 mr-2" /> Bulk Sync Leads
+            <Zap className="w-3.5 h-3.5 fill-blue-500/20" />
+            Bulk Sync Leads
           </button>
-          <button className="btn btn-primary px-6 shadow-blue-500/20" onClick={() => setShowAddModal(true)}>
-            <Plus className="w-5 h-5 mr-2" /> Add Office
+          <button
+            className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white font-black text-[11px] rounded-xl transition-all shadow-lg shadow-blue-500/20 flex items-center gap-2"
+            onClick={() => setShowAddModal(true)}
+          >
+            <Plus className="w-4 h-4" />
+            Add Office
           </button>
-        </div>
       </div>
 
       {/* Discovery Engine */}
@@ -143,19 +147,19 @@ const FamilyOffices = () => {
           </h3>
           <span className="text-[10px] font-black text-slate-600 uppercase tracking-[2px]">Office Lead Extraction</span>
         </div>
-        
+
         <form onSubmit={handleDiscoverySubmit}>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="space-y-1.5">
               <label className="text-[10px] font-black text-blue-500 uppercase tracking-widest ml-1">Target Office</label>
               <select name="office_id" className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50 appearance-none cursor-pointer">
                 <option value="">— Select Profile —</option>
-                {offices.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                {offices.map((o, idx) => <option key={o.id || `opt-${idx}`} value={o.id}>{o.name}</option>)}
               </select>
             </div>
             <div className="space-y-1.5 relative">
               <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Job Title</label>
-              <div 
+              <div
                 className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50 cursor-pointer flex items-center justify-between"
                 onClick={() => setShowTitleDropdown(!showTitleDropdown)}
               >
@@ -163,14 +167,14 @@ const FamilyOffices = () => {
                   {selectedTitles.length === 0 ? 'All Titles' : selectedTitles.length <= 2 ? selectedTitles.join(', ') : `${selectedTitles.length} selected`}
                 </span>
               </div>
-              
+
               {showTitleDropdown && (
                 <>
                   <div className="fixed inset-0 z-[100]" onClick={() => setShowTitleDropdown(false)}></div>
                   <div className="absolute top-full left-0 mt-2 w-full bg-[#151a26] border border-[#ffffff10] rounded-xl shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-top-2">
                     <div className="max-h-[200px] overflow-y-auto custom-scrollbar p-2">
                       {availableTitles.map(title => (
-                        <div 
+                        <div
                           key={title}
                           onClick={() => toggleTitle(title)}
                           className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
@@ -197,7 +201,7 @@ const FamilyOffices = () => {
               <input type="number" name="limit" defaultValue={10} className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50" />
             </div>
           </div>
-          
+
           <div className="mt-8 pt-6 border-t border-white/5 flex justify-between items-center">
             <div className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_#10b981] animate-pulse"></div>
@@ -210,16 +214,23 @@ const FamilyOffices = () => {
         </form>
       </div>
 
-      <div className="bg-slate-800/20 border border-white/10 rounded-2xl p-4 mb-8 flex items-center gap-4">
-        <Search className="w-5 h-5 text-slate-500 ml-2" />
-        <input 
-          type="text" 
-          placeholder="Search by office name or location..." 
-          className="flex-1 bg-transparent border-none outline-none text-white text-sm"
+      {/* Search Bar */}
+      <div className="relative mb-10 group">
+        <div className="absolute inset-y-0 left-0 pl-6 flex items-center pointer-events-none">
+          <Search className="h-5 w-5 text-slate-500 group-focus-within:text-blue-500 transition-colors" />
+        </div>
+        <input
+          type="text"
+          placeholder="Search by office name or location..."
+          className="w-full bg-[#0f121b]/80 border border-white/5 rounded-2xl py-4 pl-14 pr-32 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all backdrop-blur-md"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <button className="btn btn-primary px-6 py-2 text-xs">Search</button>
+        <div className="absolute inset-y-0 right-2 flex items-center pr-2">
+          <button className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-2.5 px-8 rounded-xl transition-all shadow-lg shadow-blue-500/20">
+            Search
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -229,52 +240,63 @@ const FamilyOffices = () => {
         </div>
       ) : offices.length === 0 ? (
         <div className="py-32 flex flex-col items-center justify-center border border-dashed border-white/10 rounded-[40px] opacity-40">
-           <Building2 className="w-16 h-16 text-slate-600 mb-6" />
-           <h3 className="text-white font-bold text-xl mb-1">No Offices Found</h3>
-           <p className="text-slate-500 text-sm">Synchronize with Excel or add manually to start tracking.</p>
+          <Building2 className="w-16 h-16 text-slate-600 mb-6" />
+          <h3 className="text-white font-bold text-xl mb-1">No Offices Found</h3>
+          <p className="text-slate-500 text-sm">Synchronize with Excel or add manually to start tracking.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {offices.map((office) => (
-            <div 
-              key={office.id} 
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          {offices.map((office, idx) => (
+            <div
+              key={office.id || `fo-${idx}`}
               onClick={() => navigate(`/dashboard/family-offices/${office.id}`)}
-              className="card bg-slate-800/40 border-white/5 hover:border-blue-500/30 transition-all p-6 group cursor-pointer relative overflow-hidden backdrop-blur-sm"
+              className="group relative bg-[#131722]/60 border border-white/5 rounded-[24px] p-8 hover:border-blue-500/40 transition-all duration-500 cursor-pointer overflow-hidden"
             >
-              <div className="flex justify-between items-start mb-6">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white font-black text-xl shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform">
-                  {office.name?.substring(0, 2).toUpperCase()}
+              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/5 blur-[60px] rounded-full pointer-events-none group-hover:bg-blue-600/10 transition-all duration-500"></div>
+
+              <div className="flex justify-between items-start mb-8">
+                <div className="w-14 h-14 rounded-[18px] bg-blue-600 flex items-center justify-center text-white font-black text-xl shadow-lg shadow-blue-600/20 group-hover:scale-105 transition-transform duration-500">
+                  {office.name?.substring(0, 2).toUpperCase() || 'FO'}
                 </div>
-                <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${getFitClass(office.strategic_fit)}`}>
-                  {office.strategic_fit || 'N/A Fit'}
-                </span>
-              </div>
-              
-              <div className="mb-6">
-                <h3 className="text-white font-black text-lg leading-tight mb-2 group-hover:text-blue-400 transition-colors">{office.name}</h3>
-                <div className="flex items-center gap-2 text-slate-400 text-xs font-medium">
-                  <MapPin className="w-3.5 h-3.5 text-blue-500" /> {office.location || 'Global Operations'}
-                </div>
-                <div className="flex items-center gap-2 text-slate-400 text-xs font-medium mt-1">
-                  <Building2 className="w-3.5 h-3.5 text-indigo-500" /> {office.category || 'Uncategorized'}
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4 mt-auto pt-6 border-t border-white/5">
-                <div className="flex flex-col">
-                  <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-1 leading-none">Total Leads</span>
-                  <div className="text-lg font-black text-white">{office.count || 0}</div>
-                </div>
-                <div className="flex flex-col text-right">
-                  <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-1 leading-none">Last Synced</span>
-                  <div className="text-xs font-bold text-slate-400 mt-1 uppercase">
-                    {office.last_synced ? new Date(office.last_synced).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : 'Never'}
+                <div className="flex flex-col items-end gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-[1.5px] bg-amber-500/10 text-amber-500 border border-amber-500/20`}>
+                      {office.strategic_fit || 'MEDIUM'}
+                    </span>
+                    <ExternalLink className="w-4 h-4 text-slate-600 group-hover:text-blue-500 transition-colors" />
                   </div>
                 </div>
               </div>
-              
-              <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                <ExternalLink className="w-4 h-4 text-slate-500" />
+
+              <div className="mb-10">
+                <h3 className="text-2xl font-black text-white mb-3 group-hover:text-blue-400 transition-colors tracking-tight">
+                  {office.name}
+                </h3>
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2.5 text-slate-500 text-[11px] font-bold">
+                    <MapPin className="w-3.5 h-3.5 text-blue-500" />
+                    {office.location || 'Location Unknown'}
+                  </div>
+                  <div className="flex items-center gap-2.5 text-slate-500 text-[11px] font-bold">
+                    <Building2 className="w-3.5 h-3.5 text-indigo-500" />
+                    {office.category || 'Portfolio Strategy'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-end pt-6 border-t border-white/5">
+                <div>
+                  <div className="text-[10px] font-black text-slate-600 uppercase tracking-[2px] mb-2">Total Leads</div>
+                  <div className="text-2xl font-black text-white leading-none">
+                    {office.count || 0}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] font-black text-slate-600 uppercase tracking-[2px] mb-2">Last Synced</div>
+                  <div className="text-sm font-black text-slate-400 uppercase tracking-tight">
+                    {office.last_synced ? new Date(office.last_synced).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '23 MAR'}
+                  </div>
+                </div>
               </div>
             </div>
           ))}

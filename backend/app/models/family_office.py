@@ -31,7 +31,7 @@ def get_all_family_offices(search_query=None, user_id=None):
     ORDER BY fo.name ASC
     """
     cur.execute(query, query_params)
-    rows = cur.fetchall()
+    rows = [dict(row) for row in cur.fetchall()]
     cur.close()
     conn.close()
     return rows

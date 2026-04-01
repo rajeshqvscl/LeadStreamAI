@@ -143,6 +143,46 @@ def create_tables():
     );
     """)
 
+    # Prompts Table
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS prompts (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        prompt_type TEXT NOT NULL,
+        content TEXT NOT NULL,
+        description TEXT,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    """)
+
+    # Seed default prompts if table is empty
+    cur.execute("SELECT COUNT(*) FROM prompts")
+    if cur.fetchone()['count'] == 0:
+        default_prompts = [
+            ("Default Classification Prompt", "CLASSIFICATION", 
+             "You are a lead classification expert. Analyze the following lead information and classify them.\n\nLead Information:\n- Name: {{name}}\n- Email: {{email}}\n- Designation/Title: {{designation}}\n- Company: {{company_name}}\n- Industry: {{industry}}\n- LinkedIn: {{linkedin}}",
+             "Default prompt for classifying leads by persona and company type."),
+            
+            ("Default Email Generation Prompt", "EMAIL_GENERATION",
+             "- Tone: {{tone}}\n- Sector Context: {{context}}\n- Be concise (under 200 words for body)\n\nRespond in valid JSON format:\n{\n  \"subject\": \"email subject line\",\n  \"body\": \"full email body in plain text\"\n}",
+             "Default prompt for generating outreach emails."),
+            
+            ("Default Strategy Prompt", "STRATEGY",
+             "Focus on building genuine connections. Lead with value, not sales pitch. Mention specific industry trends when possible. Keep the tone consultative.",
+             "Default strategy guidelines for email generation."),
+            
+            ("Default Context Prompt", "CONTEXT",
+             "We are a technology company that helps businesses automate their workflows and improve operational efficiency through AI-powered solutions.",
+             "Default company context for emails.")
+        ]
+        for name, p_type, content, desc in default_prompts:
+            cur.execute("""
+                INSERT INTO prompts (name, prompt_type, content, description, is_active)
+                VALUES (%s, %s, %s, %s, TRUE)
+            """, (name, p_type, content, desc))
+
     # Seed default admin if missing
     cur.execute("SELECT COUNT(*) FROM users WHERE username = %s", (os.getenv("ADMIN_USERNAME", "admin"),))
     if cur.fetchone()['count'] == 0:

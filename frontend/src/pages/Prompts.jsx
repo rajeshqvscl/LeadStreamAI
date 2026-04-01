@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Save, RotateCcw, Info, Hash, Play, Loader2, AlertCircle } from 'lucide-react';
+import { Sparkles, Save, Plus, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import api from '../services/api';
 
 const Prompts = () => {
   const [prompts, setPrompts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [editingId, setEditingId] = useState(null);
-  const [editData, setEditData] = useState({ content: '', description: '' });
-  const [isSaving, setIsSaving] = useState(false);
+  const [isSaving, setIsSaving] = useState(null); // stores ID of saving prompt
+  const [saveSuccess, setSaveSuccess] = useState(null);
 
   const fetchPrompts = async () => {
     setIsLoading(true);
@@ -25,143 +24,164 @@ const Prompts = () => {
     fetchPrompts();
   }, []);
 
-  const handleEdit = (prompt) => {
-    setEditingId(prompt.id);
-    setEditData({ content: prompt.content, description: prompt.description || '' });
+  const handleUpdate = (id, field, value) => {
+    setPrompts(prev => prev.map(p => p.id === id ? { ...p, [field]: value } : p));
   };
 
-  const handleSave = async (id) => {
-    setIsSaving(true);
+  const onSave = async (prompt) => {
+    setIsSaving(prompt.id);
     try {
-      await api.put(`/api/prompts/${id}`, editData);
-      setEditingId(null);
-      fetchPrompts();
+      await api.put(`/api/prompts/${prompt.id}`, {
+        name: prompt.name,
+        prompt_type: prompt.prompt_type,
+        content: prompt.content,
+        description: prompt.description,
+        is_active: prompt.is_active
+      });
+      setSaveSuccess(prompt.id);
+      setTimeout(() => setSaveSuccess(null), 3000);
     } catch (err) {
       alert('Failed to save prompt');
     } finally {
-      setIsSaving(false);
+      setIsSaving(null);
     }
   };
 
-  const getTags = (content) => {
-    const regex = /\{\{(.*?)\}\}/g;
-    const matches = content.match(regex);
-    return matches ? [...new Set(matches.map(m => m.replace(/\{\{|\}\}/g, '')))] : [];
+  const getBadgeColor = (type) => {
+    switch (type) {
+      case 'CLASSIFICATION': return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20';
+      case 'EMAIL_GENERATION': return 'bg-blue-500/10 text-blue-500 border-blue-500/20';
+      case 'STRATEGY': return 'bg-purple-500/10 text-purple-500 border-purple-500/20';
+      case 'CONTEXT': return 'bg-orange-500/10 text-orange-400 border-orange-500/20';
+      default: return 'bg-slate-500/10 text-slate-400 border-slate-500/20';
+    }
   };
 
   return (
-    <div className="animate-in fade-in duration-500">
-      <div className="flex justify-between items-end mb-8">
+    <div className="max-w-[1200px] mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <div className="flex justify-between items-start mb-10">
         <div>
-          <h1 className="text-2xl font-bold text-white">AI Engine Prompts</h1>
-          <p className="text-slate-400 text-sm mt-1">Fine-tune the intelligence behind lead classification and email personalization.</p>
+          <h1 className="text-[28px] font-black text-white tracking-tight flex items-center gap-3">
+            AI Prompts
+          </h1>
+          <p className="text-slate-400 text-sm mt-1 font-medium italic">
+            Manage prompt templates for classification and email generation
+          </p>
         </div>
-        <div className="bg-blue-500/10 border border-blue-500/20 px-4 py-2 rounded-xl flex items-center gap-3">
-          <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse shadow-[0_0_8px_#3b82f6]"></div>
-          <span className="text-[11px] font-black text-blue-400 uppercase tracking-widest">GPT-4o Integration Active</span>
-        </div>
+        <button className="btn bg-blue-600 hover:bg-blue-500 text-white border-none py-2.5 px-6 rounded-xl flex items-center gap-2 shadow-[0_0_20px_rgba(37,99,235,0.3)] transition-all hover:scale-105 active:scale-95">
+          <Plus className="w-4 h-4" />
+          <span className="text-[13px] font-bold">New Prompt</span>
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {isLoading ? (
-          <div className="md:col-span-2 py-32 flex flex-col items-center justify-center opacity-50">
-            <Loader2 className="w-12 h-12 text-blue-500 animate-spin mb-4" />
-            <p className="text-slate-400 font-medium">Loading LLM instructions...</p>
-          </div>
-        ) : prompts.length === 0 ? (
-          <div className="md:col-span-2 py-20 text-center text-slate-500 border border-dashed border-white/10 rounded-3xl">
-            No prompts found. Re-run backend migrations to seed defaults.
-          </div>
-        ) : prompts.map((prompt) => (
-          <div key={prompt.id} className="card bg-slate-800/40 border-white/5 hover:border-blue-500/30 transition-all backdrop-blur-sm group p-6 shadow-xl relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-1 h-full bg-blue-500/50 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            
-            <div className="flex justify-between items-start mb-6">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-white/5 flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform">
-                  <Sparkles className="w-6 h-6 text-blue-400" />
-                </div>
-                <div>
-                  <h3 className="text-white font-bold leading-tight uppercase tracking-tight">{prompt.name}</h3>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Type:</span>
-                    <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest bg-blue-500/10 px-1.5 py-0.5 rounded">{prompt.prompt_type}</span>
-                  </div>
-                </div>
-              </div>
+      {isLoading ? (
+        <div className="py-20 flex flex-col items-center justify-center">
+          <Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-4" />
+          <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Syncing with backend...</p>
+        </div>
+      ) : prompts.length === 0 ? (
+        <div className="py-20 text-center border-2 border-dashed border-white/5 rounded-[32px] bg-white/[0.02]">
+          <AlertCircle className="w-12 h-12 text-slate-700 mx-auto mb-4" />
+          <p className="text-slate-500 font-medium">No prompt templates initialized yet.</p>
+        </div>
+      ) : (
+        <div className="space-y-8">
+          {prompts.map((prompt) => (
+            <div key={prompt.id} className="group relative">
+              <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-[24px] blur opacity-0 group-hover:opacity-100 transition duration-1000"></div>
               
-              {editingId === prompt.id ? (
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => setEditingId(null)}
-                    className="btn btn-ghost py-2 px-3 h-auto"
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                  </button>
-                  <button 
-                    onClick={() => handleSave(prompt.id)}
-                    disabled={isSaving}
-                    className="btn btn-primary py-2 px-4 h-auto shadow-blue-500/20"
-                  >
-                    {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Save className="w-4 h-4 mr-2" /> Save</>}
-                  </button>
-                </div>
-              ) : (
-                <button 
-                  onClick={() => handleEdit(prompt)}
-                  className="btn btn-ghost py-2 px-4 h-auto border-white/10 hover:border-blue-500/30"
-                >
-                  Edit Instruction
-                </button>
-              )}
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex flex-col gap-2">
-                <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest flex items-center gap-1.5 ml-1">
-                  <Play className="w-2.5 h-2.5 fill-slate-500" /> System Instruction
-                </label>
-                {editingId === prompt.id ? (
-                  <textarea 
-                    className="form-control min-h-[160px] bg-slate-950 font-mono text-xs leading-relaxed border-blue-500/30"
-                    value={editData.content}
-                    onChange={(e) => setEditData({ ...editData, content: e.target.value })}
-                  />
-                ) : (
-                  <div className="bg-slate-900/50 border border-white/5 rounded-2xl p-4 text-[13px] text-slate-400 leading-relaxed min-h-[120px] font-medium italic">
-                    {prompt.content}
+              <div className="relative bg-[#0f121b] border border-white/5 rounded-[24px] overflow-hidden shadow-2xl transition-all">
+                <div className="p-8">
+                  <div className="flex justify-between items-start mb-6">
+                    <div className="space-y-1">
+                      <h3 className="text-lg font-black text-white tracking-tight">{prompt.name}</h3>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded text-[9px] font-black tracking-[1px] border uppercase ${getBadgeColor(prompt.prompt_type)}`}>
+                          {prompt.prompt_type.replace('_', ' ')}
+                        </span>
+                        {prompt.is_active && (
+                          <span className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-black tracking-[1px] uppercase flex items-center gap-1">
+                            <CheckCircle2 className="w-2.5 h-2.5" /> ACTIVE
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                )}
-              </div>
 
-              <div className="flex flex-col gap-2">
-                <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest flex items-center gap-1.5 ml-1">
-                  <Hash className="w-3 h-3" /> Predicted Variables
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {getTags(prompt.content).length > 0 ? getTags(prompt.content).map(tag => (
-                    <span key={tag} className="px-2 py-1 rounded-lg bg-slate-900/80 border border-white/10 text-[10px] font-bold text-slate-300 font-mono">
-                      {tag}
-                    </span>
-                  )) : (
-                    <span className="text-[10px] text-slate-600 font-bold uppercase py-1">No dynamic tags detected</span>
-                  )}
+                  <p className="text-[12px] text-slate-500 mb-6 font-medium leading-relaxed">
+                    {prompt.description || "System instruction for AI model processing."}
+                  </p>
+
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center px-1">
+                      <label className="text-[11px] font-extrabold text-slate-400 uppercase tracking-widest">Prompt Content</label>
+                    </div>
+                    <div className="relative">
+                      <textarea
+                        value={prompt.content}
+                        onChange={(e) => handleUpdate(prompt.id, 'content', e.target.value)}
+                        className="w-full bg-black/40 border border-white/5 rounded-2xl p-6 text-[13px] text-slate-300 font-mono leading-relaxed focus:border-blue-500/50 focus:ring-4 focus:ring-blue-500/5 transition-all outline-none resize-none min-h-[160px]"
+                        spellCheck="false"
+                      />
+                      <div className="absolute top-4 right-4 opacity-20 group-hover:opacity-100 transition-opacity">
+                        <Sparkles className="w-4 h-4 text-blue-400" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-8 flex items-center justify-between pt-6 border-t border-white/5">
+                    <label className="flex items-center gap-3 cursor-pointer group/toggle">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          checked={prompt.is_active}
+                          onChange={(e) => handleUpdate(prompt.id, 'is_active', e.target.checked)}
+                          className="sr-only"
+                        />
+                        <div className={`w-10 h-5 rounded-full transition-colors ${prompt.is_active ? 'bg-blue-600' : 'bg-slate-800'} border border-white/5`}></div>
+                        <div className={`absolute top-1 left-1 w-3 h-3 rounded-full bg-white transition-transform ${prompt.is_active ? 'translate-x-5' : 'translate-x-0'}`}></div>
+                      </div>
+                      <span className="text-[11px] font-bold text-slate-400 group-hover/toggle:text-white transition-colors">Active</span>
+                    </label>
+
+                    <button
+                      onClick={() => onSave(prompt)}
+                      disabled={isSaving === prompt.id}
+                      className={`btn h-auto py-2.5 px-8 rounded-xl text-[12px] font-black transition-all flex items-center gap-2 ${
+                        saveSuccess === prompt.id 
+                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white' 
+                          : 'bg-blue-600 hover:bg-blue-500 text-white'
+                      } border-none shadow-lg`}
+                    >
+                      {isSaving === prompt.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : saveSuccess === prompt.id ? (
+                        <><CheckCircle2 className="w-4 h-4" /> SAVED</>
+                      ) : (
+                        <><Save className="w-4 h-4" /> SAVE</>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
-
-            <div className="mt-8 pt-5 border-t border-white/5 flex items-center gap-2 opacity-60">
-              <Info className="w-4 h-4 text-blue-400" />
-              <p className="text-[11px] text-slate-400 font-medium">
-                {editingId === prompt.id ? 'Changes will take effect instantly for all new AI operations.' : (prompt.description || 'This prompt controls how the AI analyzes and generates outbound content.')}
-              </p>
-            </div>
-            
-            <div className="absolute bottom-4 right-4 flex items-center gap-2 text-[9px] font-black text-slate-600 uppercase tracking-widest pointer-events-none group-hover:opacity-100 opacity-0 transition-opacity">
-              <AlertCircle className="w-3 h-3" /> Advanced Override
-            </div>
+          ))}
+        </div>
+      )}
+      
+      <div className="mt-20 p-10 rounded-[32px] bg-gradient-to-br from-blue-600/5 to-purple-600/5 border border-white/5">
+        <div className="flex gap-6 items-start">
+          <div className="w-12 h-12 rounded-2xl bg-blue-600/10 flex items-center justify-center shrink-0">
+            <AlertCircle className="w-6 h-6 text-blue-500" />
           </div>
-        ))}
+          <div className="space-y-2">
+            <h4 className="text-white font-bold text-sm">System Variables</h4>
+            <p className="text-slate-500 text-[12px] leading-relaxed max-w-[800px]">
+              Use double curly brackets <code className="bg-white/5 px-1.5 py-0.5 rounded text-blue-400 font-mono">{"{{variable}}"}</code> to inject dynamic data into your prompts. 
+              Commonly used: name, email, designation, company_name, industry, context, tone.
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );

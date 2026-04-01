@@ -57,9 +57,19 @@ def sync_offices(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     if not sheet_url:
         raise HTTPException(status_code=400, detail="FAMILY_OFFICES_PATH not configured")
     
-    # Google Sheets CSV Export URL logic
-    doc_id = sheet_url.split('/d/')[1].split('/')[0]
-    export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv"
+    # Google Sheets CSV Export URL logic with GID support
+    import re
+    match = re.search(r'/d/([a-zA-Z0-9-_]+)', sheet_url)
+    if not match:
+        raise HTTPException(status_code=400, detail="Invalid Google Sheets URL")
+    doc_id = match.group(1)
+    
+    gid = "0"
+    gid_match = re.search(r'gid=([0-9]+)', sheet_url)
+    if gid_match:
+        gid = gid_match.group(1)
+        
+    export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv&gid={gid}"
     
     try:
         response = requests.get(export_url)
@@ -100,7 +110,7 @@ def search_rocketreach(office_id: int, req: RocketReachSearch, user_id: Optional
             """, (
                 lead.get("first_name", ""), lead.get("last_name", ""), lead.get("email", ""),
                 lead.get("domain", ""), lead.get("linkedin", ""), lead.get("company", ""),
-                office['name'], lead.get("source", "rocketreach"), json.dumps(payload),
+                str(office.get('name', '')).strip(), lead.get("source", "rocketreach"), json.dumps(payload),
                 fit_score, persona, lead.get("phone", ""), user_id
             ))
             added_count += 1
@@ -134,7 +144,7 @@ def bulk_sync(user_id: Optional[str] = Header(None, alias="X-User-Id")):
                 VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT DO NOTHING
             """, (lead_name, "Office", email, office['name'], office['name'], user_id))
-            total_added += cur.rowcount
+            total_added += (cur.rowcount or 0)
     conn.commit()
     cur.close()
     conn.close()
