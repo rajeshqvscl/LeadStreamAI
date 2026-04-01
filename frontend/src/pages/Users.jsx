@@ -74,7 +74,11 @@ const Users = () => {
     if (e) e.preventDefault();
     try {
       if (editingUser) {
-        await api.put(`/api/users/${editingUser.id}`, formData);
+        const payload = { ...formData };
+        if (!payload.password) {
+          delete payload.password;
+        }
+        await api.put(`/api/users/${editingUser.id}`, payload);
       } else {
         await api.post('/api/users/', formData);
       }
