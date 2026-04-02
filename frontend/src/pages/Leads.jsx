@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Rocket, Search, ChevronDown, CheckCircle, Mail, User, Linkedin, 
-  Loader2, Sparkles, Tag, Plus, ChevronRight, X, AlertTriangle, 
-  ChevronLeft, ChevronUp, FileSpreadsheet, Download 
+import {
+  Rocket, Search, ChevronDown, CheckCircle, Mail, User, Linkedin,
+  Loader2, Sparkles, Tag, Plus, ChevronRight, X, AlertTriangle,
+  ChevronLeft, ChevronUp, FileSpreadsheet, Download
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
@@ -313,14 +313,17 @@ const Leads = () => {
 
     const processData = async (data) => {
       try {
-        const response = await axios.post('http://localhost:8000/api/leads/bulk-import', data);
+        // Clean data: removing any empty rows
+        const cleanData = data.filter(row => row.email || row.Email || row.Name || row.name);
+        
+        const response = await api.post('/api/leads/bulk-import', cleanData);
         showNotification('success', response.data.message || 'Import successful');
         fetchLeads();
       } catch (err) {
         showNotification('error', 'Import failed: ' + (err.response?.data?.detail || err.message));
       } finally {
         setIsSyncing(false);
-        e.target.value = null;
+        if (fileInputRef.current) fileInputRef.current.value = "";
       }
     };
 
@@ -350,12 +353,22 @@ const Leads = () => {
 
   const downloadTemplate = () => {
     const template = [
-      { first_name: 'John', last_name: 'Doe', email: 'john@example.com', company_name: 'Acme Corp', linkedin_url: 'https://linkedin.com/in/johndoe', persona: 'FOUNDER' }
+      { 
+        Name: 'John Doe', 
+        email: 'john@example.com', 
+        company_name: 'Acme Corp', 
+        linkedin_url: 'https://linkedin.com/in/johndoe', 
+        Designation: 'Founder & CEO',
+        city: 'New York',
+        country: 'USA',
+        persona: 'FOUNDER',
+        phone: '+1 234 567 8900'
+      }
     ];
     const ws = XLSX.utils.json_to_sheet(template);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Template");
-    XLSX.writeFile(wb, "LeadStream_Template.xlsx");
+    XLSX.utils.book_append_sheet(wb, ws, "LeadStream_Template");
+    XLSX.writeFile(wb, "LeadStreamAI_Import_Template.xlsx");
   };
 
   const removeLabel = async (leadId, label) => {
@@ -384,27 +397,27 @@ const Leads = () => {
           className="hidden"
           accept=".csv, .xlsx, .xls"
         />
-        <button 
+        <button
           onClick={() => fileInputRef.current?.click()}
           disabled={isSyncing}
           className="flex-1 btn btn-ghost py-3.5 text-base border-dashed hover:border-blue-500/50 group transition-all duration-300 w-full"
-        > 
+        >
           {isSyncing ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <FileSpreadsheet className="w-5 h-5 mr-2 text-indigo-400 group-hover:scale-110 transition-transform" />}
           {isSyncing ? 'Syncing...' : 'Sync Excel / CSV'}
         </button>
-        
-        <button 
+
+        <button
           onClick={() => setShowAddModal(true)}
           className="flex-1 btn btn-ghost py-3.5 text-base border-dashed hover:border-blue-500/50 group w-full"
-        > 
-          <Plus className="w-5 h-5 mr-2 text-blue-400 group-hover:rotate-90 transition-transform" /> New Lead 
+        >
+          <Plus className="w-5 h-5 mr-2 text-blue-400 group-hover:rotate-90 transition-transform" /> New Lead
         </button>
-        
-        <button 
+
+        <button
           onClick={downloadTemplate}
           className="flex-1 btn btn-primary py-3.5 text-base shadow-blue-500/20 group w-full"
-        > 
-          <Download className="w-5 h-5 mr-2 group-hover:-translate-y-1 transition-transform" /> Download Template 
+        >
+          <Download className="w-5 h-5 mr-2 group-hover:-translate-y-1 transition-transform" /> Download Template
         </button>
       </div>
 
@@ -828,10 +841,10 @@ const Leads = () => {
                     </td>
                     <td>
                       <span className={`px-2 py-1 rounded-[4px] text-[10px] font-bold tracking-wider ${['FOUNDER', 'C-SUITE', 'EXECUTIVE'].includes(lead.persona) ? 'bg-blue-500/10 text-blue-400' :
-                          ['PARTNER', 'INVESTOR'].includes(lead.persona) ? 'bg-purple-500/10 text-purple-400' :
-                            'bg-amber-500/10 text-amber-400'
+                        ['PARTNER', 'INVESTOR'].includes(lead.persona) ? 'bg-purple-500/10 text-purple-400' :
+                          'bg-amber-500/10 text-amber-400'
                         }`}>
-                        {lead.persona || 'UNKNOWN'}
+                        {lead.designation || lead.persona || 'UNKNOWN'}
                       </span>
                     </td>
                     <td className="text-slate-400">

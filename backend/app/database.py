@@ -52,6 +52,7 @@ def create_tables():
         ("phone", "TEXT"),
         ("city", "TEXT"),
         ("country", "TEXT"),
+        ("designation", "TEXT"),
         ("fit_score", "INTEGER DEFAULT 0"),
         ("validation_status", "TEXT DEFAULT 'PENDING'"),
         ("email_status", "TEXT DEFAULT 'PENDING'"),

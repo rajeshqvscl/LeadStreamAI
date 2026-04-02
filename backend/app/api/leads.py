@@ -53,7 +53,14 @@ def get_leads(
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    query = "SELECT * FROM leads_raw WHERE 1=1"
+    # Dynamically extract designation if needed (to handle cases where schema update was blocked)
+    query = """
+        SELECT *, 
+               COALESCE(raw_payload->>'Designation', raw_payload->>'Role/Designation', raw_payload->>'designation', persona) as designation, 
+               labels 
+        FROM leads_raw 
+        WHERE 1=1
+    """
     params = []
     
     if user_id:
@@ -98,13 +105,15 @@ def get_leads(
         query += " AND validation_status = %s"
         params.append(validation_status)
         
-    # count total
-    count_query = query.replace("SELECT *", "SELECT COUNT(*)")
+    # count total - handle multi-line select correctly
+    count_query = f"SELECT COUNT(*) FROM ({query}) as total_count"
     cur.execute(count_query, tuple(params))
     total = cur.fetchone()[0]
     
     query += " ORDER BY id DESC LIMIT %s OFFSET %s"
     params.extend([per_page, (page - 1) * per_page])
+    cur.execute(query, tuple(params))
+    leads = cur.fetchall()
     
     cur.execute(query, tuple(params))
     rows = cur.fetchall()
@@ -316,39 +325,106 @@ def bulk_delete(req: List[int]):
         conn.close()
     return {"message": "Leads rejected and deleted"}
 @router.post("/leads/bulk-import")
-def bulk_import(leads: List[dict]):
+def bulk_import(
+    leads: List[dict],
+    user_id: Optional[str] = Header(None, alias="X-User-Id")
+):
     """
-    Import a list of leads directly into the pipeline.
-    Expects a list of dictionaries with first_name, last_name, email, etc.
+    Import a list of leads with flexible header mapping.
+    Email and Name are the only core requirements.
     """
     conn = get_db_connection()
     cur = conn.cursor()
     inserted = 0
     errors = 0
+    skipped = 0
 
     try:
+        db_user_id = None
+        if user_id:
+            try:
+                db_user_id = int(user_id)
+            except:
+                pass
+
         for lead in leads:
-            first_name = lead.get("first_name", "")
-            last_name = lead.get("last_name", "")
-            email = lead.get("email")
-            if not email:
+            # Flexible Mapping for Name
+            name = (
+                lead.get("Name") or lead.get("name") or 
+                lead.get("Full Name") or lead.get("full_name") or 
+                lead.get("Lead Name") or 
+                f"{lead.get('first_name', '')} {lead.get('last_name', '')}".strip()
+            )
+            
+            # Flexible Mapping for Email
+            email = (
+                lead.get("email") or lead.get("Email") or 
+                lead.get("E-mail") or lead.get("Email Address") or 
+                lead.get("Work Email")
+            )
+
+            if not email or not name:
                 errors += 1
                 continue
+
+            # Flexible Mapping for other fields
+            company = (
+                lead.get("company_name") or lead.get("Company Name") or 
+                lead.get("Company") or lead.get("Account") or lead.get("Organization")
+            )
+            linkedin = (
+                lead.get("linkedin_url") or lead.get("LinkedIn URL") or 
+                lead.get("LinkedIn") or lead.get("Profile URL") or lead.get("URL")
+            )
+            designation = (
+                lead.get("Designation") or lead.get("Job Title") or 
+                lead.get("Title") or lead.get("Role") or lead.get("Position") or 
+                lead.get("Role/Designation")
+            )
+            city = lead.get("city") or lead.get("City") or lead.get("Location") or lead.get("Town")
+            country = lead.get("country") or lead.get("Country") or lead.get("Nation")
+            persona = lead.get("persona") or lead.get("Persona") or lead.get("Category") or "OTHER"
+            phone = lead.get("phone") or lead.get("Phone") or lead.get("phone number") or lead.get("Mobile")
+
+            # Data Formatting
+            name_parts = name.split(" ", 1)
+            f_name = name_parts[0] if name_parts else ""
+            l_name = name_parts[1] if len(name_parts) > 1 else ""
             
-            company = lead.get("company_name") or lead.get("company")
-            linkedin = lead.get("linkedin_url") or lead.get("linkedin")
-            persona = lead.get("persona") or "OTHER"
-            source = lead.get("source") or "import"
-            
+            # Create a savepoint for each lead to prevent global transaction abortion
+            cur.execute("SAVEPOINT lead_savepoint")
             try:
+                # Optimized query: only using columns we know exist for sure
                 cur.execute("""
-                    INSERT INTO leads_raw (first_name, last_name, email, company_name, linkedin_url, persona, source)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (email) DO NOTHING
-                """, (first_name, last_name, email, company, linkedin, persona, source))
+                    INSERT INTO leads_raw (
+                        first_name, last_name, email, company_name, linkedin_url, 
+                        city, country, persona, phone, source, user_id, raw_payload
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (email) DO UPDATE SET
+                        first_name = EXCLUDED.first_name,
+                        last_name = EXCLUDED.last_name,
+                        company_name = EXCLUDED.company_name,
+                        linkedin_url = EXCLUDED.linkedin_url,
+                        city = EXCLUDED.city,
+                        country = EXCLUDED.country,
+                        persona = EXCLUDED.persona,
+                        phone = EXCLUDED.phone,
+                        user_id = COALESCE(leads_raw.user_id, EXCLUDED.user_id),
+                        raw_payload = EXCLUDED.raw_payload
+                """, (
+                    f_name, l_name, email, company, linkedin, 
+                    city, country, persona, phone, "import", db_user_id, 
+                    json.dumps(lead)
+                ))
                 if cur.rowcount > 0:
                     inserted += 1
-            except:
+                else:
+                    skipped += 1
+                cur.execute("RELEASE SAVEPOINT lead_savepoint")
+            except Exception as e:
+                cur.execute("ROLLBACK TO SAVEPOINT lead_savepoint")
+                print(f"Bulk import individual error: {e}")
                 errors += 1
                 continue
         
@@ -360,4 +436,4 @@ def bulk_import(leads: List[dict]):
         cur.close()
         conn.close()
 
-    return {"message": f"Imported {inserted} leads ({errors} skipped/errors)"}
+    return {"message": f"Successfully processed {inserted + skipped} leads. ({inserted} new/updated, {errors} skipped due to invalid email or name)"}
