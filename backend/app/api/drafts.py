@@ -2,6 +2,7 @@ from fastapi import APIRouter, Header
 from pydantic import BaseModel
 import traceback
 from typing import Optional, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from app.models.lead import get_lead_by_id
 from app.models.draft import insert_draft
@@ -458,22 +459,31 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
         total_leads_updated = 0
         total_groups = len(groups)
         
-        for key, group_leads in groups.items():
+        def process_group(group_key, group_leads):
             first_lead = group_leads[0]
-            
-            # Generate email using first lead as context
-            email_data = generator.generate_email(normalize_lead(first_lead))
-            subject = email_data.get("subject", "Following up")
-            body = email_data.get("body", "Hello, we would love to connect.")
-            
-            # Ensure proper dynamic greeting
+            try:
+                email_data = generator.generate_email(normalize_lead(first_lead))
+                subject = email_data.get("subject", "Following up")
+                body = email_data.get("body", "Hello, we would love to connect.")
+            except Exception as e:
+                print(f"Error generating email for {group_key}: {e}")
+                subject = "Following up"
+                body = "Hello, we would love to connect to discuss potential synergies."
+                
             lines = body.split('\n')
             if lines and any(g in lines[0].lower() for g in ['hi ', 'hello ', 'dear ']):
                 lines = lines[1:]
             clean_body = '\n'.join(lines).lstrip()
-            email_content = f"Subject: {subject}\n\nHi {{first_name}},\n\n{clean_body}"
+            return f"Subject: {subject}\n\nHi {{first_name}},\n\n{clean_body}", group_leads
             
-            # Update all leads in this group
+        results = []
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(process_group, k, v) for k, v in groups.items()]
+            for future in as_completed(futures):
+                res = future.result()
+                if res: results.append(res)
+                
+        for email_content, group_leads in results:
             group_ids = [l['id'] for l in group_leads]
             id_format = ','.join(['%s'] * len(group_ids))
             

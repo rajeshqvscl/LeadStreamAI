@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, MapPin, Building2, BarChart, RefreshCw, Zap, ExternalLink, Loader2 } from 'lucide-react';
+import { Search, Plus, MapPin, Building2, BarChart, RefreshCw, Zap, ExternalLink, Loader2, ChevronDown, CheckCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
@@ -10,6 +10,7 @@ const FamilyOffices = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
+  const [discoveryTab, setDiscoveryTab] = useState('direct'); // 'direct' or 'bulk'
 
   // Custom Multi-Select State
   const availableTitles = ['Partner', 'Associate', 'Manager', 'Founder', 'Analyst'];
@@ -74,26 +75,51 @@ const FamilyOffices = () => {
   const handleDiscoverySubmit = async (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
-    const officeId = formData.get('office_id');
-    if (!officeId) {
-      alert("Please select a target office.");
-      return;
-    }
+    const data = Object.fromEntries(formData.entries());
 
-    setIsExtracting(true);
-    try {
-      await api.post(`/api/family-offices/${officeId}/rocketreach`, {
-        job_title: selectedTitles.length > 0 ? selectedTitles.join(',') : '',
-        location: formData.get('location'),
-        limit: parseInt(formData.get('limit')) || 10
-      });
-      alert('Extraction completed successfully.');
-      fetchOffices();
-    } catch (err) {
-      console.error('Failed to extract leads', err);
-      alert('Extraction failed.');
-    } finally {
-      setIsExtracting(false);
+    if (discoveryTab === 'direct') {
+      const officeId = data.office_id;
+      if (!officeId) {
+        alert("Please select a target office.");
+        return;
+      }
+
+      setIsExtracting(true);
+      try {
+        await api.post(`/api/family-offices/${officeId}/rocketreach`, {
+          job_title: selectedTitles.length > 0 ? selectedTitles.join(',') : '',
+          location: data.location,
+          limit: parseInt(data.limit) || 10
+        });
+        alert('Extraction completed successfully.');
+        fetchOffices();
+      } catch (err) {
+        console.error('Failed to extract leads', err);
+        alert('Extraction failed.');
+      } finally {
+        setIsExtracting(false);
+      }
+    } else {
+      // Bulk Search Mode
+      setIsExtracting(true);
+      try {
+        const payload = {
+          bulk_title: data.bulk_title,
+          bulk_location: data.bulk_location,
+          industry: data.industry,
+          keyword: data.keyword,
+          exclude: data.exclude,
+          count: parseInt(data.limit) || 10
+        };
+        await api.post('/api/ingest-leads', payload);
+        alert('Bulk Extraction completed successfully.');
+        fetchOffices();
+      } catch (err) {
+        console.error('Bulk extraction failed', err);
+        alert('Bulk extraction failed.');
+      } finally {
+        setIsExtracting(false);
+      }
     }
   };
 
@@ -145,70 +171,119 @@ const FamilyOffices = () => {
             <span className="text-2xl text-blue-500 not-italic">⚡</span>
             RocketReach <span className="bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">Discovery Engine</span>
           </h3>
-          <span className="text-[10px] font-black text-slate-600 uppercase tracking-[2px]">Office Lead Extraction</span>
+          <div className="flex gap-4">
+            <button
+              onClick={() => setDiscoveryTab('direct')}
+              className={`pb-2 text-[11px] font-black uppercase tracking-wider transition-all relative ${discoveryTab === 'direct' ? 'text-blue-500 after:absolute after:bottom-[-2px] after:left-0 after:right-0 after:h-0.5 after:bg-blue-500 after:shadow-[0_0_10px_#3b82f6]' : 'text-slate-600 hover:text-white'}`}
+            >
+              1. Office Lookup
+            </button>
+            <button
+              onClick={() => setDiscoveryTab('bulk')}
+              className={`pb-2 text-[11px] font-black uppercase tracking-wider transition-all relative ${discoveryTab === 'bulk' ? 'text-indigo-500 after:absolute after:bottom-[-2px] after:left-0 after:right-0 after:h-0.5 after:bg-indigo-500 after:shadow-[0_0_10px_#6366f1]' : 'text-slate-600 hover:text-white'}`}
+            >
+              2. Industry Bulk Search
+            </button>
+          </div>
         </div>
 
         <form onSubmit={handleDiscoverySubmit}>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-blue-500 uppercase tracking-widest ml-1">Target Office</label>
-              <select name="office_id" className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50 appearance-none cursor-pointer">
-                <option value="">— Select Profile —</option>
-                {offices.map((o, idx) => <option key={o.id || `opt-${idx}`} value={o.id}>{o.name}</option>)}
-              </select>
-            </div>
-            <div className="space-y-1.5 relative">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Job Title</label>
-              <div
-                className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50 cursor-pointer flex items-center justify-between"
-                onClick={() => setShowTitleDropdown(!showTitleDropdown)}
-              >
-                <span className={selectedTitles.length === 0 ? 'text-slate-500' : 'text-white'}>
-                  {selectedTitles.length === 0 ? 'All Titles' : selectedTitles.length <= 2 ? selectedTitles.join(', ') : `${selectedTitles.length} selected`}
-                </span>
+          {discoveryTab === 'direct' ? (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-blue-500 uppercase tracking-widest ml-1">Target Office</label>
+                <div className="relative">
+                  <select name="office_id" className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50 appearance-none cursor-pointer">
+                    <option value="">— Select Profile —</option>
+                    {offices.map((o, idx) => <option key={o.id || `opt-${idx}`} value={o.id}>{o.name}</option>)}
+                  </select>
+                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+                </div>
               </div>
+              <div className="space-y-1.5 relative">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Job Title</label>
+                <div
+                  className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50 cursor-pointer flex items-center justify-between"
+                  onClick={() => setShowTitleDropdown(!showTitleDropdown)}
+                >
+                  <span className={selectedTitles.length === 0 ? 'text-slate-500' : 'text-white'}>
+                    {selectedTitles.length === 0 ? 'All Titles' : selectedTitles.length <= 2 ? selectedTitles.join(', ') : `${selectedTitles.length} selected`}
+                  </span>
+                  <ChevronDown className={`w-4 h-4 text-slate-500 transition-all ${showTitleDropdown ? 'rotate-180' : ''}`} />
+                </div>
 
-              {showTitleDropdown && (
-                <>
-                  <div className="fixed inset-0 z-[100]" onClick={() => setShowTitleDropdown(false)}></div>
-                  <div className="absolute top-full left-0 mt-2 w-full bg-[#151a26] border border-[#ffffff10] rounded-xl shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-top-2">
-                    <div className="max-h-[200px] overflow-y-auto custom-scrollbar p-2">
-                      {availableTitles.map(title => (
-                        <div
-                          key={title}
-                          onClick={() => toggleTitle(title)}
-                          className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
-                        >
-                          <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${selectedTitles.includes(title) ? 'bg-blue-500 border-blue-500' : 'border-slate-600 bg-transparent'}`}>
-                            {selectedTitles.includes(title) && <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>}
+                {showTitleDropdown && (
+                  <>
+                    <div className="fixed inset-0 z-[100]" onClick={() => setShowTitleDropdown(false)}></div>
+                    <div className="absolute top-full left-0 mt-2 w-full bg-[#151a26] border border-[#ffffff10] rounded-xl shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                      <div className="max-h-[200px] overflow-y-auto custom-scrollbar p-2">
+                        {availableTitles.map(title => (
+                          <div
+                            key={title}
+                            onClick={() => toggleTitle(title)}
+                            className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
+                          >
+                            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${selectedTitles.includes(title) ? 'bg-blue-500 border-blue-500' : 'border-slate-600 bg-transparent'}`}>
+                              {selectedTitles.includes(title) && <CheckCircle className="w-3 h-3 text-white" />}
+                            </div>
+                            <span className={`text-sm font-semibold tracking-wide ${selectedTitles.includes(title) ? 'text-white' : 'text-slate-400'}`}>
+                              {title}
+                            </span>
                           </div>
-                          <span className={`text-sm font-semibold tracking-wide ${selectedTitles.includes(title) ? 'text-white' : 'text-slate-400'}`}>
-                            {title}
-                          </span>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                </>
-              )}
+                  </>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Location</label>
+                <input type="text" name="location" placeholder="e.g. Dubai, London" className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Limit</label>
+                <input type="number" name="limit" defaultValue={10} className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50" />
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Location</label>
-              <input type="text" name="location" placeholder="e.g. Dubai, London" className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50" />
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest ml-1">Broad Titles</label>
+                <input type="text" name="bulk_title" className="w-full bg-black/40 border border-indigo-500/20 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-indigo-500/50" placeholder="CIO, Family Office" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Location</label>
+                <input type="text" name="bulk_location" className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50" placeholder="USA, UK" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Industry</label>
+                <input type="text" name="industry" className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50" placeholder="Finance" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Keywords</label>
+                <input type="text" name="keyword" className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50" placeholder="Capital Management" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Limit</label>
+                <input type="number" name="limit" defaultValue={10} className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50" />
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Limit</label>
-              <input type="number" name="limit" defaultValue={10} className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50" />
-            </div>
-          </div>
+          )}
 
           <div className="mt-8 pt-6 border-t border-white/5 flex justify-between items-center">
             <div className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_#10b981] animate-pulse"></div>
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">RocketReach API ready</span>
             </div>
-            <button type="submit" disabled={isExtracting} className="btn btn-primary px-10 rounded-xl disabled:opacity-50">
-              {isExtracting ? 'Extracting...' : 'Extract Portfolio Leads'}
+            <button type="submit" disabled={isExtracting} className={`btn px-12 py-2.5 rounded-xl text-white font-black text-[11px] uppercase tracking-wider transition-all shadow-lg ${discoveryTab === 'direct' ? 'bg-blue-600 hover:bg-blue-500 shadow-blue-500/20' : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-500/20'} disabled:opacity-50`}>
+              {isExtracting ? (
+                <div className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Processing...</span>
+                </div>
+              ) : (
+                discoveryTab === 'direct' ? 'Extract Office Leads' : 'Start Bulk Extraction'
+              )}
             </button>
           </div>
         </form>

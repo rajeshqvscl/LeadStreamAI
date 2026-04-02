@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Plus, Rocket, X, Loader2, CheckCircle, AlertTriangle, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Tag, MoreHorizontal, Sparkles, Upload, FileText, Trash2, RefreshCw } from 'lucide-react';
+import { Search, Plus, Rocket, X, Loader2, CheckCircle, AlertTriangle, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Tag, MoreHorizontal, Sparkles, Upload, FileText, Trash2, RefreshCw, Mail, User, Linkedin } from 'lucide-react';
 import api from '../services/api';
 
 const Leads = () => {
@@ -23,8 +23,8 @@ const Leads = () => {
   const personas = ['FOUNDER', 'INVESTOR', 'PARTNER', 'OTHER'];
   const statuses = ['PENDING', 'VALIDATING', 'VALID', 'INVALID'];
 
-  const [discoveryTab, setDiscoveryTab] = useState('company'); // 'company' or 'bulk'
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [isBulkActionLoading, setIsBulkActionLoading] = useState(false);
   
   const [showAddModal, setShowAddModal] = useState(false);
   const [notification, setNotification] = useState(null); 
@@ -62,6 +62,8 @@ const Leads = () => {
     setPagination(prev => ({ ...prev, page: 1 }));
   };
 
+  const [lookupMode, setLookupMode] = useState('search'); // 'search', 'email', 'name'
+
   const showNotification = (type, message) => {
     setNotification({ type, message });
     setTimeout(() => setNotification(null), 5000);
@@ -79,6 +81,8 @@ const Leads = () => {
         city: filters.city,
         company: filters.company,
         country: filters.country,
+        exclude_drafted: true,
+        exclude_source: 'bulk',
       };
       const response = await api.get('/api/leads', { params });
       
@@ -122,18 +126,25 @@ const Leads = () => {
     const data = Object.fromEntries(formData.entries());
     
     // Inject multi-select titles into payload
-    if (discoveryTab === 'company' && selectedTitles.length > 0) {
+    if (selectedTitles.length > 0) {
       data.title = selectedTitles.join(',');
     }
 
     try {
-      const response = await api.post('/api/ingest-leads', data);
+      const response = await api.post('/api/ingest-leads', {
+        ...data,
+        mode: lookupMode,
+        source_type: 'direct'
+      });
       fetchLeads();
       
       if (response.data.inserted === 0) {
-        showNotification('error', `No data found for this specific search (${data.company || data.bulk_title || 'query'}).`);
+        let msg = "No data found for this specific search.";
+        if (lookupMode === 'email') msg = `No verified profile found for the email: ${data.email}`;
+        if (lookupMode === 'name') msg = `No matching LinkedIn profile found for: ${data.name}`;
+        showNotification('error', msg);
       } else {
-        showNotification('success', `Extraction complete. ${response.data.inserted} new leads added.`);
+        showNotification('success', `Extraction complete. ${response.data.inserted} new lead(s) added.`);
       }
     } catch (err) {
       showNotification('error', 'Extraction failed: ' + (err.response?.data?.detail || err.message));
@@ -194,46 +205,49 @@ const Leads = () => {
   // Bulk Email Actions
   const handleGenerateDomainDrafts = async () => {
     if (selectedLeads.size === 0) return;
-    setIsLoading(true);
+    setIsBulkActionLoading(true);
     try {
       const leadIds = Array.from(selectedLeads);
       const res = await api.post('/api/generate-bulk-domain-drafts', { lead_ids: leadIds });
-      showNotification('success', res.data.message);
+      showNotification('success', 'Drafts generated and moved to Email Drafts.');
       setSelectedLeads(new Set());
       fetchLeads();
     } catch (err) {
       showNotification('error', 'Failed to generate drafts: ' + (err.response?.data?.error || err.message));
-      setIsLoading(false);
+    } finally {
+      setIsBulkActionLoading(false);
     }
   };
 
   const handleSendDomainEmails = async () => {
     if (selectedLeads.size === 0) return;
-    setIsLoading(true);
+    setIsBulkActionLoading(true);
     try {
       const leadIds = Array.from(selectedLeads);
       const res = await api.post('/api/send-bulk-domain-emails', { lead_ids: leadIds });
-      showNotification('success', res.data.message);
+      showNotification('success', 'Emails sent successfully.');
       setSelectedLeads(new Set());
       fetchLeads();
     } catch (err) {
       showNotification('error', 'Failed to send emails: ' + (err.response?.data?.error || err.message));
-      setIsLoading(false);
+    } finally {
+      setIsBulkActionLoading(false);
     }
   };
   
   const handleApproveDomainDrafts = async () => {
     if (selectedLeads.size === 0) return;
-    setIsLoading(true);
+    setIsBulkActionLoading(true);
     try {
       const leadIds = Array.from(selectedLeads);
       const res = await api.post('/api/approve-bulk-domain-drafts', { lead_ids: leadIds });
-      showNotification('success', res.data.message);
+      showNotification('success', 'Leads approved and moved to Email Drafts.');
       setSelectedLeads(new Set());
       fetchLeads();
     } catch (err) {
       showNotification('error', 'Failed to approve drafts: ' + (err.response?.data?.error || err.message));
-      setIsLoading(false);
+    } finally {
+      setIsBulkActionLoading(false);
     }
   };
 
@@ -310,131 +324,165 @@ const Leads = () => {
         </button>
       </div>
 
-      {/* Discovery Engine Panel - Same as Original */}
-      <div className="bg-gradient-to-br from-[#1e293b]/70 to-[#0f172a]/90 border border-blue-500/20 rounded-[20px] p-6 mb-8 relative group shadow-heavy">
-        <div className="flex justify-between items-center mb-5">
-          <h3 className="text-white font-bold flex items-center gap-2">
-            <span className="text-xl text-[#3b82f6]">⚡</span>
-            RocketReach <span className="bg-gradient-to-r from-[#3b82f6] to-[#8b5cf6] bg-clip-text text-transparent">Discovery Engine</span>
-          </h3>
-          <div className="flex gap-4">
-            <button
-              onClick={() => setDiscoveryTab('company')}
-              className={`pb-2 text-[12px] font-extrabold uppercase tracking-wider transition-all relative ${discoveryTab === 'company' ? 'text-[#3b82f6] after:absolute after:bottom-[-2px] after:left-0 after:right-0 after:h-0.5 after:bg-[#3b82f6] after:shadow-[0_0_10px_#3b82f6]' : 'text-[#475569] hover:text-white'}`}
+      {/* Discovery Engine Panel - Multi-Mode Enhancement */}
+      <div className="bg-gradient-to-br from-[#1e293b]/70 to-[#0f172a]/90 border border-blue-500/20 rounded-[20px] p-6 mb-8 relative group shadow-heavy overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/5 blur-[80px] rounded-full pointer-events-none"></div>
+        
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mb-8">
+          <div>
+            <h3 className="text-white font-bold flex items-center gap-2 mb-1">
+              <span className="text-xl text-[#3b82f6]">⚡</span>
+              RocketReach <span className="bg-gradient-to-r from-[#3b82f6] to-[#8b5cf6] bg-clip-text text-transparent">Discovery Engine</span>
+            </h3>
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-7">Institutional Data Extraction</p>
+          </div>
+          
+          {/* Mode Switcher Tabs */}
+          <div className="flex bg-black/40 p-1 rounded-[14px] border border-white/10 self-stretch sm:self-auto">
+            <button 
+              onClick={() => setLookupMode('search')}
+              className={`flex-1 sm:flex-none px-4 py-2 rounded-[10px] text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${lookupMode === 'search' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
             >
-              1. Company Search
+              Direct Extract
             </button>
-            <button
-              onClick={() => setDiscoveryTab('bulk')}
-              className={`pb-2 text-[12px] font-extrabold uppercase tracking-wider transition-all relative ${discoveryTab === 'bulk' ? 'text-[#8b5cf6] after:absolute after:bottom-[-2px] after:left-0 after:right-0 after:h-0.5 after:bg-[#8b5cf6] after:shadow-[0_0_10px_#8b5cf6]' : 'text-[#475569] hover:text-white'}`}
+            <button 
+              onClick={() => setLookupMode('email')}
+              className={`flex-1 sm:flex-none px-4 py-2 rounded-[10px] text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${lookupMode === 'email' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
             >
-              2. Bulk Search
+              By Mail
+            </button>
+            <button 
+              onClick={() => setLookupMode('name')}
+              className={`flex-1 sm:flex-none px-4 py-2 rounded-[10px] text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${lookupMode === 'name' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-400'}`}
+            >
+              By LinkedIn Name
             </button>
           </div>
         </div>
 
         <form onSubmit={handleDiscoverySubmit}>
-          {discoveryTab === 'company' ? (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-1.5 md:col-span-1">
-                <label className="text-[10px] font-extrabold text-[#3b82f6] uppercase tracking-widest pl-1">Target Company</label>
-                <input type="text" name="company" className="form-control" placeholder="e.g. NVIDIA, Stripe" />
-              </div>
-              <div className="space-y-1.5 relative">
-                <label className="text-[10px] font-extrabold text-[#475569] uppercase tracking-widest pl-1">Job Title</label>
-                <div 
-                  className="form-control cursor-pointer flex items-center justify-between"
-                  onClick={() => setShowTitleDropdown(!showTitleDropdown)}
-                >
-                  <span className={`text-sm ${selectedTitles.length === 0 ? 'text-slate-500' : 'text-white'}`}>
-                    {selectedTitles.length === 0 ? 'Any Title / Auto' : selectedTitles.length <= 2 ? selectedTitles.join(', ') : `${selectedTitles.length} selected`}
-                  </span>
-                  <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showTitleDropdown ? 'rotate-180' : ''}`} />
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+            {lookupMode === 'search' ? (
+              <>
+                <div className="space-y-1.5 md:col-span-4">
+                  <label className="text-[10px] font-extrabold text-[#3b82f6] uppercase tracking-widest pl-1">Target Company</label>
+                  <input type="text" name="company" className="form-control h-12" placeholder="e.g. NVIDIA, Stripe" />
                 </div>
-                
-                {/* Custom Multi-Select Dropdown Menu */}
-                {showTitleDropdown && (
-                  <>
-                    <div className="fixed inset-0 z-[100]" onClick={() => setShowTitleDropdown(false)}></div>
-                    <div className="absolute top-full left-0 right-0 mt-2 bg-[#151a26] border border-[#ffffff10] rounded-xl shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-top-2">
-                      <div className="max-h-[200px] overflow-y-auto custom-scrollbar p-2">
-                        {availableTitles.map(title => (
-                          <div 
-                            key={title}
-                            onClick={() => toggleTitle(title)}
-                            className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
-                          >
-                            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${selectedTitles.includes(title) ? 'bg-blue-500 border-blue-500' : 'border-slate-600 bg-transparent'}`}>
-                              {selectedTitles.includes(title) && <CheckCircle className="w-3 h-3 text-white" />}
+                <div className="space-y-1.5 md:col-span-4 relative">
+                  <label className="text-[10px] font-extrabold text-[#475569] uppercase tracking-widest pl-1">Job Title</label>
+                  <div 
+                    className="form-control h-12 cursor-pointer flex items-center justify-between"
+                    onClick={() => setShowTitleDropdown(!showTitleDropdown)}
+                  >
+                    <span className={`text-sm ${selectedTitles.length === 0 ? 'text-slate-500' : 'text-white'}`}>
+                      {selectedTitles.length === 0 ? 'Any Title / Auto' : selectedTitles.length <= 2 ? selectedTitles.join(', ') : `${selectedTitles.length} selected`}
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showTitleDropdown ? 'rotate-180' : ''}`} />
+                  </div>
+                  
+                  {showTitleDropdown && (
+                    <>
+                      <div className="fixed inset-0 z-[100]" onClick={() => setShowTitleDropdown(false)}></div>
+                      <div className="absolute top-full left-0 right-0 mt-2 bg-[#151a26] border border-[#ffffff10] rounded-xl shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                        <div className="max-h-[200px] overflow-y-auto custom-scrollbar p-2">
+                          {availableTitles.map(title => (
+                            <div 
+                              key={title}
+                              onClick={() => toggleTitle(title)}
+                              className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
+                            >
+                              <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${selectedTitles.includes(title) ? 'bg-blue-500 border-blue-500' : 'border-slate-600 bg-transparent'}`}>
+                                {selectedTitles.includes(title) && <CheckCircle className="w-3 h-3 text-white" />}
+                              </div>
+                              <span className={`text-sm font-semibold tracking-wide ${selectedTitles.includes(title) ? 'text-white' : 'text-slate-400'}`}>
+                                {title}
+                              </span>
                             </div>
-                            <span className={`text-sm font-semibold tracking-wide ${selectedTitles.includes(title) ? 'text-white' : 'text-slate-400'}`}>
-                              {title}
-                            </span>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  </>
-                )}
+                    </>
+                  )}
+                </div>
+                <div className="space-y-1.5 md:col-span-4">
+                  <label className="text-[10px] font-extrabold text-[#475569] uppercase tracking-widest pl-1">Location</label>
+                  <input type="text" name="location" className="form-control h-12" placeholder="e.g. California" />
+                </div>
+              </>
+            ) : lookupMode === 'email' ? (
+              <div className="space-y-1.5 md:col-span-12">
+                <label className="text-[10px] font-extrabold text-[#3b82f6] uppercase tracking-widest pl-1 flex items-center gap-2">
+                  <Mail className="w-3 h-3" /> Target Email Address
+                </label>
+                <input 
+                  type="email" 
+                  name="email" 
+                  required
+                  className="form-control h-12 w-full bg-black/40 border-blue-500/30 focus:border-blue-500 transition-all text-base px-6 italic" 
+                  placeholder="Paste direct email (e.g. j.doe@nvidia.com)" 
+                />
               </div>
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-extrabold text-[#475569] uppercase tracking-widest pl-1">Location</label>
-                <input type="text" name="location" className="form-control" placeholder="e.g. California" />
-              </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-extrabold text-[#8b5cf6] uppercase tracking-widest pl-1">Broad Titles</label>
-                <input type="text" name="bulk_title" className="form-control border-[#8b5cf6]/20" placeholder="Founders" />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-extrabold text-[#475569] uppercase tracking-widest pl-1">Location</label>
-                <input type="text" name="bulk_location" className="form-control" placeholder="USA" />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-extrabold text-[#475569] uppercase tracking-widest pl-1">Industry</label>
-                <input type="text" name="industry" className="form-control" placeholder="SaaS" />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-extrabold text-[#475569] uppercase tracking-widest pl-1">Keywords</label>
-                <input type="text" name="keyword" className="form-control" placeholder="AI, Web3" />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-extrabold text-[#475569] uppercase tracking-widest pl-1">Exclude</label>
-                <input type="text" name="exclude" className="form-control" placeholder="HR, Recruiting" />
-              </div>
-            </div>
-          )}
+            ) : (
+              <>
+                <div className="space-y-1.5 md:col-span-6">
+                  <label className="text-[10px] font-extrabold text-[#3b82f6] uppercase tracking-widest pl-1 flex items-center gap-2">
+                    <User className="w-3 h-3" /> LinkedIn Employee Name
+                  </label>
+                  <input 
+                     type="text" 
+                     name="name" 
+                     required
+                     className="form-control h-12" 
+                     placeholder="e.g. Jensen Huang" 
+                  />
+                </div>
+                <div className="space-y-1.5 md:col-span-6">
+                  <label className="text-[10px] font-extrabold text-[#475569] uppercase tracking-widest pl-1">Target Company (Recommended)</label>
+                  <input 
+                    type="text" 
+                    name="company" 
+                    className="form-control h-12" 
+                    placeholder="e.g. NVIDIA" 
+                  />
+                </div>
+              </>
+            )}
+          </div>
 
-          <div className="flex justify-between items-center mt-6 pt-5 border-t border-white/5">
+          <div className="flex flex-col sm:flex-row justify-between items-center mt-8 pt-6 border-t border-white/5 gap-4">
             <div className="flex items-center gap-4">
-              <div className="bg-black/30 px-4 py-2 rounded-xl border border-white/5 flex items-center gap-3">
-                <label className="text-[10px] font-black text-[#475569] uppercase">Limit</label>
-                <input type="number" name="count" defaultValue="10" min="1" max="100" className="bg-transparent border-none text-white font-black w-8 outline-none text-[15px]" />
-              </div>
+              {lookupMode === 'search' && (
+                <div className="bg-black/30 px-4 py-2 rounded-xl border border-white/5 flex items-center gap-3">
+                  <label className="text-[10px] font-black text-[#475569] uppercase">Limit</label>
+                  <input type="number" name="count" defaultValue="10" min="1" max="100" className="bg-transparent border-none text-white font-black w-8 outline-none text-[15px]" />
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <div className="w-1.5 h-1.5 bg-[#10b981] rounded-full shadow-[0_0_8px_#10b981]"></div>
-                <span className="text-[11px] text-[#475569] font-semibold">RocketReach API Connected</span>
+                <span className="text-[11px] text-[#475569] font-semibold">RocketReach Multi-Node Extraction Active</span>
               </div>
             </div>
             <button
               type="submit"
               disabled={discoveryLoading}
-              className={`btn px-10 py-3.5 rounded-[12px] font-extrabold text-white shadow-lg transition-all duration-300 min-w-[200px] ${discoveryTab === 'company' ? 'bg-[#3b82f6] hover:bg-[#2563eb] shadow-[0_10px_20px_rgba(37,99,235,0.2)]' : 'bg-[#8b5cf6] hover:bg-[#7c3aed] shadow-[0_10px_20px_rgba(139,92,246,0.2)]'}`}
+              className="w-full sm:w-auto btn btn-primary px-12 py-3.5 rounded-[12px] font-extrabold text-white shadow-blue-500/20 transition-all duration-300 min-w-[200px]"
             >
               {discoveryLoading ? (
                 <div className="flex items-center gap-2">
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>Searching RocketReach...</span>
+                  <span>Identifying High-Value Lead...</span>
                 </div>
               ) : (
-                'Begin Extraction'
+                <div className="flex items-center gap-2">
+                  {lookupMode === 'search' ? <Rocket className="w-4 h-4" /> : lookupMode === 'email' ? <Mail className="w-4 h-4" /> : <Linkedin className="w-4 h-4" />}
+                  <span>{lookupMode === 'search' ? 'Begin Extraction' : 'Identify & Import'}</span>
+                </div>
               )}
             </button>
           </div>
         </form>
       </div>
+
 
       {/* Filter System - Same as Original */}
       <div className="bg-[#151a26] border border-[#ffffff08] rounded-[14px] px-4 py-3 mb-6 flex flex-wrap items-center shadow-lg divide-x divide-[#ffffff08]">
@@ -541,10 +589,10 @@ const Leads = () => {
           </select>
         </div>
 
-        <div className="flex items-center gap-2 px-4 flex-1 justify-end border-r-0">
+        <div className="flex items-center gap-2 px-4 flex-1 justify-end border-r-0 text-right">
           <button
             onClick={() => setFilters({ search: '', title: '', company: '', persona: '', status: '', country: '', city: '', show_unsubscribed: false })}
-            className="flex items-center px-4 py-1.5 bg-[#ffffff05] hover:bg-[#ffffff0a] rounded-lg border border-[#ffffff08] transition-colors text-[10px] font-extrabold text-slate-300"
+            className="flex items-center px-4 py-1.5 bg-[#ffffff05] hover:bg-[#ffffff0a] rounded-lg border border-[#ffffff08] transition-colors text-[10px] font-extrabold text-slate-300 ml-auto"
           >
             Reset
           </button>
@@ -562,25 +610,32 @@ const Leads = () => {
         <div className="flex items-center gap-2">
           <button 
             onClick={handleGenerateDomainDrafts}
-            className="btn btn-ghost py-2 px-4 shadow-none bg-white/5 border-white/10 hover:bg-white/10 text-slate-200"
+            disabled={isBulkActionLoading}
+            className="btn btn-ghost py-2 px-4 shadow-none bg-white/5 border-white/10 hover:bg-white/10 text-slate-200 disabled:opacity-50"
           >
-            <Sparkles className="w-4 h-4 mr-2 text-blue-400" /> Generate Drafts
+            {isBulkActionLoading ? <Loader2 className="w-4 h-4 mr-2 text-blue-400 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2 text-blue-400" />}
+            Generate Drafts
           </button>
           <button 
             onClick={handleApproveDomainDrafts}
-            className="btn btn-ghost py-2 px-4 shadow-none bg-white/5 border-white/10 hover:bg-white/10 text-slate-200"
+            disabled={isBulkActionLoading}
+            className="btn btn-ghost py-2 px-4 shadow-none bg-white/5 border-white/10 hover:bg-white/10 text-slate-200 disabled:opacity-50"
           >
-            <CheckCircle className="w-4 h-4 mr-2 text-blue-400" /> Approve Selected
+            {isBulkActionLoading ? <Loader2 className="w-4 h-4 mr-2 text-blue-400 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-2 text-blue-400" />}
+            Approve Selected
           </button>
           <button 
             onClick={handleSendDomainEmails}
-            className="btn btn-ghost py-2 px-4 shadow-none bg-white/5 border-white/10 hover:bg-white/10 text-slate-200"
+            disabled={isBulkActionLoading}
+            className="btn btn-ghost py-2 px-4 shadow-none bg-white/5 border-white/10 hover:bg-white/10 text-slate-200 disabled:opacity-50"
           >
-            <Rocket className="w-4 h-4 mr-2 text-emerald-400" /> Send Selected
+            {isBulkActionLoading ? <Loader2 className="w-4 h-4 mr-2 text-emerald-400 animate-spin" /> : <Rocket className="w-4 h-4 mr-2 text-emerald-400" />}
+            Send Selected
           </button>
           <button 
             onClick={handleAddLabelToSelected}
-            className="btn btn-primary py-2 px-4 shadow-none"
+            disabled={isBulkActionLoading}
+            className="btn btn-primary py-2 px-4 shadow-none disabled:opacity-50"
           >
             <Tag className="w-4 h-4 mr-2" /> Assign Labels
           </button>

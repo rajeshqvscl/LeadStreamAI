@@ -65,6 +65,9 @@ const Layout = () => {
           <Link to="/dashboard/leads" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'leads' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'leads' ? 'text-white' : 'text-[#94a3b8]'}`}>👥</span> Lead Pipeline
           </Link>
+          <Link to="/dashboard/bulk-search" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'bulk-search' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+            <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'bulk-search' ? 'text-white' : 'text-[#94a3b8]'}`}>🚀</span> Bulk Search
+          </Link>
           <Link to="/dashboard/family-offices" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'family-offices' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'family-offices' ? 'text-white' : 'text-[#94a3b8]'}`}>🏢</span> Family Offices
           </Link>

@@ -18,6 +18,7 @@ import Users from './pages/Users';
 import FamilyOffices from './pages/FamilyOffices';
 import FamilyOfficeDetail from './pages/FamilyOfficeDetail';
 import GenerateSector from './pages/GenerateSector';
+import BulkSearch from './pages/BulkSearch';
 
 function App() {
   return (
@@ -46,6 +47,7 @@ function App() {
           <Route path="family-offices" element={<FamilyOffices />} />
           <Route path="family-offices/:officeId" element={<ErrorBoundary><FamilyOfficeDetail /></ErrorBoundary>} />
           <Route path="generate" element={<GenerateSector />} />
+          <Route path="bulk-search" element={<BulkSearch />} />
         </Route>
 
         {/* Root Redirect */}

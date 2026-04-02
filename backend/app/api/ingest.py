@@ -15,7 +15,7 @@ class LeadRequest(BaseModel):
     company: Optional[str] = None
     title: Optional[str] = None
     location: Optional[str] = None
-    count: Optional[str] = "10"
+    count: Optional[int] = 20
     
     # Bulk search fields
     bulk_title: Optional[str] = None
@@ -23,6 +23,12 @@ class LeadRequest(BaseModel):
     industry: Optional[str] = None
     keyword: Optional[str] = None
     exclude: Optional[str] = None
+    source_type: Optional[str] = "direct"
+    
+    # New Lookup Modes
+    mode: Optional[str] = "search" # search, email, name
+    email: Optional[str] = None
+    name: Optional[str] = None
 
 def categorize_lead(payload):
     title = str(payload.get("current_title", "")).lower()
@@ -69,48 +75,41 @@ def categorize_lead(payload):
 @router.post("/ingest")
 @router.post("/ingest-leads")
 def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    # Map frontend fields to the search_leads backend logic
-    employer = req.company or req.industry or ""
-    job_title = req.title or req.bulk_title or ""
-    loc = req.location or req.bulk_location or ""
-    
-    try:
-        page_size = int(req.count)
-    except Exception:
-        page_size = 10
+    from app.services.rocketreach_service import search_leads, lookup_by_email, lookup_by_name
 
     # Log search activity before processing
     try:
         from app.models.lead import add_activity_log
-        search_summary = f"{req.title or ''} at {req.company or ''}".strip() or "Discovery search"
-        add_activity_log(None, "LEAD_SEARCH", f"Search performed for: {search_summary}", "admin", user_id=user_id)
+        summary = req.email if req.mode == "email" else (req.name if req.mode == "name" else f"{req.title or ''} at {req.company or ''}")
+        add_activity_log(None, "LEAD_SEARCH", f"Mode [{req.mode}] search: {summary or 'Discovery'}", "admin", user_id=user_id)
     except:
         pass
 
     try:
-        # 1. Search leads via RocketReach
-        try:
-            leads = search_leads(
-                employer,
-                job_title,
-                loc,
-                page_size
-            )
-        except Exception as e:
-            logger.error("search_leads_failed", error=str(e))
-            raise HTTPException(status_code=400, detail=f"Search failed: {str(e)}")
+        leads = []
+        if req.mode == "email" and req.email:
+            leads = lookup_by_email(req.email)
+        elif req.mode == "name" and req.name:
+            leads = lookup_by_name(req.name, req.company)
+        else:
+            # Default search mode
+            employer = req.company or req.industry or ""
+            job_title = req.title or req.bulk_title or ""
+            loc = req.location or req.bulk_location or ""
+            leads = search_leads(employer, job_title, loc, req.count or 10)
 
-        # 2. Process and insert leads
+        if not leads:
+            return { "success": True, "fetched": 0, "inserted": 0, "errors": 0, "message": "No results found" }
+
+        # Process and insert leads
         inserted = 0
         errors = 0
         
         for lead in leads:
-            if not lead:
-                continue
+            if not lead: continue
                 
             try:
                 persona, fit_score = categorize_lead(lead.get("payload", {}))
-
                 insert_lead(
                     lead["first_name"],
                     lead["last_name"],
@@ -118,7 +117,7 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
                     lead["domain"],
                     lead["linkedin"],
                     lead["company"],
-                    lead["source"],
+                    req.source_type or lead["source"],
                     lead["payload"],
                     fit_score=fit_score,
                     persona=persona,
@@ -131,14 +130,12 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
                 errors += 1
                 continue
 
-        # Log bulk ingestion activity
         if inserted > 0:
             try:
                 from app.models.lead import add_activity_log
-                details = f"Ingested {inserted} leads from {leads[0].get('company') or 'RocketReach' if leads else 'Discovery'}"
+                details = f"Ingested {inserted} leads via {req.mode} mode"
                 add_activity_log(None, "BULK_INGESTION", details, "admin", user_id=user_id)
-            except:
-                pass
+            except: pass
 
         return {
             "success": True,
@@ -147,8 +144,8 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
             "errors": errors
         }
 
-    except HTTPException:
-        raise
+    except HTTPException: raise
     except Exception as e:
         logger.error("ingest_leads_critical_error", error=str(e))
-        raise HTTPException(status_code=500, detail="Internal server error during ingestion process")
+        raise HTTPException(status_code=500, detail="Internal server error during ingestion process")
+

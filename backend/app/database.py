@@ -223,4 +223,4 @@ def create_tables():
                     sync_from_csv(response.text)
                     print(f"[startup] Auto-synced family offices from Google Sheets.")
     except Exception as e:
-        print(f"[startup] Could not auto-sync family offices: {e}")
+        print(f"[startup] Could not auto-sync family offices: {e}")

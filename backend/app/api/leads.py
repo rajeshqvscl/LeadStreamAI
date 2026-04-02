@@ -23,6 +23,7 @@ class LeadUpdate(BaseModel):
     fit_score: Optional[int] = None
     campaign_id: Optional[int] = None
     family_office_name: Optional[str] = None
+    source: Optional[str] = None
 
 from typing import List
 
@@ -43,7 +44,10 @@ def get_leads(
     validation_status: Optional[str] = "",
     city: Optional[str] = "",
     country: Optional[str] = "",
+    source: Optional[str] = "",
     per_page: int = 25,
+    exclude_drafted: bool = False,
+    exclude_source: Optional[str] = None,
     user_id: Optional[str] = Header(None, alias="X-User-Id")
 ):
     conn = get_db_connection()
@@ -56,9 +60,18 @@ def get_leads(
         query += " AND user_id = %s"
         params.append(user_id)
     else:
-        # If no user_id is provided, show only orphaned leads (for safety)
         query += " AND user_id IS NULL"
 
+    if source:
+        query += " AND source = %s"
+        params.append(source)
+        
+    if exclude_source:
+        query += " AND source != %s"
+        params.append(exclude_source)
+    
+    if exclude_drafted:
+        query += " AND (email_status IS NULL OR email_status = '')"
     
     if search:
         query += " AND (first_name ILIKE %s OR last_name ILIKE %s OR email ILIKE %s OR company_name ILIKE %s OR raw_payload->>'current_title' ILIKE %s OR persona ILIKE %s OR phone ILIKE %s)"
@@ -136,6 +149,7 @@ def get_leads(
             "country": country,
             "linkedin": r["linkedin_url"],
             "validation_status": r["validation_status"],
+            "email_status": r.get("email_status"),
             "is_unsubscribed": r.get("is_unsubscribed", False),
             "created_at": r["created_at"].isoformat() if r["created_at"] else None
         })
@@ -144,6 +158,7 @@ def get_leads(
         "leads": leads,
         "total": total
     }
+
 
 @router.get("/leads/{lead_id}")
 def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
@@ -267,4 +282,36 @@ def remove_lead_label(lead_id: int, req: LabelRemoveRequest):
         cur.close()
         conn.close()
     
-    return {"message": "Label removed successfully"}
+class BulkUpdateSourceReq(BaseModel):
+    lead_ids: List[int]
+    source: str
+
+@router.post("/leads/bulk-approve")
+def bulk_approve(req: List[int]):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("UPDATE leads_raw SET source = 'direct' WHERE id = ANY(%s)", (req,))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+    return {"message": "Leads approved and moved to pipeline"}
+
+@router.post("/leads/bulk-delete")
+def bulk_delete(req: List[int]):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM leads_raw WHERE id = ANY(%s)", (req,))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+    return {"message": "Leads rejected and deleted"}
