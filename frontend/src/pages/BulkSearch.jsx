@@ -30,7 +30,7 @@ const BulkSearch = () => {
   const [showIndustryDropdown, setShowIndustryDropdown] = useState(false);
   const [industrySearch, setIndustrySearch] = useState('');
 
-  const personaOptions = ["CEO", "Founder", "Managing Director", "CTO", "CIO", "Partner", "Investor", "COO", "VP"];
+  const personaOptions = ["CEO", "Founder", "Managing Director", "CFO", "Partner", "Investor"];
   const sectorOptions = [
     { id: 'DEEP_TECH', label: 'Deep Tech' },
     { id: 'HIGH_TECH', label: 'High Tech' },
@@ -45,14 +45,14 @@ const BulkSearch = () => {
     { id: 'ENT_APP', label: 'Enterprise Applications' },
     { id: 'ENT_SW', label: 'Enterprise Software' },
     { id: 'EDTECH', label: 'EdTech' },
-    { id: 'PHARMA', label: 'Pharma (M&A)' },
-    { id: 'NUTRA', label: 'Nutra (M&A)' },
+    { id: 'PHARMA', label: 'Pharmaceutical (M&A)' },
+    { id: 'NUTRA', label: 'Nutraceutical (M&A)' },
     { id: 'CHEMICAL', label: 'Chemical (M&A)' },
     { id: 'FOOD_EXT', label: 'Food Extracts (M&A)' },
-    { id: 'TEXTILE', label: 'Textile' }
+    { id: 'TEXTILE', label: 'Textile (Clothing/Brands)' }
   ];
 
-  const filteredIndustries = sectorOptions.filter(s => 
+  const filteredIndustries = sectorOptions.filter(s =>
     s.label.toLowerCase().includes(industrySearch.toLowerCase())
   );
 
@@ -270,15 +270,15 @@ const BulkSearch = () => {
               <label className="text-[10px] font-black text-indigo-400 uppercase tracking-[2px] ml-1 flex items-center gap-2">
                 <Tag className="w-3 h-3" /> Target Persona
               </label>
-              <div 
+              <div
                 className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3.5 px-4 text-[14px] font-medium text-white cursor-pointer flex justify-between items-center group-hover:border-indigo-500/30 transition-all"
                 onClick={() => setShowPersonaDropdown(!showPersonaDropdown)}
               >
                 <span className={selectedPersonas.length === 0 ? "text-slate-700" : "text-white"}>
-                  {selectedPersonas.length === 0 
-                    ? "Select target personas..." 
-                    : selectedPersonas.length <= 3 
-                      ? selectedPersonas.join(', ') 
+                  {selectedPersonas.length === 0
+                    ? "Select target personas..."
+                    : selectedPersonas.length <= 3
+                      ? selectedPersonas.join(', ')
                       : `${selectedPersonas.length} Roles Selected`}
                 </span>
                 <ChevronRight className={`w-4 h-4 text-slate-500 transition-transform ${showPersonaDropdown ? 'rotate-90' : ''}`} />
@@ -292,10 +292,10 @@ const BulkSearch = () => {
                       {personaOptions.map(p => {
                         const isSelected = selectedPersonas.includes(p);
                         return (
-                          <div 
+                          <div
                             key={p}
                             onClick={() => {
-                              setSelectedPersonas(prev => 
+                              setSelectedPersonas(prev =>
                                 isSelected ? prev.filter(x => x !== p) : [...prev, p]
                               );
                             }}
@@ -342,7 +342,7 @@ const BulkSearch = () => {
                         <div className="px-3 py-4 text-center text-slate-500 text-[11px] font-black uppercase tracking-widest">No matching sectors</div>
                       ) : (
                         filteredIndustries.map(s => (
-                          <div 
+                          <div
                             key={s.id}
                             onClick={() => {
                               setSelectedIndustry(s.label);
@@ -611,6 +611,7 @@ const BulkSearch = () => {
                         >
                           {processingId === lead.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                         </button>
+
                         <button
                           onClick={() => window.location.href = `/dashboard/leads/${lead.id}`}
                           title="Full Intelligence View"
@@ -618,6 +619,7 @@ const BulkSearch = () => {
                         >
                           <FileText className="w-3.5 h-3.5" />
                         </button>
+
                         <button
                           onClick={() => handleDeleteSingle(lead.id)}
                           title="Reject Lead"

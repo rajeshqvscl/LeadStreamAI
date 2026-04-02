@@ -26,9 +26,10 @@ class LeadRequest(BaseModel):
     source_type: Optional[str] = "direct"
     
     # New Lookup Modes
-    mode: Optional[str] = "search" # search, email, name
+    mode: Optional[str] = "search" # search, email, name, url
     email: Optional[str] = None
     name: Optional[str] = None
+    linkedin_url: Optional[str] = None
 
 def categorize_lead(payload):
     title = str(payload.get("current_title", "")).lower()
@@ -91,6 +92,9 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
             leads = lookup_by_email(req.email)
         elif req.mode == "name" and req.name:
             leads = lookup_by_name(req.name, req.company)
+        elif req.mode == "url" and req.linkedin_url:
+            from app.services.rocketreach_service import lookup_by_linkedin_url
+            leads = lookup_by_linkedin_url(req.linkedin_url)
         else:
             # Default search mode
             employer = req.company or req.industry or ""
@@ -148,4 +152,4 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
     except Exception as e:
         logger.error("ingest_leads_critical_error", error=str(e))
         raise HTTPException(status_code=500, detail="Internal server error during ingestion process")
-
+

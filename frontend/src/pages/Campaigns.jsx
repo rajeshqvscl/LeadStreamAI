@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Search, Plus, Filter, MoreHorizontal, Play, Pause, 
   Trash2, Loader2, BarChart3, Users, Mail, MousePointer2,
-  X, Sparkles, Target, MessageSquare, Layout, Activity
+  X, Sparkles, Target, MessageSquare, Layout, Activity,
+  ChevronDown
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -23,6 +24,36 @@ const Campaigns = () => {
     strategy_prompt: '',
     is_active: true
   });
+  
+  const [showPersonaDropdown, setShowPersonaDropdown] = useState(false);
+  const [showIndustryDropdown, setShowIndustryDropdown] = useState(false);
+  const [industrySearch, setIndustrySearch] = useState('');
+
+  const personaOptions = ["CEO", "Founder", "Managing Director", "CFO", "Partner", "Investor"];
+  const sectorOptions = [
+    { id: 'DEEP_TECH', label: 'Deep Tech' },
+    { id: 'HIGH_TECH', label: 'High Tech' },
+    { id: 'SAAS', label: 'SAAS' },
+    { id: 'DEFENCE_TECH', label: 'Defence Tech' },
+    { id: 'TRAVEL', label: 'Travel' },
+    { id: 'AUTOMOTIVE', label: 'Automotive' },
+    { id: 'AI_INFRA', label: 'AI Infra' },
+    { id: 'AI_INTEL', label: 'AI Intelligence' },
+    { id: 'GEN_AI', label: 'Generative AI' },
+    { id: 'ESPORTS', label: 'Esports' },
+    { id: 'ENT_APP', label: 'Enterprise Applications' },
+    { id: 'ENT_SW', label: 'Enterprise Software' },
+    { id: 'EDTECH', label: 'EdTech' },
+    { id: 'PHARMA', label: 'Pharmaceutical (M&A)' },
+    { id: 'NUTRA', label: 'Nutraceutical (M&A)' },
+    { id: 'CHEMICAL', label: 'Chemical (M&A)' },
+    { id: 'FOOD_EXT', label: 'Food Extracts (M&A)' },
+    { id: 'TEXTILE', label: 'Textile (Clothing/Brands)' }
+  ];
+
+  const filteredIndustries = sectorOptions.filter(s => 
+    s.label.toLowerCase().includes(industrySearch.toLowerCase())
+  );
 
   const fetchCampaigns = async () => {
     setIsLoading(true);
@@ -324,26 +355,85 @@ const Campaigns = () => {
               <div className="flex items-center gap-2 text-[11px] font-black text-purple-500 uppercase tracking-widest border-b border-purple-500/10 pb-2">
                 <Users className="w-3 h-3" /> Target Audience
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-6 relative">
+                <div className="space-y-3 relative">
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Focus Industry</label>
-                  <input 
-                    type="text" 
-                    value={formData.target_industry}
-                    onChange={(e) => setFormData({...formData, target_industry: e.target.value})}
-                    placeholder="e.g. Fintech, SaaS" 
-                    className="w-full bg-black/40 border border-white/10 rounded-2xl py-3 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-all font-medium"
-                  />
+                  <div className="relative">
+                    <input 
+                      type="text" 
+                      value={formData.target_industry || industrySearch}
+                      onFocus={() => setShowIndustryDropdown(true)}
+                      onChange={(e) => {
+                        setIndustrySearch(e.target.value);
+                        if (formData.target_industry) setFormData({...formData, target_industry: ''});
+                      }}
+                      placeholder="Search industry..." 
+                      className="w-full bg-black/40 border border-white/10 rounded-2xl py-3 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-all font-medium pr-10"
+                    />
+                    <ChevronDown className={`absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 transition-transform ${showIndustryDropdown ? 'rotate-180' : ''}`} />
+                  </div>
+
+                  {showIndustryDropdown && (
+                    <>
+                      <div className="fixed inset-0 z-[60]" onClick={() => setShowIndustryDropdown(false)}></div>
+                      <div className="absolute top-full left-0 right-0 mt-3 bg-[#0f172a] border border-white/10 rounded-2xl shadow-2xl z-[70] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                        <div className="max-h-[200px] overflow-y-auto p-2 space-y-1">
+                          {filteredIndustries.length === 0 ? (
+                            <div className="px-3 py-4 text-center text-slate-500 text-[10px] font-black uppercase tracking-widest">No matching sectors</div>
+                          ) : (
+                            filteredIndustries.map(s => (
+                              <div 
+                                key={s.id}
+                                onClick={() => {
+                                  setFormData({...formData, target_industry: s.label});
+                                  setIndustrySearch(s.label);
+                                  setShowIndustryDropdown(false);
+                                }}
+                                className={`px-4 py-3 rounded-xl cursor-pointer transition-all ${formData.target_industry === s.label ? 'bg-blue-600/10 text-blue-400' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
+                              >
+                                <span className="text-sm font-bold">{s.label}</span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
-                <div className="space-y-2">
+
+                <div className="space-y-3 relative">
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Target Persona</label>
-                  <input 
-                    type="text" 
-                    value={formData.target_persona}
-                    onChange={(e) => setFormData({...formData, target_persona: e.target.value})}
-                    placeholder="e.g. CEO, CTO" 
-                    className="w-full bg-black/40 border border-white/10 rounded-2xl py-3 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-all font-medium"
-                  />
+                  <div 
+                    className="w-full bg-black/40 border border-white/10 rounded-2xl py-3 px-4 text-sm text-white cursor-pointer flex justify-between items-center hover:border-blue-500/30 transition-all font-medium h-[46px]"
+                    onClick={() => setShowPersonaDropdown(!showPersonaDropdown)}
+                  >
+                    <span className={!formData.target_persona ? "text-slate-600" : "text-white"}>
+                      {formData.target_persona || "Select persona..."}
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform ${showPersonaDropdown ? 'rotate-180' : ''}`} />
+                  </div>
+
+                  {showPersonaDropdown && (
+                    <>
+                      <div className="fixed inset-0 z-[60]" onClick={() => setShowPersonaDropdown(false)}></div>
+                      <div className="absolute top-full left-0 right-0 mt-3 bg-[#0f172a] border border-white/10 rounded-2xl shadow-2xl z-[70] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                        <div className="max-h-[200px] overflow-y-auto p-2 space-y-1">
+                          {personaOptions.map(p => (
+                            <div 
+                              key={p}
+                              onClick={() => {
+                                setFormData({...formData, target_persona: p});
+                                setShowPersonaDropdown(false);
+                              }}
+                              className={`px-4 py-3 rounded-xl cursor-pointer transition-all ${formData.target_persona === p ? 'bg-indigo-600/10 text-indigo-400' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
+                            >
+                              <span className="text-sm font-bold">{p}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

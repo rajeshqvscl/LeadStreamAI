@@ -315,3 +315,49 @@ def bulk_delete(req: List[int]):
         cur.close()
         conn.close()
     return {"message": "Leads rejected and deleted"}
+@router.post("/leads/bulk-import")
+def bulk_import(leads: List[dict]):
+    """
+    Import a list of leads directly into the pipeline.
+    Expects a list of dictionaries with first_name, last_name, email, etc.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+    inserted = 0
+    errors = 0
+
+    try:
+        for lead in leads:
+            first_name = lead.get("first_name", "")
+            last_name = lead.get("last_name", "")
+            email = lead.get("email")
+            if not email:
+                errors += 1
+                continue
+            
+            company = lead.get("company_name") or lead.get("company")
+            linkedin = lead.get("linkedin_url") or lead.get("linkedin")
+            persona = lead.get("persona") or "OTHER"
+            source = lead.get("source") or "import"
+            
+            try:
+                cur.execute("""
+                    INSERT INTO leads_raw (first_name, last_name, email, company_name, linkedin_url, persona, source)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (email) DO NOTHING
+                """, (first_name, last_name, email, company, linkedin, persona, source))
+                if cur.rowcount > 0:
+                    inserted += 1
+            except:
+                errors += 1
+                continue
+        
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+    return {"message": f"Imported {inserted} leads ({errors} skipped/errors)"}

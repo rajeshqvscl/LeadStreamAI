@@ -1,6 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Plus, Rocket, X, Loader2, CheckCircle, AlertTriangle, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Tag, MoreHorizontal, Sparkles, Upload, FileText, Trash2, RefreshCw, Mail, User, Linkedin } from 'lucide-react';
+import { 
+  Rocket, Search, ChevronDown, CheckCircle, Mail, User, Linkedin, 
+  Loader2, Sparkles, Tag, Plus, ChevronRight, X, AlertTriangle, 
+  ChevronLeft, ChevronUp, FileSpreadsheet, Download 
+} from 'lucide-react';
+import * as XLSX from 'xlsx';
+import Papa from 'papaparse';
+import axios from 'axios';
 import api from '../services/api';
 
 const Leads = () => {
@@ -19,26 +26,34 @@ const Leads = () => {
     show_unsubscribed: false,
   });
 
-  // Hardcoded for now based on templates, ideally fetched from API
   const personas = ['FOUNDER', 'INVESTOR', 'PARTNER', 'OTHER'];
   const statuses = ['PENDING', 'VALIDATING', 'VALID', 'INVALID'];
 
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
   const [isBulkActionLoading, setIsBulkActionLoading] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const fileInputRef = useRef(null);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [notification, setNotification] = useState(null);
 
-  // Table specific state
   const [selectedLeads, setSelectedLeads] = useState(new Set());
   const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
 
   const [showLabelModal, setShowLabelModal] = useState(false);
   const [labelInput, setLabelInput] = useState('');
-  const [targetLeadIds, setTargetLeadIds] = useState([]); // IDs of leads to receive new label
+  const [targetLeadIds, setTargetLeadIds] = useState([]);
 
-  // Custom Multi-Select State
-  const availableTitles = ['CEO', 'Founder', 'Co Founder', 'CFO', 'MD', 'Director'];
+  const uniqueCompanies = useMemo(() => {
+    const comps = new Set();
+    leads.forEach(l => {
+      const c = l.company_name || l.company;
+      if (c) comps.add(c);
+    });
+    return Array.from(comps).sort();
+  }, [leads]);
+
+  const availableTitles = ['CEO', 'Founder', 'Managing Director', 'CFO', 'Partner', 'Investor'];
   const [selectedTitles, setSelectedTitles] = useState([]);
   const [showTitleDropdown, setShowTitleDropdown] = useState(false);
 
@@ -62,7 +77,7 @@ const Leads = () => {
     setPagination(prev => ({ ...prev, page: 1 }));
   };
 
-  const [lookupMode, setLookupMode] = useState('search'); // 'search', 'email', 'name'
+  const [lookupMode, setLookupMode] = useState('search');
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
@@ -86,7 +101,6 @@ const Leads = () => {
       };
       const response = await api.get('/api/leads', { params });
 
-      // Map leads to ensure 'labels' array exists locally even if backend doesn't return it yet
       const fetchedLeads = response.data.leads.map(lead => ({
         ...lead,
         labels: lead.labels || []
@@ -98,7 +112,7 @@ const Leads = () => {
         total_pages: Math.ceil(response.data.total / 25),
         total: response.data.total
       }));
-      setSelectedLeads(new Set()); // Context reset
+      setSelectedLeads(new Set());
     } catch (err) {
       console.error('Failed to fetch leads', err);
     } finally {
@@ -122,18 +136,21 @@ const Leads = () => {
   const handleDiscoverySubmit = async (e) => {
     e.preventDefault();
     setDiscoveryLoading(true);
-    const formData = new FormData(e.target);
-    const data = Object.fromEntries(formData.entries());
 
-    // Inject multi-select titles into payload
-    if (selectedTitles.length > 0) {
-      data.title = selectedTitles.join(',');
-    }
+    const formData = new FormData(e.currentTarget);
+    const data = {
+      mode: lookupMode,
+      company: formData.get('company'),
+      title: selectedTitles.join(','),
+      location: formData.get('location'),
+      count: formData.get('count'),
+      email: formData.get('email'),
+      linkedin_url: formData.get('linkedin_url')
+    };
 
     try {
       const response = await api.post('/api/ingest-leads', {
         ...data,
-        mode: lookupMode,
         source_type: 'direct'
       });
       fetchLeads();
@@ -141,7 +158,6 @@ const Leads = () => {
       if (response.data.inserted === 0) {
         let msg = "No data found for this specific search.";
         if (lookupMode === 'email') msg = `No verified profile found for the email: ${data.email}`;
-        if (lookupMode === 'name') msg = `No matching LinkedIn profile found for: ${data.name}`;
         showNotification('error', msg);
       } else {
         showNotification('success', `Extraction complete. ${response.data.inserted} new lead(s) added.`);
@@ -208,7 +224,7 @@ const Leads = () => {
     setIsBulkActionLoading(true);
     try {
       const leadIds = Array.from(selectedLeads);
-      const res = await api.post('/api/generate-bulk-domain-drafts', { lead_ids: leadIds });
+      await api.post('/api/generate-bulk-domain-drafts', { lead_ids: leadIds });
       showNotification('success', 'Drafts generated and moved to Email Drafts.');
       setSelectedLeads(new Set());
       fetchLeads();
@@ -224,7 +240,7 @@ const Leads = () => {
     setIsBulkActionLoading(true);
     try {
       const leadIds = Array.from(selectedLeads);
-      const res = await api.post('/api/send-bulk-domain-emails', { lead_ids: leadIds });
+      await api.post('/api/send-bulk-domain-emails', { lead_ids: leadIds });
       showNotification('success', 'Emails sent successfully.');
       setSelectedLeads(new Set());
       fetchLeads();
@@ -240,7 +256,7 @@ const Leads = () => {
     setIsBulkActionLoading(true);
     try {
       const leadIds = Array.from(selectedLeads);
-      const res = await api.post('/api/approve-bulk-domain-drafts', { lead_ids: leadIds });
+      await api.post('/api/approve-bulk-domain-drafts', { lead_ids: leadIds });
       showNotification('success', 'Leads approved and moved to Email Drafts.');
       setSelectedLeads(new Set());
       fetchLeads();
@@ -262,11 +278,11 @@ const Leads = () => {
     setTargetLeadIds([id]);
     setShowLabelModal(true);
   };
+
   const submitLabels = () => {
     if (!labelInput.trim()) return;
     const newLabels = labelInput.split(',').map(l => l.trim()).filter(l => l);
 
-    // Apply labels through API
     api.post('/api/leads/bulk-labels', { lead_ids: targetLeadIds, labels: newLabels })
       .then(() => {
         setLeads(prev => prev.map(lead => {
@@ -288,19 +304,67 @@ const Leads = () => {
     setTargetLeadIds([]);
   };
 
-  const removeLabel = (leadId, labelToRemove) => {
-    api.post(`/api/leads/${leadId}/remove-label`, { label: labelToRemove })
-      .then(() => {
-        setLeads(prev => prev.map(lead => {
-          if (lead.id === leadId) {
-            return { ...lead, labels: (lead.labels || []).filter(l => l !== labelToRemove) };
-          }
-          return lead;
-        }));
-      })
-      .catch(err => {
-        console.error('Failed to remove label:', err);
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setIsSyncing(true);
+    const reader = new FileReader();
+
+    const processData = async (data) => {
+      try {
+        const response = await axios.post('http://localhost:8000/api/leads/bulk-import', data);
+        showNotification('success', response.data.message || 'Import successful');
+        fetchLeads();
+      } catch (err) {
+        showNotification('error', 'Import failed: ' + (err.response?.data?.detail || err.message));
+      } finally {
+        setIsSyncing(false);
+        e.target.value = null;
+      }
+    };
+
+    if (file.name.endsWith('.csv')) {
+      Papa.parse(file, {
+        header: true,
+        complete: (results) => {
+          processData(results.data);
+        },
+        error: (err) => {
+          showNotification('error', 'CSV parse failed: ' + err.message);
+          setIsSyncing(false);
+        }
       });
+    } else {
+      reader.onload = (evt) => {
+        const bstr = evt.target.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws);
+        processData(data);
+      };
+      reader.readAsBinaryString(file);
+    }
+  };
+
+  const downloadTemplate = () => {
+    const template = [
+      { first_name: 'John', last_name: 'Doe', email: 'john@example.com', company_name: 'Acme Corp', linkedin_url: 'https://linkedin.com/in/johndoe', persona: 'FOUNDER' }
+    ];
+    const ws = XLSX.utils.json_to_sheet(template);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Template");
+    XLSX.writeFile(wb, "LeadStream_Template.xlsx");
+  };
+
+  const removeLabel = async (leadId, label) => {
+    try {
+      await axios.post(`http://localhost:8000/api/leads/${leadId}/remove-label`, { label });
+      setLeads(leads.map(l => l.id === leadId ? { ...l, labels: l.labels.filter(x => x !== label) } : l));
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   return (
@@ -312,19 +376,38 @@ const Leads = () => {
         </div>
       </div>
 
-      <div className="flex gap-4 mb-6">
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex-1 btn btn-ghost py-3.5 text-base border-dashed hover:border-blue-500/50"
-        >
-          <Plus className="w-5 h-5 mr-2" /> New Lead
+      <div className="flex flex-col sm:flex-row items-center gap-4 mb-10 mt-6 animate-in slide-in-from-top-4 duration-500">
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileUpload}
+          className="hidden"
+          accept=".csv, .xlsx, .xls"
+        />
+        <button 
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isSyncing}
+          className="flex-1 btn btn-ghost py-3.5 text-base border-dashed hover:border-blue-500/50 group transition-all duration-300 w-full"
+        > 
+          {isSyncing ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <FileSpreadsheet className="w-5 h-5 mr-2 text-indigo-400 group-hover:scale-110 transition-transform" />}
+          {isSyncing ? 'Syncing...' : 'Sync Excel / CSV'}
         </button>
-        <button className="flex-1 btn btn-primary py-3.5 text-base shadow-blue-500/20">
-          <Rocket className="w-5 h-5 mr-2" /> Batch Import
+        
+        <button 
+          onClick={() => setShowAddModal(true)}
+          className="flex-1 btn btn-ghost py-3.5 text-base border-dashed hover:border-blue-500/50 group w-full"
+        > 
+          <Plus className="w-5 h-5 mr-2 text-blue-400 group-hover:rotate-90 transition-transform" /> New Lead 
+        </button>
+        
+        <button 
+          onClick={downloadTemplate}
+          className="flex-1 btn btn-primary py-3.5 text-base shadow-blue-500/20 group w-full"
+        > 
+          <Download className="w-5 h-5 mr-2 group-hover:-translate-y-1 transition-transform" /> Download Template 
         </button>
       </div>
 
-      {/* Discovery Engine Panel - Multi-Mode Enhancement */}
       <div className="bg-gradient-to-br from-[#1e293b]/70 to-[#0f172a]/90 border border-blue-500/20 rounded-[20px] p-6 mb-8 relative group shadow-heavy">
         <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/5 blur-[80px] rounded-full pointer-events-none"></div>
 
@@ -355,7 +438,7 @@ const Leads = () => {
               onClick={() => setLookupMode('name')}
               className={`flex-1 sm:flex-none px-4 py-2 rounded-[10px] text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${lookupMode === 'name' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-400'}`}
             >
-              By LinkedIn Name
+              By LinkedIn URL
             </button>
           </div>
         </div>
@@ -423,29 +506,18 @@ const Leads = () => {
                 />
               </div>
             ) : (
-              <>
-                <div className="space-y-1.5 md:col-span-6">
-                  <label className="text-[10px] font-extrabold text-[#3b82f6] uppercase tracking-widest pl-1 flex items-center gap-2">
-                    <User className="w-3 h-3" /> LinkedIn Employee Name
-                  </label>
-                  <input
-                    type="text"
-                    name="name"
-                    required
-                    className="form-control h-12"
-                    placeholder="e.g. Jensen Huang"
-                  />
-                </div>
-                <div className="space-y-1.5 md:col-span-6">
-                  <label className="text-[10px] font-extrabold text-[#475569] uppercase tracking-widest pl-1">Target Company (Recommended)</label>
-                  <input
-                    type="text"
-                    name="company"
-                    className="form-control h-12"
-                    placeholder="e.g. NVIDIA"
-                  />
-                </div>
-              </>
+              <div className="space-y-1.5 md:col-span-12">
+                <label className="text-[10px] font-extrabold text-[#3b82f6] uppercase tracking-widest pl-1 flex items-center gap-2">
+                  <Linkedin className="w-3 h-3" /> LinkedIn Profile URL
+                </label>
+                <input
+                  type="url"
+                  name="linkedin_url"
+                  required
+                  className="form-control h-12 w-full"
+                  placeholder="https://www.linkedin.com/in/jensenhuang/"
+                />
+              </div>
             )}
           </div>
 
@@ -552,14 +624,15 @@ const Leads = () => {
 
         <div className="flex items-center gap-2 px-4">
           <span className="text-[9px] font-extrabold text-[#475569] uppercase tracking-widest">Company:</span>
-          <input
-            type="text"
+          <select
             name="company"
-            placeholder="Search strict..."
-            className="bg-transparent border-none text-[#e2e8f0] text-[11px] font-bold outline-none w-[90px] placeholder-slate-600"
+            className="bg-transparent text-[#e2e8f0] text-[11px] font-bold outline-none cursor-pointer appearance-none max-w-[120px]"
             value={filters.company}
             onChange={handleFilterChange}
-          />
+          >
+            <option value="">All Companies ▼</option>
+            {uniqueCompanies.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
         </div>
 
         <div className="flex items-center gap-2 px-4">

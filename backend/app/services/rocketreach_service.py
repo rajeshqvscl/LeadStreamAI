@@ -154,6 +154,23 @@ def lookup_by_email(email):
     return [parsed] if parsed else []
 
 
+def lookup_by_linkedin_url(linkedin_url):
+    """
+    Search RocketReach for a person by their LinkedIn URL.
+    """
+    url = f"{BASE_URL}/person/lookup"
+    params = {"linkedin_url": linkedin_url}
+    r = requests.get(url, headers=HEADERS, params=params, timeout=30)
+    
+    if not r.ok:
+        print(f"LinkedIn URL lookup error ({r.status_code}): {r.text}")
+        return []
+    
+    details = r.json()
+    parsed = _parse_profile_details(details)
+    return [parsed] if parsed else []
+
+
 def lookup_by_name(name, company=None):
     """
     Search RocketReach for a person by name and optionally company.
