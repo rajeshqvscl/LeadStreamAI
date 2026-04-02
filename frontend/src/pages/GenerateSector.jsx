@@ -27,25 +27,25 @@ const GenerateSector = () => {
       // Mock data for UI development if API is missing
       setSectors([
         // DO'S
-        { sector: 'DEEP_TECH', display_name: 'Deep Tech', count: 5, total: 12, context: '', strategy: '' },
-        { sector: 'HIGH_TECH', display_name: 'High Tech', count: 8, total: 20, context: '', strategy: '' },
-        { sector: 'SAAS', display_name: 'SAAS', count: 12, total: 45, context: '', strategy: '' },
-        { sector: 'DEFENCE_TECH', display_name: 'Defence Tech', count: 3, total: 8, context: '', strategy: '' },
-        { sector: 'TRAVEL', display_name: 'Travel', count: 0, total: 15, context: '', strategy: '' },
-        { sector: 'AUTOMOTIVE', display_name: 'Automotive', count: 2, total: 10, context: '', strategy: '' },
-        { sector: 'AI_INFRA', display_name: 'AI Infra', count: 9, total: 25, context: '', strategy: '' },
-        { sector: 'AI_INTEL', display_name: 'AI Intelligence', count: 7, total: 18, context: '', strategy: '' },
-        { sector: 'GEN_AI', display_name: 'Generative AI', count: 15, total: 50, context: '', strategy: '' },
-        { sector: 'ESPORTS', display_name: 'Esports', count: 4, total: 12, context: '', strategy: '' },
-        { sector: 'ENT_APP', display_name: 'Enterprise Applications', count: 6, total: 22, context: '', strategy: '' },
-        { sector: 'ENT_SW', display_name: 'Enterprise Software', count: 10, total: 30, context: '', strategy: '' },
-        { sector: 'EDTECH', display_name: 'EdTech', count: 1, total: 14, context: '', strategy: '' },
+        { sector: 'DEEP_TECH', display_name: 'Deep Tech', count: 15, total: 42, context: '', strategy: '' },
+        { sector: 'HIGH_TECH', display_name: 'High Tech', count: 15, total: 38, context: '', strategy: '' },
+        { sector: 'SAAS', display_name: 'SAAS', count: 15, total: 65, context: '', strategy: '' },
+        { sector: 'DEFENCE_TECH', display_name: 'Defence Tech', count: 15, total: 28, context: '', strategy: '' },
+        { sector: 'TRAVEL', display_name: 'Travel', count: 15, total: 35, context: '', strategy: '' },
+        { sector: 'AUTOMOTIVE', display_name: 'Automotive', count: 15, total: 30, context: '', strategy: '' },
+        { sector: 'AI_INFRA', display_name: 'AI Infra', count: 15, total: 55, context: '', strategy: '' },
+        { sector: 'AI_INTEL', display_name: 'AI Intelligence', count: 15, total: 48, context: '', strategy: '' },
+        { sector: 'GEN_AI', display_name: 'Generative AI', count: 15, total: 70, context: '', strategy: '' },
+        { sector: 'ESPORTS', display_name: 'Esports', count: 15, total: 32, context: '', strategy: '' },
+        { sector: 'ENT_APP', display_name: 'Enterprise Applications', count: 15, total: 42, context: '', strategy: '' },
+        { sector: 'ENT_SW', display_name: 'Enterprise Software', count: 15, total: 50, context: '', strategy: '' },
+        { sector: 'EDTECH', display_name: 'EdTech', count: 15, total: 34, context: '', strategy: '' },
         // ONLY FOR M&A
-        { sector: 'PHARMA', display_name: 'Pharmaceutical (M&A)', count: 0, total: 8, context: '', strategy: '' },
-        { sector: 'NUTRA', display_name: 'Nutraceutical (M&A)', count: 2, total: 5, context: '', strategy: '' },
-        { sector: 'CHEMICAL', display_name: 'Chemical (M&A)', count: 1, total: 7, context: '', strategy: '' },
-        { sector: 'FOOD_EXT', display_name: 'Food Extracts (M&A)', count: 0, total: 4, context: '', strategy: '' },
-        { sector: 'TEXTILE', display_name: 'Textile (Clothing/Brands)', count: 3, total: 9, context: '', strategy: '' }
+        { sector: 'PHARMA', display_name: 'Pharmaceutical (M&A)', count: 15, total: 28, context: '', strategy: '' },
+        { sector: 'NUTRA', display_name: 'Nutraceutical (M&A)', count: 15, total: 25, context: '', strategy: '' },
+        { sector: 'CHEMICAL', display_name: 'Chemical (M&A)', count: 15, total: 27, context: '', strategy: '' },
+        { sector: 'FOOD_EXT', display_name: 'Food Extracts (M&A)', count: 15, total: 24, context: '', strategy: '' },
+        { sector: 'TEXTILE', display_name: 'Textile (Clothing/Brands)', count: 15, total: 29, context: '', strategy: '' }
       ]);
     } finally {
       setIsLoading(false);

@@ -25,14 +25,14 @@ const Leads = () => {
 
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
   const [isBulkActionLoading, setIsBulkActionLoading] = useState(false);
-  
+
   const [showAddModal, setShowAddModal] = useState(false);
-  const [notification, setNotification] = useState(null); 
-  
+  const [notification, setNotification] = useState(null);
+
   // Table specific state
   const [selectedLeads, setSelectedLeads] = useState(new Set());
   const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
-  
+
   const [showLabelModal, setShowLabelModal] = useState(false);
   const [labelInput, setLabelInput] = useState('');
   const [targetLeadIds, setTargetLeadIds] = useState([]); // IDs of leads to receive new label
@@ -41,9 +41,9 @@ const Leads = () => {
   const availableTitles = ['CEO', 'Founder', 'Co Founder', 'CFO', 'MD', 'Director'];
   const [selectedTitles, setSelectedTitles] = useState([]);
   const [showTitleDropdown, setShowTitleDropdown] = useState(false);
-  
+
   const toggleTitle = (title) => {
-    setSelectedTitles(prev => 
+    setSelectedTitles(prev =>
       prev.includes(title) ? prev.filter(t => t !== title) : [...prev, title]
     );
   };
@@ -85,13 +85,13 @@ const Leads = () => {
         exclude_source: 'bulk',
       };
       const response = await api.get('/api/leads', { params });
-      
+
       // Map leads to ensure 'labels' array exists locally even if backend doesn't return it yet
       const fetchedLeads = response.data.leads.map(lead => ({
         ...lead,
         labels: lead.labels || []
       }));
-      
+
       setLeads(fetchedLeads);
       setPagination(prev => ({
         ...prev,
@@ -124,7 +124,7 @@ const Leads = () => {
     setDiscoveryLoading(true);
     const formData = new FormData(e.target);
     const data = Object.fromEntries(formData.entries());
-    
+
     // Inject multi-select titles into payload
     if (selectedTitles.length > 0) {
       data.title = selectedTitles.join(',');
@@ -137,7 +137,7 @@ const Leads = () => {
         source_type: 'direct'
       });
       fetchLeads();
-      
+
       if (response.data.inserted === 0) {
         let msg = "No data found for this specific search.";
         if (lookupMode === 'email') msg = `No verified profile found for the email: ${data.email}`;
@@ -170,7 +170,7 @@ const Leads = () => {
         let valB = b[sortConfig.key] || '';
         if (typeof valA === 'string') valA = valA.toLowerCase();
         if (typeof valB === 'string') valB = valB.toLowerCase();
-        
+
         if (valA < valB) {
           return sortConfig.direction === 'asc' ? -1 : 1;
         }
@@ -234,7 +234,7 @@ const Leads = () => {
       setIsBulkActionLoading(false);
     }
   };
-  
+
   const handleApproveDomainDrafts = async () => {
     if (selectedLeads.size === 0) return;
     setIsBulkActionLoading(true);
@@ -282,7 +282,7 @@ const Leads = () => {
         showNotification('error', 'Failed to save labels to server.');
         console.error(err);
       });
-    
+
     setShowLabelModal(false);
     setLabelInput('');
     setTargetLeadIds([]);
@@ -325,9 +325,9 @@ const Leads = () => {
       </div>
 
       {/* Discovery Engine Panel - Multi-Mode Enhancement */}
-      <div className="bg-gradient-to-br from-[#1e293b]/70 to-[#0f172a]/90 border border-blue-500/20 rounded-[20px] p-6 mb-8 relative group shadow-heavy overflow-hidden">
+      <div className="bg-gradient-to-br from-[#1e293b]/70 to-[#0f172a]/90 border border-blue-500/20 rounded-[20px] p-6 mb-8 relative group shadow-heavy">
         <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/5 blur-[80px] rounded-full pointer-events-none"></div>
-        
+
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mb-8">
           <div>
             <h3 className="text-white font-bold flex items-center gap-2 mb-1">
@@ -336,22 +336,22 @@ const Leads = () => {
             </h3>
             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-7">Institutional Data Extraction</p>
           </div>
-          
+
           {/* Mode Switcher Tabs */}
           <div className="flex bg-black/40 p-1 rounded-[14px] border border-white/10 self-stretch sm:self-auto">
-            <button 
+            <button
               onClick={() => setLookupMode('search')}
               className={`flex-1 sm:flex-none px-4 py-2 rounded-[10px] text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${lookupMode === 'search' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
             >
               Direct Extract
             </button>
-            <button 
+            <button
               onClick={() => setLookupMode('email')}
               className={`flex-1 sm:flex-none px-4 py-2 rounded-[10px] text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${lookupMode === 'email' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
             >
               By Mail
             </button>
-            <button 
+            <button
               onClick={() => setLookupMode('name')}
               className={`flex-1 sm:flex-none px-4 py-2 rounded-[10px] text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${lookupMode === 'name' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-400'}`}
             >
@@ -370,7 +370,7 @@ const Leads = () => {
                 </div>
                 <div className="space-y-1.5 md:col-span-4 relative">
                   <label className="text-[10px] font-extrabold text-[#475569] uppercase tracking-widest pl-1">Job Title</label>
-                  <div 
+                  <div
                     className="form-control h-12 cursor-pointer flex items-center justify-between"
                     onClick={() => setShowTitleDropdown(!showTitleDropdown)}
                   >
@@ -379,14 +379,14 @@ const Leads = () => {
                     </span>
                     <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showTitleDropdown ? 'rotate-180' : ''}`} />
                   </div>
-                  
+
                   {showTitleDropdown && (
                     <>
                       <div className="fixed inset-0 z-[100]" onClick={() => setShowTitleDropdown(false)}></div>
                       <div className="absolute top-full left-0 right-0 mt-2 bg-[#151a26] border border-[#ffffff10] rounded-xl shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-top-2">
                         <div className="max-h-[200px] overflow-y-auto custom-scrollbar p-2">
                           {availableTitles.map(title => (
-                            <div 
+                            <div
                               key={title}
                               onClick={() => toggleTitle(title)}
                               className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
@@ -414,12 +414,12 @@ const Leads = () => {
                 <label className="text-[10px] font-extrabold text-[#3b82f6] uppercase tracking-widest pl-1 flex items-center gap-2">
                   <Mail className="w-3 h-3" /> Target Email Address
                 </label>
-                <input 
-                  type="email" 
-                  name="email" 
+                <input
+                  type="email"
+                  name="email"
                   required
-                  className="form-control h-12 w-full bg-black/40 border-blue-500/30 focus:border-blue-500 transition-all text-base px-6 italic" 
-                  placeholder="Paste direct email (e.g. j.doe@nvidia.com)" 
+                  className="form-control h-12 w-full bg-black/40 border-blue-500/30 focus:border-blue-500 transition-all text-base px-6 italic"
+                  placeholder="Paste direct email (e.g. j.doe@nvidia.com)"
                 />
               </div>
             ) : (
@@ -428,21 +428,21 @@ const Leads = () => {
                   <label className="text-[10px] font-extrabold text-[#3b82f6] uppercase tracking-widest pl-1 flex items-center gap-2">
                     <User className="w-3 h-3" /> LinkedIn Employee Name
                   </label>
-                  <input 
-                     type="text" 
-                     name="name" 
-                     required
-                     className="form-control h-12" 
-                     placeholder="e.g. Jensen Huang" 
+                  <input
+                    type="text"
+                    name="name"
+                    required
+                    className="form-control h-12"
+                    placeholder="e.g. Jensen Huang"
                   />
                 </div>
                 <div className="space-y-1.5 md:col-span-6">
                   <label className="text-[10px] font-extrabold text-[#475569] uppercase tracking-widest pl-1">Target Company (Recommended)</label>
-                  <input 
-                    type="text" 
-                    name="company" 
-                    className="form-control h-12" 
-                    placeholder="e.g. NVIDIA" 
+                  <input
+                    type="text"
+                    name="company"
+                    className="form-control h-12"
+                    placeholder="e.g. NVIDIA"
                   />
                 </div>
               </>
@@ -500,8 +500,8 @@ const Leads = () => {
 
         <div className="flex items-center gap-2 px-4 relative">
           <span className="text-[9px] font-extrabold text-[#475569] uppercase tracking-widest">Title:</span>
-          
-          <div 
+
+          <div
             className="bg-transparent text-[#e2e8f0] text-[11px] font-bold outline-none cursor-pointer flex items-center gap-1"
             onClick={() => setShowFilterTitleDropdown(!showFilterTitleDropdown)}
           >
@@ -517,7 +517,7 @@ const Leads = () => {
                   {availableTitles.map(title => {
                     const isSelected = filters.title && filters.title.split(',').includes(title);
                     return (
-                      <div 
+                      <div
                         key={title}
                         onClick={() => toggleFilterTitle(title)}
                         className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
@@ -608,7 +608,7 @@ const Leads = () => {
           <span className="text-sm font-semibold text-blue-200">leads selected</span>
         </div>
         <div className="flex items-center gap-2">
-          <button 
+          <button
             onClick={handleGenerateDomainDrafts}
             disabled={isBulkActionLoading}
             className="btn btn-ghost py-2 px-4 shadow-none bg-white/5 border-white/10 hover:bg-white/10 text-slate-200 disabled:opacity-50"
@@ -616,7 +616,7 @@ const Leads = () => {
             {isBulkActionLoading ? <Loader2 className="w-4 h-4 mr-2 text-blue-400 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2 text-blue-400" />}
             Generate Drafts
           </button>
-          <button 
+          <button
             onClick={handleApproveDomainDrafts}
             disabled={isBulkActionLoading}
             className="btn btn-ghost py-2 px-4 shadow-none bg-white/5 border-white/10 hover:bg-white/10 text-slate-200 disabled:opacity-50"
@@ -624,7 +624,7 @@ const Leads = () => {
             {isBulkActionLoading ? <Loader2 className="w-4 h-4 mr-2 text-blue-400 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-2 text-blue-400" />}
             Approve Selected
           </button>
-          <button 
+          <button
             onClick={handleSendDomainEmails}
             disabled={isBulkActionLoading}
             className="btn btn-ghost py-2 px-4 shadow-none bg-white/5 border-white/10 hover:bg-white/10 text-slate-200 disabled:opacity-50"
@@ -632,7 +632,7 @@ const Leads = () => {
             {isBulkActionLoading ? <Loader2 className="w-4 h-4 mr-2 text-emerald-400 animate-spin" /> : <Rocket className="w-4 h-4 mr-2 text-emerald-400" />}
             Send Selected
           </button>
-          <button 
+          <button
             onClick={handleAddLabelToSelected}
             disabled={isBulkActionLoading}
             className="btn btn-primary py-2 px-4 shadow-none disabled:opacity-50"
@@ -688,8 +688,8 @@ const Leads = () => {
             <thead>
               <tr>
                 <th className="w-10">
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     className="custom-checkbox"
                     checked={selectedLeads.size === sortedLeads.length && sortedLeads.length > 0}
                     onChange={handleSelectAll}
@@ -698,31 +698,31 @@ const Leads = () => {
                 <th className="sortable" onClick={() => requestSort('name')}>
                   <div className="flex items-center gap-1">
                     Name
-                    {sortConfig.key === 'name' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3"/> : <ChevronDown className="w-3 h-3"/>)}
+                    {sortConfig.key === 'name' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
                   </div>
                 </th>
                 <th className="sortable" onClick={() => requestSort('company_name')}>
                   <div className="flex items-center gap-1">
                     Company
-                    {sortConfig.key === 'company_name' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3"/> : <ChevronDown className="w-3 h-3"/>)}
+                    {sortConfig.key === 'company_name' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
                   </div>
                 </th>
                 <th className="sortable" onClick={() => requestSort('persona')}>
                   <div className="flex items-center gap-1">
                     Title / Role
-                    {sortConfig.key === 'persona' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3"/> : <ChevronDown className="w-3 h-3"/>)}
+                    {sortConfig.key === 'persona' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
                   </div>
                 </th>
                 <th className="sortable" onClick={() => requestSort('city')}>
                   <div className="flex items-center gap-1">
                     Location
-                    {sortConfig.key === 'city' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3"/> : <ChevronDown className="w-3 h-3"/>)}
+                    {sortConfig.key === 'city' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
                   </div>
                 </th>
                 <th className="sortable" onClick={() => requestSort('domain')}>
                   <div className="flex items-center gap-1">
                     Domain / Website
-                    {sortConfig.key === 'domain' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3"/> : <ChevronDown className="w-3 h-3"/>)}
+                    {sortConfig.key === 'domain' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
                   </div>
                 </th>
                 <th>Labels</th>
@@ -735,15 +735,15 @@ const Leads = () => {
                 return (
                   <tr key={lead.id} className={isSelected ? 'selected' : ''}>
                     <td>
-                      <input 
-                        type="checkbox" 
+                      <input
+                        type="checkbox"
                         className="custom-checkbox"
                         checked={isSelected}
                         onChange={(e) => handleSelectOne(e, lead.id)}
                       />
                     </td>
                     <td>
-                      <button 
+                      <button
                         onClick={() => navigate(`/dashboard/leads/${lead.id}`)}
                         className="font-bold text-white hover:text-blue-400 transition-colors cursor-pointer text-left"
                       >
@@ -754,11 +754,10 @@ const Leads = () => {
                       {lead.company_name || lead.family_office_name || 'N/A'}
                     </td>
                     <td>
-                      <span className={`px-2 py-1 rounded-[4px] text-[10px] font-bold tracking-wider ${
-                        ['FOUNDER', 'C-SUITE', 'EXECUTIVE'].includes(lead.persona) ? 'bg-blue-500/10 text-blue-400' :
-                        ['PARTNER', 'INVESTOR'].includes(lead.persona) ? 'bg-purple-500/10 text-purple-400' :
-                        'bg-amber-500/10 text-amber-400'
-                      }`}>
+                      <span className={`px-2 py-1 rounded-[4px] text-[10px] font-bold tracking-wider ${['FOUNDER', 'C-SUITE', 'EXECUTIVE'].includes(lead.persona) ? 'bg-blue-500/10 text-blue-400' :
+                          ['PARTNER', 'INVESTOR'].includes(lead.persona) ? 'bg-purple-500/10 text-purple-400' :
+                            'bg-amber-500/10 text-amber-400'
+                        }`}>
                         {lead.persona || 'UNKNOWN'}
                       </span>
                     </td>
@@ -780,7 +779,7 @@ const Leads = () => {
                             <button className="remove-label" onClick={(e) => { e.stopPropagation(); removeLabel(lead.id, label); }}>×</button>
                           </span>
                         ))}
-                        <button 
+                        <button
                           onClick={() => handleAddLabelToSingle(lead.id)}
                           className="w-5 h-5 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors ml-1 border border-white/10"
                           title="Add Label"
@@ -790,7 +789,7 @@ const Leads = () => {
                       </div>
                     </td>
                     <td className="text-right">
-                      <button 
+                      <button
                         onClick={() => navigate(`/dashboard/leads/${lead.id}`)}
                         className="p-2 bg-slate-800/50 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors inline-block"
                       >
@@ -822,8 +821,8 @@ const Leads = () => {
                 key={i}
                 onClick={() => setPagination(v => ({ ...v, page: i + 1 }))}
                 className={`w-10 h-10 rounded-xl font-bold text-sm transition-all ${pagination.page === i + 1
-                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
-                    : 'bg-slate-800 border border-white/5 text-slate-400 hover:bg-slate-700'
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
+                  : 'bg-slate-800 border border-white/5 text-slate-400 hover:bg-slate-700'
                   }`}
               >
                 {i + 1}
@@ -896,11 +895,11 @@ const Leads = () => {
             <p className="text-sm text-slate-400 mb-5">
               Add labels to {targetLeadIds.length} selected lead(s). Separated by commas.
             </p>
-            
-            <input 
-              type="text" 
-              className="form-control mb-5" 
-              placeholder="e.g. VIP, High Priority, Follow-up" 
+
+            <input
+              type="text"
+              className="form-control mb-5"
+              placeholder="e.g. VIP, High Priority, Follow-up"
               value={labelInput}
               onChange={e => setLabelInput(e.target.value)}
               onKeyDown={e => {
@@ -911,10 +910,10 @@ const Leads = () => {
               }}
               autoFocus
             />
-            
+
             <div className="flex justify-end gap-3">
-              <button 
-                className="btn btn-ghost px-5" 
+              <button
+                className="btn btn-ghost px-5"
                 onClick={() => {
                   setShowLabelModal(false);
                   setLabelInput('');
@@ -934,8 +933,8 @@ const Leads = () => {
       {notification && (
         <div className={`fixed bottom-8 right-8 z-[3000] animate-in slide-in-from-bottom-4 duration-300`}>
           <div className={`flex items-center gap-3 px-6 py-4 rounded-2xl shadow-2xl border backdrop-blur-md ${notification.type === 'success'
-              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-              : 'bg-red-500/10 border-red-500/20 text-red-400'
+            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+            : 'bg-red-500/10 border-red-500/20 text-red-400'
             }`}>
             {notification.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
             <p className="text-sm font-bold tracking-tight">{notification.message}</p>

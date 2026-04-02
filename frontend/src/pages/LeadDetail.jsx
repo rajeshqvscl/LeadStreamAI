@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { 
-  ChevronLeft, Linkedin, Trash2, UserMinus, 
+import {
+  ChevronLeft, Linkedin, Trash2, UserMinus,
   Mail, History, CheckCircle2, XCircle, AlertCircle,
   Loader2, ExternalLink, Sparkles, Save, Phone,
   MapPin, Building2, User, Check, ChevronDown
@@ -9,9 +9,9 @@ import {
 import api from '../services/api';
 
 const COMPANY_OPTIONS = [
-  "AI Accelera", "AI Infra Labs", "AI Intelligence Labs", "AI Tech Leads", 
-  "ARVR Labs", "AgriTech Labs", "Altos Incorporated", "Amazon", 
-  "Automotive Labs", "BS Deep Tech Consulting & Development", "Bacon Software", 
+  "AI Accelera", "AI Infra Labs", "AI Intelligence Labs", "AI Tech Leads",
+  "ARVR Labs", "AgriTech Labs", "Altos Incorporated", "Amazon",
+  "Automotive Labs", "BS Deep Tech Consulting & Development", "Bacon Software",
   "Blinkit-AI", "Blockchain Labs", "Chris Hospitals"
 ];
 const CITY_OPTIONS = [
@@ -57,7 +57,7 @@ const CustomDropdown = ({ label, value, onChange, options, placeholder, searchab
   return (
     <div className="relative">
       {label && <label className="block text-[10px] font-bold text-[#64748b] mb-1.5">{label}</label>}
-      <div 
+      <div
         ref={triggerRef}
         className="w-full bg-[#0f121b] border border-[#ffffff08] rounded-md px-3 py-2.5 text-[11px] font-medium transition-colors cursor-pointer flex justify-between items-center hover:border-blue-500/30"
         onClick={handleOpen}
@@ -65,11 +65,11 @@ const CustomDropdown = ({ label, value, onChange, options, placeholder, searchab
         <span className={value ? "text-white" : "text-slate-500"}>{value || placeholder}</span>
         <ChevronDown className={`w-3.5 h-3.5 text-slate-500 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
       </div>
-      
+
       {isOpen && (
         <>
           <div className="fixed inset-0 z-[9998]" onClick={() => { setIsOpen(false); setSearch(''); }} />
-          <div 
+          <div
             style={dropdownStyle}
             className="bg-[#0f121b] border border-[#ffffff15] rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200"
           >
@@ -87,7 +87,7 @@ const CustomDropdown = ({ label, value, onChange, options, placeholder, searchab
               </div>
             )}
             <div className="overflow-y-auto max-h-[240px] p-1.5">
-              <div 
+              <div
                 className="flex items-center gap-2 px-3 py-2.5 text-[11px] rounded-lg cursor-pointer text-slate-500 hover:bg-white/5 transition-colors italic"
                 onClick={() => { onChange(''); setIsOpen(false); setSearch(''); }}
               >
@@ -99,11 +99,10 @@ const CustomDropdown = ({ label, value, onChange, options, placeholder, searchab
               {filtered.map((opt, i) => {
                 const isSelected = value === opt;
                 return (
-                  <div 
+                  <div
                     key={i}
-                    className={`flex items-center gap-2 px-3 py-2.5 text-[11px] rounded-lg cursor-pointer transition-colors ${
-                      isSelected ? 'bg-[#2563eb] text-white font-bold' : 'text-slate-300 hover:bg-white/5'
-                    }`}
+                    className={`flex items-center gap-2 px-3 py-2.5 text-[11px] rounded-lg cursor-pointer transition-colors ${isSelected ? 'bg-[#2563eb] text-white font-bold' : 'text-slate-300 hover:bg-white/5'
+                      }`}
                     onClick={() => { onChange(opt); setIsOpen(false); setSearch(''); }}
                   >
                     {isSelected ? <Check className="w-3.5 h-3.5 shrink-0" /> : <span className="w-3.5 h-3.5 shrink-0" />}
@@ -121,13 +120,13 @@ const CustomDropdown = ({ label, value, onChange, options, placeholder, searchab
 
 const CampaignField = ({ value, onChange, options }) => {
   const [isSelectMode, setIsSelectMode] = useState(true);
-  
+
   return (
     <div className="w-full">
       <div className="flex justify-between items-center mb-1.5 px-0.5">
         <label className="block text-[10px] font-bold text-[#64748b]">Campaign</label>
-        <button 
-          type="button" 
+        <button
+          type="button"
           onClick={() => setIsSelectMode(!isSelectMode)}
           className="text-[#60a5fa] text-[9px] font-bold hover:text-blue-400 transition-colors"
         >
@@ -176,7 +175,7 @@ const LeadDetail = () => {
       ]);
       const l = leadRes.data;
       setLead(l);
-      
+
       // Explicitly map all fields from API to ensure proper state binding
       setForm({
         ...l,
@@ -288,8 +287,8 @@ const LeadDetail = () => {
       {/* Header */}
       <div className="flex justify-between items-center mb-8">
         <div className="flex items-center gap-5">
-          <Link 
-            to="/dashboard/leads" 
+          <Link
+            to="/dashboard/leads"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#1e293b] border border-transparent text-[#94a3b8] hover:text-white hover:bg-[#334155] transition-all text-[11px] font-bold"
           >
             ← Back
@@ -301,8 +300,8 @@ const LeadDetail = () => {
             <div className="flex items-center gap-3 mb-0.5">
               <h1 className="text-[20px] font-black text-white tracking-tight">{fullName}</h1>
               {lead.linkedin_url && (
-                <a 
-                  href={lead.linkedin_url} target="_blank" rel="noreferrer" 
+                <a
+                  href={lead.linkedin_url} target="_blank" rel="noreferrer"
                   className="flex items-center gap-1 text-[#60a5fa] hover:text-blue-400 transition-colors text-[11px] font-bold"
                 >
                   <Linkedin className="w-3 h-3" /> LinkedIn
@@ -317,7 +316,7 @@ const LeadDetail = () => {
           </div>
         </div>
         <div className="flex gap-2.5">
-          <button 
+          <button
             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-[#1e293b] text-[#94a3b8] text-[11px] font-bold hover:bg-[#334155] hover:text-white transition-all"
             onClick={handleDelete}
           >
@@ -328,7 +327,7 @@ const LeadDetail = () => {
               Opted Out
             </span>
           ) : (
-            <button 
+            <button
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-[#ef4444] text-white text-[11px] font-bold hover:bg-[#dc2626] transition-all"
               onClick={handleUnsubscribe}
             >
@@ -410,7 +409,7 @@ const LeadDetail = () => {
                     className="w-full bg-[#0f121b] border border-[#ffffff08] rounded-md px-3 py-2.5 text-white text-[11px] font-medium focus:border-blue-500/50 outline-none transition-colors"
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-[10px] font-bold text-[#64748b] mb-1.5">LinkedIn</label>
                   <div className="relative">
@@ -445,13 +444,13 @@ const LeadDetail = () => {
                     placeholder="Select Country"
                   />
                 </div>
-                
+
                 <CampaignField
                   value={form.campaign_id}
                   onChange={(val) => setForm(prev => ({ ...prev, campaign_id: val }))}
                   options={CAMPAIGN_OPTIONS}
                 />
-                
+
                 <CustomDropdown
                   label="Company (Scroll Options)"
                   value={form.company_name}
@@ -459,7 +458,7 @@ const LeadDetail = () => {
                   options={COMPANY_OPTIONS}
                   placeholder="Select Company"
                 />
-                
+
                 <div className="relative">
                   <label className="block text-[10px] font-bold text-[#64748b] mb-1.5">Family Office (Linked Entity)</label>
                   <CustomDropdown
@@ -472,8 +471,8 @@ const LeadDetail = () => {
                 </div>
 
                 <div className="pt-2">
-                  <button 
-                    type="submit" 
+                  <button
+                    type="submit"
                     disabled={isSaving}
                     className="flex items-center gap-2 px-4 py-2 rounded-md bg-[#2563eb] text-white text-[11px] font-bold hover:bg-blue-600 transition-all disabled:opacity-50"
                   >
@@ -498,15 +497,15 @@ const LeadDetail = () => {
                     <div key={idx} className="flex gap-3 items-start">
                       <div className="mt-0.5 flex flex-col items-center">
                         <div className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
-                        {idx !== logs.length - 1 && <div className="w-px flex-1 bg-white/5 mt-1.5 mb-0" style={{minHeight:'20px'}} />}
+                        {idx !== logs.length - 1 && <div className="w-px flex-1 bg-white/5 mt-1.5 mb-0" style={{ minHeight: '20px' }} />}
                       </div>
                       <div className="flex-1 pb-2">
                         <div className="text-[11px] font-black text-white tracking-wider">{log.action}</div>
                         <div className="text-[10px] text-slate-500 mt-0.5">
                           {log.created_at
                             ? new Date(log.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
-                              ', ' +
-                              new Date(log.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+                            ', ' +
+                            new Date(log.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
                             : '—'} · {log.performed_by || 'system'}
                         </div>
                       </div>
@@ -530,54 +529,54 @@ const LeadDetail = () => {
             </div>
             <div className="p-6 space-y-6">
               <div className="grid grid-cols-3">
-                 <span className="text-[#64748b] text-[10px] font-bold uppercase tracking-widest leading-6">STATUS</span>
-                 <div className="col-span-2">
-                   <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest bg-[#f59e0b]/10 text-[#fbbf24]">
-                     {lead.validation_status || 'PENDING'}
-                   </span>
-                 </div>
+                <span className="text-[#64748b] text-[10px] font-bold uppercase tracking-widest leading-6">STATUS</span>
+                <div className="col-span-2">
+                  <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest bg-[#f59e0b]/10 text-[#fbbf24]">
+                    {lead.validation_status || 'PENDING'}
+                  </span>
+                </div>
               </div>
               <div className="grid grid-cols-3">
-                 <span className="text-[#64748b] text-[10px] font-bold uppercase tracking-widest leading-5">COMPANY</span>
-                 <div className="col-span-2 text-white text-[11px] font-medium leading-5">
-                   {lead.company_name || '—'}
-                 </div>
+                <span className="text-[#64748b] text-[10px] font-bold uppercase tracking-widest leading-5">COMPANY</span>
+                <div className="col-span-2 text-white text-[11px] font-medium leading-5">
+                  {lead.company_name || '—'}
+                </div>
               </div>
               <div className="grid grid-cols-3">
-                 <span className="text-[#64748b] text-[10px] font-bold uppercase tracking-widest leading-5">PHONE</span>
-                 <div className="col-span-2 text-white text-[11px] font-medium leading-5 tabular-nums">
-                   {lead.phone || '—'}
-                 </div>
+                <span className="text-[#64748b] text-[10px] font-bold uppercase tracking-widest leading-5">PHONE</span>
+                <div className="col-span-2 text-white text-[11px] font-medium leading-5 tabular-nums">
+                  {lead.phone || '—'}
+                </div>
               </div>
               <div className="grid grid-cols-3">
-                 <span className="text-[#64748b] text-[10px] font-bold uppercase tracking-widest leading-5">SOURCE</span>
-                 <div className="col-span-2 text-white text-[11px] font-medium leading-5 lowercase">
-                   {lead.source || 'rocketreach'}
-                 </div>
+                <span className="text-[#64748b] text-[10px] font-bold uppercase tracking-widest leading-5">SOURCE</span>
+                <div className="col-span-2 text-white text-[11px] font-medium leading-5 lowercase">
+                  {lead.source || 'rocketreach'}
+                </div>
               </div>
               <div className="grid grid-cols-3">
-                 <span className="text-[#64748b] text-[10px] font-bold uppercase tracking-widest leading-5">CAMPAIGN</span>
-                 <div className="col-span-2 text-white text-[11px] font-medium leading-5">
-                   —
-                 </div>
+                <span className="text-[#64748b] text-[10px] font-bold uppercase tracking-widest leading-5">CAMPAIGN</span>
+                <div className="col-span-2 text-white text-[11px] font-medium leading-5">
+                  —
+                </div>
               </div>
               <div className="grid grid-cols-3">
-                 <span className="text-[#64748b] text-[10px] font-bold uppercase tracking-widest leading-5">CITY</span>
-                 <div className="col-span-2 text-white text-[11px] font-medium leading-5">
-                   {lead.city || '—'}
-                 </div>
+                <span className="text-[#64748b] text-[10px] font-bold uppercase tracking-widest leading-5">CITY</span>
+                <div className="col-span-2 text-white text-[11px] font-medium leading-5">
+                  {lead.city || '—'}
+                </div>
               </div>
               <div className="grid grid-cols-3">
-                 <span className="text-[#64748b] text-[10px] font-bold uppercase tracking-widest leading-5">COUNTRY</span>
-                 <div className="col-span-2 text-white text-[11px] font-medium leading-5">
-                   {lead.country || '—'}
-                 </div>
+                <span className="text-[#64748b] text-[10px] font-bold uppercase tracking-widest leading-5">COUNTRY</span>
+                <div className="col-span-2 text-white text-[11px] font-medium leading-5">
+                  {lead.country || '—'}
+                </div>
               </div>
               <div className="grid grid-cols-3">
-                 <span className="text-[#64748b] text-[10px] font-bold uppercase tracking-widest leading-5">CREATED</span>
-                 <div className="col-span-2 text-white text-[11px] font-medium leading-5">
-                   {lead.created_at ? new Date(lead.created_at).toISOString().replace('T', ' ').substring(0, 16) : '—'}
-                 </div>
+                <span className="text-[#64748b] text-[10px] font-bold uppercase tracking-widest leading-5">CREATED</span>
+                <div className="col-span-2 text-white text-[11px] font-medium leading-5">
+                  {lead.created_at ? new Date(lead.created_at).toISOString().replace('T', ' ').substring(0, 16) : '—'}
+                </div>
               </div>
             </div>
           </div>
@@ -590,7 +589,7 @@ const LeadDetail = () => {
                 <h3 className="text-[13px] font-bold text-white tracking-wide">Email Drafts</h3>
               </div>
               <button onClick={handleGenerateDraft} disabled={isGenerating} className="bg-[#2563eb] hover:bg-blue-600 text-white text-[10px] font-extrabold px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors disabled:opacity-50">
-                {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Sparkles className="w-3.5 h-3.5"/>}
+                {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                 {isGenerating ? 'Generating...' : 'Draft AI Email'}
               </button>
             </div>
@@ -599,11 +598,11 @@ const LeadDetail = () => {
                 <div className="space-y-3">
                   {drafts.map(d => (
                     <div key={d.id} className="bg-[#0f121b] border border-[#ffffff08] rounded-xl p-4 cursor-pointer hover:border-blue-500/50 transition-colors shadow-md group" onClick={() => navigate(`/dashboard/emails/${d.id}/edit`)}>
-                       <div className="flex justify-between items-start mb-2 gap-3">
-                         <h4 className="text-[11px] font-bold text-white line-clamp-2 leading-relaxed flex-1 group-hover:text-blue-400 transition-colors">{d.subject || 'Follow-up on operational strategies'}</h4>
-                         <span className="shrink-0 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-emerald-500/10 text-emerald-400">DRAFT</span>
-                       </div>
-                       <p className="text-[10px] text-[#64748b] font-medium">Click to review and refine →</p>
+                      <div className="flex justify-between items-start mb-2 gap-3">
+                        <h4 className="text-[11px] font-bold text-white line-clamp-2 leading-relaxed flex-1 group-hover:text-blue-400 transition-colors">{d.subject || 'Follow-up on operational strategies'}</h4>
+                        <span className="shrink-0 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-emerald-500/10 text-emerald-400">DRAFT</span>
+                      </div>
+                      <p className="text-[10px] text-[#64748b] font-medium">Click to review and refine →</p>
                     </div>
                   ))}
                 </div>
@@ -622,13 +621,12 @@ const LeadDetail = () => {
       {/* Notification Toast */}
       {notification && (
         <div className="fixed bottom-8 right-8 z-[2000] animate-in slide-in-from-bottom-4">
-          <div className={`px-6 py-4 rounded-2xl shadow-2xl border backdrop-blur-md flex items-center gap-3 ${
-            notification.type === 'success' 
-              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
+          <div className={`px-6 py-4 rounded-2xl shadow-2xl border backdrop-blur-md flex items-center gap-3 ${notification.type === 'success'
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
               : 'bg-red-500/10 border-red-500/20 text-red-500'
-          }`}>
-            {notification.type === 'success' 
-              ? <CheckCircle2 className="w-5 h-5" /> 
+            }`}>
+            {notification.type === 'success'
+              ? <CheckCircle2 className="w-5 h-5" />
               : <AlertCircle className="w-5 h-5" />}
             <span className="font-bold text-sm">{notification.message}</span>
           </div>

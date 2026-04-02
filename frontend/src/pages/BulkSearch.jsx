@@ -6,15 +6,15 @@ const BulkSearch = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [notification, setNotification] = useState(null);
   const [limit, setLimit] = useState(20);
-  
+
   // Results Table State
   const [bulkLeads, setBulkLeads] = useState([]);
   const [isTableLoading, setIsTableLoading] = useState(false);
   const [pagination, setPagination] = useState({ page: 1, total_pages: 1, total: 0 });
   const [selectedLeads, setSelectedLeads] = useState(new Set());
   const [isBulkActionLoading, setIsBulkActionLoading] = useState(false);
-  const [processingId, setProcessingId] = useState(null); 
-  
+  const [processingId, setProcessingId] = useState(null);
+
   // New Filter State
   const [filters, setFilters] = useState({
     search: '',
@@ -22,6 +22,39 @@ const BulkSearch = () => {
     company: '',
     status: ''
   });
+
+  // Selection States for Form
+  const [selectedPersonas, setSelectedPersonas] = useState([]);
+  const [selectedIndustry, setSelectedIndustry] = useState('');
+  const [showPersonaDropdown, setShowPersonaDropdown] = useState(false);
+  const [showIndustryDropdown, setShowIndustryDropdown] = useState(false);
+  const [industrySearch, setIndustrySearch] = useState('');
+
+  const personaOptions = ["CEO", "Founder", "Managing Director", "CTO", "CIO", "Partner", "Investor", "COO", "VP"];
+  const sectorOptions = [
+    { id: 'DEEP_TECH', label: 'Deep Tech' },
+    { id: 'HIGH_TECH', label: 'High Tech' },
+    { id: 'SAAS', label: 'SAAS' },
+    { id: 'DEFENCE_TECH', label: 'Defence Tech' },
+    { id: 'TRAVEL', label: 'Travel' },
+    { id: 'AUTOMOTIVE', label: 'Automotive' },
+    { id: 'AI_INFRA', label: 'AI Infra' },
+    { id: 'AI_INTEL', label: 'AI Intelligence' },
+    { id: 'GEN_AI', label: 'Generative AI' },
+    { id: 'ESPORTS', label: 'Esports' },
+    { id: 'ENT_APP', label: 'Enterprise Applications' },
+    { id: 'ENT_SW', label: 'Enterprise Software' },
+    { id: 'EDTECH', label: 'EdTech' },
+    { id: 'PHARMA', label: 'Pharma (M&A)' },
+    { id: 'NUTRA', label: 'Nutra (M&A)' },
+    { id: 'CHEMICAL', label: 'Chemical (M&A)' },
+    { id: 'FOOD_EXT', label: 'Food Extracts (M&A)' },
+    { id: 'TEXTILE', label: 'Textile' }
+  ];
+
+  const filteredIndustries = sectorOptions.filter(s => 
+    s.label.toLowerCase().includes(industrySearch.toLowerCase())
+  );
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
@@ -88,12 +121,12 @@ const BulkSearch = () => {
     if (selectedLeads.size === 0) return;
     setIsBulkActionLoading(true);
     try {
-      const response = await api.post('/api/generate-bulk-domain-drafts', { 
-        lead_ids: Array.from(selectedLeads) 
+      const response = await api.post('/api/generate-bulk-domain-drafts', {
+        lead_ids: Array.from(selectedLeads)
       });
       showNotification('success', `Drafts generated and moved to Email Drafts.`);
-      setSelectedLeads(new Set()); 
-      fetchBulkLeads(pagination.page); 
+      setSelectedLeads(new Set());
+      fetchBulkLeads(pagination.page);
     } catch (err) {
       showNotification('error', 'Bulk draft generation failed');
     } finally {
@@ -105,12 +138,12 @@ const BulkSearch = () => {
     if (selectedLeads.size === 0) return;
     setIsBulkActionLoading(true);
     try {
-      const response = await api.post('/api/approve-bulk-domain-drafts', { 
-        lead_ids: Array.from(selectedLeads) 
+      const response = await api.post('/api/approve-bulk-domain-drafts', {
+        lead_ids: Array.from(selectedLeads)
       });
       showNotification('success', `Approved leads moved to Email Drafts.`);
-      setSelectedLeads(new Set()); 
-      fetchBulkLeads(pagination.page); 
+      setSelectedLeads(new Set());
+      fetchBulkLeads(pagination.page);
     } catch (err) {
       showNotification('error', 'Bulk approval failed');
     } finally {
@@ -180,6 +213,8 @@ const BulkSearch = () => {
     try {
       const response = await api.post('/api/ingest-leads', {
         ...data,
+        bulk_title: selectedPersonas.join(', '),
+        industry: selectedIndustry,
         count: limit,
         source_type: 'bulk'
       });
@@ -230,84 +265,142 @@ const BulkSearch = () => {
         <div className="absolute bottom-0 left-0 w-64 h-64 bg-purple-600/5 blur-[100px] rounded-full pointer-events-none"></div>
 
         <form onSubmit={handleBulkSubmit}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 mb-8">
-            <div className="space-y-2">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-x-8 gap-y-6 mb-8">
+            <div className="space-y-4 md:col-span-6 relative">
               <label className="text-[10px] font-black text-indigo-400 uppercase tracking-[2px] ml-1 flex items-center gap-2">
                 <Tag className="w-3 h-3" /> Target Persona
               </label>
-              <input 
-                type="text" 
-                name="bulk_title" 
-                required
-                placeholder="e.g. Managing Director, CIO"
-                className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3 px-4 text-[14px] font-medium text-white placeholder:text-slate-700 focus:outline-none focus:border-indigo-500/30 focus:ring-1 focus:ring-indigo-500/20 transition-all shadow-inner" 
-              />
+              <div 
+                className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3.5 px-4 text-[14px] font-medium text-white cursor-pointer flex justify-between items-center group-hover:border-indigo-500/30 transition-all"
+                onClick={() => setShowPersonaDropdown(!showPersonaDropdown)}
+              >
+                <span className={selectedPersonas.length === 0 ? "text-slate-700" : "text-white"}>
+                  {selectedPersonas.length === 0 
+                    ? "Select target personas..." 
+                    : selectedPersonas.length <= 3 
+                      ? selectedPersonas.join(', ') 
+                      : `${selectedPersonas.length} Roles Selected`}
+                </span>
+                <ChevronRight className={`w-4 h-4 text-slate-500 transition-transform ${showPersonaDropdown ? 'rotate-90' : ''}`} />
+              </div>
+
+              {showPersonaDropdown && (
+                <>
+                  <div className="fixed inset-0 z-[100]" onClick={() => setShowPersonaDropdown(false)}></div>
+                  <div className="absolute top-full left-0 right-0 mt-3 bg-[#0f172a] border border-white/10 rounded-[14px] shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                    <div className="max-h-[240px] overflow-y-auto p-2 space-y-1">
+                      {personaOptions.map(p => {
+                        const isSelected = selectedPersonas.includes(p);
+                        return (
+                          <div 
+                            key={p}
+                            onClick={() => {
+                              setSelectedPersonas(prev => 
+                                isSelected ? prev.filter(x => x !== p) : [...prev, p]
+                              );
+                            }}
+                            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all ${isSelected ? 'bg-indigo-600/10 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
+                          >
+                            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${isSelected ? 'bg-indigo-600 border-indigo-500' : 'border-slate-700 bg-transparent'}`}>
+                              {isSelected && <Check className="w-3 h-3 text-white" />}
+                            </div>
+                            <span className="text-[13px] font-bold">{p}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-4 md:col-span-6 relative">
               <label className="text-[10px] font-black text-blue-400 uppercase tracking-[2px] ml-1 flex items-center gap-2">
-                <Building2 className="w-3 h-3" /> Industry
+                <Building2 className="w-3 h-3" /> Industry / Sector
               </label>
-              <input 
-                type="text" 
-                name="industry" 
-                placeholder="e.g. Venture Capital"
-                className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3 px-4 text-[14px] font-medium text-white placeholder:text-slate-700 focus:outline-none focus:border-blue-500/30 focus:ring-1 focus:ring-blue-500/20 transition-all shadow-inner" 
-              />
+              <div className="relative group">
+                <input
+                  type="text"
+                  placeholder="Seach or select industry..."
+                  className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3.5 px-4 text-[14px] font-medium text-white placeholder:text-slate-700 focus:outline-none focus:border-blue-500/30 transition-all pr-10"
+                  value={selectedIndustry || industrySearch}
+                  onFocus={() => setShowIndustryDropdown(true)}
+                  onChange={(e) => {
+                    setIndustrySearch(e.target.value);
+                    if (selectedIndustry) setSelectedIndustry('');
+                  }}
+                />
+                <ChevronRight className={`absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 transition-transform ${showIndustryDropdown ? 'rotate-90' : ''}`} />
+              </div>
+
+              {showIndustryDropdown && (
+                <>
+                  <div className="fixed inset-0 z-[100]" onClick={() => setShowIndustryDropdown(false)}></div>
+                  <div className="absolute top-full left-0 right-0 mt-3 bg-[#0f172a] border border-white/10 rounded-[14px] shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                    <div className="max-h-[240px] overflow-y-auto p-2 space-y-1">
+                      {filteredIndustries.length === 0 ? (
+                        <div className="px-3 py-4 text-center text-slate-500 text-[11px] font-black uppercase tracking-widest">No matching sectors</div>
+                      ) : (
+                        filteredIndustries.map(s => (
+                          <div 
+                            key={s.id}
+                            onClick={() => {
+                              setSelectedIndustry(s.label);
+                              setIndustrySearch(s.label);
+                              setShowIndustryDropdown(false);
+                            }}
+                            className={`px-3 py-2.5 rounded-lg cursor-pointer transition-all ${selectedIndustry === s.label ? 'bg-blue-600/10 text-blue-400' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
+                          >
+                            <span className="text-[13px] font-bold">{s.label}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 md:col-span-6">
               <label className="text-[10px] font-black text-rose-400 uppercase tracking-[2px] ml-1 flex items-center gap-2">
                 <MapPin className="w-3 h-3" /> Location
               </label>
-              <input 
-                type="text" 
-                name="bulk_location" 
+              <input
+                type="text"
+                name="bulk_location"
                 placeholder="e.g. London, Dubai"
-                className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3 px-4 text-[14px] font-medium text-white placeholder:text-slate-700 focus:outline-none focus:border-rose-500/30 focus:ring-1 focus:ring-rose-500/20 transition-all shadow-inner" 
+                className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3 px-4 text-[14px] font-medium text-white placeholder:text-slate-700 focus:outline-none focus:border-rose-500/30 focus:ring-1 focus:ring-rose-500/20 transition-all shadow-inner"
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 md:col-span-6">
               <label className="text-[10px] font-black text-amber-500 uppercase tracking-[2px] ml-1 flex items-center gap-2">
                 <Database className="w-3 h-3" /> Keywords
               </label>
-              <input 
-                type="text" 
-                name="keyword" 
+              <input
+                type="text"
+                name="keyword"
                 placeholder="e.g. Multi-Family Office"
-                className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3 px-4 text-[14px] font-medium text-white placeholder:text-slate-700 focus:outline-none focus:border-amber-500/30 focus:ring-1 focus:ring-amber-500/20 transition-all shadow-inner" 
+                className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3 px-4 text-[14px] font-medium text-white placeholder:text-slate-700 focus:outline-none focus:border-amber-500/30 focus:ring-1 focus:ring-amber-500/20 transition-all shadow-inner"
               />
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-8 mb-10">
-            <div className="space-y-2 md:col-span-4">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[2px] ml-1 flex items-center gap-2">
-                <Filter className="w-3 h-3 text-slate-400" /> Exclude
-              </label>
-              <input 
-                type="text" 
-                name="exclude" 
-                placeholder="Recruitment, HR"
-                className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3 px-4 text-[13px] text-white placeholder:text-slate-800 focus:outline-none focus:border-slate-500/20 transition-all italic font-medium" 
-              />
-            </div>
-            
-            <div className="space-y-4 md:col-span-8 bg-black/30 p-4 rounded-[14px] border border-white/5 flex flex-col justify-center">
-              <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-[3px]">
-                <span className="text-slate-500">Extraction Capacity</span>
-                <span className="text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-lg border border-indigo-500/20">{limit} Leads</span>
+            <div className="md:col-span-12 py-4">
+              <div className="space-y-4 bg-black/30 p-6 rounded-[20px] border border-white/5">
+                <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-[3px]">
+                  <span className="text-slate-500">Extraction Capacity</span>
+                  <span className="text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-lg border border-indigo-500/20">{limit} Leads</span>
+                </div>
+                <input
+                  type="range"
+                  min="5"
+                  max="100"
+                  step="5"
+                  value={limit}
+                  onChange={(e) => setLimit(parseInt(e.target.value))}
+                  className="w-full h-1.5 bg-[#050810] rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                />
               </div>
-              <input 
-                type="range" 
-                min="5" 
-                max="100" 
-                step="5"
-                value={limit}
-                onChange={(e) => setLimit(parseInt(e.target.value))}
-                className="w-full h-1.5 bg-[#050810] rounded-lg appearance-none cursor-pointer accent-indigo-500"
-              />
             </div>
           </div>
 
@@ -316,8 +409,8 @@ const BulkSearch = () => {
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
               Verified Institutional Discovery Engine
             </div>
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               disabled={isLoading}
               className="w-full sm:w-auto px-10 py-3 rounded-[14px] bg-gradient-to-r from-indigo-600 via-purple-600 to-fuchsia-600 hover:from-indigo-500 hover:via-purple-500 hover:to-fuchsia-500 text-white font-black text-[12px] uppercase tracking-[3px] transition-all shadow-[0_0_20px_rgba(79,70,229,0.3)] hover:shadow-[0_0_30px_rgba(79,70,229,0.5)] disabled:opacity-50 flex items-center justify-center gap-2 active:scale-[0.98] cursor-pointer"
             >
@@ -343,7 +436,7 @@ const BulkSearch = () => {
           <span className="text-[13px] font-bold text-indigo-200 uppercase tracking-[2px]">Discovery items selected</span>
         </div>
         <div className="flex items-center gap-3">
-          <button 
+          <button
             onClick={handleBulkApproveDrafts}
             disabled={isBulkActionLoading}
             className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-[14px] text-[11px] font-black uppercase tracking-widest transition-all shadow-lg shadow-emerald-600/20 cursor-pointer disabled:opacity-50"
@@ -351,7 +444,7 @@ const BulkSearch = () => {
             {isBulkActionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
             {isBulkActionLoading ? 'Processing...' : 'Approve & Draft'}
           </button>
-          <button 
+          <button
             onClick={handleBulkGenerateDrafts}
             disabled={isBulkActionLoading}
             className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-[14px] text-[11px] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-600/20 cursor-pointer disabled:opacity-50"
@@ -359,7 +452,7 @@ const BulkSearch = () => {
             {isBulkActionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
             {isBulkActionLoading ? 'Processing...' : 'Generate Drafts'}
           </button>
-          <button 
+          <button
             onClick={handleBulkDelete}
             disabled={isBulkActionLoading}
             className="flex items-center gap-2 px-6 py-2.5 bg-rose-600/10 hover:bg-rose-600/20 text-rose-500 border border-rose-600/20 rounded-[14px] text-[11px] font-black uppercase tracking-widest transition-all cursor-pointer disabled:opacity-50"
@@ -385,7 +478,7 @@ const BulkSearch = () => {
               onChange={handleFilterChange}
             />
           </div>
-          
+
           <div className="flex items-center gap-2 px-4 relative">
             <span className="text-[9px] font-extrabold text-[#475569] uppercase tracking-widest">Role:</span>
             <select
@@ -418,12 +511,12 @@ const BulkSearch = () => {
           </div>
 
           <div className="flex items-center px-4 flex-1 justify-end border-r-0 text-right">
-             <button
-               onClick={() => setFilters({ search: '', persona: '', company: '', status: '' })}
-               className="flex items-center px-4 py-1.5 bg-[#ffffff05] hover:bg-[#ffffff0a] rounded-[10px] border border-[#ffffff08] transition-colors text-[10px] font-extrabold text-slate-300 ml-auto"
-             >
-               Reset
-             </button>
+            <button
+              onClick={() => setFilters({ search: '', persona: '', company: '', status: '' })}
+              className="flex items-center px-4 py-1.5 bg-[#ffffff05] hover:bg-[#ffffff0a] rounded-[10px] border border-[#ffffff08] transition-colors text-[10px] font-extrabold text-slate-300 ml-auto"
+            >
+              Reset
+            </button>
           </div>
         </div>
 
@@ -432,7 +525,7 @@ const BulkSearch = () => {
             <Database className="w-4 h-4 text-indigo-400" /> Discovery Repository
           </h3>
           <div className="text-[11px] font-extrabold text-slate-500 bg-black/40 px-4 py-1.5 rounded-full border border-white/5">
-             <span className="text-indigo-400">{pagination.total}</span> total records harvested
+            <span className="text-indigo-400">{pagination.total}</span> total records harvested
           </div>
         </div>
 
@@ -441,8 +534,8 @@ const BulkSearch = () => {
             <thead>
               <tr className="bg-black/20 border-b border-white/5">
                 <th className="px-6 py-3 w-12">
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     className="w-4 h-4 rounded border-slate-700 bg-slate-900 ring-offset-slate-900 focus:ring-indigo-500 accent-indigo-500 cursor-pointer"
                     checked={selectedLeads.size === bulkLeads.length && bulkLeads.length > 0}
                     onChange={toggleSelectAll}
@@ -470,8 +563,8 @@ const BulkSearch = () => {
                 bulkLeads.map((lead) => (
                   <tr key={lead.id} className={`hover:bg-indigo-500/5 transition-all group ${selectedLeads.has(lead.id) ? 'bg-indigo-500/10' : ''}`}>
                     <td className="px-6 py-4">
-                      <input 
-                        type="checkbox" 
+                      <input
+                        type="checkbox"
                         className="w-4 h-4 rounded border-slate-700 bg-slate-900 ring-offset-slate-900 focus:ring-indigo-500 accent-indigo-500 cursor-pointer"
                         checked={selectedLeads.has(lead.id)}
                         onChange={() => toggleSelect(lead.id)}
@@ -502,33 +595,33 @@ const BulkSearch = () => {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-center gap-2">
-                        <button 
-                           onClick={() => handleApproveDraftSingle(lead.id)}
-                           disabled={processingId === lead.id}
-                           title="Approve & Generate Draft"
-                           className="p-1.5 rounded-lg bg-emerald-600/10 hover:bg-emerald-600 text-emerald-500 hover:text-white transition-all border border-emerald-600/20 cursor-pointer disabled:opacity-50"
+                        <button
+                          onClick={() => handleApproveDraftSingle(lead.id)}
+                          disabled={processingId === lead.id}
+                          title="Approve & Generate Draft"
+                          className="p-1.5 rounded-lg bg-emerald-600/10 hover:bg-emerald-600 text-emerald-500 hover:text-white transition-all border border-emerald-600/20 cursor-pointer disabled:opacity-50"
                         >
                           {processingId === lead.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
                         </button>
-                        <button 
-                           onClick={() => handleGenerateDraftSingle(lead.id)}
-                           disabled={processingId === lead.id}
-                           title="Generate AI Draft (Review required)"
-                           className="p-1.5 rounded-lg bg-indigo-600/10 hover:bg-indigo-600 text-indigo-400 hover:text-white transition-all border border-indigo-600/20 cursor-pointer disabled:opacity-50"
+                        <button
+                          onClick={() => handleGenerateDraftSingle(lead.id)}
+                          disabled={processingId === lead.id}
+                          title="Generate AI Draft (Review required)"
+                          className="p-1.5 rounded-lg bg-indigo-600/10 hover:bg-indigo-600 text-indigo-400 hover:text-white transition-all border border-indigo-600/20 cursor-pointer disabled:opacity-50"
                         >
                           {processingId === lead.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                         </button>
-                        <button 
-                           onClick={() => window.location.href = `/dashboard/leads/${lead.id}`}
-                           title="Full Intelligence View"
-                           className="p-1.5 rounded-lg bg-white/5 hover:bg-indigo-600 text-slate-400 hover:text-white transition-all border border-white/5 cursor-pointer"
+                        <button
+                          onClick={() => window.location.href = `/dashboard/leads/${lead.id}`}
+                          title="Full Intelligence View"
+                          className="p-1.5 rounded-lg bg-white/5 hover:bg-indigo-600 text-slate-400 hover:text-white transition-all border border-white/5 cursor-pointer"
                         >
                           <FileText className="w-3.5 h-3.5" />
                         </button>
-                        <button 
-                           onClick={() => handleDeleteSingle(lead.id)}
-                           title="Reject Lead"
-                           className="p-1.5 rounded-lg bg-rose-600/10 hover:bg-rose-600 text-rose-500 hover:text-white transition-all border border-rose-600/20 cursor-pointer"
+                        <button
+                          onClick={() => handleDeleteSingle(lead.id)}
+                          title="Reject Lead"
+                          className="p-1.5 rounded-lg bg-rose-600/10 hover:bg-rose-600 text-rose-500 hover:text-white transition-all border border-rose-600/20 cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -544,7 +637,7 @@ const BulkSearch = () => {
         {/* Local Pagination */}
         {pagination.total_pages > 1 && (
           <div className="px-6 py-4 border-t border-white/5 flex justify-center items-center gap-4 bg-black/10">
-            <button 
+            <button
               disabled={pagination.page <= 1}
               onClick={() => fetchBulkLeads(pagination.page - 1)}
               className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all border border-white/5 disabled:opacity-30 disabled:cursor-not-allowed"
@@ -554,7 +647,7 @@ const BulkSearch = () => {
             <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest bg-black/30 px-3 py-1 rounded-full">
               Page {pagination.page} / {pagination.total_pages}
             </span>
-            <button 
+            <button
               disabled={pagination.page >= pagination.total_pages}
               onClick={() => fetchBulkLeads(pagination.page + 1)}
               className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all border border-white/5 disabled:opacity-30 disabled:cursor-not-allowed"
