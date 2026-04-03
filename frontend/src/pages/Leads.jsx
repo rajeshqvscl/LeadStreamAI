@@ -448,8 +448,8 @@ const Leads = () => {
               By Mail
             </button>
             <button
-              onClick={() => setLookupMode('name')}
-              className={`flex-1 sm:flex-none px-4 py-2 rounded-[10px] text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${lookupMode === 'name' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-400'}`}
+              onClick={() => setLookupMode('url')}
+              className={`flex-1 sm:flex-none px-4 py-2 rounded-[10px] text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${lookupMode === 'url' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-400'}`}
             >
               By LinkedIn URL
             </button>

@@ -56,7 +56,7 @@ def get_leads(
     # Dynamically extract designation if needed (to handle cases where schema update was blocked)
     query = """
         SELECT *, 
-               COALESCE(raw_payload->>'Designation', raw_payload->>'Role/Designation', raw_payload->>'designation', persona) as designation, 
+               COALESCE(designation, raw_payload->>'Designation', raw_payload->>'Role/Designation', raw_payload->>'designation', persona) as designation, 
                labels 
         FROM leads_raw 
         WHERE 1=1

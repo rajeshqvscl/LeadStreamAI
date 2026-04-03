@@ -8,11 +8,27 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
     conn = get_db_connection()
     cur = conn.cursor()
 
+    # Extract designation from payload if not explicitly provided
+    designation = payload.get("current_title", payload.get("designation", payload.get("Designation", ""))) if payload else ""
+
     cur.execute(
         """
         INSERT INTO leads_raw
-        (first_name, last_name, email, domain, linkedin_url, company_name, source, raw_payload, fit_score, persona, phone, user_id)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        (first_name, last_name, email, domain, linkedin_url, company_name, source, raw_payload, fit_score, persona, phone, user_id, designation)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (email) DO UPDATE SET
+            first_name = EXCLUDED.first_name,
+            last_name = EXCLUDED.last_name,
+            domain = EXCLUDED.domain,
+            linkedin_url = EXCLUDED.linkedin_url,
+            company_name = EXCLUDED.company_name,
+            source = EXCLUDED.source,
+            raw_payload = EXCLUDED.raw_payload,
+            fit_score = EXCLUDED.fit_score,
+            persona = EXCLUDED.persona,
+            phone = EXCLUDED.phone,
+            user_id = COALESCE(leads_raw.user_id, EXCLUDED.user_id),
+            designation = EXCLUDED.designation
         """,
         (
             first_name,
@@ -26,7 +42,8 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
             fit_score,
             persona,
             phone,
-            user_id
+            user_id,
+            designation
         )
     )
 
