@@ -183,7 +183,7 @@ const Login = () => {
           </div>
 
           <a
-            href={`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/auth/google/login`}
+            href={`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/api/auth/google/login`}
             className="flex items-center justify-center gap-2.5 w-full py-3 px-5 bg-white/5 text-[#c8cdd8] border border-white/10 rounded-xl text-[13px] font-semibold transition-all hover:bg-white/10 hover:text-white hover:border-white/20"
           >
             <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" alt="G" className="w-[18px] h-[18px]" />

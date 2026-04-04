@@ -131,6 +131,39 @@ def create_tables():
     );
     """)
 
+    # Users Table
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        full_name TEXT,
+        password_hash TEXT,
+        role TEXT DEFAULT 'USER',
+        is_active BOOLEAN DEFAULT TRUE,
+        is_approved BOOLEAN DEFAULT FALSE,
+        has_db_access BOOLEAN DEFAULT FALSE,
+        google_id TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+    """)
+
+    # Ensure columns exist in users (schema evolution)
+    user_cols = [
+        ("is_approved", "BOOLEAN DEFAULT FALSE"),
+        ("has_db_access", "BOOLEAN DEFAULT FALSE"),
+        ("google_id", "TEXT"),
+        ("email", "TEXT UNIQUE")
+    ]
+    for col_name, col_type in user_cols:
+        try:
+            # PostgreSQL 9.6+ supports IF NOT EXISTS for ADD COLUMN
+            cur.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_name} {col_type};")
+            conn.commit() # Commit each change to be safe
+        except psycopg2.Error:
+            conn.rollback()
+            continue
+
     # Family Offices Table
     cur.execute("""
     CREATE TABLE IF NOT EXISTS family_offices (

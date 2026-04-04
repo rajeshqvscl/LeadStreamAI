@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Rocket, Loader2, CheckCircle, AlertCircle, Database, Filter, MapPin, Building2, Tag, ChevronLeft, ChevronRight, User, FileText, Trash2, Check, Sparkles } from 'lucide-react';
+import { Search, Rocket, Loader2, CheckCircle, AlertCircle, Database, Filter, MapPin, Building2, Tag, ChevronLeft, ChevronRight, User, FileText, Trash2, Check, Sparkles, FileSpreadsheet, Download, Pencil } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import Papa from 'papaparse';
 import api from '../services/api';
 
 const BulkSearch = () => {
@@ -15,6 +17,10 @@ const BulkSearch = () => {
   const [isBulkActionLoading, setIsBulkActionLoading] = useState(false);
   const [processingId, setProcessingId] = useState(null);
 
+  const [syncMode, setSyncMode] = useState('rocketreach'); // 'rocketreach' or 'spreadsheet'
+  const [isSyncing, setIsSyncing] = useState(false);
+  const fileInputRef = React.useRef(null);
+
   // New Filter State
   const [filters, setFilters] = useState({
     search: '',
@@ -22,6 +28,7 @@ const BulkSearch = () => {
     company: '',
     status: ''
   });
+  const [sourceFilter, setSourceFilter] = useState('all'); // 'all' | 'bulk' | 'csv_import'
 
   // Selection States for Form
   const [selectedPersonas, setSelectedPersonas] = useState([]);
@@ -64,25 +71,32 @@ const BulkSearch = () => {
   const fetchBulkLeads = async (pageToFetch = pagination.page) => {
     setIsTableLoading(true);
     try {
-      const response = await api.get('/api/leads', {
-        params: {
-          page: pageToFetch,
-          per_page: 10,
-          source: 'bulk',
-          search: filters.search,
-          persona: filters.persona,
-          company: filters.company,
-          validation_status: filters.status,
-          exclude_drafted: true
-        }
-      });
+      const params = {
+        page: 1,
+        per_page: 1000,
+        search: filters.search,
+        persona: filters.persona,
+        company: filters.company,
+        validation_status: filters.status,
+        exclude_drafted: true
+      };
+      // Filter by import source
+      if (sourceFilter === 'bulk') {
+        params.source = 'bulk';
+      } else if (sourceFilter === 'csv_import') {
+        params.source = 'csv_import';
+      } else {
+        // All: exclude sources that aren't bulk-related (e.g. direct pipeline)
+        params.exclude_source = 'direct';
+      }
+      const response = await api.get('/api/leads', { params });
       setBulkLeads(response.data.leads || []);
       setPagination({
         page: pageToFetch,
         total_pages: Math.ceil((response.data.total || 0) / 10),
         total: response.data.total || 0
       });
-      setSelectedLeads(new Set()); // Reset selection on page change
+      setSelectedLeads(new Set());
     } catch (err) {
       console.error('Failed to fetch bulk leads', err);
     } finally {
@@ -92,7 +106,7 @@ const BulkSearch = () => {
 
   useEffect(() => {
     fetchBulkLeads(1);
-  }, [filters]); // Refetch when filters
+  }, [filters, sourceFilter]);
 
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
@@ -204,6 +218,116 @@ const BulkSearch = () => {
     }
   };
 
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setIsSyncing(true);
+    const reader = new FileReader();
+
+    const processData = async (data) => {
+      try {
+        const cleanData = data.filter(row => row.email || row.Email || row.Name || row.name);
+        const response = await api.post('/api/leads/bulk-import', cleanData);
+        showNotification('success', response.data.message || 'Import successful');
+        fetchBulkLeads();
+      } catch (err) {
+        showNotification('error', 'Import failed: ' + (err.response?.data?.detail || err.message));
+      } finally {
+        setIsSyncing(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    };
+
+    if (file.name.endsWith('.csv')) {
+      Papa.parse(file, {
+        header: true,
+        complete: (results) => {
+          processData(results.data);
+        },
+        error: (err) => {
+          showNotification('error', 'CSV parse failed: ' + err.message);
+          setIsSyncing(false);
+        }
+      });
+    } else {
+      reader.onload = (evt) => {
+        const bstr = evt.target.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws);
+        processData(data);
+      };
+      reader.readAsBinaryString(file);
+    }
+  };
+
+  const handleSheetImport = async () => {
+    const input = document.querySelector('input[name="google_sheet_url"]');
+    const rawUrl = input?.value;
+    if (!rawUrl) {
+      showNotification('error', 'Please enter a valid Google Sheet URL.');
+      return;
+    }
+    
+    let exportUrl;
+    try {
+      if (rawUrl.includes('/d/')) {
+        const docId = rawUrl.split('/d/')[1].split('/')[0];
+        exportUrl = `https://docs.google.com/spreadsheets/d/${docId}/export?format=csv`;
+      } else {
+        throw new Error('Unrecognized URL format');
+      }
+    } catch (e) {
+      showNotification('error', 'Invalid Google Sheet URL format.');
+      return;
+    }
+
+    setIsSyncing(true);
+    Papa.parse(exportUrl, {
+      download: true,
+      header: true,
+      complete: async (results) => {
+        try {
+          const cleanData = results.data.filter(row => row.email || row.Email || row.Name || row.name);
+          const response = await api.post('/api/leads/bulk-import', cleanData);
+          showNotification('success', response.data.message || 'Import successful');
+          fetchBulkLeads();
+          if (input) input.value = '';
+        } catch (err) {
+          showNotification('error', 'Import failed: ' + (err.response?.data?.detail || err.message));
+        } finally {
+          setIsSyncing(false);
+        }
+      },
+      error: (err) => {
+        showNotification('error', 'Failed to fetch or parse from URL: ' + err.message);
+        setIsSyncing(false);
+      }
+    });
+  };
+
+  const downloadTemplate = () => {
+    const template = [
+      { 
+        Name: 'John Doe', 
+        email: 'john@example.com', 
+        company_name: 'Acme Corp', 
+        linkedin_url: 'https://linkedin.com/in/johndoe', 
+        Designation: 'Founder & CEO',
+        city: 'New York',
+        country: 'USA',
+        persona: 'FOUNDER',
+        phone: '+1 234 567 8900'
+      }
+    ];
+    const ws = XLSX.utils.json_to_sheet(template);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "LeadStream_Template");
+    XLSX.writeFile(wb, "LeadStreamAI_Import_Template.xlsx");
+  };
+
   const handleBulkSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
@@ -264,8 +388,25 @@ const BulkSearch = () => {
         <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-600/5 blur-[120px] rounded-full pointer-events-none"></div>
         <div className="absolute bottom-0 left-0 w-64 h-64 bg-purple-600/5 blur-[100px] rounded-full pointer-events-none"></div>
 
-        <form onSubmit={handleBulkSubmit}>
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-x-8 gap-y-6 mb-8">
+        {/* Tab Switcher */}
+        <div className="flex bg-black/40 p-1 rounded-[14px] border border-white/10 w-fit mb-8 relative z-10 transition-all">
+          <button
+            onClick={() => setSyncMode('rocketreach')}
+            className={`px-6 py-2.5 rounded-[10px] text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${syncMode === 'rocketreach' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+            RocketReach Query
+          </button>
+          <button
+            onClick={() => setSyncMode('spreadsheet')}
+            className={`px-6 py-2.5 rounded-[10px] text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${syncMode === 'spreadsheet' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+            Spreadsheet Import
+          </button>
+        </div>
+
+        {syncMode === 'rocketreach' ? (
+          <form onSubmit={handleBulkSubmit}>
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-x-8 gap-y-6 mb-8">
             <div className="space-y-4 md:col-span-6 relative">
               <label className="text-[10px] font-black text-indigo-400 uppercase tracking-[2px] ml-1 flex items-center gap-2">
                 <Tag className="w-3 h-3" /> Target Persona
@@ -425,6 +566,73 @@ const BulkSearch = () => {
             </button>
           </div>
         </form>
+        ) : (
+          <div className="space-y-6 relative z-10">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              className="hidden"
+              accept=".csv, .xlsx, .xls"
+            />
+            <div className="flex flex-col sm:flex-row gap-6">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isSyncing}
+                className="flex-1 px-8 py-5 rounded-[16px] bg-[#1e293b]/50 border border-indigo-500/30 hover:bg-indigo-500/10 hover:border-indigo-500/50 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer group disabled:opacity-50"
+              >
+                {isSyncing ? (
+                  <Loader2 className="w-8 h-8 animate-spin text-indigo-400" />
+                ) : (
+                  <FileSpreadsheet className="w-8 h-8 text-indigo-400 group-hover:scale-110 transition-transform" />
+                )}
+                <span className="text-[14px] font-bold text-white tracking-wide">
+                  {isSyncing ? 'Processing File...' : 'Upload Local Excel / CSV'}
+                </span>
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Max 5MB • Auto-mapping enabled</span>
+              </button>
+              
+              <button
+                type="button"
+                onClick={downloadTemplate}
+                className="flex-1 px-8 py-5 rounded-[16px] bg-[#1e293b]/50 border border-amber-500/30 hover:bg-amber-500/10 hover:border-amber-500/50 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer group"
+              >
+                <Download className="w-8 h-8 text-amber-500 group-hover:-translate-y-1 transition-transform" />
+                <span className="text-[14px] font-bold text-white tracking-wide">Download Template</span>
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Standardized format</span>
+              </button>
+            </div>
+            
+            <div className="flex items-center gap-4 text-slate-500 text-[10px] font-black uppercase tracking-[3px] py-2">
+              <div className="flex-1 border-t border-white/5"></div>
+              <span>OR DIRECT SYNC FROM CLOUD</span>
+              <div className="flex-1 border-t border-white/5"></div>
+            </div>
+
+            <div className="bg-[#1e293b]/30 border border-emerald-500/20 p-6 rounded-[16px]">
+              <label className="text-[10px] font-extrabold text-emerald-500 uppercase tracking-widest flex items-center gap-2 mb-4">
+                <FileSpreadsheet className="w-4 h-4" /> Public Google Sheet Link
+              </label>
+              <div className="flex flex-col sm:flex-row gap-4">
+                <input
+                  type="url"
+                  name="google_sheet_url"
+                  className="flex-1 bg-[#050810] border border-white/5 rounded-[14px] py-4 px-5 text-[14px] font-medium text-white placeholder:text-slate-700 focus:outline-none focus:border-emerald-500/30 focus:ring-1 focus:ring-emerald-500/20 transition-all"
+                  placeholder="https://docs.google.com/spreadsheets/d/.../edit"
+                />
+                <button
+                  type="button"
+                  onClick={handleSheetImport}
+                  disabled={isSyncing}
+                  className="px-10 py-4 rounded-[14px] bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[12px] uppercase tracking-[2px] transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50 min-w-[200px] cursor-pointer flex items-center justify-center"
+                >
+                  {isSyncing ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Sync Connected Sheet'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Action Toolbar for Selected Items */}
@@ -512,7 +720,7 @@ const BulkSearch = () => {
 
           <div className="flex items-center px-4 flex-1 justify-end border-r-0 text-right">
             <button
-              onClick={() => setFilters({ search: '', persona: '', company: '', status: '' })}
+              onClick={() => { setFilters({ search: '', persona: '', company: '', status: '' }); setSourceFilter('all'); }}
               className="flex items-center px-4 py-1.5 bg-[#ffffff05] hover:bg-[#ffffff0a] rounded-[10px] border border-[#ffffff08] transition-colors text-[10px] font-extrabold text-slate-300 ml-auto"
             >
               Reset
@@ -520,10 +728,30 @@ const BulkSearch = () => {
           </div>
         </div>
 
-        <div className="px-6 py-4 border-b border-white/5 flex justify-between items-center bg-white/5">
+        <div className="px-6 py-4 border-b border-white/5 flex flex-wrap justify-between items-center gap-4 bg-white/5">
           <h3 className="text-[11px] font-black text-white uppercase tracking-[4px] flex items-center gap-2">
             <Database className="w-4 h-4 text-indigo-400" /> Discovery Repository
           </h3>
+          <div className="flex items-center gap-2">
+            {/* Source Filter Tabs */}
+            {[
+              { key: 'all', label: 'All Sources' },
+              { key: 'bulk', label: '🚀 RocketReach' },
+              { key: 'csv_import', label: '📊 Excel / CSV / Sheet' },
+            ].map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setSourceFilter(tab.key)}
+                className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all border ${
+                  sourceFilter === tab.key
+                    ? 'bg-indigo-600 text-white border-indigo-500 shadow-lg shadow-indigo-600/20'
+                    : 'bg-black/30 text-slate-500 border-white/5 hover:text-slate-300 hover:border-white/10'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
           <div className="text-[11px] font-extrabold text-slate-500 bg-black/40 px-4 py-1.5 rounded-full border border-white/5">
             <span className="text-indigo-400">{pagination.total}</span> total records harvested
           </div>
@@ -543,6 +771,7 @@ const BulkSearch = () => {
                 </th>
                 <th className="px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Lead Identity</th>
                 <th className="px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Company / Org</th>
+                <th className="px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Source</th>
                 <th className="px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Actions</th>
               </tr>
             </thead>
@@ -594,6 +823,17 @@ const BulkSearch = () => {
                       <div className="text-[9px] font-black text-indigo-500/70 uppercase tracking-tighter">{lead.persona}</div>
                     </td>
                     <td className="px-6 py-4">
+                      {lead.source === 'csv_import' ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          📊 Excel / CSV / Sheet
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                          🚀 RocketReach
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
                       <div className="flex items-center justify-center gap-2">
                         <button
                           onClick={() => handleApproveDraftSingle(lead.id)}
@@ -604,6 +844,14 @@ const BulkSearch = () => {
                           {processingId === lead.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
                         </button>
                         <button
+                          onClick={() => navigate(`/dashboard/leads/${lead.id}`)}
+                          disabled={processingId === lead.id}
+                          title="Edit Lead"
+                          className="p-1.5 rounded-lg bg-blue-600/10 hover:bg-blue-600 text-blue-400 hover:text-white transition-all border border-blue-600/20 cursor-pointer disabled:opacity-50"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
                           onClick={() => handleGenerateDraftSingle(lead.id)}
                           disabled={processingId === lead.id}
                           title="Generate AI Draft (Review required)"
@@ -611,19 +859,11 @@ const BulkSearch = () => {
                         >
                           {processingId === lead.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                         </button>
-
-                        <button
-                          onClick={() => window.location.href = `/dashboard/leads/${lead.id}`}
-                          title="Full Intelligence View"
-                          className="p-1.5 rounded-lg bg-white/5 hover:bg-indigo-600 text-slate-400 hover:text-white transition-all border border-white/5 cursor-pointer"
-                        >
-                          <FileText className="w-3.5 h-3.5" />
-                        </button>
-
                         <button
                           onClick={() => handleDeleteSingle(lead.id)}
-                          title="Reject Lead"
-                          className="p-1.5 rounded-lg bg-rose-600/10 hover:bg-rose-600 text-rose-500 hover:text-white transition-all border border-rose-600/20 cursor-pointer"
+                          disabled={processingId === lead.id}
+                          title="Reject & Delete Lead"
+                          className="p-1.5 rounded-lg bg-rose-600/10 hover:bg-rose-600 text-rose-500 hover:text-white transition-all border border-rose-600/20 cursor-pointer disabled:opacity-50"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -635,29 +875,6 @@ const BulkSearch = () => {
             </tbody>
           </table>
         </div>
-
-        {/* Local Pagination */}
-        {pagination.total_pages > 1 && (
-          <div className="px-6 py-4 border-t border-white/5 flex justify-center items-center gap-4 bg-black/10">
-            <button
-              disabled={pagination.page <= 1}
-              onClick={() => fetchBulkLeads(pagination.page - 1)}
-              className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all border border-white/5 disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest bg-black/30 px-3 py-1 rounded-full">
-              Page {pagination.page} / {pagination.total_pages}
-            </span>
-            <button
-              disabled={pagination.page >= pagination.total_pages}
-              onClick={() => fetchBulkLeads(pagination.page + 1)}
-              className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all border border-white/5 disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Footer Info */}

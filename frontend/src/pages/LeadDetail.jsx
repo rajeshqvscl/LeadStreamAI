@@ -236,12 +236,12 @@ const LeadDetail = () => {
   };
 
   const handleDelete = async () => {
-    if (window.confirm('Permanently delete this lead?')) {
+    if (window.confirm('Permanently delete this lead? This action cannot be undone.')) {
       try {
-        await api.delete(`/api/leads/${leadId}`);
+        await api.post('/api/leads/bulk-delete', [parseInt(leadId)]);
         navigate('/dashboard/leads');
-      } catch {
-        showNotification('error', 'Failed to delete lead');
+      } catch (err) {
+        showNotification('error', 'Failed to delete lead: ' + (err.response?.data?.detail || err.message));
       }
     }
   };

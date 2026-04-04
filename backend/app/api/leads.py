@@ -25,6 +25,19 @@ class LeadUpdate(BaseModel):
     family_office_name: Optional[str] = None
     source: Optional[str] = None
 
+class LeadCreate(BaseModel):
+    first_name: str
+    last_name: Optional[str] = ""
+    email: str
+    company_name: Optional[str] = ""
+    designation: Optional[str] = ""
+    phone: Optional[str] = ""
+    city: Optional[str] = ""
+    country: Optional[str] = ""
+    linkedin_url: Optional[str] = ""
+    persona: Optional[str] = "OTHER"
+    source: Optional[str] = "direct"
+
 from typing import List
 
 class BulkLabelRequest(BaseModel):
@@ -76,7 +89,47 @@ def get_leads(
     if exclude_source:
         query += " AND source != %s"
         params.append(exclude_source)
+
+    # ─── Context-Aware Quality Filters ───────────────────────────────────────
     
+    # CASE 1: Lead Pipeline (exclude_source='bulk' or source='direct')
+    # Focus: Highest quality, active roles, and genuine personal profiles only.
+    is_pipeline_context = (exclude_source == 'bulk') or (source == 'direct')
+    if is_pipeline_context:
+        # 1. Exclude titles NOT suitable for outreach (retired, advisors, former roles)
+        # Added 'advisor' and 'retired' specifically for pipeline as requested.
+        title_expr = "COALESCE(designation, raw_payload->>'current_title', raw_payload->>'Designation', raw_payload->>'designation', raw_payload->>'Title', raw_payload->>'Job Title', raw_payload->>'Role', persona, '')"
+        ex_pipe = r'ex-|former |previous |past |retired|advisor'
+        query += f" AND {title_expr} !~* '{ex_pipe}'"
+        
+        # 2. Genuine Profile Requirement
+        # Only include leads with a valid personal LinkedIn URL (contains /in/)
+        query += " AND linkedin_url IS NOT NULL AND linkedin_url ~* '/in/'"
+
+    # CASE 2: Bulk Search / Discovery (exclude_source='direct' or source in bulk/csv)
+    # Focus: Filtering out test data and expired leads from broad searches.
+    is_bulk_context = (source in ('bulk', 'csv_import')) or (exclude_source == 'direct')
+    if is_bulk_context:
+        # 1. Identity Verification
+        query += " AND (first_name IS NOT NULL OR last_name IS NOT NULL) AND (COALESCE(first_name,'') != '' OR COALESCE(last_name,'') != '')"
+        query += " AND company_name IS NOT NULL AND COALESCE(company_name,'') != ''"
+        query += " AND ((email IS NOT NULL AND COALESCE(email,'') != '') OR (linkedin_url IS NOT NULL AND COALESCE(linkedin_url,'') != ''))"
+
+        # 2. Block dummy / test records in name and email
+        bad = r'test|dummy|example|sample|mock|noreply|noemail|unknown'
+        query += f" AND COALESCE(first_name,'') !~* '{bad}'"
+        query += f" AND COALESCE(last_name,'') !~* '{bad}'"
+        query += f" AND COALESCE(email,'') !~* '{bad}'"
+
+        # 3. Block invalid email domains
+        query += r" AND COALESCE(email,'') !~* '@(test|dummy|example|mockcorp|fakeinc)\.(com|net|io|org)$'"
+
+        # 4. Block former / expired roles
+        ex_bulk = r'ex-|former |previous |past |retired|emeritus'
+        title_expr_bulk = "COALESCE(designation, raw_payload->>'current_title', raw_payload->>'Designation', raw_payload->>'designation', persona, '')"
+        query += f" AND {title_expr_bulk} !~* '{ex_bulk}'"
+    # ──────────────────────────────────────────────────────────────────────────
+
     if exclude_drafted:
         query += " AND (email_status IS NULL OR email_status = '')"
     
@@ -104,6 +157,7 @@ def get_leads(
     if validation_status:
         query += " AND validation_status = %s"
         params.append(validation_status)
+
         
     # count total - handle multi-line select correctly
     count_query = f"SELECT COUNT(*) FROM ({query}) as total_count"
@@ -157,6 +211,7 @@ def get_leads(
             "city": city,
             "country": country,
             "linkedin": r["linkedin_url"],
+            "source": r.get("source", ""),
             "validation_status": r["validation_status"],
             "email_status": r.get("email_status"),
             "is_unsubscribed": r.get("is_unsubscribed", False),
@@ -244,6 +299,37 @@ def update_lead_endpoint(lead_id: int, req: LeadUpdate, user_id: Optional[str] =
 def get_lead_activity(lead_id: int):
     logs = get_activity_log(lead_id)
     return logs
+
+@router.post("/leads")
+def create_manual_lead(req: LeadCreate, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    from app.models.lead import insert_lead
+    
+    payload = {
+        "designation": req.designation,
+        "city": req.city,
+        "country": req.country,
+        "phone": req.phone,
+        "manual_entry": True
+    }
+    
+    try:
+        insert_lead(
+            req.first_name,
+            req.last_name,
+            req.email,
+            "", # domain
+            req.linkedin_url,
+            req.company_name,
+            req.source or "direct",
+            payload,
+            fit_score=0,
+            persona=req.persona or "OTHER",
+            phone=req.phone,
+            user_id=user_id
+        )
+        return {"message": "Lead created successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/leads/bulk-labels")
 def bulk_labels(req: BulkLabelRequest):
@@ -410,11 +496,12 @@ def bulk_import(
                         country = EXCLUDED.country,
                         persona = EXCLUDED.persona,
                         phone = EXCLUDED.phone,
-                        user_id = COALESCE(leads_raw.user_id, EXCLUDED.user_id),
+                        source = EXCLUDED.source,
+                        user_id = COALESCE(EXCLUDED.user_id, leads_raw.user_id),
                         raw_payload = EXCLUDED.raw_payload
                 """, (
                     f_name, l_name, email, company, linkedin, 
-                    city, country, persona, phone, "import", db_user_id, 
+                    city, country, persona, phone, "csv_import", db_user_id, 
                     json.dumps(lead)
                 ))
                 if cur.rowcount > 0:

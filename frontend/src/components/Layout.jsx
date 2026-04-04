@@ -71,6 +71,9 @@ const Layout = () => {
           <Link to="/dashboard/family-offices" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'family-offices' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'family-offices' ? 'text-white' : 'text-[#94a3b8]'}`}>🏢</span> Family Offices
           </Link>
+          <Link to="/dashboard/companies" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'companies' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+            <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'companies' ? 'text-white' : 'text-[#94a3b8]'}`}>📊</span> Company Database
+          </Link>
           <Link to="/dashboard/emails" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'emails' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'emails' ? 'text-white' : 'text-[#94a3b8]'}`}>✉️</span> Email Drafts
           </Link>

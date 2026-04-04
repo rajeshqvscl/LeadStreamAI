@@ -3,10 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import {
   Rocket, Search, ChevronDown, CheckCircle, Mail, User, Linkedin,
   Loader2, Sparkles, Tag, Plus, ChevronRight, X, AlertTriangle,
-  ChevronLeft, ChevronUp, FileSpreadsheet, Download
+  ChevronLeft, ChevronUp, FileSpreadsheet, Download, Trash2, Pencil
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
-import Papa from 'papaparse';
 import axios from 'axios';
 import api from '../services/api';
 
@@ -31,10 +29,14 @@ const Leads = () => {
 
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
   const [isBulkActionLoading, setIsBulkActionLoading] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const fileInputRef = useRef(null);
 
   const [showAddModal, setShowAddModal] = useState(false);
+  const [isCreatingLead, setIsCreatingLead] = useState(false);
+  const [newLeadData, setNewLeadData] = useState({
+    first_name: '', last_name: '', email: '', company_name: '',
+    designation: '', phone: '', city: '', country: '',
+    linkedin_url: '', persona: 'OTHER'
+  });
   const [notification, setNotification] = useState(null);
 
   const [selectedLeads, setSelectedLeads] = useState(new Set());
@@ -166,6 +168,53 @@ const Leads = () => {
       showNotification('error', 'Extraction failed: ' + (err.response?.data?.detail || err.message));
     } finally {
       setDiscoveryLoading(false);
+    }
+  };
+
+  const handleCreateManualLead = async (e) => {
+    e.preventDefault();
+    setIsCreatingLead(true);
+    try {
+      await api.post('/api/leads', newLeadData);
+      showNotification('success', 'Lead created successfully and added to pipeline.');
+      setShowAddModal(false);
+      setNewLeadData({
+        first_name: '', last_name: '', email: '', company_name: '',
+        designation: '', phone: '', city: '', country: '',
+        linkedin_url: '', persona: 'OTHER'
+      });
+      fetchLeads();
+    } catch (err) {
+      showNotification('error', 'Failed to create lead: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setIsCreatingLead(false);
+    }
+  };
+
+  const handleDeleteSingle = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this lead? This action cannot be undone.')) return;
+    try {
+      await api.post('/api/leads/bulk-delete', [id]);
+      showNotification('success', 'Lead deleted successfully.');
+      fetchLeads();
+    } catch (err) {
+      showNotification('error', 'Failed to delete lead: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedLeads);
+    if (!window.confirm(`Are you sure you want to delete ${ids.length} selected leads? This action cannot be undone.`)) return;
+    setIsBulkActionLoading(true);
+    try {
+      await api.post('/api/leads/bulk-delete', ids);
+      showNotification('success', `${ids.length} leads deleted successfully.`);
+      setSelectedLeads(new Set());
+      fetchLeads();
+    } catch (err) {
+      showNotification('error', 'Failed to delete leads: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setIsBulkActionLoading(false);
     }
   };
 
@@ -304,73 +353,6 @@ const Leads = () => {
     setTargetLeadIds([]);
   };
 
-  const handleFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    setIsSyncing(true);
-    const reader = new FileReader();
-
-    const processData = async (data) => {
-      try {
-        // Clean data: removing any empty rows
-        const cleanData = data.filter(row => row.email || row.Email || row.Name || row.name);
-        
-        const response = await api.post('/api/leads/bulk-import', cleanData);
-        showNotification('success', response.data.message || 'Import successful');
-        fetchLeads();
-      } catch (err) {
-        showNotification('error', 'Import failed: ' + (err.response?.data?.detail || err.message));
-      } finally {
-        setIsSyncing(false);
-        if (fileInputRef.current) fileInputRef.current.value = "";
-      }
-    };
-
-    if (file.name.endsWith('.csv')) {
-      Papa.parse(file, {
-        header: true,
-        complete: (results) => {
-          processData(results.data);
-        },
-        error: (err) => {
-          showNotification('error', 'CSV parse failed: ' + err.message);
-          setIsSyncing(false);
-        }
-      });
-    } else {
-      reader.onload = (evt) => {
-        const bstr = evt.target.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
-        const wsname = wb.SheetNames[0];
-        const ws = wb.Sheets[wsname];
-        const data = XLSX.utils.sheet_to_json(ws);
-        processData(data);
-      };
-      reader.readAsBinaryString(file);
-    }
-  };
-
-  const downloadTemplate = () => {
-    const template = [
-      { 
-        Name: 'John Doe', 
-        email: 'john@example.com', 
-        company_name: 'Acme Corp', 
-        linkedin_url: 'https://linkedin.com/in/johndoe', 
-        Designation: 'Founder & CEO',
-        city: 'New York',
-        country: 'USA',
-        persona: 'FOUNDER',
-        phone: '+1 234 567 8900'
-      }
-    ];
-    const ws = XLSX.utils.json_to_sheet(template);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "LeadStream_Template");
-    XLSX.writeFile(wb, "LeadStreamAI_Import_Template.xlsx");
-  };
-
   const removeLabel = async (leadId, label) => {
     try {
       await axios.post(`http://localhost:8000/api/leads/${leadId}/remove-label`, { label });
@@ -387,41 +369,15 @@ const Leads = () => {
           <h1 className="text-2xl font-bold text-white">Lead Pipeline</h1>
           <p className="text-slate-400 text-sm mt-1">Manage and organize your AI-triaged investment leads via list view.</p>
         </div>
-      </div>
-
-      <div className="flex flex-col sm:flex-row items-center gap-4 mb-10 mt-6 animate-in slide-in-from-top-4 duration-500">
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleFileUpload}
-          className="hidden"
-          accept=".csv, .xlsx, .xls"
-        />
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isSyncing}
-          className="flex-1 btn btn-ghost py-3.5 text-base border-dashed hover:border-blue-500/50 group transition-all duration-300 w-full"
-        >
-          {isSyncing ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <FileSpreadsheet className="w-5 h-5 mr-2 text-indigo-400 group-hover:scale-110 transition-transform" />}
-          {isSyncing ? 'Syncing...' : 'Sync Excel / CSV'}
-        </button>
-
         <button
           onClick={() => setShowAddModal(true)}
-          className="flex-1 btn btn-ghost py-3.5 text-base border-dashed hover:border-blue-500/50 group w-full"
+          className="btn btn-primary px-6 py-2.5 text-[11px] font-black uppercase tracking-widest rounded-xl flex items-center gap-2 shadow-blue-500/20"
         >
-          <Plus className="w-5 h-5 mr-2 text-blue-400 group-hover:rotate-90 transition-transform" /> New Lead
-        </button>
-
-        <button
-          onClick={downloadTemplate}
-          className="flex-1 btn btn-primary py-3.5 text-base shadow-blue-500/20 group w-full"
-        >
-          <Download className="w-5 h-5 mr-2 group-hover:-translate-y-1 transition-transform" /> Download Template
+          <Plus className="w-4 h-4" /> New Lead
         </button>
       </div>
 
-      <div className="bg-gradient-to-br from-[#1e293b]/70 to-[#0f172a]/90 border border-blue-500/20 rounded-[20px] p-6 mb-8 relative group shadow-heavy">
+      <div className="bg-gradient-to-br from-[#1e293b]/70 to-[#0f172a]/90 border border-blue-500/20 rounded-[20px] p-6 mb-8 mt-6 relative group shadow-heavy">
         <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/5 blur-[80px] rounded-full pointer-events-none"></div>
 
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mb-8">
@@ -511,6 +467,7 @@ const Leads = () => {
                   <Mail className="w-3 h-3" /> Target Email Address
                 </label>
                 <input
+                  key="email-input"
                   type="email"
                   name="email"
                   required
@@ -524,6 +481,7 @@ const Leads = () => {
                   <Linkedin className="w-3 h-3" /> LinkedIn Profile URL
                 </label>
                 <input
+                  key="linkedin-input"
                   type="url"
                   name="linkedin_url"
                   required
@@ -725,6 +683,14 @@ const Leads = () => {
           >
             <Tag className="w-4 h-4 mr-2" /> Assign Labels
           </button>
+          <button
+            onClick={handleBulkDelete}
+            disabled={isBulkActionLoading}
+            className="btn btn-ghost py-2 px-4 shadow-none bg-rose-500/5 border-rose-500/10 hover:bg-rose-500/10 text-rose-400 font-bold disabled:opacity-50"
+          >
+            {isBulkActionLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+            Delete Selected
+          </button>
         </div>
       </div>
 
@@ -875,12 +841,27 @@ const Leads = () => {
                       </div>
                     </td>
                     <td className="text-right">
-                      <button
-                        onClick={() => navigate(`/dashboard/leads/${lead.id}`)}
-                        className="p-2 bg-slate-800/50 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors inline-block"
-                      >
-                        <ChevronRight className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => navigate(`/dashboard/leads/${lead.id}`)}
+                          title="Edit Lead"
+                          className="p-2 hover:bg-blue-500/10 rounded-lg text-slate-500 hover:text-blue-400 transition-all shadow-sm"
+                        >
+                          <Pencil className="w-5 h-5" />
+                        </button>
+                        <button
+                          onClick={() => navigate(`/dashboard/leads/${lead.id}`)}
+                          className="p-2 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all shadow-sm group"
+                        >
+                          <ChevronRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteSingle(lead.id); }}
+                          className="p-2 hover:bg-rose-500/10 rounded-lg text-slate-500 hover:text-rose-400 transition-all shadow-sm"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -938,34 +919,112 @@ const Leads = () => {
           </button>
         </div>
         <div className="drawer-body">
-          <form className="space-y-4">
-            <div className="form-group">
-              <label>Full Name</label>
-              <input type="text" className="form-control" placeholder="John Doe" />
+          <form className="space-y-4" onSubmit={handleCreateManualLead} id="manual-lead-form">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="form-group">
+                <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">First Name</label>
+                <input 
+                  type="text" required className="form-control" placeholder="John" 
+                  value={newLeadData.first_name}
+                  onChange={e => setNewLeadData({...newLeadData, first_name: e.target.value})}
+                />
+              </div>
+              <div className="form-group">
+                <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Last Name</label>
+                <input 
+                  type="text" className="form-control" placeholder="Doe" 
+                  value={newLeadData.last_name}
+                  onChange={e => setNewLeadData({...newLeadData, last_name: e.target.value})}
+                />
+              </div>
             </div>
+            
             <div className="form-group">
-              <label>Email Address</label>
-              <input type="email" className="form-control" placeholder="john@example.com" />
+              <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Email Address</label>
+              <input 
+                type="email" required className="form-control" placeholder="john@example.com" 
+                value={newLeadData.email}
+                onChange={e => setNewLeadData({...newLeadData, email: e.target.value})}
+              />
             </div>
+
             <div className="form-group">
-              <label>Target Role (Persona)</label>
-              <select className="form-control">
+              <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Designation / Job Title</label>
+              <input 
+                type="text" className="form-control" placeholder="Managing Director" 
+                value={newLeadData.designation}
+                onChange={e => setNewLeadData({...newLeadData, designation: e.target.value})}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="form-group">
+                <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">City</label>
+                <input 
+                  type="text" className="form-control" placeholder="New York" 
+                  value={newLeadData.city}
+                  onChange={e => setNewLeadData({...newLeadData, city: e.target.value})}
+                />
+              </div>
+              <div className="form-group">
+                <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Country</label>
+                <input 
+                  type="text" className="form-control" placeholder="USA" 
+                  value={newLeadData.country}
+                  onChange={e => setNewLeadData({...newLeadData, country: e.target.value})}
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Phone (Optional)</label>
+              <input 
+                type="text" className="form-control" placeholder="+1 234 567 890" 
+                value={newLeadData.phone}
+                onChange={e => setNewLeadData({...newLeadData, phone: e.target.value})}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Company</label>
+              <input 
+                type="text" className="form-control" placeholder="Acme Inc" 
+                value={newLeadData.company_name}
+                onChange={e => setNewLeadData({...newLeadData, company_name: e.target.value})}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Target Persona</label>
+              <select 
+                className="form-control cursor-pointer"
+                value={newLeadData.persona}
+                onChange={e => setNewLeadData({...newLeadData, persona: e.target.value})}
+              >
                 {personas.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
+
             <div className="form-group">
-              <label>Company</label>
-              <input type="text" className="form-control" placeholder="Acme Inc" />
-            </div>
-            <div className="form-group">
-              <label>LinkedIn URL</label>
-              <input type="url" className="form-control" placeholder="https://linkedin.com/in/..." />
+              <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">LinkedIn URL</label>
+              <input 
+                type="url" className="form-control" placeholder="https://linkedin.com/in/..." 
+                value={newLeadData.linkedin_url}
+                onChange={e => setNewLeadData({...newLeadData, linkedin_url: e.target.value})}
+              />
             </div>
           </form>
         </div>
         <div className="drawer-footer">
-          <button className="btn btn-ghost" onClick={() => setShowAddModal(false)}>Cancel</button>
-          <button className="btn btn-primary px-8">Create Lead</button>
+          <button className="btn btn-ghost px-6" onClick={() => setShowAddModal(false)}>Cancel</button>
+          <button 
+            type="submit" 
+            form="manual-lead-form" 
+            disabled={isCreatingLead}
+            className="btn btn-primary px-8"
+          >
+            {isCreatingLead ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create Lead'}
+          </button>
         </div>
       </div>
 

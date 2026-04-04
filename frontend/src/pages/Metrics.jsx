@@ -32,7 +32,7 @@ const Metrics = () => {
   }
 
   // Calculate derived metrics from dynamic API response
-  const totalLeads = data.total_leads || 1; 
+  const totalLeads = data.total_leads || 1;
   const validationRate = ((data.valid_leads / totalLeads) * 100).toFixed(1);
   const deliveryRate = data.sent > 0 ? ((data.delivered / data.sent) * 100).toFixed(1) : '0.0';
   const heatRate = data.engagement_rate.toFixed(1);
@@ -90,7 +90,7 @@ const Metrics = () => {
           <div className="text-3xl font-bold mb-2">{data.total_leads}</div>
           <div className="text-[10px] text-slate-500">Total active all sectors</div>
         </div>
-        
+
         <div className="flex-1 bg-slate-900/60 border border-white/5 rounded-xl p-5 border-t-2 border-t-indigo-500 relative overflow-hidden">
           <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">ACCURACY FLOW</div>
           <div className="text-3xl font-bold text-indigo-400 mb-2">{validationRate}%</div>

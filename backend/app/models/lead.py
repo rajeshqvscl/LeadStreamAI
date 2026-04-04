@@ -152,3 +152,4 @@ def save_email_draft(lead_id, draft):
         add_activity_log(lead_id, "DRAFT_GENERATED", "AI email draft generated and saved for review", "system")
     except:
         pass
+        pass

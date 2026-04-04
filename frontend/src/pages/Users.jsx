@@ -25,7 +25,9 @@ const Users = () => {
     email: '',
     full_name: '',
     password: '',
-    role: 'USER'
+    role: 'USER',
+    is_approved: false,
+    has_db_access: false
   });
 
   const fetchUsers = async () => {
@@ -55,7 +57,9 @@ const Users = () => {
         email: user.email,
         full_name: user.full_name || '',
         password: '',
-        role: user.role
+        role: user.role,
+        is_approved: user.is_approved,
+        has_db_access: user.has_db_access
       });
     } else {
       setEditingUser(null);
@@ -64,21 +68,24 @@ const Users = () => {
         email: '',
         full_name: '',
         password: '',
-        role: 'USER'
+        role: 'USER',
+        is_approved: true, // Manual creation defaults to approved
+        has_db_access: false
       });
     }
     setShowDrawer(true);
   };
 
-  const handleSubmit = async (e) => {
-    if (e) e.preventDefault();
+  const handleSubmit = async (e, overrideData = null) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const dataToSubmit = overrideData || formData;
     try {
-      if (editingUser) {
-        const payload = { ...formData };
+      if (editingUser || overrideData) {
+        const payload = { ...dataToSubmit };
         if (!payload.password) {
           delete payload.password;
         }
-        await api.put(`/api/users/${editingUser.id}`, payload);
+        await api.put(`/api/users/${dataToSubmit.id || editingUser.id}`, payload);
       } else {
         await api.post('/api/users/', formData);
       }
@@ -169,22 +176,23 @@ const Users = () => {
               <tr className="bg-slate-900/50">
                 <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Identity</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Access Level</th>
-                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Account Status</th>
-                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Registration</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Approval</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">DB Access</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider text-right">Settings</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5 text-[13px]">
               {isLoading ? (
-                <tr><td colSpan="5" className="px-6 py-20 text-center"><Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto" /></td></tr>
+                <tr><td colSpan="6" className="px-6 py-20 text-center"><Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto" /></td></tr>
               ) : users.length === 0 ? (
-                <tr><td colSpan="5" className="px-6 py-20 text-center text-slate-500">No users found match the current criteria.</td></tr>
+                <tr><td colSpan="6" className="px-6 py-20 text-center text-slate-500">No users found match the current criteria.</td></tr>
               ) : users.map(user => (
                 <tr key={user.id} className="hover:bg-white/5 transition-colors group">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-white shadow-lg ${user.role === 'ADMIN' ? 'bg-gradient-to-br from-red-600 to-orange-600 shadow-red-600/20' :
-                          'bg-gradient-to-br from-blue-600 to-cyan-600 shadow-blue-600/20'
+                        'bg-gradient-to-br from-blue-600 to-cyan-600 shadow-blue-600/20'
                         }`}>
                         {user.username.substring(0, 1).toUpperCase()}
                       </div>
@@ -203,14 +211,42 @@ const Users = () => {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
-                      <div className={`w-1.5 h-1.5 rounded-full ${user.is_active ? 'bg-green-500 shadow-[0_0_8px_#10b981]' : 'bg-red-500 shadow-[0_0_8px_#ef4444]'}`}></div>
-                      <span className={`text-[11px] font-extrabold uppercase tracking-tighter ${user.is_active ? 'text-green-500' : 'text-red-500'}`}>
-                        {user.is_active ? 'Authorized' : 'Suspended'}
-                      </span>
+                       {user.is_approved ? (
+                         <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-500">
+                           <Check className="w-3 h-3" />
+                           <span className="text-[9px] font-black uppercase">Approved</span>
+                         </div>
+                       ) : (
+                         <button 
+                           onClick={() => handleSubmit({ preventDefault: () => {} }, { ...user, is_approved: true, id: user.id })}
+                           className="flex items-center gap-1.5 px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 text-amber-500 hover:bg-amber-500/20 transition-all"
+                         >
+                           <RotateCcw className="w-3 h-3" />
+                           <span className="text-[9px] font-black uppercase">Pending</span>
+                         </button>
+                       )}
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-[11px] text-slate-500 font-medium whitespace-nowrap">
-                    {new Date(user.created_at).toLocaleDateString()}
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2">
+                       <button 
+                         onClick={() => {
+                           const newStatus = !user.has_db_access;
+                           api.put(`/api/users/${user.id}`, { has_db_access: newStatus }).then(() => fetchUsers());
+                         }}
+                         className={`px-2 py-1 rounded border transition-all text-[9px] font-black uppercase ${user.has_db_access ? 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400' : 'bg-slate-800 border-white/5 text-slate-500'}`}
+                       >
+                         {user.has_db_access ? 'Unlocked' : 'Locked'}
+                       </button>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-1.5 h-1.5 rounded-full ${user.is_active ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                      <span className={`text-[10px] font-bold uppercase ${user.is_active ? 'text-green-500' : 'text-red-500'}`}>
+                        {user.is_active ? 'Active' : 'Suspended'}
+                      </span>
+                    </div>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -221,7 +257,7 @@ const Users = () => {
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      
+
                       {user.is_active ? (
                         <button
                           onClick={() => handleDelete(user.id)}
