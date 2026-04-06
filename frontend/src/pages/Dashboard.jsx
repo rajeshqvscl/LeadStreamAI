@@ -95,7 +95,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 30000);
+    const interval = setInterval(fetchData, 10000); // High-frequency 10s polling for real-time Command Center
     return () => clearInterval(interval);
   }, [isAdmin]);
 

@@ -195,7 +195,7 @@ async def dispatch_admin_report(user_id: Optional[str] = Header(None, alias="X-U
         
         stats = []
         for label, interval in periods:
-            # Leads Ingested
+            # Leads Ingested - Accurate record count from leads_raw
             cur.execute(f"SELECT COUNT(*) FROM leads_raw WHERE created_at > NOW() - INTERVAL '{interval}'")
             ingested = cur.fetchone()[0] or 0
             
@@ -203,8 +203,8 @@ async def dispatch_admin_report(user_id: Optional[str] = Header(None, alias="X-U
             cur.execute(f"SELECT COUNT(*) FROM activity_log WHERE action IN ('SENT', 'EMAIL_SENT') AND created_at > NOW() - INTERVAL '{interval}'")
             sent = cur.fetchone()[0] or 0
             
-            # Reverts (assuming manual tag or status change as 'REVERT' or 'REPLIED' in activity_log)
-            cur.execute(f"SELECT COUNT(*) FROM activity_log WHERE action IN ('REVERT', 'REPLIED', 'STATUS_CHANGE') AND details ILIKE '%revert%' AND created_at > NOW() - INTERVAL '{interval}'")
+            # Reverts (Replies)
+            cur.execute(f"SELECT COUNT(*) FROM activity_log WHERE action IN ('REVERT', 'REPLIED') AND created_at > NOW() - INTERVAL '{interval}'")
             reverts = cur.fetchone()[0] or 0
             
             stats.append({
@@ -214,7 +214,26 @@ async def dispatch_admin_report(user_id: Optional[str] = Header(None, alias="X-U
                 "reverts": reverts
             })
 
-        # 3. Create Executive Summary Template
+        # 3. Intelligence Briefing (Summarized Recent Interactions)
+        cur.execute("""
+            SELECT u.username, al.action, COUNT(*) as volume
+            FROM activity_log al
+            JOIN users u ON al.user_id = u.id
+            WHERE al.created_at > NOW() - INTERVAL '24 hours'
+            GROUP BY u.username, al.action
+            ORDER BY volume DESC
+            LIMIT 15
+        """)
+        raw_intelligence = cur.fetchall()
+        intelligence_brief = ""
+        if not raw_intelligence:
+            intelligence_brief = "<li style='margin-bottom: 8px;'>Steady State: No critical operations reported in the last 24 hours.</li>"
+        else:
+            for intel in raw_intelligence:
+                action_name = intel['action'].replace('_', ' ').capitalize()
+                intelligence_brief += f"<li style='margin-bottom: 8px;'><b>{intel['username']}</b> performed {action_name} ({intel['volume']} unit{'s' if intel['volume'] > 1 else ''})</li>"
+
+        # 4. Create Executive Summary Template
         html = f"""
         <html>
         <body style="font-family: 'Inter', Arial, sans-serif; background-color: #0d1117; color: #c9d1d9; margin: 0; padding: 40px;">
@@ -250,7 +269,14 @@ async def dispatch_admin_report(user_id: Optional[str] = Header(None, alias="X-U
                 </div>
             """
             
-        html += """
+        html += f"""
+                <div style="margin-top: 40px; background: #0d1117; border-radius: 16px; border: 1px solid #30363d; padding: 25px;">
+                    <h3 style="color: #ffffff; font-size: 11px; font-weight: 900; text-transform: uppercase; margin-bottom: 20px; letter-spacing: 1px; border-bottom: 1px solid #30363d; padding-bottom: 10px;">Recent System Intelligence Brief (24h)</h3>
+                    <ul style="list-style-type: none; padding: 0; margin: 0; font-size: 13px; color: #c9d1d9;">
+                        {intelligence_brief}
+                    </ul>
+                </div>
+                
                 <div style="margin-top: 40px; padding: 20px; text-align: center; color: #8b949e; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; border-top: 1px solid #30363d;">
                     DISPATCHED BY LeadStream AI SYSTEM • {gen_time}
                 </div>

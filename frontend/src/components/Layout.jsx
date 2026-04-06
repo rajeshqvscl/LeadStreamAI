@@ -168,6 +168,8 @@ const Layout = () => {
                     onClick={() => { 
                       localStorage.removeItem('token'); 
                       localStorage.removeItem('user'); 
+                      localStorage.removeItem('token_admin');
+                      localStorage.removeItem('user_admin');
                       window.location.href = '/login?logout=success';
                     }} 
                     className="block w-full text-left px-3.5 py-2.5 text-[13px] text-[#f43f5e] font-medium hover:bg-white/5 transition-colors"

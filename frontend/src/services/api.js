@@ -8,12 +8,12 @@ const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('token') || localStorage.getItem('token_admin');
   if (token && token !== 'undefined') {
     config.headers.Authorization = `Bearer ${token}`;
   }
   
-  const userStr = localStorage.getItem('user');
+  const userStr = localStorage.getItem('user') || localStorage.getItem('user_admin');
   if (userStr) {
     try {
       const user = JSON.parse(userStr);

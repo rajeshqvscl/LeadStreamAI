@@ -176,19 +176,15 @@ const Login = () => {
             </span>
           </button>
 
-          <div className="flex items-center gap-3 my-6">
-            <div className="flex-1 h-px bg-white/5"></div>
-            <span className="text-[11px] text-[#4a5068] uppercase tracking-widest font-semibold">Or continue with</span>
-            <div className="flex-1 h-px bg-white/5"></div>
+          <div className="text-center mt-6">
+            <button 
+              type="button"
+              onClick={() => navigate('/admin')}
+              className="text-[10px] font-black text-slate-600 uppercase tracking-[2px] transition-all hover:text-blue-500 hover:tracking-[3px]"
+            >
+              🔒 Staff Entry Portal
+            </button>
           </div>
-
-          <a
-            href={`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/api/auth/google/login`}
-            className="flex items-center justify-center gap-2.5 w-full py-3 px-5 bg-white/5 text-[#c8cdd8] border border-white/10 rounded-xl text-[13px] font-semibold transition-all hover:bg-white/10 hover:text-white hover:border-white/20"
-          >
-            <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" alt="G" className="w-[18px] h-[18px]" />
-            Sign in with Google
-          </a>
         </form>
 
         <div className="text-center mt-6 pt-5 border-t border-white/5">

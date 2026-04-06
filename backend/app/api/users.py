@@ -16,6 +16,8 @@ class UserBase(BaseModel):
     full_name: Optional[str] = None
     role: str = "USER"
     is_active: bool = True
+    is_approved: bool = False
+    has_db_access: bool = False
 
 class UserCreate(UserBase):
     password: str
@@ -26,6 +28,8 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
+    is_approved: Optional[bool] = None
+    has_db_access: Optional[bool] = None
     password: Optional[str] = None
 
 @router.get("/users/")
@@ -176,23 +180,36 @@ def get_user_productivity(user_id: Optional[str] = Header(None, alias="X-User-Id
         if not caller or caller['role'] != 'ADMIN':
             raise HTTPException(status_code=403, detail="Unauthorized: Admin access required")
             
+        # 1. Count actual leads from leads_raw
+        cur.execute("""
+            SELECT u.username, u.full_name, COUNT(l.id) as count
+            FROM users u
+            LEFT JOIN leads_raw l ON u.id = l.user_id
+            WHERE l.created_at > NOW() - INTERVAL '30 days'
+            GROUP BY u.username, u.full_name
+        """)
+        lead_rows = cur.fetchall()
+        
+        # 2. Count other activities from activity_log
         cur.execute("""
             SELECT u.username, u.full_name, al.action, COUNT(*) as count
             FROM activity_log al
             JOIN users u ON al.user_id = u.id
             WHERE al.created_at > NOW() - INTERVAL '30 days'
+            AND al.action NOT IN ('LEAD_SEARCH', 'BULK_INGESTION', 'LEAD_INGESTED')
             GROUP BY u.username, u.full_name, al.action
-            ORDER BY count DESC
         """)
-        rows = cur.fetchall()
-        
-        # Mapping actions to standard categories for the chart
-        # LEAD_SEARCH, BULK_INGESTION -> leads
-        # BULK_DRAFT_GENERATE, SENT -> outreach
-        # BULK_DOMAIN_APPROVE -> valid
+        activity_rows = cur.fetchall()
         
         stats = {}
-        for r in rows:
+        
+        # Initialize with lead counts
+        for r in lead_rows:
+            uname = r['full_name'] or r['username']
+            stats[uname] = {"name": uname, "leads": r['count'], "outreach": 0, "valid": 0}
+            
+        # Add activity counts
+        for r in activity_rows:
             uname = r['full_name'] or r['username']
             if uname not in stats:
                 stats[uname] = {"name": uname, "leads": 0, "outreach": 0, "valid": 0}
@@ -200,15 +217,10 @@ def get_user_productivity(user_id: Optional[str] = Header(None, alias="X-User-Id
             action = r['action']
             count = r['count']
             
-            if action in ('LEAD_SEARCH', 'BULK_INGESTION', 'LEAD_INGESTED'):
-                stats[uname]['leads'] += count
-            elif action in ('BULK_DRAFT_GENERATE', 'SENT', 'EMAIL_SENT'):
+            if action in ('BULK_DRAFT_GENERATE', 'SENT', 'EMAIL_SENT'):
                 stats[uname]['outreach'] += count
             elif action in ('BULK_DOMAIN_APPROVE'):
                 stats[uname]['valid'] += count
-            else:
-                # Catch-all for other productivity metrics
-                stats[uname]['leads'] += count 
             
         return list(stats.values())
     finally:
@@ -232,7 +244,7 @@ def get_active_users(user_id: Optional[str] = Header(None, alias="X-User-Id")):
             SELECT DISTINCT u.id, u.username, u.full_name, u.email, MAX(al.created_at) as last_active
             FROM users u
             JOIN activity_log al ON u.id = al.user_id
-            WHERE al.created_at > NOW() - INTERVAL '24 hours'
+            WHERE al.created_at > NOW() - INTERVAL '15 minutes'
             GROUP BY u.id, u.username, u.full_name, u.email
             ORDER BY last_active DESC
         """)
