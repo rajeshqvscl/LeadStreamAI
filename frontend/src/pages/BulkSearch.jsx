@@ -56,6 +56,13 @@ const BulkSearch = () => {
     { id: 'NUTRA', label: 'Nutraceutical (M&A)' },
     { id: 'CHEMICAL', label: 'Chemical (M&A)' },
     { id: 'FOOD_EXT', label: 'Food Extracts (M&A)' },
+    { id: 'EV', label: 'EV (Electric Vehicles)' },
+    { id: 'DRONES', label: 'Drones' },
+    { id: 'FINTECH', label: 'Fintech' },
+    { id: 'BEAUTY', label: 'Skincare/Beauty Care' },
+    { id: 'REAL_ESTATE', label: 'Real Estate' },
+    { id: 'FMCG', label: 'FMCG' },
+    { id: 'CONSUMER', label: 'Consumes' },
     { id: 'TEXTILE', label: 'Textile (Clothing/Brands)' }
   ];
 
@@ -270,7 +277,7 @@ const BulkSearch = () => {
       showNotification('error', 'Please enter a valid Google Sheet URL.');
       return;
     }
-    
+
     let exportUrl;
     try {
       if (rawUrl.includes('/d/')) {
@@ -310,11 +317,11 @@ const BulkSearch = () => {
 
   const downloadTemplate = () => {
     const template = [
-      { 
-        Name: 'John Doe', 
-        email: 'john@example.com', 
-        company_name: 'Acme Corp', 
-        linkedin_url: 'https://linkedin.com/in/johndoe', 
+      {
+        Name: 'John Doe',
+        email: 'john@example.com',
+        company_name: 'Acme Corp',
+        linkedin_url: 'https://linkedin.com/in/johndoe',
         Designation: 'Founder & CEO',
         city: 'New York',
         country: 'USA',
@@ -407,165 +414,165 @@ const BulkSearch = () => {
         {syncMode === 'rocketreach' ? (
           <form onSubmit={handleBulkSubmit}>
             <div className="grid grid-cols-1 md:grid-cols-12 gap-x-8 gap-y-6 mb-8">
-            <div className="space-y-4 md:col-span-6 relative">
-              <label className="text-[10px] font-black text-indigo-400 uppercase tracking-[2px] ml-1 flex items-center gap-2">
-                <Tag className="w-3 h-3" /> Target Persona
-              </label>
-              <div
-                className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3.5 px-4 text-[14px] font-medium text-white cursor-pointer flex justify-between items-center group-hover:border-indigo-500/30 transition-all"
-                onClick={() => setShowPersonaDropdown(!showPersonaDropdown)}
-              >
-                <span className={selectedPersonas.length === 0 ? "text-slate-700" : "text-white"}>
-                  {selectedPersonas.length === 0
-                    ? "Select target personas..."
-                    : selectedPersonas.length <= 3
-                      ? selectedPersonas.join(', ')
-                      : `${selectedPersonas.length} Roles Selected`}
-                </span>
-                <ChevronRight className={`w-4 h-4 text-slate-500 transition-transform ${showPersonaDropdown ? 'rotate-90' : ''}`} />
+              <div className="space-y-4 md:col-span-6 relative">
+                <label className="text-[10px] font-black text-indigo-400 uppercase tracking-[2px] ml-1 flex items-center gap-2">
+                  <Tag className="w-3 h-3" /> Target Persona
+                </label>
+                <div
+                  className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3.5 px-4 text-[14px] font-medium text-white cursor-pointer flex justify-between items-center group-hover:border-indigo-500/30 transition-all"
+                  onClick={() => setShowPersonaDropdown(!showPersonaDropdown)}
+                >
+                  <span className={selectedPersonas.length === 0 ? "text-slate-700" : "text-white"}>
+                    {selectedPersonas.length === 0
+                      ? "Select target personas..."
+                      : selectedPersonas.length <= 3
+                        ? selectedPersonas.join(', ')
+                        : `${selectedPersonas.length} Roles Selected`}
+                  </span>
+                  <ChevronRight className={`w-4 h-4 text-slate-500 transition-transform ${showPersonaDropdown ? 'rotate-90' : ''}`} />
+                </div>
+
+                {showPersonaDropdown && (
+                  <>
+                    <div className="fixed inset-0 z-[100]" onClick={() => setShowPersonaDropdown(false)}></div>
+                    <div className="absolute top-full left-0 right-0 mt-3 bg-[#0f172a] border border-white/10 rounded-[14px] shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                      <div className="max-h-[240px] overflow-y-auto p-2 space-y-1">
+                        {personaOptions.map(p => {
+                          const isSelected = selectedPersonas.includes(p);
+                          return (
+                            <div
+                              key={p}
+                              onClick={() => {
+                                setSelectedPersonas(prev =>
+                                  isSelected ? prev.filter(x => x !== p) : [...prev, p]
+                                );
+                              }}
+                              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all ${isSelected ? 'bg-indigo-600/10 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
+                            >
+                              <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${isSelected ? 'bg-indigo-600 border-indigo-500' : 'border-slate-700 bg-transparent'}`}>
+                                {isSelected && <Check className="w-3 h-3 text-white" />}
+                              </div>
+                              <span className="text-[13px] font-bold">{p}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
-              {showPersonaDropdown && (
-                <>
-                  <div className="fixed inset-0 z-[100]" onClick={() => setShowPersonaDropdown(false)}></div>
-                  <div className="absolute top-full left-0 right-0 mt-3 bg-[#0f172a] border border-white/10 rounded-[14px] shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-top-2">
-                    <div className="max-h-[240px] overflow-y-auto p-2 space-y-1">
-                      {personaOptions.map(p => {
-                        const isSelected = selectedPersonas.includes(p);
-                        return (
-                          <div
-                            key={p}
-                            onClick={() => {
-                              setSelectedPersonas(prev =>
-                                isSelected ? prev.filter(x => x !== p) : [...prev, p]
-                              );
-                            }}
-                            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all ${isSelected ? 'bg-indigo-600/10 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
-                          >
-                            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${isSelected ? 'bg-indigo-600 border-indigo-500' : 'border-slate-700 bg-transparent'}`}>
-                              {isSelected && <Check className="w-3 h-3 text-white" />}
-                            </div>
-                            <span className="text-[13px] font-bold">{p}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
+              <div className="space-y-4 md:col-span-6 relative">
+                <label className="text-[10px] font-black text-blue-400 uppercase tracking-[2px] ml-1 flex items-center gap-2">
+                  <Building2 className="w-3 h-3" /> Industry / Sector
+                </label>
+                <div className="relative group">
+                  <input
+                    type="text"
+                    placeholder="Seach or select industry..."
+                    className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3.5 px-4 text-[14px] font-medium text-white placeholder:text-slate-700 focus:outline-none focus:border-blue-500/30 transition-all pr-10"
+                    value={selectedIndustry || industrySearch}
+                    onFocus={() => setShowIndustryDropdown(true)}
+                    onChange={(e) => {
+                      setIndustrySearch(e.target.value);
+                      if (selectedIndustry) setSelectedIndustry('');
+                    }}
+                  />
+                  <ChevronRight className={`absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 transition-transform ${showIndustryDropdown ? 'rotate-90' : ''}`} />
+                </div>
 
-            <div className="space-y-4 md:col-span-6 relative">
-              <label className="text-[10px] font-black text-blue-400 uppercase tracking-[2px] ml-1 flex items-center gap-2">
-                <Building2 className="w-3 h-3" /> Industry / Sector
-              </label>
-              <div className="relative group">
+                {showIndustryDropdown && (
+                  <>
+                    <div className="fixed inset-0 z-[100]" onClick={() => setShowIndustryDropdown(false)}></div>
+                    <div className="absolute top-full left-0 right-0 mt-3 bg-[#0f172a] border border-white/10 rounded-[14px] shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                      <div className="max-h-[240px] overflow-y-auto p-2 space-y-1">
+                        {filteredIndustries.length === 0 ? (
+                          <div className="px-3 py-4 text-center text-slate-500 text-[11px] font-black uppercase tracking-widest">No matching sectors</div>
+                        ) : (
+                          filteredIndustries.map(s => (
+                            <div
+                              key={s.id}
+                              onClick={() => {
+                                setSelectedIndustry(s.label);
+                                setIndustrySearch(s.label);
+                                setShowIndustryDropdown(false);
+                              }}
+                              className={`px-3 py-2.5 rounded-lg cursor-pointer transition-all ${selectedIndustry === s.label ? 'bg-blue-600/10 text-blue-400' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
+                            >
+                              <span className="text-[13px] font-bold">{s.label}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="space-y-2 md:col-span-6">
+                <label className="text-[10px] font-black text-rose-400 uppercase tracking-[2px] ml-1 flex items-center gap-2">
+                  <MapPin className="w-3 h-3" /> Location
+                </label>
                 <input
                   type="text"
-                  placeholder="Seach or select industry..."
-                  className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3.5 px-4 text-[14px] font-medium text-white placeholder:text-slate-700 focus:outline-none focus:border-blue-500/30 transition-all pr-10"
-                  value={selectedIndustry || industrySearch}
-                  onFocus={() => setShowIndustryDropdown(true)}
-                  onChange={(e) => {
-                    setIndustrySearch(e.target.value);
-                    if (selectedIndustry) setSelectedIndustry('');
-                  }}
+                  name="bulk_location"
+                  placeholder="e.g. London, Dubai"
+                  className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3 px-4 text-[14px] font-medium text-white placeholder:text-slate-700 focus:outline-none focus:border-rose-500/30 focus:ring-1 focus:ring-rose-500/20 transition-all shadow-inner"
                 />
-                <ChevronRight className={`absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 transition-transform ${showIndustryDropdown ? 'rotate-90' : ''}`} />
               </div>
 
-              {showIndustryDropdown && (
-                <>
-                  <div className="fixed inset-0 z-[100]" onClick={() => setShowIndustryDropdown(false)}></div>
-                  <div className="absolute top-full left-0 right-0 mt-3 bg-[#0f172a] border border-white/10 rounded-[14px] shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-top-2">
-                    <div className="max-h-[240px] overflow-y-auto p-2 space-y-1">
-                      {filteredIndustries.length === 0 ? (
-                        <div className="px-3 py-4 text-center text-slate-500 text-[11px] font-black uppercase tracking-widest">No matching sectors</div>
-                      ) : (
-                        filteredIndustries.map(s => (
-                          <div
-                            key={s.id}
-                            onClick={() => {
-                              setSelectedIndustry(s.label);
-                              setIndustrySearch(s.label);
-                              setShowIndustryDropdown(false);
-                            }}
-                            className={`px-3 py-2.5 rounded-lg cursor-pointer transition-all ${selectedIndustry === s.label ? 'bg-blue-600/10 text-blue-400' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
-                          >
-                            <span className="text-[13px] font-bold">{s.label}</span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="space-y-2 md:col-span-6">
-              <label className="text-[10px] font-black text-rose-400 uppercase tracking-[2px] ml-1 flex items-center gap-2">
-                <MapPin className="w-3 h-3" /> Location
-              </label>
-              <input
-                type="text"
-                name="bulk_location"
-                placeholder="e.g. London, Dubai"
-                className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3 px-4 text-[14px] font-medium text-white placeholder:text-slate-700 focus:outline-none focus:border-rose-500/30 focus:ring-1 focus:ring-rose-500/20 transition-all shadow-inner"
-              />
-            </div>
-
-            <div className="space-y-2 md:col-span-6">
-              <label className="text-[10px] font-black text-amber-500 uppercase tracking-[2px] ml-1 flex items-center gap-2">
-                <Database className="w-3 h-3" /> Keywords
-              </label>
-              <input
-                type="text"
-                name="keyword"
-                placeholder="e.g. Multi-Family Office"
-                className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3 px-4 text-[14px] font-medium text-white placeholder:text-slate-700 focus:outline-none focus:border-amber-500/30 focus:ring-1 focus:ring-amber-500/20 transition-all shadow-inner"
-              />
-            </div>
-
-            <div className="md:col-span-12 py-4">
-              <div className="space-y-4 bg-black/30 p-6 rounded-[20px] border border-white/5">
-                <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-[3px]">
-                  <span className="text-slate-500">Extraction Capacity</span>
-                  <span className="text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-lg border border-indigo-500/20">{limit} Leads</span>
-                </div>
+              <div className="space-y-2 md:col-span-6">
+                <label className="text-[10px] font-black text-amber-500 uppercase tracking-[2px] ml-1 flex items-center gap-2">
+                  <Database className="w-3 h-3" /> Keywords
+                </label>
                 <input
-                  type="range"
-                  min="5"
-                  max="100"
-                  step="5"
-                  value={limit}
-                  onChange={(e) => setLimit(parseInt(e.target.value))}
-                  className="w-full h-1.5 bg-[#050810] rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                  type="text"
+                  name="keyword"
+                  placeholder="e.g. Multi-Family Office"
+                  className="w-full bg-[#050810] border border-white/5 rounded-[14px] py-3 px-4 text-[14px] font-medium text-white placeholder:text-slate-700 focus:outline-none focus:border-amber-500/30 focus:ring-1 focus:ring-amber-500/20 transition-all shadow-inner"
                 />
               </div>
-            </div>
-          </div>
 
-          <div className="pt-6 border-t border-white/5 flex flex-col sm:flex-row justify-between items-center gap-6">
-            <div className="flex items-center gap-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 py-2 rounded-[14px] bg-emerald-500/5 border border-emerald-500/10">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-              Verified Institutional Discovery Engine
+              <div className="md:col-span-12 py-4">
+                <div className="space-y-4 bg-black/30 p-6 rounded-[20px] border border-white/5">
+                  <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-[3px]">
+                    <span className="text-slate-500">Extraction Capacity</span>
+                    <span className="text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-lg border border-indigo-500/20">{limit} Leads</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="5"
+                    max="100"
+                    step="5"
+                    value={limit}
+                    onChange={(e) => setLimit(parseInt(e.target.value))}
+                    className="w-full h-1.5 bg-[#050810] rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                  />
+                </div>
+              </div>
             </div>
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full sm:w-auto px-10 py-3 rounded-[14px] bg-gradient-to-r from-indigo-600 via-purple-600 to-fuchsia-600 hover:from-indigo-500 hover:via-purple-500 hover:to-fuchsia-500 text-white font-black text-[12px] uppercase tracking-[3px] transition-all shadow-[0_0_20px_rgba(79,70,229,0.3)] hover:shadow-[0_0_30px_rgba(79,70,229,0.5)] disabled:opacity-50 flex items-center justify-center gap-2 active:scale-[0.98] cursor-pointer"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Discovery in progress...</span>
-                </>
-              ) : (
-                'Launch Extraction'
-              )}
-            </button>
-          </div>
-        </form>
+
+            <div className="pt-6 border-t border-white/5 flex flex-col sm:flex-row justify-between items-center gap-6">
+              <div className="flex items-center gap-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 py-2 rounded-[14px] bg-emerald-500/5 border border-emerald-500/10">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                Verified Institutional Discovery Engine
+              </div>
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full sm:w-auto px-10 py-3 rounded-[14px] bg-gradient-to-r from-indigo-600 via-purple-600 to-fuchsia-600 hover:from-indigo-500 hover:via-purple-500 hover:to-fuchsia-500 text-white font-black text-[12px] uppercase tracking-[3px] transition-all shadow-[0_0_20px_rgba(79,70,229,0.3)] hover:shadow-[0_0_30px_rgba(79,70,229,0.5)] disabled:opacity-50 flex items-center justify-center gap-2 active:scale-[0.98] cursor-pointer"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Discovery in progress...</span>
+                  </>
+                ) : (
+                  'Launch Extraction'
+                )}
+              </button>
+            </div>
+          </form>
         ) : (
           <div className="space-y-6 relative z-10">
             <input
@@ -592,7 +599,7 @@ const BulkSearch = () => {
                 </span>
                 <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Max 5MB • Auto-mapping enabled</span>
               </button>
-              
+
               <button
                 type="button"
                 onClick={downloadTemplate}
@@ -603,7 +610,7 @@ const BulkSearch = () => {
                 <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Standardized format</span>
               </button>
             </div>
-            
+
             <div className="flex items-center gap-4 text-slate-500 text-[10px] font-black uppercase tracking-[3px] py-2">
               <div className="flex-1 border-t border-white/5"></div>
               <span>OR DIRECT SYNC FROM CLOUD</span>
@@ -742,11 +749,10 @@ const BulkSearch = () => {
               <button
                 key={tab.key}
                 onClick={() => setSourceFilter(tab.key)}
-                className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all border ${
-                  sourceFilter === tab.key
+                className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all border ${sourceFilter === tab.key
                     ? 'bg-indigo-600 text-white border-indigo-500 shadow-lg shadow-indigo-600/20'
                     : 'bg-black/30 text-slate-500 border-white/5 hover:text-slate-300 hover:border-white/10'
-                }`}
+                  }`}
               >
                 {tab.label}
               </button>

@@ -5,13 +5,15 @@ import json
 import structlog
 from anthropic import Anthropic
 
+from pathlib import Path
+from dotenv import load_dotenv
+
+env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
+
 logger = structlog.get_logger(__name__)
 
-MODEL_NAME = "claude-sonnet-4-6"   # ✅ LATEST STABLE MODEL AS OF 2026
-PROMPT_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "prompts", "email_v1.txt")
-)
-
+MODEL_NAME = "claude-sonnet-4-6"
 
 class EmailGenerator:
 
@@ -23,18 +25,43 @@ class EmailGenerator:
 
         self.client = Anthropic(api_key=api_key)
 
-    def generate_email(self, lead: dict):
+    def _get_prompt(self, prompt_type: str):
+        """Fetch prompt content from dedicated database table."""
+        try:
+            from app.database import get_db_connection
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT content FROM prompts WHERE prompt_type = %s AND is_active = TRUE LIMIT 1", (prompt_type,))
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            return row['content'] if row else None
+        except Exception as e:
+            logger.error("error_fetching_prompt", type=prompt_type, error=str(e))
+            return None
 
-        with open(PROMPT_PATH, "r", encoding="utf-8") as prompt_file:
-            base_prompt = prompt_file.read().strip()
+    def generate_email(self, lead: dict, sender_name: str = "the team"):
+        # Fetch dynamic instructions from DB
+        email_prompt = self._get_prompt("EMAIL_GENERATION")
+        context_prompt = self._get_prompt("CONTEXT") or "We are a technology partner helping businesses with AI-driven efficiency."
+        
+        if not email_prompt:
+             # High-quality default if DB is empty
+             email_prompt = "You are a professional outreach expert. Write a concise, value-driven cold email."
 
-        lead_prompt = f"""
-Lead:
+        lead_info = f"""
+Lead Information:
 Name: {lead.get('first_name', '')} {lead.get('last_name', '')}
 Company: {lead.get('company_name', '')}
+Title/Role: {lead.get('designation', lead.get('persona', 'Executive'))}
+Industry Context: {lead.get('industry', 'Technology')}
+
+Sender Context:
+Sender Name: {sender_name}
+Company Mission: {context_prompt}
 """
 
-        prompt = f"{base_prompt}\n\n{lead_prompt}"
+        full_system_prompt = f"{email_prompt}\n\n{lead_info}\n\nIMPORTANT: Use the Sender Name provided in the sign-off. Return ONLY valid JSON with 'subject' and 'body' keys."
 
         try:
             logger.info("calling_claude", model=MODEL_NAME)
@@ -45,28 +72,19 @@ Company: {lead.get('company_name', '')}
                 messages=[
                     {
                         "role": "user",
-                        "content": prompt
+                        "content": full_system_prompt
                     }
                 ],
             )
-
-            # ✅ SAFE extraction
-            text = ""
-            for block in response.content:
-                if block.type == "text":
-                    text += block.text
-
-            text = text.strip()
-
-            log_text = str(text)[:200]
-            logger.info("claude_raw_response", text=log_text)
-
+            
+            # Extract text
+            text = "".join([block.text for block in response.content if block.type == "text"]).strip()
             return self._parse_response(text)
 
         except Exception as e:
             logger.error("claude_error", error=str(e))
 
-            # ✅ High-quality fallback
+            # ✅ High-quality fallback with DYNAMIC NAME
             company = lead.get('company_name', 'your company')
             first_name = lead.get('first_name', 'there')
             designation = lead.get('designation', 'Managing Director')
@@ -82,14 +100,14 @@ I've been working with several professional services firms who are discovering t
 What's particularly interesting is how firms like yours are leveraging these solutions to:
 • Reduce project delivery times by 30-40%
 • Free up senior talent for higher-value strategic work
-• Demonstrate measurable ROI improvements to clients
+• Provide measurable ROI improvements to clients
 
 I'd love to share some specific examples of how similar firms are implementing these approaches, and explore whether there might be relevant applications for {company}'s client work.
 
 Would you be open to a brief 15-minute conversation next week? I can share some industry benchmarks that might be valuable for your upcoming client discussions.
 
 Best regards,
-[Your name]"""
+{sender_name}"""
             }
 
     def refine_email(self, subject: str, body: str, instruction: str):
@@ -115,11 +133,7 @@ Best regards,
                 messages=[{"role": "user", "content": prompt}],
             )
             
-            text = ""
-            for block in response.content:
-                if block.type == "text":
-                    text += block.text
-            
+            text = "".join([block.text for block in response.content if block.type == "text"]).strip()
             return self._parse_response(text)
         except Exception as e:
             logger.error("refine_error", error=str(e))

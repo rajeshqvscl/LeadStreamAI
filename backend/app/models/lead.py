@@ -8,6 +8,14 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
     conn = get_db_connection()
     cur = conn.cursor()
 
+    # Global Blacklist Check: Prevent ingestion of opted-out leads
+    if email:
+        cur.execute("SELECT 1 FROM unsubscribe_list WHERE email = %s", (email,))
+        if cur.fetchone():
+            cur.close()
+            conn.close()
+            return  # Silently skip insertion for blacklisted emails
+
     # Extract designation from payload if not explicitly provided
     designation = payload.get("current_title", payload.get("designation", payload.get("Designation", ""))) if payload else ""
 

@@ -8,12 +8,26 @@ env_path = Path(__file__).resolve().parent / ".env"
 load_dotenv(dotenv_path=env_path, override=True)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+if DATABASE_URL:
+    # Remove any quotes or whitespace that might be in the .env
+    DATABASE_URL = DATABASE_URL.strip().strip("'").strip('"')
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 def get_db_connection():
-    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-    return conn
+    if not DATABASE_URL:
+        # Check if we can find it again in case of late loading
+        url = os.getenv("DATABASE_URL")
+        if not url:
+             raise Exception("CRITICAL: DATABASE_URL is missing from environment.")
+    
+    try:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor, connect_timeout=10)
+        return conn
+    except psycopg2.OperationalError as e:
+        print(f"DATABASE CONNECTION ERROR: {e}")
+        # Re-raise with more context
+        raise Exception(f"Failed to connect to database at {DATABASE_URL[:20]}... Error: {str(e)}")
 
 # Create Database Tables
 def create_tables():
@@ -174,6 +188,17 @@ def create_tables():
         strategic_fit TEXT,
         last_synced TIMESTAMP,
         user_id INTEGER
+    );
+    """)
+
+    # Company Registry Table (Dynamic Sheet Data)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS company_registry (
+        id SERIAL PRIMARY KEY,
+        row_data JSONB NOT NULL,
+        user_id INTEGER,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
     );
     """)
 

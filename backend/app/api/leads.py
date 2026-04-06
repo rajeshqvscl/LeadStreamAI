@@ -90,44 +90,37 @@ def get_leads(
         query += " AND source != %s"
         params.append(exclude_source)
 
-    # ─── Context-Aware Quality Filters ───────────────────────────────────────
-    
-    # CASE 1: Lead Pipeline (exclude_source='bulk' or source='direct')
-    # Focus: Highest quality, active roles, and genuine personal profiles only.
-    is_pipeline_context = (exclude_source == 'bulk') or (source == 'direct')
-    if is_pipeline_context:
-        # 1. Exclude titles NOT suitable for outreach (retired, advisors, former roles)
-        # Added 'advisor' and 'retired' specifically for pipeline as requested.
-        title_expr = "COALESCE(designation, raw_payload->>'current_title', raw_payload->>'Designation', raw_payload->>'designation', raw_payload->>'Title', raw_payload->>'Job Title', raw_payload->>'Role', persona, '')"
-        ex_pipe = r'ex-|former |previous |past |retired|advisor'
-        query += f" AND {title_expr} !~* '{ex_pipe}'"
-        
-        # 2. Genuine Profile Requirement
-        # Only include leads with a valid personal LinkedIn URL (contains /in/)
-        query += " AND linkedin_url IS NOT NULL AND linkedin_url ~* '/in/'"
-
-    # CASE 2: Bulk Search / Discovery (exclude_source='direct' or source in bulk/csv)
-    # Focus: Filtering out test data and expired leads from broad searches.
     is_bulk_context = (source in ('bulk', 'csv_import')) or (exclude_source == 'direct')
     if is_bulk_context:
-        # 1. Identity Verification
+        # 1. Must have a basic identity (Name and Company)
         query += " AND (first_name IS NOT NULL OR last_name IS NOT NULL) AND (COALESCE(first_name,'') != '' OR COALESCE(last_name,'') != '')"
         query += " AND company_name IS NOT NULL AND COALESCE(company_name,'') != ''"
-        query += " AND ((email IS NOT NULL AND COALESCE(email,'') != '') OR (linkedin_url IS NOT NULL AND COALESCE(linkedin_url,'') != ''))"
 
-        # 2. Block dummy / test records in name and email
-        bad = r'test|dummy|example|sample|mock|noreply|noemail|unknown'
-        query += f" AND COALESCE(first_name,'') !~* '{bad}'"
-        query += f" AND COALESCE(last_name,'') !~* '{bad}'"
-        query += f" AND COALESCE(email,'') !~* '{bad}'"
+        # 2. Block dummy / test records in name and email content
+        bad_names = r'test|dummy|sample|example|unknown|admin|user|lead test|mock|noreply'
+        query += f" AND COALESCE(first_name,'') !~* '{bad_names}'"
+        query += f" AND COALESCE(last_name,'') !~* '{bad_names}'"
 
-        # 3. Block invalid email domains
-        query += r" AND COALESCE(email,'') !~* '@(test|dummy|example|mockcorp|fakeinc)\.(com|net|io|org)$'"
+    if source == 'direct':
+        # Apply strict filtering for Lead Pipeline ONLY
+        
+        # Dummy Names
+        bad_names = r'test|dummy|sample|example|unknown|admin|user|lead test|mock|noreply'
+        query += f" AND COALESCE(first_name,'') !~* '{bad_names}'"
+        query += f" AND COALESCE(last_name,'') !~* '{bad_names}'"
 
-        # 4. Block former / expired roles
-        ex_bulk = r'ex-|former |previous |past |retired|emeritus'
-        title_expr_bulk = "COALESCE(designation, raw_payload->>'current_title', raw_payload->>'Designation', raw_payload->>'designation', persona, '')"
-        query += f" AND {title_expr_bulk} !~* '{ex_bulk}'"
+        # Invalid Email Domains
+        bad_domains = r'@(test|dummy|example|mailinator|fake|temp|noemail)\.(com|net|io|org)$'
+        query += f" AND COALESCE(email,'') !~* '{bad_domains}'"
+
+        # Active Role Filter
+        bad_titles = r'\b(ex|former|previous|past|advisor|retired|consultant|board member)\b'
+        query += f" AND COALESCE(designation, raw_payload->>'Designation', raw_payload->>'Role/Designation', raw_payload->>'designation', persona, '') !~* '{bad_titles}'"
+        
+    # Global Blacklist Exclusion
+    query += " AND (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)"
+    query += " AND email NOT IN (SELECT email FROM unsubscribe_list)"
+
     # ──────────────────────────────────────────────────────────────────────────
 
     if exclude_drafted:
@@ -164,7 +157,7 @@ def get_leads(
     cur.execute(count_query, tuple(params))
     total = cur.fetchone()[0]
     
-    query += " ORDER BY id DESC LIMIT %s OFFSET %s"
+    query += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
     params.extend([per_page, (page - 1) * per_page])
     cur.execute(query, tuple(params))
     leads = cur.fetchall()
@@ -395,6 +388,36 @@ def bulk_approve(req: List[int]):
         cur.close()
         conn.close()
     return {"message": "Leads approved and moved to pipeline"}
+
+@router.post("/leads/{lead_id}/unsubscribe")
+def unsubscribe_lead(lead_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        cur.execute("SELECT email, source FROM leads_raw WHERE id = %s", (lead_id,))
+        lead = cur.fetchone()
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        
+        cur.execute("UPDATE leads_raw SET is_unsubscribed = TRUE WHERE id = %s", (lead_id,))
+        
+        if lead['email']:
+            cur.execute("""
+                INSERT INTO unsubscribe_list (email, reason, source)
+                VALUES (%s, 'Manual opt-out from lead details', %s)
+                ON CONFLICT (email) DO NOTHING
+            """, (lead['email'], lead['source']))
+        
+        conn.commit()
+        add_activity_log(lead_id, "UNSUBSCRIBED", "Lead opted out and email blacklisted manually", "admin")
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+        
+    return {"message": "Lead unsubscribed and blacklisted successfully"}
 
 @router.post("/leads/bulk-delete")
 def bulk_delete(req: List[int]):

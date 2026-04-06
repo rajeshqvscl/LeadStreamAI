@@ -194,16 +194,16 @@ const EditEmail = () => {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => handleRefine('Shorten this email')} className="px-3 py-1.5 bg-[#ffffff05] border border-[#ffffff0a] text-[#94a3b8] hover:text-white hover:bg-[#ffffff0a] rounded-[4px] text-[10px] font-bold uppercase tracking-widest transition-colors">
+                <button onClick={() => handleRefine('Shorten this email')} className="cursor-pointer px-3 py-1.5 bg-[#ffffff05] border border-[#ffffff0a] text-[#94a3b8] hover:text-white hover:bg-[#ffffff0a] rounded-[4px] text-[10px] font-bold uppercase tracking-widest transition-colors">
                   SHORTEN
                 </button>
-                <button onClick={() => handleRefine('Make it more professional')} className="px-3 py-1.5 bg-[#ffffff05] border border-[#ffffff0a] text-[#94a3b8] hover:text-white hover:bg-[#ffffff0a] rounded-[4px] text-[10px] font-bold uppercase tracking-widest transition-colors">
+                <button onClick={() => handleRefine('Make it more professional')} className="cursor-pointer px-3 py-1.5 bg-[#ffffff05] border border-[#ffffff0a] text-[#94a3b8] hover:text-white hover:bg-[#ffffff0a] rounded-[4px] text-[10px] font-bold uppercase tracking-widest transition-colors">
                   MORE PROFESSIONAL
                 </button>
-                <button onClick={() => handleRefine('Add specific ROI data or metrics')} className="px-3 py-1.5 bg-[#ffffff05] border border-[#ffffff0a] text-[#94a3b8] hover:text-white hover:bg-[#ffffff0a] rounded-[4px] text-[10px] font-bold uppercase tracking-widest transition-colors">
+                <button onClick={() => handleRefine('Add specific ROI data or metrics')} className="cursor-pointer px-3 py-1.5 bg-[#ffffff05] border border-[#ffffff0a] text-[#94a3b8] hover:text-white hover:bg-[#ffffff0a] rounded-[4px] text-[10px] font-bold uppercase tracking-widest transition-colors">
                   ADD ROI DATA
                 </button>
-                <button onClick={() => handleRefine('Make it more friendly and conversational')} className="px-3 py-1.5 bg-[#ffffff05] border border-[#ffffff0a] text-[#94a3b8] hover:text-white hover:bg-[#ffffff0a] rounded-[4px] text-[10px] font-bold uppercase tracking-widest transition-colors">
+                <button onClick={() => handleRefine('Make it more friendly and conversational')} className="cursor-pointer px-3 py-1.5 bg-[#ffffff05] border border-[#ffffff0a] text-[#94a3b8] hover:text-white hover:bg-[#ffffff0a] rounded-[4px] text-[10px] font-bold uppercase tracking-widest transition-colors">
                   FRIENDLY TONE
                 </button>
               </div>

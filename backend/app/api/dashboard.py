@@ -42,6 +42,9 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
     cur.execute(f"SELECT COUNT(*) as sent FROM leads_raw {where_clause} AND email_status = 'SENT'", params)
     sent = cur.fetchone()['sent'] or 0
     
+    cur.execute(f"SELECT COUNT(*) as refined FROM leads_raw {where_clause} AND email_draft IS NOT NULL", params)
+    refined = cur.fetchone()['refined'] or 0
+    
     # Engagement Pulse - Joining with campaigns to ensure user-isolation
     events_join = "JOIN campaigns c ON ce.campaign_id = c.id"
     events_where = "WHERE c.user_id = %s" if user_id else "WHERE c.user_id IS NULL"
@@ -86,7 +89,7 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         unique_clicks = with_linkedin
         
         bounce_rate = 0.0
-        unsub_rate = 0.0
+        unsub_rate = float(f"{(total_unsubs / total_leads * 100):.1f}") if total_leads > 0 else 0.0
 
     cur.execute(f"SELECT persona, COUNT(*) as count FROM leads_raw {where_clause} AND persona IS NOT NULL GROUP BY persona", params)
 
@@ -112,11 +115,10 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         "classified": classified,
         "pending": pending,
         "sent": sent,
-        "conversion_rate": 0.0,
+        "refined": refined,
         "daily_sent_count": sent,
-        "daily_limit": 1000,
+        "daily_limit": 100,
         "open_rate": open_rate,
-        "unique_opens": unique_opens,
         "click_rate": click_rate,
         "unique_clicks": unique_clicks,
         "engagement_rate": engagement_rate,

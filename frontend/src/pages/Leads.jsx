@@ -99,7 +99,7 @@ const Leads = () => {
         company: filters.company,
         country: filters.country,
         exclude_drafted: true,
-        exclude_source: 'bulk',
+        source: 'direct',
       };
       const response = await api.get('/api/leads', { params });
 

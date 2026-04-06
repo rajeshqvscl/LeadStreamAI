@@ -1,8 +1,8 @@
-from fastapi import APIRouter, HTTPException, Depends, Header
+from fastapi import APIRouter, HTTPException, Header
 from app.database import get_db_connection
 import psycopg2.extras
-from typing import List, Optional
-import os
+from typing import List, Optional, Dict, Any
+import json
 
 router = APIRouter()
 
@@ -13,88 +13,93 @@ def normalize_user_id(user_id: Optional[str]) -> str:
 
 @router.get("/companies")
 def list_companies(user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Returns company profiles fetched directly from a static Google Sheets Drive link."""
-    uid = normalize_user_id(user_id)
+    """Returns company profiles from the internal company registry database."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
     try:
-        # Check access
-        cur.execute("SELECT role, has_db_access FROM users WHERE id = %s", (uid,))
-        user = cur.fetchone()
+        # Fetch from the internal registry instead of external sheets
+        cur.execute("SELECT id, row_data FROM company_registry ORDER BY id ASC")
+        rows = cur.fetchall()
         
-        if not user:
-            raise HTTPException(status_code=401, detail="User not found")
+        companies = []
+        for r in rows:
+            data = r['row_data']
+            if isinstance(data, str):
+                data = json.loads(data)
+            companies.append({ "id": r['id'], **data })
+
+        return {
+            "companies": companies,
+            "total": len(companies)
+        }
+    except Exception as e:
+        return { "companies": [], "error": str(e) }
+    finally:
+        cur.close()
+        conn.close()
+
+@router.post("/companies/import")
+def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Clears the current registry and imports a new batch of spreadsheet data."""
+    uid = normalize_user_id(user_id)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    try:
+        # Clear existing data for a fresh import (or we could append, but clear is usually cleaner for 'Replace')
+        cur.execute("DELETE FROM company_registry")
         
-        if user['role'] != 'ADMIN' and not user['has_db_access']:
-            return {
-                "access_denied": True,
-                "message": "Company database access requires administrative approval.",
-                "companies": []
-            }
-            
-        # Fetch from Sheets
-        import requests as req_lib
-        import csv
-        import io
+        # Batch Insert
+        for row in rows:
+            cur.execute(
+                "INSERT INTO company_registry (row_data, user_id) VALUES (%s, %s)",
+                (json.dumps(row), uid)
+            )
+        
+        conn.commit()
+        return {"success": True, "count": len(rows)}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
+    finally:
+        cur.close()
+        conn.close()
 
-        sheet_url = os.getenv("COMPANY_DATABASE_PATH")
-        if not sheet_url or "your_google_sheets" in sheet_url:
-             return {
-                "access_denied": False,
-                "companies": [],
-                "error": "Company database source is not configured by admin."
-            }
+@router.patch("/companies/{row_id}")
+def update_company(row_id: int, row_data: Dict[str, Any], user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Updates a specific row in the company registry."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    try:
+        cur.execute(
+            "UPDATE company_registry SET row_data = %s, updated_at = NOW() WHERE id = %s",
+            (json.dumps(row_data), row_id)
+        )
+        conn.commit()
+        return {"success": True}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
 
-        try:
-            # Automatic URL transformation for Google Sheets
-            if "/d/" in sheet_url:
-                doc_id = sheet_url.split('/d/')[1].split('/')[0]
-                export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv"
-            else:
-                export_url = sheet_url
-
-            response = req_lib.get(export_url, timeout=10)
-            if not response.ok:
-                raise Exception(f"Failed to fetch sheet: {response.status_code}")
-            
-            # Parse CSV
-            f = io.StringIO(response.text)
-            reader = csv.DictReader(f)
-            companies = [row for row in reader]
-
-            return {
-                "access_denied": False,
-                "companies": companies,
-                "total": len(companies)
-            }
-        except Exception as e:
-            return {
-                "access_denied": False,
-                "companies": [],
-                "error": f"Drive Link Error: {str(e)}"
-            }
-
+@router.delete("/companies/clear")
+def clear_companies():
+    """Wipes the entire company registry."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM company_registry")
+        conn.commit()
+        return {"success": True}
     finally:
         cur.close()
         conn.close()
 
 @router.post("/companies/request-access")
 def request_db_access(user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Submits a request to the admin for database access pulse."""
-    uid = normalize_user_id(user_id)
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    try:
-        # In a real app, this might create a request record. 
-        # For now, we'll just log it in activity_log for the admin to see.
-        cur.execute("""
-            INSERT INTO activity_log (user_id, action, details)
-            VALUES (%s, 'DB_ACCESS_REQUEST', 'User requested access to the global company database.')
-        """, (uid,))
-        conn.commit()
-        return {"message": "Access request submitted to system administrators."}
-    finally:
-        cur.close()
-        conn.close()
+    """Submits access request (Legacy - keeping for route compatibility if needed)."""
+    return {"message": "Access restriction removed. You have full system clearance."}

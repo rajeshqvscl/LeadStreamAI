@@ -38,6 +38,23 @@ def normalize_lead(lead):
         }
     return {}
 
+def get_user_name(user_id):
+    if not user_id:
+        return "the team"
+    try:
+        from app.database import get_db_connection
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("SELECT full_name, username FROM users WHERE id = %s", (user_id,))
+        user = cur.fetchone()
+        cur.close()
+        conn.close()
+        if user:
+            return user['full_name'] or user['username']
+    except:
+        pass
+    return "the team"
+
 # --- Generate Draft ---
 # Supports both /generate-draft (user prompt) and /generate-email (frontend Axios)
 @router.post("/generate-draft")
@@ -47,8 +64,10 @@ def generate_draft(req: DraftRequest, user_id: Optional[str] = Header(None, alia
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
-        if user_id:
+        if user_id and user_id != "admin":
             cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (req.lead_id, user_id))
+        elif user_id == "admin":
+            cur.execute("SELECT * FROM leads_raw WHERE id = %s", (req.lead_id,))
         else:
             cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (req.lead_id,))
             
@@ -58,8 +77,9 @@ def generate_draft(req: DraftRequest, user_id: Optional[str] = Header(None, alia
             return {"error": "Lead not found"}
         lead = normalize_lead(lead)
         
+        sender_name = get_user_name(user_id)
         generator = EmailGenerator()
-        email_data = generator.generate_email(lead)
+        email_data = generator.generate_email(lead, sender_name=sender_name)
         
         subject = email_data.get("subject", "Following up")
         body = email_data.get("body", "Hello, we would love to connect.")
@@ -115,9 +135,11 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, per_page: in
     where_clause = "WHERE email_draft IS NOT NULL"
     params = []
     
-    if user_id:
+    if user_id and user_id != "admin":
         where_clause += " AND user_id = %s"
         params.append(user_id)
+    elif user_id == "admin":
+        pass # Admin sees all
     else:
         where_clause += " AND user_id IS NULL"
 
@@ -210,8 +232,10 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[s
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
-        if user_id:
+        if user_id and user_id != "admin":
             cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (draft_id, user_id))
+        elif user_id == "admin":
+            cur.execute("SELECT * FROM leads_raw WHERE id = %s", (draft_id,))
         else:
             cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (draft_id,))
             
@@ -247,8 +271,10 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     # Ensure a draft exists before approving
-    if user_id:
+    if user_id and user_id != "admin":
         cur.execute("SELECT first_name, last_name, company_name, email_draft, domain FROM leads_raw WHERE id = %s AND user_id = %s", (draft_id, user_id))
+    elif user_id == "admin":
+        cur.execute("SELECT first_name, last_name, company_name, email_draft, domain FROM leads_raw WHERE id = %s", (draft_id,))
     else:
         cur.execute("SELECT first_name, last_name, company_name, email_draft, domain FROM leads_raw WHERE id = %s AND user_id IS NULL", (draft_id,))
         
@@ -257,8 +283,9 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
     
     if lead and not lead.get('email_draft'):
         from app.services.llm_services import EmailGenerator
+        sender_name = get_user_name(user_id)
         generator = EmailGenerator()
-        email_data = generator.generate_email(dict(lead))
+        email_data = generator.generate_email(dict(lead), sender_name=sender_name)
         subject = email_data.get("subject", "Following up")
         body = email_data.get("body", "Hello, we would love to connect.")
         
@@ -295,8 +322,15 @@ def reject_draft(draft_id: int, req: Optional[RejectRequest] = None, user_id: Op
     conn = get_db_connection()
     cur = conn.cursor()
     
-    where_clause = "WHERE id = %s AND user_id = %s" if user_id else "WHERE id = %s AND user_id IS NULL"
-    params = (draft_id, user_id) if user_id else (draft_id,)
+    if user_id and user_id != "admin":
+        where_clause = "WHERE id = %s AND user_id = %s"
+        params = (draft_id, user_id)
+    elif user_id == "admin":
+        where_clause = "WHERE id = %s"
+        params = (draft_id,)
+    else:
+        where_clause = "WHERE id = %s AND user_id IS NULL"
+        params = (draft_id,)
     
     cur.execute(
         f"UPDATE leads_raw SET email_status = 'REJECTED', updated_at = NOW() {where_clause}",
@@ -322,8 +356,15 @@ def approve_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = H
             return {"message": "No leads provided"}
             
         format_strings = ','.join(['%s'] * len(req.lead_ids))
-        where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s" if user_id else f"WHERE id IN ({format_strings}) AND user_id IS NULL"
-        params = tuple(req.lead_ids) + ((user_id,) if user_id else ())
+        if user_id and user_id != "admin":
+            where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s"
+            params = tuple(req.lead_ids) + (user_id,)
+        elif user_id == "admin":
+            where_clause = f"WHERE id IN ({format_strings})"
+            params = tuple(req.lead_ids)
+        else:
+            where_clause = f"WHERE id IN ({format_strings}) AND user_id IS NULL"
+            params = tuple(req.lead_ids)
         
         cur.execute(f"SELECT * FROM leads_raw {where_clause}", params)
 
@@ -401,8 +442,15 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     conn = get_db_connection()
     cur = conn.cursor()
     
-    where_clause = "WHERE email_status = 'APPROVED' AND user_id = %s" if user_id else "WHERE email_status = 'APPROVED' AND user_id IS NULL"
-    params = (user_id,) if user_id else ()
+    if user_id and user_id != "admin":
+        where_clause = "WHERE email_status = 'APPROVED' AND user_id = %s"
+        params = (user_id,)
+    elif user_id == "admin":
+        where_clause = "WHERE email_status = 'APPROVED'"
+        params = ()
+    else:
+        where_clause = "WHERE email_status = 'APPROVED' AND user_id IS NULL"
+        params = ()
     
     # Get all approved lead IDs for THIS user
     cur.execute(f"SELECT id FROM leads_raw {where_clause}", params)
@@ -435,8 +483,15 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
             return {"message": "No leads provided"}
             
         format_strings = ','.join(['%s'] * len(req.lead_ids))
-        where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s" if user_id else f"WHERE id IN ({format_strings}) AND user_id IS NULL"
-        params = tuple(req.lead_ids) + ((user_id,) if user_id else ())
+        if user_id and user_id != "admin":
+            where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s"
+            params = tuple(req.lead_ids) + (user_id,)
+        elif user_id == "admin":
+            where_clause = f"WHERE id IN ({format_strings})"
+            params = tuple(req.lead_ids)
+        else:
+            where_clause = f"WHERE id IN ({format_strings}) AND user_id IS NULL"
+            params = tuple(req.lead_ids)
 
         cur.execute(f"SELECT * FROM leads_raw {where_clause}", params)
 
@@ -462,7 +517,8 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
         def process_group(group_key, group_leads):
             first_lead = group_leads[0]
             try:
-                email_data = generator.generate_email(normalize_lead(first_lead))
+                sender_name = get_user_name(user_id)
+                email_data = generator.generate_email(normalize_lead(first_lead), sender_name=sender_name)
                 subject = email_data.get("subject", "Following up")
                 body = email_data.get("body", "Hello, we would love to connect.")
             except Exception as e:
@@ -526,8 +582,15 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
             return {"message": "No leads provided"}
             
         format_strings = ','.join(['%s'] * len(req.lead_ids))
-        where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s" if user_id else f"WHERE id IN ({format_strings}) AND user_id IS NULL"
-        params = tuple(req.lead_ids) + ((user_id,) if user_id else ())
+        if user_id and user_id != "admin":
+            where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s"
+            params = tuple(req.lead_ids) + (user_id,)
+        elif user_id == "admin":
+            where_clause = f"WHERE id IN ({format_strings})"
+            params = tuple(req.lead_ids)
+        else:
+            where_clause = f"WHERE id IN ({format_strings}) AND user_id IS NULL"
+            params = tuple(req.lead_ids)
 
         cur.execute(f"SELECT * FROM leads_raw {where_clause}", params)
 
@@ -557,7 +620,8 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
             # If draft already exists, use it. Otherwise generate.
             email_content = first_lead.get("email_draft")
             if not email_content:
-                email_data = generator.generate_email(normalize_lead(first_lead))
+                sender_name = get_user_name(user_id)
+                email_data = generator.generate_email(normalize_lead(first_lead), sender_name=sender_name)
                 subject = email_data.get("subject", "Following up")
                 body = email_data.get("body", "Hello, we would love to connect.")
                 
