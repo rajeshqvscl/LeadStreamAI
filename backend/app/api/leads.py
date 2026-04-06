@@ -101,6 +101,10 @@ def get_leads(
         query += f" AND COALESCE(first_name,'') !~* '{bad_names}'"
         query += f" AND COALESCE(last_name,'') !~* '{bad_names}'"
 
+        # 3. Invalid Email Domains
+        bad_domains = r'@(test|dummy|example|mailinator|fake|temp|noemail)\.(com|net|io|org)$'
+        query += f" AND COALESCE(email,'') !~* '{bad_domains}'"
+
     if source == 'direct':
         # Apply strict filtering for Lead Pipeline ONLY
         

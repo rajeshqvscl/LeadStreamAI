@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Search, Rocket, Loader2, CheckCircle, AlertCircle, Database, Filter, MapPin, Building2, Tag, ChevronLeft, ChevronRight, User, FileText, Trash2, Check, Sparkles, FileSpreadsheet, Download, Pencil } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
+import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
 const BulkSearch = () => {
+  const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
   const [notification, setNotification] = useState(null);
   const [limit, setLimit] = useState(20);

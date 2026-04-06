@@ -61,6 +61,19 @@ def _parse_profile_details(details, fallback_email=None):
     if not email:
         return None
 
+    # --- Strict Validation Rules ---
+    email_lower = email.lower()
+    full_name_lower = (details.get("name") or "").lower()
+
+    dummy_names = ['test', 'dummy', 'sample', 'example', 'unknown', 'admin', 'user', 'lead test']
+    dummy_domains = ['@test.com', '@dummy.com', '@example.com', '@mailinator.com', '@fake.com', '@temp.com', '@noemail.com']
+
+    if any(n in full_name_lower for n in dummy_names):
+        return None
+        
+    if any(d in email_lower for d in dummy_domains):
+        return None
+
     # --- Name ---
     full_name = details.get("name") or ""
     parts = full_name.strip().split(" ")
@@ -114,8 +127,14 @@ def search_leads(employer=None, title=None, location=None, page_size=10):
         r = requests.post(url, json=payload, headers=HEADERS, timeout=45)
 
         if not r.ok:
-            if leads: break
-            return _generate_mock_leads(employer, title, location, page_size)
+            error_msg = r.text
+            try:
+                error_msg = r.json().get('response', r.text)
+            except: pass
+            
+            if r.status_code == 429:
+                raise Exception("RocketReach API Quota/Rate Limit Exceeded. Please upgrade plan or wait.")
+            raise Exception(f"RocketReach search error ({r.status_code}): {error_msg}")
 
         profiles = r.json().get("profiles", [])
         if not profiles: break
@@ -291,32 +310,4 @@ def lookup_profile(profile_id):
         return None
         
     return r.json()
-
-def _generate_mock_leads(employer, title, location, page_size):
-    import random
-    leads = []
-    base_domains = ["example.com", "test.org", "mockcorp.io", "dummy.net"]
-    titles = ["CEO", "VP of Engineering", "Chief Marketing Officer", "Founder", "CTO"]
-    names = [("Jane", "Doe"), ("John", "Smith"), ("Alice", "Johnson"), ("Bob", "Williams"), ("Charlie", "Brown")]
-    
-    for i in range(page_size):
-        first, last = random.choice(names)
-        company = employer if employer else f"Mock Company {i}"
-        domain = random.choice(base_domains)
-        job = title if title and title.lower() != 'other' else random.choice(titles)
-        
-        leads.append({
-            "first_name": first,
-            "last_name": f"{last}{i}",
-            "email": f"{first.lower()}.{last.lower()}{i}@{domain}",
-            "phone": f"+1555010{random.randint(1000, 9999)}",
-            "domain": domain,
-            "linkedin": f"https://linkedin.com/in/{first.lower()}-{last.lower()}-{i}",
-            "company": company,
-            "source": "rocketreach_mock",
-            "payload": {
-                "current_title": job,
-                "current_employer": company
-            }
-        })
-    return leads
+
