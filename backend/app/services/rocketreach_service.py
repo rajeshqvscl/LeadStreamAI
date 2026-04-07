@@ -30,6 +30,58 @@ C_SUITE_TITLES = [
     "Managing Partner",
 ]
 
+class RocketReachRateLimitError(Exception):
+    def __init__(self, message, wait_seconds=None):
+        super().__init__(message)
+        self.wait_seconds = wait_seconds
+
+def _make_request(method, url, **kwargs):
+    """
+    Centralized request wrapper to handle 429 rate limits and parse 'wait' time.
+    """
+    try:
+        if 'headers' not in kwargs:
+            kwargs['headers'] = HEADERS
+        
+        # Merge API Key if not present
+        if 'Api-Key' not in kwargs['headers']:
+            kwargs['headers'].update(HEADERS)
+
+        r = requests.request(method, url, **kwargs)
+        
+        if r.status_code == 429:
+            data = {}
+            try:
+                data = r.json()
+            except: pass
+            
+            # RocketReach returns {"detail": "...", "wait": 123.4} or similar
+            wait = data.get("wait") or r.headers.get("Retry-After")
+            try:
+                wait_val = float(wait) if wait else None
+            except:
+                wait_val = None
+                
+            raise RocketReachRateLimitError(
+                "RocketReach API Quota/Rate Limit Exceeded.",
+                wait_seconds=wait_val
+            )
+            
+        if not r.ok:
+            error_msg = r.text
+            try:
+                error_msg = r.json().get('response', r.text)
+            except: pass
+            raise Exception(f"RocketReach error ({r.status_code}): {error_msg}")
+            
+        return r.json()
+    except RocketReachRateLimitError:
+        raise
+    except Exception as e:
+        if "Quota/Rate Limit" in str(e): # Compatibility
+             raise RocketReachRateLimitError(str(e))
+        raise
+
 
 def _parse_profile_details(details, fallback_email=None):
     """
@@ -123,20 +175,13 @@ def search_leads(employer=None, title=None, location=None, page_size=10):
     current_page = 1
     
     while len(leads) < page_size and current_page <= max_pages:
-        payload = { "start": current_page, "page_size": max(page_size * 2, 20), "query": query }
-        r = requests.post(url, json=payload, headers=HEADERS, timeout=45)
+        try:
+            payload = { "start": current_page, "page_size": max(page_size * 2, 20), "query": query }
+            data = _make_request("POST", url, json=payload)
+        except Exception as e:
+            raise Exception(f"RocketReach search failed: {str(e)}")
 
-        if not r.ok:
-            error_msg = r.text
-            try:
-                error_msg = r.json().get('response', r.text)
-            except: pass
-            
-            if r.status_code == 429:
-                raise Exception("RocketReach API Quota/Rate Limit Exceeded. Please upgrade plan or wait.")
-            raise Exception(f"RocketReach search error ({r.status_code}): {error_msg}")
-
-        profiles = r.json().get("profiles", [])
+        profiles = data.get("profiles", [])
         if not profiles: break
 
         def process_profile(p):
@@ -273,12 +318,13 @@ def lookup_by_name(name, company=None):
         "query": query
     }
     
-    r = requests.post(url, json=payload, headers=HEADERS, timeout=30)
-    if not r.ok:
-        print(f"Name search error ({r.status_code}): {r.text}")
+    try:
+        data = _make_request("POST", url, json=payload)
+    except Exception as e:
+        print(f"Name search error: {str(e)}")
         return []
 
-    profiles = r.json().get("profiles", [])
+    profiles = data.get("profiles", [])
     leads = []
     
     def process_name_profile(p):
@@ -287,7 +333,7 @@ def lookup_by_name(name, company=None):
         details = lookup_profile(pid)
         return _parse_profile_details(details)
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(process_name_profile, p) for p in profiles]
         for future in as_completed(futures):
             parsed = future.result()
@@ -303,11 +349,6 @@ def lookup_profile(profile_id):
     """
     url = f"{BASE_URL}/person/lookup"
     params = {"id": profile_id}
-    r = requests.get(url, headers=HEADERS, params=params, timeout=30)
-    
-    if not r.ok:
-        print(f"Profile lookup error ({r.status_code}): {r.text}")
-        return None
-        
-    return r.json()
-
+    data = _make_request("GET", url, params=params)
+    return data
+

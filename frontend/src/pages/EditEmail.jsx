@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ChevronLeft, Sparkles, Loader2, Save, Wand2, Type, Briefcase, BarChart3, Smile, CheckCircle2, AlertCircle, Send, Link as LinkIcon } from 'lucide-react';
+import { ChevronLeft, Sparkles, Loader2, Save, Wand2, Type, Briefcase, BarChart3, Smile, CheckCircle2, AlertCircle, Send, Link as LinkIcon, FileText } from 'lucide-react';
 import api from '../services/api';
 
 const EditEmail = () => {
@@ -9,6 +9,7 @@ const EditEmail = () => {
   const [draft, setDraft] = useState(null);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const [remarks, setRemarks] = useState('');
   const [aiInstruction, setAiInstruction] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isRefining, setIsRefining] = useState(false);
@@ -26,32 +27,26 @@ const EditEmail = () => {
       // In our current API, draftId is the leadId
       const response = await api.get(`/api/leads/${draftId}`);
       const lead = response.data;
-      
+
       // Robust extraction of subject and body
       let draftContent = lead.email_draft || "";
       // Normalize literal escapes
       draftContent = draftContent.replace(/\\n/g, "\n").replace(/\\r\\n/g, "\n");
-      
+
       let sub = "";
       let bd = draftContent;
-      
+
       if (draftContent.includes("Subject:")) {
-        const parts = draftContent.split(/\n\n|\n/, 2); // Split by double or single newline
-        if (parts.length > 0) {
-          sub = parts[0].replace(/Subject:\s*/, "").trim();
-          if (parts.length > 1) {
-            // Re-join the rest for the body if there were more than 2 parts originally
-            const bodyStart = draftContent.indexOf(parts[1]);
-            bd = draftContent.substring(bodyStart).trim();
-          } else {
-            bd = "";
-          }
-        }
+        const lines = draftContent.split('\n');
+        sub = lines[0].replace(/Subject:\s*/, "").trim();
+        bd = lines.slice(1).join('\n').trim();
+        // If there was a double newline after subject, lines[1] might be empty, which is fine.
       }
 
       setDraft(lead);
       setSubject(sub);
       setBody(bd);
+      setRemarks(lead.remarks || '');
     } catch (err) {
       console.error('Failed to fetch draft', err);
       showNotification('error', 'Failed to load draft');
@@ -68,7 +63,7 @@ const EditEmail = () => {
     setIsSaving(true);
     try {
       const email_draft = `Subject: ${subject}\n\n${body}`;
-      await api.patch(`/api/leads/${draftId}`, { email_draft });
+      await api.patch(`/api/leads/${draftId}`, { email_draft, remarks });
       if (!silent) showNotification('success', 'Changes saved successfully');
     } catch {
       showNotification('error', 'Failed to save changes');
@@ -92,7 +87,7 @@ const EditEmail = () => {
         showNotification('error', `AI refinement failed: ${response.data.error}`);
         return;
       }
-      
+
       if (response.data.subject || response.data.body) {
         setSubject(response.data.subject || '');
         setBody(response.data.body || '');
@@ -148,11 +143,11 @@ const EditEmail = () => {
             <span className="text-amber-500 text-sm">✏️</span>
             <h3 className="text-white font-bold text-[13px] tracking-wide">Edit Draft</h3>
           </div>
-          
+
           <div className="p-6 flex-1 flex flex-col gap-6">
             <div className="space-y-2">
               <label className="text-[11px] font-medium text-slate-400">Subject</label>
-              <input 
+              <input
                 type="text"
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
@@ -163,7 +158,7 @@ const EditEmail = () => {
 
             <div className="space-y-2 flex-1 flex flex-col">
               <label className="text-[11px] font-medium text-slate-400">Body</label>
-              <textarea 
+              <textarea
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 placeholder="Generate AI draft to begin or write your own message..."
@@ -171,19 +166,29 @@ const EditEmail = () => {
               />
             </div>
 
+            <div className="space-y-2">
+              <label className="text-[11px] font-medium text-slate-400">Lead Remarks / Context</label>
+              <textarea
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                placeholder="Private notes about this lead's background or specific needs..."
+                className="w-full bg-[#0a0f1a] border border-[#ffffff10] rounded-md px-4 py-3 text-[12px] text-slate-300 font-medium outline-none focus:border-blue-500/50 resize-none min-h-[80px]"
+              />
+            </div>
+
             {/* AI Refinement Tools */}
             <div className="space-y-4 pt-4">
               <div className="relative flex items-center bg-[#0a0f1a] border border-[#ffffff10] rounded-md px-3 py-1 focus-within:border-blue-500/50 transition-colors">
                 <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={aiInstruction}
                   onChange={(e) => setAiInstruction(e.target.value)}
                   placeholder="Edit with AI (e.g., 'Make it more formal', 'Add focus on ROI'...)"
                   className="flex-1 bg-transparent border-none text-[12px] text-slate-300 px-3 py-2 outline-none italic placeholder-slate-500"
                   onKeyDown={(e) => e.key === 'Enter' && handleRefine()}
                 />
-                <button 
+                <button
                   onClick={() => handleRefine()}
                   disabled={isRefining || !aiInstruction}
                   className="bg-[#10b981] hover:bg-emerald-500 text-white text-[11px] font-bold px-4 py-1.5 rounded-md transition-colors disabled:opacity-50 flex items-center shadow-lg shadow-emerald-500/20"
@@ -209,7 +214,7 @@ const EditEmail = () => {
               </div>
 
               <div className="pt-6 flex items-center gap-4">
-                <button 
+                <button
                   onClick={() => handleSave()}
                   disabled={isSaving}
                   className="bg-[#1e293b] hover:bg-[#334155] text-white text-[12px] font-bold px-5 py-2.5 rounded-md transition-colors disabled:opacity-50 flex items-center border border-[#ffffff10]"
@@ -217,7 +222,7 @@ const EditEmail = () => {
                   {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
                   Save Changes
                 </button>
-                <button 
+                <button
                   onClick={handleApproveAndSend}
                   className="flex-1 bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-600 hover:to-red-700 text-white text-[12px] font-black uppercase tracking-widest px-6 py-2.5 rounded-md transition-all shadow-lg shadow-red-500/20 flex items-center justify-center gap-2"
                 >
@@ -230,88 +235,118 @@ const EditEmail = () => {
 
         {/* Right: Email Preview Panel */}
         <div className="bg-[#131722] border border-[#ffffff08] rounded-[16px] overflow-hidden shadow-2xl flex flex-col min-h-[700px]">
-           {/* Preview Header */}
-           <div className="p-6 border-b border-[#ffffff08] bg-[#0a0f1a]">
-             <div className="flex justify-between items-start">
-               <div className="flex gap-4 items-center">
-                 <div className="w-12 h-12 rounded-full bg-[#8b5cf6] flex items-center justify-center text-white font-bold text-lg shadow-lg">
-                   {draft.first_name?.charAt(0)}{draft.last_name?.charAt(0)}
-                 </div>
-                 <div>
-                   <h3 className="text-white font-bold text-[15px] flex items-center gap-2">
-                     {draft.first_name} {draft.last_name}
-                   </h3>
-                   <div className="flex items-center gap-2 mt-0.5">
-                     <p className="text-[12px] text-[#94a3b8] font-medium">{draft.designation} at {draft.company_name}, {draft.city}</p>
-                     {draft.linkedin_url && (
-                       <a href={draft.linkedin_url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[11px] text-blue-400 hover:underline">
-                         <LinkIcon className="w-3 h-3" /> LinkedIn
-                       </a>
-                     )}
-                   </div>
-                 </div>
-               </div>
-               
-               <div className="text-right flex flex-col items-end gap-1">
-                 <span className="text-[#64748b] text-[9px] font-black uppercase tracking-[2px]">PERSONA</span>
-                 <span className="text-[#10b981] text-[12px] font-black uppercase tracking-[1px]">{draft.persona || 'PARTNER'}</span>
-               </div>
-             </div>
-           </div>
-
-           {/* Preview Body */}
-           <div className="p-8 flex-1 bg-[#131722] overflow-y-auto w-full custom-scrollbar">
-              <div className="w-full space-y-8">
-                 <div className="text-[13px]">
-                   <span className="text-[#94a3b8] font-medium mr-2">Subject:</span>
-                   <span className={`font-bold ${subject ? 'text-blue-400' : 'text-slate-600 italic text-[11px]'}`}>
-                     {subject || '(No subject specified)'}
-                   </span>
-                 </div>
-                 
-                 <div className={`text-[13px] leading-relaxed whitespace-pre-wrap font-medium ${body ? 'text-slate-300' : 'text-slate-600 italic text-[11px]'}`}>
-                   {body || 'Generate AI draft to begin...'}
-                 </div>
-              </div>
-           </div>
-
-           {/* Preview Stats Footer */}
-           <div className="p-8 border-t border-[#ffffff08] bg-[#0a0f1a]">
-              <div className="space-y-4 max-w-[400px]">
-                 <div className="grid grid-cols-[120px_1fr] items-center text-[11px]">
-                    <span className="text-[#64748b] font-medium">Status</span>
-                    {draft.status === 'REJECTED' ? (
-                       <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-[1px] bg-transparent text-red-500 w-max">REJECTED</span>
-                    ) : (
-                       <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-[1px] bg-transparent text-amber-500 w-max">{draft.status || 'PENDING APPROVAL'}</span>
+          {/* Preview Header */}
+          <div className="p-6 border-b border-[#ffffff08] bg-[#0a0f1a]">
+            <div className="flex justify-between items-start">
+              <div className="flex gap-4 items-center">
+                <div className="w-12 h-12 rounded-full bg-[#8b5cf6] flex items-center justify-center text-white font-bold text-lg shadow-lg">
+                  {draft.first_name?.charAt(0)}{draft.last_name?.charAt(0)}
+                </div>
+                <div>
+                  <h3 className="text-white font-bold text-[15px] flex items-center gap-2">
+                    {draft.first_name} {draft.last_name}
+                  </h3>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <p className="text-[12px] text-[#94a3b8] font-medium">{draft.designation} at {draft.company_name}, {draft.city}</p>
+                    {draft.linkedin_url && (
+                      <a href={draft.linkedin_url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[11px] text-blue-400 hover:underline">
+                        <LinkIcon className="w-3 h-3" /> LinkedIn
+                      </a>
                     )}
-                 </div>
-                 <div className="grid grid-cols-[120px_1fr] items-center text-[11px] font-medium border-t border-[#ffffff05] pt-3">
-                    <span className="text-[#64748b]">Approved By</span>
-                    <span className="text-slate-300">—</span>
-                 </div>
-                 <div className="grid grid-cols-[120px_1fr] items-center text-[11px] font-medium border-t border-[#ffffff05] pt-3">
-                    <span className="text-[#64748b]">Sent At</span>
-                    <span className="text-slate-300">—</span>
-                 </div>
-                 <div className="grid grid-cols-[120px_1fr] items-center text-[11px] font-medium border-t border-[#ffffff05] pt-3">
-                    <span className="text-[#64748b]">Opens</span>
-                    <span className="text-slate-300">0</span>
-                 </div>
-                 <div className="grid grid-cols-[120px_1fr] items-center text-[11px] font-medium border-t border-[#ffffff05] pt-3">
-                    <span className="text-[#64748b]">Clicks</span>
-                    <span className="text-slate-300">0</span>
-                 </div>
+                  </div>
+                </div>
               </div>
-           </div>
+
+              <div className="text-right flex flex-col items-end gap-1">
+                <span className="text-[#64748b] text-[9px] font-black uppercase tracking-[2px]">PERSONA</span>
+                <span className="text-[#10b981] text-[12px] font-black uppercase tracking-[1px]">{draft.persona || 'PARTNER'}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Preview Body */}
+          <div className="p-8 flex-1 bg-[#131722] overflow-y-auto w-full custom-scrollbar">
+            <div className="w-full space-y-8">
+              <div className="text-[13px]">
+                <span className="text-[#94a3b8] font-medium mr-2">Subject:</span>
+                <span className={`font-bold ${subject ? 'text-blue-400' : 'text-slate-600 italic text-[11px]'}`}>
+                  {subject || '(No subject specified)'}
+                </span>
+              </div>
+              
+              <div 
+                className={`text-[13px] leading-relaxed whitespace-pre-wrap font-medium ${body ? 'text-slate-300' : 'text-slate-600 italic text-[11px]'}`}
+                dangerouslySetInnerHTML={{ 
+                  __html: (body || 'Generate AI draft to begin...')
+                    .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white font-black text-[14px] mt-4 block">$1</strong>') 
+                }}
+              />
+
+              {/* Attachments Section */}
+              <div className="pt-10 mt-10 border-t border-[#ffffff05]">
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="text-[#64748b] text-[10px] font-black uppercase tracking-[2px]">Attachments (2)</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-[#0a0f1a] border border-[#ffffff08] hover:border-blue-500/30 transition-colors group cursor-default">
+                    <div className="w-10 h-10 rounded-md bg-red-500/10 flex items-center justify-center text-red-500">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[12px] font-bold text-slate-200 truncate group-hover:text-blue-400 transition-colors text-ellipsis">QVSCL Company Profile.pdf</p>
+                      <p className="text-[10px] text-slate-500 font-medium uppercase tracking-tight">1.7 MB • PDF Document</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-[#0a0f1a] border border-[#ffffff08] hover:border-blue-500/30 transition-colors group cursor-default">
+                    <div className="w-10 h-10 rounded-md bg-red-500/10 flex items-center justify-center text-red-500">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[12px] font-bold text-slate-200 truncate group-hover:text-blue-400 transition-colors text-ellipsis">Lalit_Huria_Profile.pdf</p>
+                      <p className="text-[10px] text-slate-500 font-medium uppercase tracking-tight">250 KB • PDF Document</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Preview Stats Footer */}
+          <div className="p-8 border-t border-[#ffffff08] bg-[#0a0f1a]">
+            <div className="space-y-4 max-w-[400px]">
+              <div className="grid grid-cols-[120px_1fr] items-center text-[11px]">
+                <span className="text-[#64748b] font-medium">Status</span>
+                {draft.status === 'REJECTED' ? (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-[1px] bg-transparent text-red-500 w-max">REJECTED</span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-[1px] bg-transparent text-amber-500 w-max">{draft.status || 'PENDING APPROVAL'}</span>
+                )}
+              </div>
+              <div className="grid grid-cols-[120px_1fr] items-center text-[11px] font-medium border-t border-[#ffffff05] pt-3">
+                <span className="text-[#64748b]">Approved By</span>
+                <span className="text-slate-300">—</span>
+              </div>
+              <div className="grid grid-cols-[120px_1fr] items-center text-[11px] font-medium border-t border-[#ffffff05] pt-3">
+                <span className="text-[#64748b]">Sent At</span>
+                <span className="text-slate-300">—</span>
+              </div>
+              <div className="grid grid-cols-[120px_1fr] items-center text-[11px] font-medium border-t border-[#ffffff05] pt-3">
+                <span className="text-[#64748b]">Opens</span>
+                <span className="text-slate-300">0</span>
+              </div>
+              <div className="grid grid-cols-[120px_1fr] items-center text-[11px] font-medium border-t border-[#ffffff05] pt-3">
+                <span className="text-[#64748b]">Clicks</span>
+                <span className="text-slate-300">0</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
       {notification && (
         <div className="fixed bottom-8 right-8 z-[2000] animate-in slide-in-from-bottom-4">
-          <div className={`px-6 py-4 rounded-xl shadow-2xl border backdrop-blur-md flex items-center gap-3 ${
-            notification.type === 'success' ? 'bg-[#10b981]/10 border-[#10b981]/20 text-[#10b981]' : 'bg-red-500/10 border-red-500/20 text-red-500'
-          }`}>
+          <div className={`px-6 py-4 rounded-xl shadow-2xl border backdrop-blur-md flex items-center gap-3 ${notification.type === 'success' ? 'bg-[#10b981]/10 border-[#10b981]/20 text-[#10b981]' : 'bg-red-500/10 border-red-500/20 text-red-500'
+            }`}>
             {notification.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
             <span className="font-bold text-[13px]">{notification.message}</span>
           </div>

@@ -3,7 +3,7 @@ import axios from '../services/api';
 import { Link } from 'react-router-dom';
 import {
   Users, CheckSquare, Rocket, BarChart3, Sparkles, Activity,
-  ShieldAlert, Mail, Loader2, Zap, Clock, Globe, Target
+  ShieldAlert, Mail, Loader2, Zap, Clock, Globe, Target, CheckCircle2, XCircle
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -40,19 +40,25 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [sendingReport, setSendingReport] = useState(false);
   const [period, setPeriod] = useState('daily');
+  const [toast, setToast] = useState(null);
 
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const isAdmin = user.role === 'ADMIN';
 
   const [isDispatching, setIsDispatching] = useState(false);
 
+  const showToast = (type, message) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 5000);
+  };
+
   const handleDispatchReport = async () => {
     setIsDispatching(true);
     try {
       await axios.post('/api/admin/dispatch-report');
-      alert('Intelligence Report Dispatched Successfully');
+      showToast('success', `System activity report dispatched to ${user.email || 'your registered email'}`);
     } catch (err) {
-      alert('Failed to dispatch report: ' + (err.response?.data?.detail || err.message));
+      showToast('error', 'Failed to dispatch report: ' + (err.response?.data?.detail || err.message));
     } finally {
       setIsDispatching(false);
     }
@@ -107,9 +113,9 @@ const Dashboard = () => {
     setSendingReport(true);
     try {
       const resp = await axios.post('/api/users/report');
-      alert(resp.data?.message || 'System activity report has been generated.');
+      showToast('success', resp.data?.message || 'System pulse report has been generated.');
     } catch (err) {
-      alert('Failed to send report: ' + (err.response?.data?.detail || 'Global Server Error'));
+      showToast('error', 'Failed to send report: ' + (err.response?.data?.detail || 'Global Server Error'));
     } finally {
       setSendingReport(false);
     }
@@ -337,12 +343,12 @@ const Dashboard = () => {
 
             <div className="mt-8 flex gap-4">
               <button
-                onClick={triggerReport}
-                disabled={sendingReport}
-                className="flex items-center gap-3 px-10 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-white rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all shadow-xl shadow-blue-500/20 group"
+                onClick={handleDispatchReport}
+                disabled={isDispatching}
+                className="flex items-center gap-3 px-10 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-white rounded-2xl text-[11px] font-black uppercase tracking-widest cursor-pointer disabled:cursor-not-allowed transition-all shadow-xl shadow-blue-500/20 group active:scale-95"
               >
-                {sendingReport ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4 group-hover:scale-110 transition-transform" />}
-                Dispatch System Pulse
+                {isDispatching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-amber-300 group-hover:scale-110 transition-transform" />}
+                {isDispatching ? 'Transmitting Intelligence...' : 'Dispatch System Report'}
               </button>
             </div>
           </div>
@@ -381,18 +387,6 @@ const Dashboard = () => {
             </div>
 
             <div className="flex flex-wrap items-center gap-4">
-              <button
-                onClick={handleDispatchReport}
-                disabled={isDispatching}
-                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white font-black px-6 py-3 rounded-2xl text-[10px] uppercase tracking-[2px] transition-all shadow-xl shadow-blue-500/20 active:scale-95 shrink-0"
-              >
-                {isDispatching ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                ) : (
-                  <Sparkles className="w-3 h-3 text-amber-300" />
-                )}
-                {isDispatching ? 'Transmitting Intelligence...' : 'Dispatch System Report'}
-              </button>
 
               <div className="flex bg-[#131722] border border-white/10 rounded-2xl p-1 gap-1">
                 {['daily', 'weekly', 'monthly', 'quarterly'].map((p) => (
@@ -456,7 +450,40 @@ const Dashboard = () => {
   }
 
   return (
-    <div className="animate-in fade-in duration-700">
+    <div className="animate-in fade-in duration-700 relative">
+      {/* Premium Toast Notification */}
+      {toast && (
+        <div className={`fixed top-16 left-1/2 -translate-x-1/2 z-[9999] min-w-[380px] max-w-[550px] flex items-center gap-6 px-8 py-6 rounded-[32px] border border-white/10 backdrop-blur-3xl animate-in slide-in-from-top-12 duration-700 ease-out fill-mode-forwards shadow-[0_30px_70px_-15px_rgba(0,0,0,0.6)] ${toast.type === 'success'
+            ? 'bg-gradient-to-br from-emerald-500/20 via-slate-950/60 to-slate-950/80 border-t-emerald-400/40'
+            : 'bg-gradient-to-br from-rose-500/20 via-slate-950/60 to-slate-950/80 border-t-rose-400/40'
+          }`}>
+          <div className="relative">
+            <div className={`absolute inset-0 blur-2xl opacity-40 ${toast.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
+            <div className={`relative p-4 rounded-[20px] ${toast.type === 'success' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'} border border-white/5 shadow-inner`}>
+              {toast.type === 'success' ? <CheckCircle2 className="w-6 h-6 ml-0.5" /> : <XCircle className="w-6 h-6 ml-0.5" />}
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className={`text-[10px] font-black uppercase tracking-[5px] ${toast.type === 'success' ? 'text-emerald-500/60' : 'text-rose-500/60'}`}>Intelligence Update</span>
+            <span className="text-[16px] font-black tracking-tight text-white leading-tight drop-shadow-sm">{toast.message}</span>
+          </div>
+
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 w-[80%] h-[1px] bg-white/5 overflow-hidden rounded-full">
+            <div className={`h-full bg-current shadow-[0_0_10px_currentColor] transition-all duration-[5000ms] ease-linear animate-toast-glow`}></div>
+          </div>
+          <div className={`absolute inset-0 rounded-[32px] pointer-events-none border border-white/5 ${toast.type === 'success' ? 'group-hover:border-emerald-500/20' : 'group-hover:border-rose-500/20'} transition-colors`}></div>
+        </div>
+      )}
+      <style>{`
+        @keyframes toast-glow {
+          0% { width: 0%; opacity: 0.2; }
+          20% { opacity: 1; }
+          100% { width: 100%; opacity: 0.1; }
+        }
+        .animate-toast-glow {
+          animation: toast-glow 5000ms linear forwards;
+        }
+      `}</style>
       {isAdmin ? renderAdminUI() : renderUserUI()}
     </div>
   );

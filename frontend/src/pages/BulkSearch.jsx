@@ -21,6 +21,20 @@ const BulkSearch = () => {
 
   const [syncMode, setSyncMode] = useState('rocketreach'); // 'rocketreach' or 'spreadsheet'
   const [isSyncing, setIsSyncing] = useState(false);
+  const [lastFetched, setLastFetched] = useState(null);
+
+  // Confirm Dialog State
+  const [confirmDialog, setConfirmDialog] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: null,
+    isDanger: false
+  });
+
+  const triggerConfirm = (title, message, onConfirm, isDanger = false) => {
+    setConfirmDialog({ isOpen: true, title, message, onConfirm, isDanger });
+  };
   const fileInputRef = React.useRef(null);
 
   // New Filter State
@@ -54,10 +68,10 @@ const BulkSearch = () => {
     { id: 'ENT_APP', label: 'Enterprise Applications' },
     { id: 'ENT_SW', label: 'Enterprise Software' },
     { id: 'EDTECH', label: 'EdTech' },
-    { id: 'PHARMA', label: 'Pharmaceutical (M&A)' },
-    { id: 'NUTRA', label: 'Nutraceutical (M&A)' },
-    { id: 'CHEMICAL', label: 'Chemical (M&A)' },
-    { id: 'FOOD_EXT', label: 'Food Extracts (M&A)' },
+    { id: 'PHARMA', label: 'Pharmaceutical' },
+    { id: 'NUTRA', label: 'Nutraceutical' },
+    { id: 'CHEMICAL', label: 'Chemical' },
+    { id: 'FOOD_EXT', label: 'Food Extracts' },
     { id: 'EV', label: 'EV (Electric Vehicles)' },
     { id: 'DRONES', label: 'Drones' },
     { id: 'FINTECH', label: 'Fintech' },
@@ -106,6 +120,7 @@ const BulkSearch = () => {
         total: response.data.total || 0
       });
       setSelectedLeads(new Set());
+      setLastFetched(new Date());
     } catch (err) {
       console.error('Failed to fetch bulk leads', err);
     } finally {
@@ -176,18 +191,25 @@ const BulkSearch = () => {
 
   const handleBulkDelete = async () => {
     if (selectedLeads.size === 0) return;
-    if (!window.confirm(`Are you sure you want to reject and delete ${selectedLeads.size} leads?`)) return;
-    setIsBulkActionLoading(true);
-    try {
-      await api.post('/api/leads/bulk-delete', Array.from(selectedLeads));
-      showNotification('success', `${selectedLeads.size} leads deleted.`);
-      fetchBulkLeads(pagination.page);
-      setSelectedLeads(new Set());
-    } catch (err) {
-      showNotification('error', 'Bulk deletion failed');
-    } finally {
-      setIsBulkActionLoading(false);
-    }
+
+    triggerConfirm(
+      "Confirm Bulk Rejection",
+      `Are you sure you want to reject and delete ${selectedLeads.size} selected leads? This action cannot be undone.`,
+      async () => {
+        setIsBulkActionLoading(true);
+        try {
+          await api.post('/api/leads/bulk-delete', Array.from(selectedLeads));
+          showNotification('success', `${selectedLeads.size} leads deleted.`);
+          fetchBulkLeads(pagination.page);
+          setSelectedLeads(new Set());
+        } catch (err) {
+          showNotification('error', 'Bulk deletion failed');
+        } finally {
+          setIsBulkActionLoading(false);
+        }
+      },
+      true
+    );
   };
 
   const handleGenerateDraftSingle = async (id) => {
@@ -217,14 +239,20 @@ const BulkSearch = () => {
   };
 
   const handleDeleteSingle = async (id) => {
-    if (!window.confirm('Delete this discovered lead?')) return;
-    try {
-      await api.post('/api/leads/bulk-delete', [id]);
-      showNotification('success', 'Lead deleted');
-      fetchBulkLeads(pagination.page);
-    } catch (err) {
-      showNotification('error', 'Failed to delete lead');
-    }
+    triggerConfirm(
+      "Delete Discovered Lead",
+      "Are you sure you want to delete this discovered lead? This action cannot be undone.",
+      async () => {
+        try {
+          await api.post('/api/leads/bulk-delete', [id]);
+          showNotification('success', 'Lead deleted');
+          fetchBulkLeads(pagination.page);
+        } catch (err) {
+          showNotification('error', 'Failed to delete lead');
+        }
+      },
+      true
+    );
   };
 
   const handleFileUpload = (e) => {
@@ -280,41 +308,19 @@ const BulkSearch = () => {
       return;
     }
 
-    let exportUrl;
-    try {
-      if (rawUrl.includes('/d/')) {
-        const docId = rawUrl.split('/d/')[1].split('/')[0];
-        exportUrl = `https://docs.google.com/spreadsheets/d/${docId}/export?format=csv`;
-      } else {
-        throw new Error('Unrecognized URL format');
-      }
-    } catch (e) {
-      showNotification('error', 'Invalid Google Sheet URL format.');
-      return;
-    }
-
+    let exportUrl = rawUrl;
     setIsSyncing(true);
-    Papa.parse(exportUrl, {
-      download: true,
-      header: true,
-      complete: async (results) => {
-        try {
-          const cleanData = results.data.filter(row => row.email || row.Email || row.Name || row.name);
-          const response = await api.post('/api/leads/bulk-import', cleanData);
-          showNotification('success', response.data.message || 'Import successful');
-          fetchBulkLeads();
-          if (input) input.value = '';
-        } catch (err) {
-          showNotification('error', 'Import failed: ' + (err.response?.data?.detail || err.message));
-        } finally {
-          setIsSyncing(false);
-        }
-      },
-      error: (err) => {
-        showNotification('error', 'Failed to fetch or parse from URL: ' + err.message);
-        setIsSyncing(false);
-      }
-    });
+    
+    try {
+      const response = await api.post('/api/leads/import-gsheet', { url: exportUrl });
+      showNotification('success', response.data.message || 'Import successful');
+      fetchBulkLeads();
+      if (input) input.value = '';
+    } catch (err) {
+      showNotification('error', 'Import failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const downloadTemplate = () => {
@@ -752,8 +758,8 @@ const BulkSearch = () => {
                 key={tab.key}
                 onClick={() => setSourceFilter(tab.key)}
                 className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all border ${sourceFilter === tab.key
-                    ? 'bg-indigo-600 text-white border-indigo-500 shadow-lg shadow-indigo-600/20'
-                    : 'bg-black/30 text-slate-500 border-white/5 hover:text-slate-300 hover:border-white/10'
+                  ? 'bg-indigo-600 text-white border-indigo-500 shadow-lg shadow-indigo-600/20'
+                  : 'bg-black/30 text-slate-500 border-white/5 hover:text-slate-300 hover:border-white/10'
                   }`}
               >
                 {tab.label}
@@ -780,6 +786,7 @@ const BulkSearch = () => {
                 <th className="px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Lead Identity</th>
                 <th className="px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Company / Org</th>
                 <th className="px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Source</th>
+                <th className="px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">Date and Time</th>
                 <th className="px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Actions</th>
               </tr>
             </thead>
@@ -841,6 +848,16 @@ const BulkSearch = () => {
                         </span>
                       )}
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex flex-col">
+                        <span className="text-[11px] font-bold text-slate-300">
+                          {lead.created_at ? new Date(lead.created_at).toLocaleDateString([], { day: '2-digit', month: 'short' }) : 'N/A'}
+                        </span>
+                        <span className="text-[9px] font-black text-slate-600 uppercase tracking-tighter">
+                          {lead.created_at ? new Date(lead.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                        </span>
+                      </div>
+                    </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-center gap-2">
                         <button
@@ -889,6 +906,42 @@ const BulkSearch = () => {
       <div className="mt-8 text-center text-[9px] text-slate-600 font-extrabold uppercase tracking-[4px]">
         Optimized for Institutional Asset Management Discovery
       </div>
+      {/* Custom Confirmation Modal */}
+      {confirmDialog.isOpen && (
+        <>
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[4000] animate-in fade-in" onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}></div>
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-[#151a26] border border-white/10 rounded-2xl shadow-2xl z-[4001] animate-in zoom-in-95 duration-200 overflow-hidden">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${confirmDialog.isDanger ? 'bg-rose-500/10 text-rose-500' : 'bg-blue-500/10 text-blue-500'}`}>
+                  <AlertCircle className="w-5 h-5" />
+                </div>
+                <h3 className="text-lg font-bold text-white">{confirmDialog.title}</h3>
+              </div>
+              <p className="text-slate-400 text-sm leading-relaxed mb-6">
+                {confirmDialog.message}
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-xs uppercase tracking-widest transition-colors border border-white/5"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    confirmDialog.onConfirm();
+                    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+                  }}
+                  className={`flex-1 px-4 py-2.5 rounded-xl text-white font-bold text-xs uppercase tracking-widest transition-all shadow-lg ${confirmDialog.isDanger ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-500/20' : 'bg-blue-600 hover:bg-blue-500 shadow-blue-500/20'}`}
+                >
+                  Confirm
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };

@@ -41,11 +41,11 @@ const GenerateSector = () => {
         { sector: 'ENT_SW', display_name: 'Enterprise Software', count: 15, total: 50, context: '', strategy: '' },
         { sector: 'EDTECH', display_name: 'EdTech', count: 15, total: 34, context: '', strategy: '' },
         // ONLY FOR M&A
-        { sector: 'PHARMA', display_name: 'Pharmaceutical (M&A)', count: 15, total: 28, context: '', strategy: '' },
-        { sector: 'NUTRA', display_name: 'Nutraceutical (M&A)', count: 15, total: 25, context: '', strategy: '' },
-        { sector: 'CHEMICAL', display_name: 'Chemical (M&A)', count: 15, total: 27, context: '', strategy: '' },
-        { sector: 'FOOD_EXT', display_name: 'Food Extracts (M&A)', count: 15, total: 24, context: '', strategy: '' },
-        { sector: 'TEXTILE', display_name: 'Textile (Clothing/Brands)', count: 15, total: 29, context: '', strategy: '' }
+        { sector: 'PHARMA', display_name: 'Pharmaceutical', count: 15, total: 28, context: '', strategy: '' },
+        { sector: 'NUTRA', display_name: 'Nutraceutical', count: 15, total: 25, context: '', strategy: '' },
+        { sector: 'CHEMICAL', display_name: 'Chemical', count: 15, total: 27, context: '', strategy: '' },
+        { sector: 'FOOD_EXT', display_name: 'Food Extracts', count: 15, total: 24, context: '', strategy: '' },
+        { sector: 'TEXTILE', display_name: 'Textile', count: 15, total: 29, context: '', strategy: '' }
       ]);
     } finally {
       setIsLoading(false);

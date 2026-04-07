@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Rocket, Search, ChevronDown, CheckCircle, Mail, User, Linkedin,
-  Loader2, Sparkles, Tag, Plus, ChevronRight, X, AlertTriangle,
+  Loader2, Sparkles, Tag, Plus, ChevronRight, X, AlertTriangle, AlertCircle,
   ChevronLeft, ChevronUp, FileSpreadsheet, Download, Trash2, Pencil
 } from 'lucide-react';
 import axios from 'axios';
@@ -41,10 +41,24 @@ const Leads = () => {
 
   const [selectedLeads, setSelectedLeads] = useState(new Set());
   const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
+  const [lastFetched, setLastFetched] = useState(null);
 
   const [showLabelModal, setShowLabelModal] = useState(false);
   const [labelInput, setLabelInput] = useState('');
   const [targetLeadIds, setTargetLeadIds] = useState([]);
+
+  // Confirm Dialog State
+  const [confirmDialog, setConfirmDialog] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: null,
+    isDanger: false
+  });
+
+  const triggerConfirm = (title, message, onConfirm, isDanger = false) => {
+    setConfirmDialog({ isOpen: true, title, message, onConfirm, isDanger });
+  };
 
   const uniqueCompanies = useMemo(() => {
     const comps = new Set();
@@ -115,6 +129,7 @@ const Leads = () => {
         total: response.data.total
       }));
       setSelectedLeads(new Set());
+      setLastFetched(new Date());
     } catch (err) {
       console.error('Failed to fetch leads', err);
     } finally {
@@ -192,30 +207,44 @@ const Leads = () => {
   };
 
   const handleDeleteSingle = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this lead? This action cannot be undone.')) return;
-    try {
-      await api.post('/api/leads/bulk-delete', [id]);
-      showNotification('success', 'Lead deleted successfully.');
-      fetchLeads();
-    } catch (err) {
-      showNotification('error', 'Failed to delete lead: ' + (err.response?.data?.detail || err.message));
-    }
+    triggerConfirm(
+      "Confirm Deletion",
+      "Are you sure you want to delete this lead? This action cannot be undone.",
+      async () => {
+        try {
+          await api.post('/api/leads/bulk-delete', [id]);
+          showNotification('success', 'Lead successfully deleted.');
+          fetchLeads();
+        } catch (err) {
+          showNotification('error', 'Failed to delete lead: ' + (err.response?.data?.detail || err.message));
+        }
+      },
+      true
+    );
   };
 
   const handleBulkDelete = async () => {
     const ids = Array.from(selectedLeads);
-    if (!window.confirm(`Are you sure you want to delete ${ids.length} selected leads? This action cannot be undone.`)) return;
-    setIsBulkActionLoading(true);
-    try {
-      await api.post('/api/leads/bulk-delete', ids);
-      showNotification('success', `${ids.length} leads deleted successfully.`);
-      setSelectedLeads(new Set());
-      fetchLeads();
-    } catch (err) {
-      showNotification('error', 'Failed to delete leads: ' + (err.response?.data?.detail || err.message));
-    } finally {
-      setIsBulkActionLoading(false);
-    }
+    if (ids.length === 0) return;
+
+    triggerConfirm(
+      ids.length === 1 ? "Confirm Deletion" : "Confirm Bulk Deletion",
+      `Are you sure you want to delete ${ids.length} selected lead${ids.length > 1 ? 's' : ''}? This action cannot be undone.`,
+      async () => {
+        setIsBulkActionLoading(true);
+        try {
+          await api.post('/api/leads/bulk-delete', ids);
+          showNotification('success', `${ids.length} leads deleted successfully.`);
+          setSelectedLeads(new Set());
+          fetchLeads();
+        } catch (err) {
+          showNotification('error', 'Failed to delete leads: ' + (err.response?.data?.detail || err.message));
+        } finally {
+          setIsBulkActionLoading(false);
+        }
+      },
+      true
+    );
   };
 
   // Setup Sorting
@@ -367,7 +396,15 @@ const Leads = () => {
       <div className="flex justify-between items-end mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white">Lead Pipeline</h1>
-          <p className="text-slate-400 text-sm mt-1">Manage and organize your AI-triaged investment leads via list view.</p>
+          <div className="flex items-center gap-2 mt-1">
+            <p className="text-slate-400 text-sm">Manage and organize your AI-triaged investment leads via list view.</p>
+            {lastFetched && (
+              <span className="text-[10px] bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded-full font-bold border border-blue-500/20 flex items-center gap-1.5 animate-in fade-in slide-in-from-left-2">
+                <div className="w-1 h-1 bg-blue-400 rounded-full animate-pulse" />
+                Updated at {lastFetched.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
+          </div>
         </div>
         <button
           onClick={() => setShowAddModal(true)}
@@ -707,7 +744,7 @@ const Leads = () => {
                 <th>Company</th>
                 <th>Title / Role</th>
                 <th>Location</th>
-                <th>Domain / Website</th>
+                <th>Date and Time</th>
                 <th>Labels</th>
                 <th className="text-right">Actions</th>
               </tr>
@@ -720,7 +757,7 @@ const Leads = () => {
                   <td><div className="h-4 bg-slate-800 rounded w-24 animate-shimmer"></div></td>
                   <td><div className="h-4 bg-slate-800 rounded w-28 animate-shimmer"></div></td>
                   <td><div className="h-4 bg-slate-800 rounded w-20 animate-shimmer"></div></td>
-                  <td><div className="h-4 bg-slate-800 rounded w-32 animate-shimmer"></div></td>
+                  <td><div className="h-4 bg-slate-800 rounded w-28 animate-shimmer"></div></td>
                   <td><div className="h-4 bg-slate-800 rounded w-16 animate-shimmer"></div></td>
                   <td className="text-right"><div className="h-6 w-6 bg-slate-800 rounded-full inline-block animate-shimmer"></div></td>
                 </tr>
@@ -771,10 +808,10 @@ const Leads = () => {
                     {sortConfig.key === 'city' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
                   </div>
                 </th>
-                <th className="sortable" onClick={() => requestSort('domain')}>
+                <th className="sortable" onClick={() => requestSort('created_at')}>
                   <div className="flex items-center gap-1">
-                    Domain / Website
-                    {sortConfig.key === 'domain' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
+                    Date and Time
+                    {sortConfig.key === 'created_at' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
                   </div>
                 </th>
                 <th>Labels</th>
@@ -816,11 +853,13 @@ const Leads = () => {
                     <td className="text-slate-400">
                       {[lead.city, lead.country].filter(Boolean).join(', ') || 'Global'}
                     </td>
-                    <td className="text-slate-400">
-                      {lead.domain ? (
-                        <a href={`https://${lead.domain}`} target="_blank" rel="noreferrer" className="hover:text-blue-400 hover:underline">
-                          {lead.domain}
-                        </a>
+                    <td className="text-[11px] font-bold text-slate-400 whitespace-nowrap">
+                      {lead.created_at ? (
+                        <>
+                          <span className="text-slate-300">{new Date(lead.created_at).toLocaleDateString([], { day: '2-digit', month: 'short' })}</span>
+                          <span className="mx-1 opacity-30">·</span>
+                          <span className="opacity-70">{new Date(lead.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        </>
                       ) : '-'}
                     </td>
                     <td className="max-w-[150px]">
@@ -923,83 +962,83 @@ const Leads = () => {
             <div className="grid grid-cols-2 gap-4">
               <div className="form-group">
                 <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">First Name</label>
-                <input 
-                  type="text" required className="form-control" placeholder="John" 
+                <input
+                  type="text" required className="form-control" placeholder="John"
                   value={newLeadData.first_name}
-                  onChange={e => setNewLeadData({...newLeadData, first_name: e.target.value})}
+                  onChange={e => setNewLeadData({ ...newLeadData, first_name: e.target.value })}
                 />
               </div>
               <div className="form-group">
                 <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Last Name</label>
-                <input 
-                  type="text" className="form-control" placeholder="Doe" 
+                <input
+                  type="text" className="form-control" placeholder="Doe"
                   value={newLeadData.last_name}
-                  onChange={e => setNewLeadData({...newLeadData, last_name: e.target.value})}
+                  onChange={e => setNewLeadData({ ...newLeadData, last_name: e.target.value })}
                 />
               </div>
             </div>
-            
+
             <div className="form-group">
               <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Email Address</label>
-              <input 
-                type="email" required className="form-control" placeholder="john@example.com" 
+              <input
+                type="email" required className="form-control" placeholder="john@example.com"
                 value={newLeadData.email}
-                onChange={e => setNewLeadData({...newLeadData, email: e.target.value})}
+                onChange={e => setNewLeadData({ ...newLeadData, email: e.target.value })}
               />
             </div>
 
             <div className="form-group">
               <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Designation / Job Title</label>
-              <input 
-                type="text" className="form-control" placeholder="Managing Director" 
+              <input
+                type="text" className="form-control" placeholder="Managing Director"
                 value={newLeadData.designation}
-                onChange={e => setNewLeadData({...newLeadData, designation: e.target.value})}
+                onChange={e => setNewLeadData({ ...newLeadData, designation: e.target.value })}
               />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="form-group">
                 <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">City</label>
-                <input 
-                  type="text" className="form-control" placeholder="New York" 
+                <input
+                  type="text" className="form-control" placeholder="New York"
                   value={newLeadData.city}
-                  onChange={e => setNewLeadData({...newLeadData, city: e.target.value})}
+                  onChange={e => setNewLeadData({ ...newLeadData, city: e.target.value })}
                 />
               </div>
               <div className="form-group">
                 <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Country</label>
-                <input 
-                  type="text" className="form-control" placeholder="USA" 
+                <input
+                  type="text" className="form-control" placeholder="USA"
                   value={newLeadData.country}
-                  onChange={e => setNewLeadData({...newLeadData, country: e.target.value})}
+                  onChange={e => setNewLeadData({ ...newLeadData, country: e.target.value })}
                 />
               </div>
             </div>
 
             <div className="form-group">
               <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Phone (Optional)</label>
-              <input 
-                type="text" className="form-control" placeholder="+1 234 567 890" 
+              <input
+                type="text" className="form-control" placeholder="+1 234 567 890"
                 value={newLeadData.phone}
-                onChange={e => setNewLeadData({...newLeadData, phone: e.target.value})}
+                onChange={e => setNewLeadData({ ...newLeadData, phone: e.target.value })}
               />
             </div>
 
             <div className="form-group">
               <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Company</label>
-              <input 
-                type="text" className="form-control" placeholder="Acme Inc" 
+              <input
+                type="text" className="form-control" placeholder="Acme Inc"
                 value={newLeadData.company_name}
-                onChange={e => setNewLeadData({...newLeadData, company_name: e.target.value})}
+                onChange={e => setNewLeadData({ ...newLeadData, company_name: e.target.value })}
               />
             </div>
 
             <div className="form-group">
               <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Target Persona</label>
-              <select 
+              <select
                 className="form-control cursor-pointer"
                 value={newLeadData.persona}
-                onChange={e => setNewLeadData({...newLeadData, persona: e.target.value})}
+                onChange={e => setNewLeadData({ ...newLeadData, persona: e.target.value })}
               >
                 {personas.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
@@ -1007,19 +1046,19 @@ const Leads = () => {
 
             <div className="form-group">
               <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">LinkedIn URL</label>
-              <input 
-                type="url" className="form-control" placeholder="https://linkedin.com/in/..." 
+              <input
+                type="url" className="form-control" placeholder="https://linkedin.com/in/..."
                 value={newLeadData.linkedin_url}
-                onChange={e => setNewLeadData({...newLeadData, linkedin_url: e.target.value})}
+                onChange={e => setNewLeadData({ ...newLeadData, linkedin_url: e.target.value })}
               />
             </div>
           </form>
         </div>
         <div className="drawer-footer">
           <button className="btn btn-ghost px-6" onClick={() => setShowAddModal(false)}>Cancel</button>
-          <button 
-            type="submit" 
-            form="manual-lead-form" 
+          <button
+            type="submit"
+            form="manual-lead-form"
             disabled={isCreatingLead}
             className="btn btn-primary px-8"
           >
@@ -1091,6 +1130,43 @@ const Leads = () => {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Custom Confirmation Modal */}
+      {confirmDialog.isOpen && (
+        <>
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[4000] animate-in fade-in" onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}></div>
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-[#151a26] border border-white/10 rounded-2xl shadow-2xl z-[4001] animate-in zoom-in-95 duration-200 overflow-hidden">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${confirmDialog.isDanger ? 'bg-rose-500/10 text-rose-500' : 'bg-blue-500/10 text-blue-500'}`}>
+                  <AlertCircle className="w-5 h-5" />
+                </div>
+                <h3 className="text-lg font-bold text-white">{confirmDialog.title}</h3>
+              </div>
+              <p className="text-slate-400 text-sm leading-relaxed mb-6">
+                {confirmDialog.message}
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-xs uppercase tracking-widest transition-colors border border-white/5"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => {
+                    confirmDialog.onConfirm();
+                    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+                  }}
+                  className={`flex-1 px-4 py-2.5 rounded-xl text-white font-bold text-xs uppercase tracking-widest transition-all shadow-lg ${confirmDialog.isDanger ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-500/20' : 'bg-blue-600 hover:bg-blue-500 shadow-blue-500/20'}`}
+                >
+                  Confirm
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

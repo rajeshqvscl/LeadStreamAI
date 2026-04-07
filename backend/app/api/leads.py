@@ -24,6 +24,7 @@ class LeadUpdate(BaseModel):
     campaign_id: Optional[int] = None
     family_office_name: Optional[str] = None
     source: Optional[str] = None
+    remarks: Optional[str] = None
 
 class LeadCreate(BaseModel):
     first_name: str
@@ -37,6 +38,7 @@ class LeadCreate(BaseModel):
     linkedin_url: Optional[str] = ""
     persona: Optional[str] = "OTHER"
     source: Optional[str] = "direct"
+    remarks: Optional[str] = ""
 
 from typing import List
 
@@ -70,17 +72,22 @@ def get_leads(
     query = """
         SELECT *, 
                COALESCE(designation, raw_payload->>'Designation', raw_payload->>'Role/Designation', raw_payload->>'designation', persona) as designation, 
-               labels 
+               labels, remarks 
         FROM leads_raw 
         WHERE 1=1
     """
     params = []
     
-    if user_id:
+    is_admin = (str(user_id).lower() == 'admin' or str(user_id) == '1')
+
+    if is_admin:
+        pass  # Admin sees all leads — no user_id filter applied
+    elif user_id:
         query += " AND user_id = %s"
         params.append(user_id)
     else:
         query += " AND user_id IS NULL"
+
 
     if source:
         query += " AND source = %s"
@@ -212,7 +219,8 @@ def get_leads(
             "validation_status": r["validation_status"],
             "email_status": r.get("email_status"),
             "is_unsubscribed": r.get("is_unsubscribed", False),
-            "created_at": r["created_at"].isoformat() if r["created_at"] else None
+            "remarks": r.get("remarks", ""),
+            "created_at": r["created_at"].isoformat() + "Z" if r["created_at"] else None
         })
 
     return {
@@ -271,7 +279,7 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
         
     # Serialize datetime
     if lead.get("created_at"):
-        lead["created_at"] = lead["created_at"].isoformat()
+        lead["created_at"] = lead["created_at"].isoformat() + "Z"
         
     # Normalize email_draft content to handle literal escapes
     if lead.get("email_draft"):
@@ -461,19 +469,20 @@ def bulk_import(
                 pass
 
         for lead in leads:
+            # Normalize keys to catch variations like "E- Mail", "First Name", "Investor Name"
+            norm_lead = {str(k).lower().replace(" ", "").replace("-", ""): str(v).strip() for k, v in lead.items() if v}
+
             # Flexible Mapping for Name
             name = (
-                lead.get("Name") or lead.get("name") or 
-                lead.get("Full Name") or lead.get("full_name") or 
-                lead.get("Lead Name") or 
-                f"{lead.get('first_name', '')} {lead.get('last_name', '')}".strip()
+                norm_lead.get("name") or norm_lead.get("fullname") or 
+                norm_lead.get("leadname") or norm_lead.get("investorname") or
+                f"{norm_lead.get('firstname', '')} {norm_lead.get('lastname', '')}".strip()
             )
             
             # Flexible Mapping for Email
             email = (
-                lead.get("email") or lead.get("Email") or 
-                lead.get("E-mail") or lead.get("Email Address") or 
-                lead.get("Work Email")
+                norm_lead.get("email") or norm_lead.get("emailaddress") or 
+                norm_lead.get("workemail")
             )
 
             if not email or not name:
@@ -482,22 +491,22 @@ def bulk_import(
 
             # Flexible Mapping for other fields
             company = (
-                lead.get("company_name") or lead.get("Company Name") or 
-                lead.get("Company") or lead.get("Account") or lead.get("Organization")
+                norm_lead.get("companyname") or norm_lead.get("company") or 
+                norm_lead.get("account") or norm_lead.get("organization") or
+                norm_lead.get("client")
             )
             linkedin = (
-                lead.get("linkedin_url") or lead.get("LinkedIn URL") or 
-                lead.get("LinkedIn") or lead.get("Profile URL") or lead.get("URL")
+                norm_lead.get("linkedinurl") or norm_lead.get("linkedin") or 
+                norm_lead.get("profileurl") or norm_lead.get("url")
             )
             designation = (
-                lead.get("Designation") or lead.get("Job Title") or 
-                lead.get("Title") or lead.get("Role") or lead.get("Position") or 
-                lead.get("Role/Designation")
+                norm_lead.get("designation") or norm_lead.get("role") or 
+                norm_lead.get("title") or norm_lead.get("jobtitle") or norm_lead.get("position")
             )
-            city = lead.get("city") or lead.get("City") or lead.get("Location") or lead.get("Town")
-            country = lead.get("country") or lead.get("Country") or lead.get("Nation")
-            persona = lead.get("persona") or lead.get("Persona") or lead.get("Category") or "OTHER"
-            phone = lead.get("phone") or lead.get("Phone") or lead.get("phone number") or lead.get("Mobile")
+            city = norm_lead.get("city") or norm_lead.get("location") or norm_lead.get("town") or norm_lead.get("place")
+            country = norm_lead.get("country") or norm_lead.get("nation")
+            persona = norm_lead.get("persona") or norm_lead.get("category") or "OTHER"
+            phone = norm_lead.get("phone") or norm_lead.get("phonenumber") or norm_lead.get("mobile")
 
             # Data Formatting
             name_parts = name.split(" ", 1)
@@ -511,9 +520,9 @@ def bulk_import(
                 cur.execute("""
                     INSERT INTO leads_raw (
                         first_name, last_name, email, company_name, linkedin_url, 
-                        city, country, persona, phone, source, user_id, raw_payload
+                        city, country, persona, phone, source, user_id, raw_payload, remarks
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (email) DO UPDATE SET
                         first_name = EXCLUDED.first_name,
                         last_name = EXCLUDED.last_name,
@@ -525,11 +534,12 @@ def bulk_import(
                         phone = EXCLUDED.phone,
                         source = EXCLUDED.source,
                         user_id = COALESCE(EXCLUDED.user_id, leads_raw.user_id),
-                        raw_payload = EXCLUDED.raw_payload
+                        raw_payload = EXCLUDED.raw_payload,
+                        remarks = COALESCE(EXCLUDED.remarks, leads_raw.remarks)
                 """, (
                     f_name, l_name, email, company, linkedin, 
                     city, country, persona, phone, "csv_import", db_user_id, 
-                    json.dumps(lead)
+                    json.dumps(lead), lead.get("remarks", "")
                 ))
                 if cur.rowcount > 0:
                     inserted += 1
@@ -551,3 +561,46 @@ def bulk_import(
         conn.close()
 
     return {"message": f"Successfully processed {inserted + skipped} leads. ({inserted} new/updated, {errors} skipped due to invalid email or name)"}
+
+
+class GSheetImportRequest(BaseModel):
+    url: str
+
+@router.post("/leads/import-gsheet")
+def import_from_gsheet(
+    req: GSheetImportRequest,
+    user_id: Optional[str] = Header(None, alias="X-User-Id")
+):
+    import requests as http_requests
+    import csv, io, re
+
+    raw_url = req.url.strip()
+    
+    if "/d/" not in raw_url:
+        raise HTTPException(status_code=400, detail="Invalid Google Sheet URL format.")
+    
+    doc_id = raw_url.split("/d/")[1].split("/")[0]
+    
+    # Extract gid (tab ID)
+    gid_match = re.search(r"[?&#]gid=(\d+)", raw_url)
+    gid = gid_match.group(1) if gid_match else "0"
+    
+    export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv&gid={gid}"
+    
+    try:
+        resp = http_requests.get(export_url, allow_redirects=True, timeout=15)
+        content_type = resp.headers.get("Content-Type", "")
+        
+        if resp.status_code == 200 and "csv" in content_type.lower():
+            reader = csv.DictReader(io.StringIO(resp.text))
+            
+            # Use our generous backend bulk-import logic!
+            return bulk_import([dict(row) for row in reader], user_id)
+            
+        else:
+            raise HTTPException(status_code=400, detail="Sheet is fully private or not found. Please make sure 'Anyone with the link can view'.")
+            
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
+        raise HTTPException(status_code=500, detail=str(e))

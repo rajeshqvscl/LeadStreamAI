@@ -84,15 +84,9 @@ def generate_draft(req: DraftRequest, user_id: Optional[str] = Header(None, alia
         subject = email_data.get("subject", "Following up")
         body = email_data.get("body", "Hello, we would love to connect.")
         
-        # Ensure proper dynamic greeting in body only
-        lines = body.split('\n')
-        if lines and any(g in lines[0].lower() for g in ['hi ', 'hello ', 'dear ']):
-            lines = lines[1:]
-        clean_body = '\n'.join(lines).lstrip()
-        
-        # Inject personalized greeting
-        first_name = lead.get('first_name', 'there')
-        email_content = f"Subject: {subject}\n\nHi {first_name},\n\n{clean_body}"
+        # The AI now generates the full email including greeting and sign-off.
+        # We just need to prepend the Subject for consistent database storage.
+        email_content = f"Subject: {subject}\n\n{body}"
         
         # update leads_raw.email_draft and email_status='PENDING_APPROVAL'
         conn = get_db_connection()
@@ -209,6 +203,10 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, per_page: in
             "fit_score": r.get("fit_score", 0),
             "subject": subject,
             "body": body,
+            "attachments": [
+                {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB", "type": "application/pdf"},
+                {"name": "Lalit_Huria_Profile.pdf", "size": "250 KB", "type": "application/pdf"}
+            ],
             "status": r["email_status"] or "PENDING_APPROVAL",
             "performance": {"opens": 0, "clicks": 0}, # Placeholders
             "verifier": "admin" if r["email_status"] in ["APPROVED", "SENT"] else None,

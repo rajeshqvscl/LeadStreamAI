@@ -50,17 +50,7 @@ def login(req: LoginRequest):
     if password_hash != user['password_hash']:
         raise HTTPException(status_code=401, detail="Invalid username or password")
         
-    # --- Fresh Start Implementation (Requested) ---
-    # Delete all data associated with this user every time they login
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM leads_raw WHERE user_id = %s", (user['id'],))
-    cur.execute("DELETE FROM activity_log WHERE user_id = %s", (user['id'],))
-    cur.execute("DELETE FROM campaigns WHERE user_id = %s", (user['id'],))
-    conn.commit()
-    cur.close()
-    conn.close()
-    # -----------------------------------------------
+    # Data is preserved across sessions — leads persist after logout/login
 
         
     return {
@@ -69,6 +59,7 @@ def login(req: LoginRequest):
         "user": {
             "id": user['id'],
             "username": user['username'],
+            "email": user['email'],
             "full_name": user['full_name'],
             "role": user['role']
         }

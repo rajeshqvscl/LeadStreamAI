@@ -1,6 +1,7 @@
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 import os
 import logging
 from datetime import datetime
@@ -13,7 +14,7 @@ load_dotenv(dotenv_path=env_path, override=True)
 
 logger = logging.getLogger(__name__)
 
-def send_email(to_email, subject, html_content):
+def send_email(to_email, subject, html_content, attachments=None):
     """Generic SMTP sender with environment-based configuration."""
     smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
@@ -36,6 +37,18 @@ def send_email(to_email, subject, html_content):
         msg['Subject'] = subject
 
         msg.attach(MIMEText(html_content, 'html'))
+
+        # Add default system attachments if they exist
+        assets_dir = Path(__file__).resolve().parent.parent.parent / "assets"
+        default_files = ["QVSCL Company Profile.pdf", "Lalit_Huria_Profile.pdf"]
+        
+        for filename in default_files:
+            file_path = assets_dir / filename
+            if file_path.exists():
+                with open(file_path, "rb") as f:
+                    part = MIMEApplication(f.read(), Name=filename)
+                    part['Content-Disposition'] = f'attachment; filename="{filename}"'
+                    msg.attach(part)
 
         server = smtplib.SMTP(smtp_server, smtp_port)
         server.starttls()

@@ -190,7 +190,8 @@ const LeadDetail = () => {
         country: l.country || '',
         campaign_id: l.campaign_id || '',
         company_name: l.company_name || '',
-        family_office_name: l.family_office_name || ''
+        family_office_name: l.family_office_name || '',
+        remarks: l.remarks || ''
       });
       setLogs(logsRes.data || []);
 
@@ -469,6 +470,17 @@ const LeadDetail = () => {
                     placeholder="None"
                   />
                 </div>
+                
+                <div>
+                  <label className="block text-[10px] font-bold text-[#64748b] mb-1.5">Remarks / Internal Notes</label>
+                  <textarea
+                    name="remarks"
+                    value={form.remarks || ''}
+                    onChange={handleChange}
+                    placeholder="Add private notes about this lead..."
+                    className="w-full bg-[#0f121b] border border-[#ffffff08] rounded-md px-3 py-2.5 text-white text-[11px] font-medium focus:border-blue-500/50 outline-none transition-colors min-h-[100px] resize-none"
+                  />
+                </div>
 
                 <div className="pt-2">
                   <button
@@ -622,8 +634,8 @@ const LeadDetail = () => {
       {notification && (
         <div className="fixed bottom-8 right-8 z-[2000] animate-in slide-in-from-bottom-4">
           <div className={`px-6 py-4 rounded-2xl shadow-2xl border backdrop-blur-md flex items-center gap-3 ${notification.type === 'success'
-              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-              : 'bg-red-500/10 border-red-500/20 text-red-500'
+            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+            : 'bg-red-500/10 border-red-500/20 text-red-500'
             }`}>
             {notification.type === 'success'
               ? <CheckCircle2 className="w-5 h-5" />

@@ -100,7 +100,22 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
             employer = req.company or req.industry or ""
             job_title = req.title or req.bulk_title or ""
             loc = req.location or req.bulk_location or ""
-            leads = search_leads(employer, job_title, loc, req.count or 10)
+            try:
+                leads = search_leads(employer, job_title, loc, req.count or 10)
+            except Exception as rr_err:
+                err_str = str(rr_err)
+                if "Insufficient Credits" in err_str or "quota" in err_str.lower() or "403" in err_str:
+                    raise HTTPException(
+                        status_code=402,
+                        detail="RocketReach API quota exhausted. Your RocketReach account has run out of credits. Please top up your RocketReach plan at rocketreach.co to continue bulk discovery."
+                    )
+                elif "429" in err_str or "Rate Limit" in err_str:
+                    raise HTTPException(
+                        status_code=429,
+                        detail="RocketReach rate limit hit. Please wait a few minutes and try again."
+                    )
+                raise HTTPException(status_code=500, detail=f"RocketReach search failed: {err_str}")
+
 
         if not leads:
             return { "success": True, "fetched": 0, "inserted": 0, "errors": 0, "message": "No results found" }

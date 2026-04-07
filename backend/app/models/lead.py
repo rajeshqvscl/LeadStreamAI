@@ -36,7 +36,8 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
             persona = EXCLUDED.persona,
             phone = EXCLUDED.phone,
             user_id = COALESCE(leads_raw.user_id, EXCLUDED.user_id),
-            designation = EXCLUDED.designation
+            designation = EXCLUDED.designation,
+            created_at = CURRENT_TIMESTAMP
         """,
         (
             first_name,

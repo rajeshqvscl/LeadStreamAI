@@ -41,74 +41,81 @@ class EmailGenerator:
             return None
 
     def generate_email(self, lead: dict, sender_name: str = "the team"):
-        # Fetch dynamic instructions from DB
-        email_prompt = self._get_prompt("EMAIL_GENERATION")
-        context_prompt = self._get_prompt("CONTEXT") or "We are a technology partner helping businesses with AI-driven efficiency."
+        first_name = lead.get('first_name', 'there')
         
-        if not email_prompt:
-             # High-quality default if DB is empty
-             email_prompt = "You are a professional outreach expert. Write a concise, value-driven cold email."
+        body = f"""I hope you're doing well.
 
-        lead_info = f"""
-Lead Information:
-Name: {lead.get('first_name', '')} {lead.get('last_name', '')}
-Company: {lead.get('company_name', '')}
-Title/Role: {lead.get('designation', lead.get('persona', 'Executive'))}
-Industry Context: {lead.get('industry', 'Technology')}
+I'm {sender_name} from QVSCL (Gurugram), a strategic advisory firm working with high-growth early-stage ventures. We are currently raising a round for a platform building a vertical AI-powered hiring intelligence layer, combining AI agents, recruitment workflows, and trust-based verification infrastructure.
 
-Sender Context:
-Sender Name: {sender_name}
-Company Mission: {context_prompt}
-"""
+**Business Overview**
+• Founded: By industry leaders with 20+ years of experience across HR, fintech, and enterprise technology
+• Focus: Building a unified hiring infrastructure platform that automates and optimizes end-to-end recruitment workflows
+• Platform Offering: A full-stack hiring platform integrating ATS, sourcing, screening, and background verification
+• Technology: AI-powered vertical agents enabling sourcing, scheduling, interviewing, and verification workflows
+• Revenue Model: Enterprise SaaS with multi-layered monetization
+• Core Differentiation: A single unified platform combining hiring + verification + intelligence
 
-        full_system_prompt = f"{email_prompt}\n\n{lead_info}\n\nIMPORTANT: Use the Sender Name provided in the sign-off. Return ONLY valid JSON with 'subject' and 'body' keys."
+**Industry Overview**
+• 3.6M job vacancies are posted monthly in India, but only 2.1M hires are completed
+• 1.5M workforce gap leading to significant unrealized economic output
+• 80% of employers face talent shortages
+• Hiring processes remain largely manual and fragmented
 
-        try:
-            logger.info("calling_claude", model=MODEL_NAME)
+**Market Opportunity**
+• Global Hiring & Recruitment Tech TAM: $150B+
+• Rapid shift toward AI-driven automation, trust, and verification layers (35-45% CAGR)
 
-            response = self.client.messages.create(
-                model=MODEL_NAME,
-                max_tokens=1000,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": full_system_prompt
-                    }
-                ],
-            )
-            
-            # Extract text
-            text = "".join([block.text for block in response.content if block.type == "text"]).strip()
-            return self._parse_response(text)
+**Problems**
+*HR & Recruiter Challenges*
+• 180 applications per hire leading to massive screening overload
+• Recruiters managing higher workloads without increased team size
+• 57% of time spent on repetitive data tasks
 
-        except Exception as e:
-            logger.error("claude_error", error=str(e))
+*Process Inefficiencies*
+• Fragmented workflows across 20+ tools
+• Manual data handling and long hiring cycles (44 days)
 
-            # ✅ High-quality fallback with DYNAMIC NAME
-            company = lead.get('company_name', 'your company')
-            first_name = lead.get('first_name', 'there')
-            designation = lead.get('designation', 'Managing Director')
-            
-            return {
-                "subject": f"Strategic Value & Operational Efficiency for {company}",
-                "body": f"""Hi {first_name},
+*Trust & Quality Issues*
+• 70% resumes contain inaccuracies and AI-generated profiles flooding pipelines
+• High attrition due to poor matching
 
-I hope this finds you well. As {designation} at {company}, you're likely seeing firsthand how your clients are grappling with increasing pressure to streamline operations while maintaining service quality in today's competitive landscape.
+**Solutions**
+• AI Hiring Co-Pilot: Vertical AI agents automating sourcing and screening
+• Unified Platform: End-to-end system integrating ATS and BGV
+• Trust Infrastructure: Proprietary trust graph
+• Background Verification: Native BGV system with 20+ checks
+• Workflow Automation: Eliminates manual HR processes
+• Scalable Architecture: APIs and integrations with HRMS/ATS
 
-I've been working with several professional services firms who are discovering that AI-powered workflow automation is becoming a key differentiator—not just for their own operations, but as a strategic advantage they can offer clients during engagements.
+**Validations & Traction**
+• 100K+ companies onboarded
+• 250+ enterprise customers across 50+ industries
+• 94% customer retention rate
 
-What's particularly interesting is how firms like yours are leveraging these solutions to:
-• Reduce project delivery times by 30-40%
-• Free up senior talent for higher-value strategic work
-• Provide measurable ROI improvements to clients
+**Operational Impact**
+• Time-to-hire reduced from weeks to 2-3 days
+• Verification TAT reduced from 15 days to 2 days
+• 40%+ reduction in HR operational workload
 
-I'd love to share some specific examples of how similar firms are implementing these approaches, and explore whether there might be relevant applications for {company}'s client work.
+**Fundraise**: $1M
 
-Would you be open to a brief 15-minute conversation next week? I can share some industry benchmarks that might be valuable for your upcoming client discussions.
+If this aligns with your portfolio focus and does not conflict with it, I’d be happy to share the full presentation or connect over a virtual meeting at your convenience. I have attached the QVSCL Profile. You may also share your investment thesis with us so we can send relevant deal flow in the future.
 
-Best regards,
-{sender_name}"""
-            }
+For more details about our services: Website | Linkedin
+
+Looking forward to your response.
+
+--
+Thanks & Regards,
+{sender_name},
+Analyst,
+LinkedIn
+8920871574"""
+
+        return {
+            "subject": "Quick introduction",
+            "body": body
+        }
 
     def refine_email(self, subject: str, body: str, instruction: str):
         """
@@ -129,7 +136,7 @@ Best regards,
             logger.info("refining_email", model=MODEL_NAME)
             response = self.client.messages.create(
                 model=MODEL_NAME,
-                max_tokens=1000,
+                max_tokens=4000,
                 messages=[{"role": "user", "content": prompt}],
             )
             
