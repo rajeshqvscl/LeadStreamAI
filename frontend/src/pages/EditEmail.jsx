@@ -125,7 +125,7 @@ const EditEmail = () => {
     <div className="animate-in fade-in duration-500 min-h-screen bg-[#0a0f1a] pb-20 p-8">
       {/* Header */}
       <div className="flex items-center gap-4 mb-8">
-        <button onClick={() => navigate('/dashboard/emails')} className="px-3 py-1.5 flex items-center gap-1.5 rounded-md bg-[#131722] border border-[#ffffff10] text-slate-300 hover:text-white transition-colors text-[11px] font-bold">
+        <button onClick={() => navigate('/dashboard/emails')} className="px-3 py-1.5 flex items-center gap-1.5 rounded-md bg-[#131722] border border-[#ffffff10] text-slate-300 hover:text-white transition-colors text-[11px] font-bold cursor-pointer">
           <ChevronLeft className="w-3.5 h-3.5" /> Back
         </button>
         <div>
@@ -191,7 +191,7 @@ const EditEmail = () => {
                 <button
                   onClick={() => handleRefine()}
                   disabled={isRefining || !aiInstruction}
-                  className="bg-[#10b981] hover:bg-emerald-500 text-white text-[11px] font-bold px-4 py-1.5 rounded-md transition-colors disabled:opacity-50 flex items-center shadow-lg shadow-emerald-500/20"
+                  className="bg-[#10b981] hover:bg-emerald-500 text-white text-[11px] font-bold px-4 py-1.5 rounded-md transition-colors disabled:opacity-50 flex items-center shadow-lg shadow-emerald-500/20 cursor-pointer"
                 >
                   {isRefining ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : ''}
                   {isRefining ? 'Refining...' : 'Refine Draft'}
@@ -214,20 +214,20 @@ const EditEmail = () => {
               </div>
 
               <div className="pt-6 flex items-center gap-4">
-                <button
-                  onClick={() => handleSave()}
-                  disabled={isSaving}
-                  className="bg-[#1e293b] hover:bg-[#334155] text-white text-[12px] font-bold px-5 py-2.5 rounded-md transition-colors disabled:opacity-50 flex items-center border border-[#ffffff10]"
-                >
-                  {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-                  Save Changes
-                </button>
-                <button
-                  onClick={handleApproveAndSend}
-                  className="flex-1 bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-600 hover:to-red-700 text-white text-[12px] font-black uppercase tracking-widest px-6 py-2.5 rounded-md transition-all shadow-lg shadow-red-500/20 flex items-center justify-center gap-2"
-                >
-                  Approve & Send Outreach <Send className="w-4 h-4" />
-                </button>
+                  <button
+                    onClick={() => handleSave()}
+                    disabled={isSaving}
+                    className="bg-[#1e293b] hover:bg-[#334155] text-white text-[12px] font-bold px-5 py-2.5 rounded-md transition-colors disabled:opacity-50 flex items-center border border-[#ffffff10] cursor-pointer"
+                  >
+                    {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                    Save Changes
+                  </button>
+                  <button
+                    onClick={handleApproveAndSend}
+                    className="flex-1 bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-600 hover:to-red-700 text-white text-[12px] font-black uppercase tracking-widest px-6 py-2.5 rounded-md transition-all shadow-lg shadow-red-500/20 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    Approve & Send Outreach <Send className="w-4 h-4" />
+                  </button>
               </div>
             </div>
           </div>
@@ -316,19 +316,25 @@ const EditEmail = () => {
             <div className="space-y-4 max-w-[400px]">
               <div className="grid grid-cols-[120px_1fr] items-center text-[11px]">
                 <span className="text-[#64748b] font-medium">Status</span>
-                {draft.status === 'REJECTED' ? (
-                  <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-[1px] bg-transparent text-red-500 w-max">REJECTED</span>
-                ) : (
-                  <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-[1px] bg-transparent text-amber-500 w-max">{draft.status || 'PENDING APPROVAL'}</span>
-                )}
+                <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-[1px] bg-transparent w-max ${
+                  draft.email_status === 'SENT' || draft.email_status === 'APPROVED' ? 'text-[#10b981]' : 
+                  draft.email_status === 'REJECTED' || draft.email_status === 'FAILED' ? 'text-red-500' : 
+                  'text-amber-500'
+                }`}>
+                  {draft.email_status || 'PENDING APPROVAL'}
+                </span>
               </div>
               <div className="grid grid-cols-[120px_1fr] items-center text-[11px] font-medium border-t border-[#ffffff05] pt-3">
                 <span className="text-[#64748b]">Approved By</span>
-                <span className="text-slate-300">—</span>
+                <span className="text-white">{(draft.email_status === 'SENT' || draft.email_status === 'APPROVED') ? 'Admin' : '—'}</span>
               </div>
               <div className="grid grid-cols-[120px_1fr] items-center text-[11px] font-medium border-t border-[#ffffff05] pt-3">
                 <span className="text-[#64748b]">Sent At</span>
-                <span className="text-slate-300">—</span>
+                <span className="text-white">
+                  {draft.email_status === 'SENT' && draft.updated_at
+                    ? new Date(draft.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                    : '—'}
+                </span>
               </div>
               <div className="grid grid-cols-[120px_1fr] items-center text-[11px] font-medium border-t border-[#ffffff05] pt-3">
                 <span className="text-[#64748b]">Opens</span>

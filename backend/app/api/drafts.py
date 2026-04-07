@@ -9,8 +9,16 @@ from app.models.draft import insert_draft
 from app.database import get_db_connection
 from app.services.llm_services import EmailGenerator
 import psycopg2.extras
+import logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+def normalize_user_id(user_id: Optional[str]) -> str:
+    """Normalizes the user ID from the header to a valid database ID string."""
+    if not user_id or user_id.strip() == "" or str(user_id).lower() == "admin":
+        return "1"
+    return str(user_id)
 
 class DraftRequest(BaseModel):
     lead_id: int
@@ -266,54 +274,72 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[s
 @router.post("/approve-draft/{draft_id}")
 @router.post("/approve-email/{draft_id}")
 def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    from app.services.email_service import send_email
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    # Ensure a draft exists before approving
-    if user_id and user_id != "admin":
-        cur.execute("SELECT first_name, last_name, company_name, email_draft, domain FROM leads_raw WHERE id = %s AND user_id = %s", (draft_id, user_id))
-    elif user_id == "admin":
-        cur.execute("SELECT first_name, last_name, company_name, email_draft, domain FROM leads_raw WHERE id = %s", (draft_id,))
-    else:
-        cur.execute("SELECT first_name, last_name, company_name, email_draft, domain FROM leads_raw WHERE id = %s AND user_id IS NULL", (draft_id,))
-        
-    lead = cur.fetchone()
-
     
-    if lead and not lead.get('email_draft'):
+    # 1. Fetch User Data for Sender Identity
+    sender_email = None
+    sender_name = "the team"
+    if user_id:
+        cur.execute("SELECT email, full_name, username FROM users WHERE id = %s", (normalize_user_id(user_id),))
+        u = cur.fetchone()
+        if u:
+            sender_email = u['email']
+            sender_name = u['full_name'] or u['username']
+
+    # 2. Fetch/Prepare Draft
+    cur.execute("SELECT first_name, last_name, email, email_draft FROM leads_raw WHERE id = %s", (draft_id,))
+    lead = cur.fetchone()
+    if not lead:
+        return {"error": "Lead not found"}
+
+    draft_content = lead.get('email_draft')
+    email = lead['email']
+    
+    if not draft_content:
         from app.services.llm_services import EmailGenerator
-        sender_name = get_user_name(user_id)
         generator = EmailGenerator()
         email_data = generator.generate_email(dict(lead), sender_name=sender_name)
         subject = email_data.get("subject", "Following up")
         body = email_data.get("body", "Hello, we would love to connect.")
-        
-        lines = body.split('\n')
-        if lines and any(g in lines[0].lower() for g in ['hi ', 'hello ', 'dear ']):
-            lines = lines[1:]
-        clean_body = '\n'.join(lines).lstrip()
-        email_content = f"Subject: {subject}\n\nHi {{first_name}},\n\n{clean_body}"
-        
-        cur.execute("""
-            UPDATE leads_raw 
-            SET email_draft = REPLACE(%s, '{{first_name}}', COALESCE(NULLIF(first_name, ''), 'there')),
-                email_status = 'APPROVED', updated_at = NOW()
-            WHERE id = %s
-        """, (email_content, draft_id))
-    else:
+        draft_content = f"Subject: {subject}\n\n{body}"
+    
+    # 3. Parse and Dispatch
+    subject = "Following up"
+    body = draft_content
+    if "Subject: " in draft_content:
+        parts = draft_content.split("\n\n", 1)
+        subject = parts[0].replace("Subject: ", "").strip()
+        body = parts[1].strip() if len(parts) > 1 else ""
+
+    # Real Dispatch
+    logging.info(f"Triggering real email dispatch for lead {draft_id} from {sender_email}")
+    success = send_email(
+        to_email=email,
+        subject=subject,
+        html_content=body.replace("\n", "<br>"),
+        from_email=sender_email,
+        from_name=sender_name
+    )
+
+    if success:
         cur.execute(
-            "UPDATE leads_raw SET email_status = 'APPROVED', updated_at = NOW() WHERE id = %s",
-            (draft_id,)
+            "UPDATE leads_raw SET email_draft = %s, email_status = 'SENT', updated_at = NOW() WHERE id = %s",
+            (draft_content, draft_id)
         )
-        
-    conn.commit()
-    cur.close()
-    conn.close()
-    
-    # Log activity
-    from app.models.lead import add_activity_log
-    add_activity_log(draft_id, "EMAIL_APPROVED", "Email draft approved by admin", "admin")
-    
-    return {"status": "approved", "message": "Draft approved successfully"}
+        conn.commit()
+        from app.models.lead import add_activity_log
+        add_activity_log(draft_id, "EMAIL_SENT", f"Email dispatched via Resend from {sender_email}", sender_name)
+        cur.close()
+        conn.close()
+        return {"status": "sent", "message": f"Success: Email dispatched to {email}"}
+    else:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Outreach dispatch failed. Please verify your Resend configuration and sender email in Profile.")
 
 @router.post("/reject-email/{draft_id}")
 def reject_draft(draft_id: int, req: Optional[RejectRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
@@ -437,38 +463,68 @@ def approve_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = H
 
 @router.post("/send-approved-batch")
 def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    from app.services.email_service import send_email
     conn = get_db_connection()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    if user_id and user_id != "admin":
-        where_clause = "WHERE email_status = 'APPROVED' AND user_id = %s"
-        params = (user_id,)
-    elif user_id == "admin":
-        where_clause = "WHERE email_status = 'APPROVED'"
-        params = ()
-    else:
-        where_clause = "WHERE email_status = 'APPROVED' AND user_id IS NULL"
-        params = ()
-    
-    # Get all approved lead IDs for THIS user
-    cur.execute(f"SELECT id FROM leads_raw {where_clause}", params)
-    ids = [r[0] for r in cur.fetchall()]
-    
-    cur.execute(
-        f"UPDATE leads_raw SET email_status = 'SENT', updated_at = NOW() {where_clause}",
-        params
-    )
+    # 1. Fetch User Data for Sender Identity
+    sender_email = None
+    sender_name = "the team"
+    if user_id:
+        cur.execute("SELECT email, full_name, username FROM users WHERE id = %s", (user_id,))
+        u = cur.fetchone()
+        if u:
+            sender_email = u['email']
+            sender_name = u['full_name'] or u['username']
 
-    updated = cur.rowcount
+    # 2. Get all approved leads for THIS user
+    where_clause = "WHERE email_status = 'APPROVED'"
+    params = []
+    if user_id and user_id != "admin":
+        where_clause += " AND user_id = %s"
+        params.append(user_id)
+    elif user_id == "admin":
+        pass
+    else:
+        where_clause += " AND user_id IS NULL"
+    
+    cur.execute(f"SELECT id, email, email_draft FROM leads_raw {where_clause}", params)
+    leads_to_send = cur.fetchall()
+    
+    sent_count = 0
+    for lead in leads_to_send:
+        try:
+            draft_content = lead['email_draft'] or ""
+            # Parse Subject and Body
+            subject = "Following up"
+            body = draft_content
+            if "Subject: " in draft_content:
+                parts = draft_content.split("\n\n", 1)
+                subject = parts[0].replace("Subject: ", "").strip()
+                body = parts[1].strip() if len(parts) > 1 else ""
+
+            # Real Dispatch
+            success = send_email(
+                to_email=lead['email'],
+                subject=subject,
+                html_content=body.replace("\n", "<br>"),
+                from_email=sender_email,
+                from_name=sender_name
+            )
+
+            if success:
+                cur.execute("UPDATE leads_raw SET email_status = 'SENT', updated_at = NOW() WHERE id = %s", (lead['id'],))
+                from app.models.lead import add_activity_log
+                add_activity_log(lead['id'], "EMAIL_SENT", f"Email dispatched via Resend from {sender_email}", "system")
+                sent_count += 1
+        except Exception as e:
+            logger.error(f"Batch dispatch error for lead {lead['id']}: {str(e)}")
+
     conn.commit()
     cur.close()
     conn.close()
     
-    from app.models.lead import add_activity_log
-    for lid in ids:
-        add_activity_log(lid, "EMAIL_SENT", "Email dispatched in batch", "system")
-        
-    return {"message": f"Successfully sent {updated} approved emails."}
+    return {"message": f"Successfully sent {sent_count} approved emails via Resend."}
 
 @router.post("/generate-bulk-domain-drafts")
 def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
@@ -572,6 +628,7 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
 
 @router.post("/send-bulk-domain-emails")
 def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    from app.services.email_service import send_email
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -579,6 +636,16 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
         if not req.lead_ids:
             return {"message": "No leads provided"}
             
+        # 1. Fetch User Data
+        sender_email = None
+        sender_name = "the team"
+        if user_id:
+            cur.execute("SELECT email, full_name, username FROM users WHERE id = %s", (user_id,))
+            u = cur.fetchone()
+            if u:
+                sender_email = u['email']
+                sender_name = u['full_name'] or u['username']
+
         format_strings = ','.join(['%s'] * len(req.lead_ids))
         if user_id and user_id != "admin":
             where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s"
@@ -590,68 +657,60 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
             where_clause = f"WHERE id IN ({format_strings}) AND user_id IS NULL"
             params = tuple(req.lead_ids)
 
-        cur.execute(f"SELECT * FROM leads_raw {where_clause}", params)
-
+        cur.execute(f"SELECT id, first_name, email, email_draft, domain, company_name FROM leads_raw {where_clause}", params)
         leads = cur.fetchall()
         
-        groups = {}
-        for row in leads:
-            lead_dict = dict(row)
-            domain = lead_dict.get('domain')
-            company = lead_dict.get('company_name')
-            group_key = domain if domain else (company if company else str(lead_dict['id']))
-            group_key = group_key.lower().strip()
-            
-            if group_key not in groups:
-                groups[group_key] = []
-            groups[group_key].append(lead_dict)
-            
-        generator = EmailGenerator()
-        total_leads_updated = 0
-        total_groups = len(groups)
-        
+        sent_count = 0
         from app.models.lead import add_activity_log
-        
-        for key, group_leads in groups.items():
-            first_lead = group_leads[0]
-            
-            # If draft already exists, use it. Otherwise generate.
-            email_content = first_lead.get("email_draft")
-            if not email_content:
-                sender_name = get_user_name(user_id)
-                email_data = generator.generate_email(normalize_lead(first_lead), sender_name=sender_name)
-                subject = email_data.get("subject", "Following up")
-                body = email_data.get("body", "Hello, we would love to connect.")
+        from app.services.llm_services import EmailGenerator
+        generator = EmailGenerator()
+
+        for lead in leads:
+            try:
+                # If draft already exists, use it. Otherwise generate.
+                email_content = lead.get("email_draft")
+                if not email_content:
+                    email_data = generator.generate_email(normalize_lead(dict(lead)), sender_name=sender_name)
+                    subject = email_data.get("subject", "Following up")
+                    body = email_data.get("body", "Hello, we would love to connect.")
+                    email_content = f"Subject: {subject}\n\n{body}"
                 
-                lines = body.split('\n')
-                if lines and any(g in lines[0].lower() for g in ['hi ', 'hello ', 'dear ']):
-                    lines = lines[1:]
-                clean_body = '\n'.join(lines).lstrip()
-                email_content = f"Subject: {subject}\n\nHi {{first_name}},\n\n{clean_body}"
-                
-            group_ids = [l['id'] for l in group_leads]
-            id_format = ','.join(['%s'] * len(group_ids))
-            
-            cur.execute(f"""
-                UPDATE leads_raw 
-                SET email_draft = REPLACE(%s, '{{first_name}}', COALESCE(NULLIF(first_name, ''), 'there')), 
-                    email_status = 'SENT', updated_at = NOW() 
-                WHERE id IN ({id_format})
-            """, (email_content, *group_ids))
-            
-            # Log one activity per domain group to avoid dashboard clutter
-            add_activity_log(None, "BULK_DOMAIN_SEND", f"Sent emails to group {key} ({len(group_ids)} leads)", "admin")
-            
-            total_leads_updated += len(group_ids)
-            
+                # Parse Subject and Body
+                subject = "Following up"
+                body = email_content
+                if "Subject: " in email_content:
+                    parts = email_content.split("\n\n", 1)
+                    subject = parts[0].replace("Subject: ", "").strip()
+                    body = parts[1].strip() if len(parts) > 1 else ""
+
+                # Real Dispatch
+                success = send_email(
+                    to_email=lead['email'],
+                    subject=subject,
+                    html_content=body.replace("\n", "<br>"),
+                    from_email=sender_email,
+                    from_name=sender_name
+                )
+
+                if success:
+                    cur.execute("""
+                        UPDATE leads_raw 
+                        SET email_draft = %s, email_status = 'SENT', updated_at = NOW() 
+                        WHERE id = %s
+                    """, (email_content, lead['id']))
+                    add_activity_log(lead['id'], "EMAIL_SENT", f"Bulk domain email dispatched via Resend from {sender_email}", "system")
+                    sent_count += 1
+            except Exception as e:
+                print(f"Error sending bulk lead {lead['id']}: {e}")
+
         conn.commit()
         cur.close()
         conn.close()
         
         return {
-            "message": f"Sent {total_groups} distinct domain emails to {total_leads_updated} leads.",
-            "groups_processed": total_groups,
-            "leads_updated": total_leads_updated
+            "message": f"Successfully sent {sent_count} emails via Resend.",
+            "leads_processed": len(leads),
+            "leads_sent": sent_count
         }
     except Exception as e:
         traceback.print_exc()

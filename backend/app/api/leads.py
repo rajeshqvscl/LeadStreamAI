@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 import json
@@ -6,6 +7,10 @@ import psycopg2
 import psycopg2.extras
 from app.database import get_db_connection
 from app.models.lead import get_lead_by_id, update_lead, get_activity_log, add_activity_log
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -218,6 +223,7 @@ def get_leads(
             "source": r.get("source", ""),
             "validation_status": r["validation_status"],
             "email_status": r.get("email_status"),
+            "status": r.get("email_status") or "PENDING_APPROVAL",
             "is_unsubscribed": r.get("is_unsubscribed", False),
             "remarks": r.get("remarks", ""),
             "created_at": r["created_at"].isoformat() + "Z" if r["created_at"] else None
@@ -248,6 +254,7 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
     
     # Convert to mutable dict
     lead = dict(row)
+    lead["status"] = lead.get("email_status") or "PENDING_APPROVAL"
     
     # Enrich with payload if needed
     payload = lead.get("raw_payload")
@@ -309,6 +316,40 @@ def get_lead_activity(lead_id: int):
 def create_manual_lead(req: LeadCreate, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     from app.models.lead import insert_lead
     
+    # 1. Existence Check (Email or LinkedIn)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Normalize empty strings to None to avoid violation of UNIQUE constraint
+    li_url = req.linkedin_url.strip() if req.linkedin_url else None
+    if not li_url: li_url = None
+    
+    query = "SELECT id, email_status, email, linkedin_url FROM leads_raw WHERE email = %s"
+    params = [req.email]
+    
+    if li_url:
+        query += " OR (linkedin_url = %s AND linkedin_url IS NOT NULL AND linkedin_url != '')"
+        params.append(li_url)
+        
+    cur.execute(query, tuple(params))
+    existing = cur.fetchone()
+    cur.close()
+    conn.close()
+    
+    if existing:
+        is_li_match = li_url and existing['linkedin_url'] == li_url
+        conflict_type = "LinkedIn URL" if is_li_match else "email"
+        status_msg = f" (Status: {existing['email_status']})" if existing['email_status'] else ""
+        
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "DUPLICATE_LEAD",
+                "lead_id": existing['id'],
+                "detail": f"A lead with this {conflict_type} already exists in your database{status_msg}."
+            }
+        )
+
     payload = {
         "designation": req.designation,
         "city": req.city,
@@ -323,7 +364,7 @@ def create_manual_lead(req: LeadCreate, user_id: Optional[str] = Header(None, al
             req.last_name,
             req.email,
             "", # domain
-            req.linkedin_url,
+            li_url, # Pass None if empty string
             req.company_name,
             req.source or "direct",
             payload,
@@ -332,9 +373,10 @@ def create_manual_lead(req: LeadCreate, user_id: Optional[str] = Header(None, al
             phone=req.phone,
             user_id=user_id
         )
-        return {"message": "Lead created successfully"}
+        return {"message": "Lead created successfully and added to pipeline."}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Error creating lead: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Storage Conflict: {str(e)}")
 
 @router.post("/leads/bulk-labels")
 def bulk_labels(req: BulkLabelRequest):

@@ -160,6 +160,8 @@ const LeadDetail = () => {
 
   // Form state - synced dynamically from lead data
   const [form, setForm] = useState({});
+  const [pendingOptOut, setPendingOptOut] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState(false);
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
@@ -236,25 +238,32 @@ const LeadDetail = () => {
     }
   };
 
-  const handleDelete = async () => {
-    if (window.confirm('Permanently delete this lead? This action cannot be undone.')) {
-      try {
-        await api.post('/api/leads/bulk-delete', [parseInt(leadId)]);
-        navigate('/dashboard/leads');
-      } catch (err) {
-        showNotification('error', 'Failed to delete lead: ' + (err.response?.data?.detail || err.message));
-      }
+  const handleDelete = () => {
+    setPendingDelete(true);
+  };
+
+  const confirmDelete = async () => {
+    setPendingDelete(false);
+    try {
+      await api.post('/api/leads/bulk-delete', [parseInt(leadId)]);
+      navigate('/dashboard/leads');
+    } catch (err) {
+      showNotification('error', 'Failed to delete lead: ' + (err.response?.data?.detail || err.message));
     }
   };
 
-  const handleUnsubscribe = async () => {
-    if (window.confirm('Opt-out this lead from all future emails?')) {
-      try {
-        await api.post(`/api/leads/${leadId}/unsubscribe`);
-        fetchData();
-      } catch {
-        showNotification('error', 'Failed to opt-out lead');
-      }
+  const handleUnsubscribe = () => {
+    setPendingOptOut(true);
+  };
+
+  const confirmOptOut = async () => {
+    setPendingOptOut(false);
+    try {
+      await api.post(`/api/leads/${leadId}/unsubscribe`);
+      fetchData();
+      showNotification('success', 'Lead opted out and blacklisted');
+    } catch {
+      showNotification('error', 'Failed to opt-out lead');
     }
   };
 
@@ -318,7 +327,7 @@ const LeadDetail = () => {
         </div>
         <div className="flex gap-2.5">
           <button
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-[#1e293b] text-[#94a3b8] text-[11px] font-bold hover:bg-[#334155] hover:text-white transition-all"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-[#1e293b] text-[#94a3b8] text-[11px] font-bold hover:bg-[#334155] hover:text-white transition-all cursor-pointer"
             onClick={handleDelete}
           >
             <Trash2 className="w-3.5 h-3.5" /> Delete
@@ -329,7 +338,7 @@ const LeadDetail = () => {
             </span>
           ) : (
             <button
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-[#ef4444] text-white text-[11px] font-bold hover:bg-[#dc2626] transition-all"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-[#ef4444] text-white text-[11px] font-bold hover:bg-[#dc2626] transition-all cursor-pointer"
               onClick={handleUnsubscribe}
             >
               Opt-out Lead
@@ -600,7 +609,7 @@ const LeadDetail = () => {
                 <span className="text-white text-sm">✉️</span>
                 <h3 className="text-[13px] font-bold text-white tracking-wide">Email Drafts</h3>
               </div>
-              <button onClick={handleGenerateDraft} disabled={isGenerating} className="bg-[#2563eb] hover:bg-blue-600 text-white text-[10px] font-extrabold px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors disabled:opacity-50">
+              <button onClick={handleGenerateDraft} disabled={isGenerating} className="bg-[#2563eb] hover:bg-blue-600 text-white text-[10px] font-extrabold px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer">
                 {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                 {isGenerating ? 'Generating...' : 'Draft AI Email'}
               </button>
@@ -612,7 +621,11 @@ const LeadDetail = () => {
                     <div key={d.id} className="bg-[#0f121b] border border-[#ffffff08] rounded-xl p-4 cursor-pointer hover:border-blue-500/50 transition-colors shadow-md group" onClick={() => navigate(`/dashboard/emails/${d.id}/edit`)}>
                       <div className="flex justify-between items-start mb-2 gap-3">
                         <h4 className="text-[11px] font-bold text-white line-clamp-2 leading-relaxed flex-1 group-hover:text-blue-400 transition-colors">{d.subject || 'Follow-up on operational strategies'}</h4>
-                        <span className="shrink-0 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-emerald-500/10 text-emerald-400">DRAFT</span>
+                        <span className={`shrink-0 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${
+                          d.status === 'SENT' ? 'bg-[#10b981]/20 text-[#10b981]' : 'bg-emerald-500/10 text-emerald-400'
+                        }`}>
+                          {d.status || 'DRAFT'}
+                        </span>
                       </div>
                       <p className="text-[10px] text-[#64748b] font-medium">Click to review and refine →</p>
                     </div>
@@ -630,8 +643,45 @@ const LeadDetail = () => {
         </div>
       </div>
 
+      {/* Action Toast (Confirmation) */}
+      {(pendingOptOut || pendingDelete) && (
+        <div className="fixed bottom-8 right-8 z-[3000] animate-in slide-in-from-bottom-4 duration-300">
+          <div className="bg-[#131722] border border-red-500/30 px-6 py-5 rounded-2xl shadow-2xl backdrop-blur-xl max-w-md">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-white font-bold text-sm mb-1">
+                  {pendingDelete ? 'Delete Lead?' : 'Opt-out Lead?'}
+                </h4>
+                <p className="text-[#64748b] text-[12px] font-medium leading-relaxed mb-4">
+                  {pendingDelete 
+                    ? 'Permanently delete this lead? This action cannot be undone and all associated data will be removed.' 
+                    : 'Are you sure you want to opt-out this lead? They will be blacklisted from all future outreach.'}
+                </p>
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={pendingDelete ? confirmDelete : confirmOptOut}
+                    className="bg-red-500 hover:bg-red-600 text-white text-[11px] font-bold px-4 py-2 rounded-lg transition-colors cursor-pointer"
+                  >
+                    Confirm {pendingDelete ? 'Delete' : 'Opt-out'}
+                  </button>
+                  <button 
+                    onClick={() => { setPendingOptOut(false); setPendingDelete(false); }}
+                    className="bg-white/5 hover:bg-white/10 text-slate-300 text-[11px] font-bold px-4 py-2 rounded-lg transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Notification Toast */}
-      {notification && (
+      {notification && !pendingOptOut && !pendingDelete && (
         <div className="fixed bottom-8 right-8 z-[2000] animate-in slide-in-from-bottom-4">
           <div className={`px-6 py-4 rounded-2xl shadow-2xl border backdrop-blur-md flex items-center gap-3 ${notification.type === 'success'
             ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'

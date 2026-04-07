@@ -41,9 +41,17 @@ class EmailGenerator:
             return None
 
     def generate_email(self, lead: dict, sender_name: str = "the team"):
-        first_name = lead.get('first_name', 'there')
+        # Personalize greeting
+        first_name = lead.get('first_name')
+        if not first_name or str(first_name).strip().lower() == "there":
+            # Fallback to full name if first name is missing or "there"
+            first_name = lead.get('name') or lead.get('full_name') or lead.get('last_name') or ""
         
-        body = f"""I hope you're doing well.
+        greeting = f"Hi {first_name}," if first_name else "Hi,"
+        
+        body = f"""{greeting}
+        
+I hope you're doing well.
 
 I'm {sender_name} from QVSCL (Gurugram), a strategic advisory firm working with high-growth early-stage ventures. We are currently raising a round for a platform building a vertical AI-powered hiring intelligence layer, combining AI agents, recruitment workflows, and trust-based verification infrastructure.
 
@@ -101,16 +109,13 @@ I'm {sender_name} from QVSCL (Gurugram), a strategic advisory firm working with 
 
 If this aligns with your portfolio focus and does not conflict with it, I’d be happy to share the full presentation or connect over a virtual meeting at your convenience. I have attached the QVSCL Profile. You may also share your investment thesis with us so we can send relevant deal flow in the future.
 
-For more details about our services: Website | Linkedin
+For more details about our services: [Website](https://qvscl.com/) | [Linkedin](https://www.linkedin.com/company/qvstrategicconsultingllp/?originalSubdomain=in)
 
 Looking forward to your response.
 
 --
 Thanks & Regards,
-{sender_name},
-Analyst,
-LinkedIn
-8920871574"""
+{sender_name}"""
 
         return {
             "subject": "Quick introduction",

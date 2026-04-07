@@ -11,6 +11,7 @@ const Emails = () => {
   const [filterStatus, setFilterStatus] = useState('');
   const [isBatchSending, setIsBatchSending] = useState(false);
   const [notification, setNotification] = useState(null);
+  const [pendingOptOut, setPendingOptOut] = useState(null);
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
@@ -59,6 +60,22 @@ const Emails = () => {
       fetchEmails();
     } catch {
       showNotification('error', 'Rejection failed');
+    }
+  };
+
+  const handleOptOut = (leadId) => {
+    setPendingOptOut(leadId);
+  };
+
+  const confirmOptOut = async () => {
+    const leadId = pendingOptOut;
+    setPendingOptOut(null);
+    try {
+      await api.post(`/api/leads/${leadId}/unsubscribe`);
+      showNotification('success', 'Lead opted out and blacklisted');
+      fetchEmails();
+    } catch {
+      showNotification('error', 'Opt-out failed');
     }
   };
 
@@ -206,19 +223,24 @@ const Emails = () => {
                     <div className="flex justify-end gap-2 items-center">
                       {email.status === 'PENDING_APPROVAL' ? (
                         <>
-                          <button onClick={() => navigate(`/dashboard/emails/${email.id}/edit`)} className="px-3 py-1 bg-transparent border border-white/10 rounded text-slate-300 text-[10px] font-bold hover:bg-white/5 transition-colors">Edit</button>
-                          <button onClick={() => handleApprove(email.id)} className="px-3 py-1 bg-transparent border border-[#10b981] rounded text-[#10b981] text-[10px] font-bold hover:bg-[#10b981]/10 transition-colors">Approve</button>
-                          <button onClick={() => handleReject(email.id)} className="px-3 py-1 bg-transparent border border-red-500 rounded text-red-500 text-[10px] font-bold hover:bg-red-500/10 transition-colors">Reject</button>
+                          <button onClick={() => navigate(`/dashboard/emails/${email.id}/edit`)} className="px-3 py-1 bg-transparent border border-white/10 rounded text-slate-300 text-[10px] font-bold hover:bg-white/5 transition-colors cursor-pointer">Edit</button>
+                          <button onClick={() => handleApprove(email.id)} className="px-3 py-1 bg-transparent border border-[#10b981] rounded text-[#10b981] text-[10px] font-bold hover:bg-[#10b981]/10 transition-colors cursor-pointer">Approve</button>
+                          <button onClick={() => handleReject(email.id)} className="px-3 py-1 bg-transparent border border-red-500 rounded text-red-500 text-[10px] font-bold hover:bg-red-500/10 transition-colors cursor-pointer">Reject</button>
                         </>
                       ) : email.status === 'REJECTED' ? (
-                        <button onClick={() => navigate(`/dashboard/emails/${email.id}/edit`)} className="px-3 py-1 bg-transparent border border-white/10 rounded text-slate-300 text-[10px] font-bold hover:bg-white/5 transition-colors">View</button>
+                        <button onClick={() => navigate(`/dashboard/emails/${email.id}/edit`)} className="px-3 py-1 bg-transparent border border-white/10 rounded text-slate-300 text-[10px] font-bold hover:bg-white/5 transition-colors cursor-pointer">View</button>
                       ) : (email.status === 'SENT' || email.status === 'APPROVED') ? (
                         <>
-                          <button onClick={() => navigate(`/dashboard/emails/${email.id}/edit`)} className="px-3 py-1 bg-transparent border border-white/10 rounded text-slate-300 text-[10px] font-bold hover:bg-white/5 transition-colors">View</button>
-                          <button className="px-3 py-1 bg-transparent rounded text-red-500 text-[10px] font-bold hover:underline transition-colors">Opt-out</button>
+                          <button onClick={() => navigate(`/dashboard/emails/${email.id}/edit`)} className="px-3 py-1 bg-transparent border border-white/10 rounded text-slate-300 text-[10px] font-bold hover:bg-white/5 transition-colors cursor-pointer">View</button>
+                          <button 
+                            onClick={() => handleOptOut(email.lead_id)}
+                            className="px-3 py-1 bg-transparent rounded text-red-500 text-[10px] font-bold hover:underline transition-colors cursor-pointer"
+                          >
+                            Opt-out
+                          </button>
                         </>
                       ) : (
-                        <button onClick={() => navigate(`/dashboard/emails/${email.id}/edit`)} className="px-3 py-1 bg-transparent border border-white/10 rounded text-slate-300 text-[10px] font-bold hover:bg-white/5 transition-colors">View</button>
+                        <button onClick={() => navigate(`/dashboard/emails/${email.id}/edit`)} className="px-3 py-1 bg-transparent border border-white/10 rounded text-slate-300 text-[10px] font-bold hover:bg-white/5 transition-colors cursor-pointer">View</button>
                       )}
                     </div>
                   </td>
@@ -240,8 +262,41 @@ const Emails = () => {
         )}
       </div>
 
+      {/* Action Toast (Confirmation) */}
+      {pendingOptOut && (
+        <div className="fixed bottom-8 right-8 z-[3000] animate-in slide-in-from-bottom-4 duration-300">
+          <div className="bg-[#131722] border border-red-500/30 px-6 py-5 rounded-2xl shadow-2xl backdrop-blur-xl max-w-md">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 shrink-0">
+                <X className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-white font-bold text-sm mb-1">Opt-out Lead?</h4>
+                <p className="text-[#64748b] text-[12px] font-medium leading-relaxed mb-4">
+                  Are you sure you want to opt-out this lead? They will be blacklisted from all future outreach.
+                </p>
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={confirmOptOut}
+                    className="bg-red-500 hover:bg-red-600 text-white text-[11px] font-bold px-4 py-2 rounded-lg transition-colors cursor-pointer"
+                  >
+                    Confirm Opt-out
+                  </button>
+                  <button 
+                    onClick={() => setPendingOptOut(null)}
+                    className="bg-white/5 hover:bg-white/10 text-slate-300 text-[11px] font-bold px-4 py-2 rounded-lg transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Toast Notification */}
-      {notification && (
+      {notification && !pendingOptOut && (
         <div className={`fixed bottom-8 right-8 z-[2000] animate-in slide-in-from-bottom-4 duration-300`}>
           <div className={`flex items-center gap-3 px-6 py-4 rounded-2xl shadow-2xl border backdrop-blur-md ${notification.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'
             }`}>

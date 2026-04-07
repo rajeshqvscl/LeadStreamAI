@@ -6,3 +6,4 @@ requests
 anthropic
 structlog
 gunicorn
+resend

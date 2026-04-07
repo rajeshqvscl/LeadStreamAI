@@ -1,142 +1,175 @@
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.mime.application import MIMEApplication
 import os
 import logging
+import resend
 from datetime import datetime
 from dotenv import load_dotenv
 from pathlib import Path
+from typing import Optional
+
+# Setup Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables from the .env file in the current directory
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path, override=True)
+logger.info(f"Module initialized with env_path: {env_path}")
 
-logger = logging.getLogger(__name__)
+# Configure Resend
+resend.api_key = os.getenv("RESEND_API_KEY")
 
-def send_email(to_email, subject, html_content, attachments=None):
-    """Generic SMTP sender with environment-based configuration."""
+def send_smtp_fallback(to_email: str, subject: str, html_content: str, from_email: str, from_name: str) -> bool:
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    
+    sender_line = f"{from_name} <{from_email}>"
     smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
     smtp_user = os.getenv("SMTP_USER")
     smtp_pass = os.getenv("SMTP_PASS")
-    sender_email = os.getenv("SENDER_EMAIL", smtp_user)
-
-    if not smtp_user or not smtp_pass:
-        logger.warning("SMTP credentials missing in .env. Skipping email dispatch.")
-        # Fallback: Print to console for visibility during dev
-        print(f"--- [DRY RUN] EMAIL TO: {to_email} ---")
-        print(f"Subject: {subject}")
-        print("Content (HTML): [Omitted from console]")
-        return False
-
+    
     try:
         msg = MIMEMultipart()
-        msg['From'] = f"LeadStream AI <{sender_email}>"
+        msg['From'] = sender_line
         msg['To'] = to_email
         msg['Subject'] = subject
-
         msg.attach(MIMEText(html_content, 'html'))
-
-        # Add default system attachments if they exist
-        assets_dir = Path(__file__).resolve().parent.parent.parent / "assets"
-        default_files = ["QVSCL Company Profile.pdf", "Lalit_Huria_Profile.pdf"]
-        
-        for filename in default_files:
-            file_path = assets_dir / filename
-            if file_path.exists():
-                with open(file_path, "rb") as f:
-                    part = MIMEApplication(f.read(), Name=filename)
-                    part['Content-Disposition'] = f'attachment; filename="{filename}"'
-                    msg.attach(part)
 
         server = smtplib.SMTP(smtp_server, smtp_port)
         server.starttls()
         server.login(smtp_user, smtp_pass)
         server.send_message(msg)
         server.quit()
+        logger.info(f"Email sent successfully via SMTP to {to_email}")
         return True
     except Exception as e:
-        logger.error(f"Failed to send email: {str(e)}")
+        logger.error(f"SMTP Dispatch Error: {str(e)}")
         return False
 
-def send_admin_report(admin_email, report_data):
-    """Formats and sends the high-end system activity report."""
-    stats = report_data.get('user_stats', [])
-    logs = report_data.get('recent_logs', [])
-    env = report_data.get('environment', 'Production')
-    
-    # Calculate global aggregates
-    total_leads = sum(s.get('leads_count', 0) for s in stats)
-    total_sent = sum(s.get('sent_count', 0) for s in stats)
-    
-    subject = f"🚀 System Pulse: {datetime.now().strftime('%Y-%m-%d')} | {env}"
-    
-    # Premium HTML Template
-    html = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; color: #334155; line-height: 1.6;">
-        <div style="max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
-            <div style="background: #1e293b; color: white; padding: 30px; text-align: center;">
-                <h1 style="margin: 0; font-size: 24px;">Admin Command Center</h1>
-                <p style="margin: 5px 0 0; opacity: 0.8; font-size: 14px;">System Activity Report</p>
-            </div>
-            
-            <div style="padding: 30px;">
-                <h2 style="font-size: 18px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; margin-bottom: 20px;">Global Summary (Last 24h)</h2>
-                <div style="display: flex; gap: 20px; margin-bottom: 30px;">
-                    <div style="background: #eff6ff; padding: 20px; border-radius: 8px; flex: 1; text-align: center;">
-                        <p style="margin: 0; font-size: 12px; color: #3b82f6; font-weight: bold;">LEADS</p>
-                        <p style="margin: 5px 0 0; font-size: 24px; font-weight: black;">{total_leads}</p>
-                    </div>
-                    <div style="background: #f5f3ff; padding: 20px; border-radius: 8px; flex: 1; text-align: center;">
-                        <p style="margin: 0; font-size: 12px; color: #8b5cf6; font-weight: bold;">OUTREACH</p>
-                        <p style="margin: 5px 0 0; font-size: 24px; font-weight: black;">{total_sent}</p>
-                    </div>
-                </div>
-
-                <h2 style="font-size: 16px; margin-bottom: 15px;">Personnel Activity</h2>
-                <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
-                    <thead>
-                        <tr style="text-align: left; background: #f8fafc;">
-                            <th style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-size: 12px;">Agent</th>
-                            <th style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-size: 12px; text-align: center;">Leads</th>
-                            <th style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-size: 12px; text-align: center;">Sent</th>
-                        </tr>
-                    </thead>
-                    <tbody>
+def format_outreach_html(text: str) -> str:
     """
+    Converts markdown-style bold and bullets into clean HTML.
+    Specifically targets **Heading** -> <strong>Heading</strong>
+    and • Bullet -> <li>Bullet</li>
+    """
+    import re
+    # Convert bold **text** to <strong>text</strong>
+    text = re.sub(r'\*\*(.*?)\*\*', r'<strong style="color: #ffffff; font-size: 14px;">\1</strong>', text)
     
-    for s in stats:
-        html += f"""
-            <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #f1f5f9; font-size: 14px;">{s['username']}</td>
-                <td style="padding: 10px; border-bottom: 1px solid #f1f5f9; font-size: 14px; text-align: center;">{s['leads_count']}</td>
-                <td style="padding: 10px; border-bottom: 1px solid #f1f5f9; font-size: 14px; text-align: center;">{s['sent_count']}</td>
-            </tr>
-        """
+    # Convert bullet points • text to list items
+    lines = text.split('\n')
+    formatted_lines = []
+    in_list = False
+    
+    for line in lines:
+        line = line.strip()
+        if line.startswith('•') or line.startswith('* '):
+            if not in_list:
+                formatted_lines.append('<ul style="padding-left: 20px; color: #cbd5e1; margin-top: 8px;">')
+                in_list = True
+            content = line.lstrip('•* ').strip()
+            formatted_lines.append(f'<li style="margin-bottom: 4px;">{content}</li>')
+        else:
+            if in_list:
+                formatted_lines.append('</ul>')
+                in_list = False
+            if line:
+                formatted_lines.append(f'<p style="margin-bottom: 12px; line-height: 1.6; color: #cbd5e1;">{line}</p>')
+            else:
+                formatted_lines.append('<br>')
+                
+    if in_list:
+        formatted_lines.append('</ul>')
         
-    html += """
-                    </tbody>
-                </table>
+    return "\n".join(formatted_lines)
 
-                <h2 style="font-size: 16px; margin-bottom: 15px;">Recent System Interactions</h2>
-                <div style="background: #fafafa; padding: 15px; border-radius: 8px; font-family: monospace; font-size: 12px;">
+def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None) -> bool:
+    """
+    Sends an email using Resend (production) or SMTP (fallback).
+    Strictly follows dynamic identity.
+    """
+    provider = os.getenv("EMAIL_PROVIDER", "resend").lower()
+    
+    if not from_email:
+        logger.error(f"ABORTING DISPATCH: No sender email provided for outreach to {to_email}.")
+        return False
+
+    final_from_email = from_email
+    final_from_name = from_name or "LeadStream Outreach"
+    sender_line = f"{final_from_name} <{final_from_email}>"
+    
+    # Process HTML Formatting (Markdown-to-HTML)
+    formatted_html = format_outreach_html(html_content)
+    
+    # Wrap in a clean container
+    final_html = f"""
+    <div style="font-family: 'Inter', sans-serif; background-color: #0f172a; color: #cbd5e1; padding: 40px; border-radius: 12px; max-width: 600px; margin: auto;">
+        {formatted_html}
+    </div>
     """
     
-    for log in logs:
-        html += f"<div>[{log['created_at'].split('T')[1][:5]}] {log['username']} - {log['action']}</div>"
-        
-    html += """
-                </div>
-            </div>
+    logger.info(f"Targeting dispatch to {to_email} via {provider}. Sender: {sender_line}")
+
+    if provider == "resend":
+        try:
+            # Re-initialize API key to ensure it is fresh from the environment
+            load_dotenv(dotenv_path=env_path, override=True)
+            resend_key = os.getenv("RESEND_API_KEY")
             
-            <div style="background: #f8fafc; padding: 20px; text-align: center; border-top: 1px solid #e2e8f0;">
-                <p style="margin: 0; font-size: 11px; color: #94a3b8;">Sent via LeadStream AI Dashboard - Automated System</p>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    
-    return send_email(admin_email, subject, html)
+            if not resend_key:
+                logger.error("RESEND_API_KEY is missing from environment.")
+                return False
+            
+            # Safe debug: only show prefix to verify key identity
+            key_prefix = resend_key[:6] if resend_key else "NONE"
+            logger.info(f"Attempting dispatch with Resend Key (prefix: {key_prefix}...)")
+            
+            resend.api_key = resend_key
+            
+            params = {
+                "from": sender_line,
+                "to": to_email,
+                "subject": subject,
+                "html": final_html,
+            }
+            
+            # Attach default profiles from assets
+            if not attachments:
+                attachments = []
+                # Correct path: email_service.py is in backend/app/services/
+                # .parent = backend/app/services/
+                # .parent.parent = backend/app/
+                # .parent.parent.parent = backend/
+                asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
+                profile_files = ["QVSCL Company Profile.pdf", "Lalit_Huria_Profile.pdf"]
+                
+                logger.info(f"Looking for attachments in: {asset_dir}")
+                
+                for filename in profile_files:
+                    path = asset_dir / filename
+                    if path.exists():
+                        import base64
+                        with open(path, "rb") as f:
+                            content_bytes = f.read()
+                            content_b64 = base64.b64encode(content_bytes).decode()
+                        attachments.append({
+                            "content": content_b64,
+                            "filename": filename
+                        })
+                        logger.info(f"Attached successfully: {filename}")
+                    else:
+                        logger.error(f"Attachment NOT FOUND directly at: {path}")
+
+            if attachments:
+                params["attachments"] = attachments
+
+            sent = resend.Emails.send(params)
+            sent_id = getattr(sent, "id", str(sent))
+            logger.info(f"Email sent successfully via Resend. ID: {sent_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Resend dispatch failed: {str(e)}")
+            return False
+    else:
+        return send_smtp_fallback(to_email, subject, final_html, final_from_email, final_from_name)

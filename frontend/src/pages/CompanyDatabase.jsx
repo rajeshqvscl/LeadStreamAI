@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Search, Upload, Download, Trash2, Loader2, Sparkles, 
-  Table, FileSpreadsheet, Plus, CheckCircle2, AlertCircle, X
+  Table, FileSpreadsheet, Plus, CheckCircle2, AlertCircle, X, Send, Mail, Pencil, PanelRightClose, Save, Layout, Tag, Building2, Filter, ChevronDown
 } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
@@ -13,6 +13,16 @@ const CompanyDatabase = () => {
   const [isImporting, setIsImporting] = useState(false);
   const [search, setSearch] = useState('');
   const [notification, setNotification] = useState(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [gsheetUrl, setGsheetUrl] = useState('');
+  const [processingId, setProcessingId] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [selectedCompany, setSelectedCompany] = useState(null);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [editForm, setEditForm] = useState({});
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [columnFilters, setColumnFilters] = useState({});
+  const [showFilters, setShowFilters] = useState(false);
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
@@ -113,15 +123,206 @@ const CompanyDatabase = () => {
     }
   };
 
-  const filteredCompanies = companies.filter(c =>
-    Object.values(c).some(val => 
+  const handleSyncGSheet = async () => {
+    if (!gsheetUrl) {
+      showNotification('error', 'Invalid Link: Please provide a valid Google Sheet URL.');
+      return;
+    }
+    setIsSyncing(true);
+    try {
+      await api.post('/api/companies/import-gsheet', { url: gsheetUrl });
+      showNotification('success', 'Satellite Link Established: Cloud dataset integrated.');
+      fetchCompanies();
+    } catch (err) {
+      showNotification('error', 'Cloud sync failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleGenerateDraft = async (id) => {
+    setProcessingId(id);
+    try {
+      await api.post(`/api/companies/${id}/generate-draft`);
+      showNotification('success', 'Draft Synchronized: Moved to lead pipeline.');
+    } catch (err) {
+      showNotification('error', 'Draft Generation Fault: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleSendEmail = async (id) => {
+    if (!window.confirm("Confirm Direct Dispatch? This will generate a lead and mark email as sent.")) return;
+    setProcessingId(id);
+    try {
+      await api.post(`/api/companies/${id}/send`);
+      showNotification('success', 'Direct Dispatch: Logged in lead pipeline.');
+    } catch (err) {
+      showNotification('error', 'Dispatch Failure: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleEditClick = (company) => {
+    setSelectedCompany(company);
+    setEditForm({ ...company });
+    setIsDrawerOpen(true);
+  };
+
+  const handleDrawerSave = async () => {
+    if (!selectedCompany) return;
+    setIsSaving(true);
+    try {
+      const dataToSave = { ...editForm };
+      delete dataToSave.id;
+      await api.patch(`/api/companies/${selectedCompany.id}`, dataToSave);
+      showNotification('success', 'Profile updated correctly.');
+      fetchCompanies();
+      setIsDrawerOpen(false);
+    } catch (err) {
+      showNotification('error', 'Update Error: Unable to save changes.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleStatusChange = async (id, newStatus) => {
+    setProcessingId(id);
+    try {
+      const company = companies.find(c => c.id === id);
+      const updatedData = { ...company, status: newStatus };
+      delete updatedData.id;
+      await api.patch(`/api/companies/${id}`, updatedData);
+      showNotification('success', `Status updated to ${newStatus}.`);
+      fetchCompanies();
+    } catch (err) {
+      showNotification('error', 'Status Update Fault.');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === filteredCompanies.length && filteredCompanies.length > 0) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filteredCompanies.map(c => c.id));
+    }
+  };
+
+  const toggleSelectRow = (id) => {
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkDelete = async () => {
+    if (!window.confirm(`Explunge ${selectedIds.length} shards? This action is non-reversible.`)) return;
+    try {
+      // Assuming backend supports bulk delete or we loop
+      await Promise.all(selectedIds.map(id => api.delete(`/api/companies/${id}`)));
+      showNotification('success', `${selectedIds.length} records purged.`);
+      setSelectedIds([]);
+      fetchCompanies();
+    } catch (err) {
+      showNotification('error', 'Bulk Purge Fault.');
+    }
+  };
+
+  const handleBulkExport = () => {
+    const dataToExport = companies.filter(c => selectedIds.includes(c.id)).map(({id, ...rest}) => rest);
+    const ws = XLSX.utils.json_to_sheet(dataToExport);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Selected_Companies");
+    XLSX.writeFile(wb, `Bulk_Export_${new Date().getTime()}.xlsx`);
+  };
+
+  const filteredCompanies = companies.filter(c => {
+    const matchesSearch = Object.values(c).some(val => 
       String(val).toLowerCase().includes(search.toLowerCase())
-    )
-  );
+    );
+    const matchesColumnFilters = Object.entries(columnFilters).every(([key, value]) => {
+      if (!value) return true;
+      return String(c[key] || '').toLowerCase().includes(value.toLowerCase());
+    });
+    return matchesSearch && matchesColumnFilters;
+  });
+
+  const getUniqueValues = (column) => {
+    const values = companies.map(c => c[column]).filter(v => v !== undefined && v !== null && v !== '');
+    return Array.from(new Set(values)).sort();
+  };
 
   const headers = companies.length > 0 
     ? Object.keys(companies[0]).filter(h => h !== 'id') 
     : ["Name", "Company", "Status", "Sector", "Email", "Note"];
+
+  const renderEditDrawer = () => {
+    if (!isDrawerOpen || !selectedCompany) return null;
+
+    return (
+      <div className="fixed inset-0 z-[100] flex justify-end animate-in fade-in duration-300">
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsDrawerOpen(false)} />
+        <div className="relative w-full max-w-xl bg-[#0d1117] border-l border-white/10 shadow-2xl flex flex-col animate-in slide-in-from-right-full duration-500">
+          <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-500">
+                <Building2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white tracking-tight">Edit Profile</h3>
+                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-0.5">Registry ID: {selectedCompany.id}</p>
+              </div>
+            </div>
+            <button onClick={() => setIsDrawerOpen(false)} className="p-2 hover:bg-white/5 rounded-lg transition-colors text-slate-500 hover:text-white">
+              <PanelRightClose className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+            <div className="flex flex-wrap gap-3 p-4 bg-blue-500/5 rounded-2xl border border-blue-500/10">
+               <button onClick={() => handleGenerateDraft(selectedCompany.id)} className="flex-1 btn bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all">
+                 <Sparkles className="w-3.5 h-3.5" /> Draft AI
+               </button>
+               <button onClick={() => handleSendEmail(selectedCompany.id)} className="flex-1 btn bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all">
+                 <Send className="w-3.5 h-3.5" /> Dispatch
+               </button>
+               <button onClick={() => handleStatusChange(selectedCompany.id, 'APPROVED')} className="flex-1 btn bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all">
+                 <CheckCircle2 className="w-3.5 h-3.5" /> Approve
+               </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-6">
+              {Object.keys(editForm).filter(key => key !== 'id').map((key) => (
+                <div key={key} className="space-y-2">
+                  <label className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">
+                    <Tag className="w-3 h-3 opacity-30" />
+                    {key.replace(/_/g, ' ')}
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm[key] || ''}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, [key]: e.target.value }))}
+                    className="w-full bg-[#131722] border border-white/5 rounded-xl px-4 py-3.5 text-sm text-white focus:outline-none focus:border-blue-500/30 transition-all font-medium"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="p-6 border-t border-white/5 bg-white/[0.02] flex gap-3">
+            <button onClick={() => setIsDrawerOpen(false)} className="flex-1 px-6 py-4 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 text-[11px] font-black uppercase tracking-widest transition-all">Cancel</button>
+            <button onClick={handleDrawerSave} disabled={isSaving} className="flex-[2] px-6 py-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2">
+              {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              Save Changes
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div {...getRootProps()} className={`min-h-screen animate-in fade-in duration-700 ${isDragActive ? 'bg-blue-600/5 cursor-copy' : ''}`}>
@@ -151,14 +352,42 @@ const CompanyDatabase = () => {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
+
+          <button 
+            onClick={() => setShowFilters(!showFilters)}
+            className={`btn px-6 h-12 rounded-2xl flex items-center gap-3 text-[11px] font-black uppercase tracking-widest transition-all ${showFilters ? 'bg-blue-500 text-white shadow-blue-500/20' : 'bg-white/5 text-slate-400 border border-white/5'}`}
+          >
+            <Filter className="w-4 h-4" />
+            {showFilters ? 'Hide Filters' : 'Filter'}
+          </button>
           
+          <div className="relative flex-1 lg:max-w-md">
+            <FileSpreadsheet className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500/50" />
+            <input
+              type="text"
+              placeholder="Paste Google Sheet URL..."
+              className="w-full bg-[#131722]/60 border border-emerald-500/10 rounded-2xl py-3 pl-12 pr-4 text-white text-[11px] focus:outline-none focus:border-emerald-500/30 transition-all font-medium placeholder:text-slate-700"
+              value={gsheetUrl}
+              onChange={(e) => setGsheetUrl(e.target.value)}
+            />
+          </div>
+
+          <button 
+            onClick={handleSyncGSheet}
+            disabled={isSyncing}
+            className="btn bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 px-6 h-12 rounded-2xl flex items-center gap-3 text-[11px] font-black uppercase tracking-widest text-emerald-500 shadow-xl shadow-emerald-500/10 disabled:opacity-50"
+          >
+            {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+            Sync Cloud
+          </button>
+
           <button 
             onClick={() => document.getElementById('file-upload').click()}
             disabled={isImporting}
             className="btn btn-primary px-6 h-12 rounded-2xl flex items-center gap-3 text-[11px] font-black uppercase tracking-widest shadow-xl shadow-blue-500/20 disabled:opacity-50"
           >
             {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-            Import Sheet
+            Import
           </button>
 
           <button 
@@ -178,6 +407,33 @@ const CompanyDatabase = () => {
           </button>
         </div>
       </div>
+
+      {/* Dynamic Filter Bar */}
+      {showFilters && companies.length > 0 && (
+        <div className="mb-8 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 p-6 bg-[#131722]/40 border border-white/5 rounded-3xl animate-in slide-in-from-top-4 duration-300">
+          {headers.map(header => {
+            const uniqueValues = getUniqueValues(header);
+            return (
+              <div key={header} className="space-y-2">
+                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">{header.replace(/_/g, ' ')}</label>
+                <div className="relative group/select">
+                  <select
+                    className="w-full appearance-none bg-[#0d1117] border border-white/5 rounded-xl px-4 py-2.5 text-[11px] text-white focus:outline-none focus:border-blue-500/30 transition-all cursor-pointer"
+                    value={columnFilters[header] || ''}
+                    onChange={(e) => setColumnFilters(prev => ({ ...prev, [header]: e.target.value }))}
+                  >
+                    <option value="">All {header.replace(/_/g, ' ')}</option>
+                    {uniqueValues.map(val => (
+                      <option key={val} value={val}>{val}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-600 pointer-events-none group-hover/select:text-slate-400 transition-colors" />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {notification && (
         <div className={`mb-6 p-4 rounded-2xl border flex items-center gap-4 animate-in slide-in-from-top-4 ${notification.type === 'error' ? 'bg-red-500/10 border-red-500/20 text-red-500' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500'}`}>
@@ -207,19 +463,38 @@ const CompanyDatabase = () => {
           <table className="w-full text-left border-collapse table-fixed">
             <thead>
               <tr className="bg-white/[0.03] border-b border-white/5">
-                {headers.map((header) => (
-                  <th key={header} className="px-6 py-6 text-[10px] font-black text-slate-500 uppercase tracking-[3px] border-r border-white/5 last:border-0 min-w-[200px]">
-                    <div className="flex items-center gap-3">
-                      <Table className="w-3 h-3 opacity-30" />
-                      {header.replace(/_/g, ' ')}
-                    </div>
+                  <th className="w-16 px-6 py-6 text-center">
+                    <input 
+                      type="checkbox" 
+                      className="w-4 h-4 rounded border-white/10 bg-transparent text-blue-500 focus:ring-offset-0 focus:ring-0 cursor-pointer"
+                      checked={selectedIds.length === filteredCompanies.length && filteredCompanies.length > 0}
+                      onChange={toggleSelectAll}
+                    />
                   </th>
-                ))}
+                  {headers.map((header) => (
+                    <th key={header} className="px-6 py-6 text-[10px] font-black text-slate-500 uppercase tracking-[3px] border-r border-white/5 last:border-0 min-w-[200px]">
+                      <div className="flex items-center gap-3">
+                        <Table className="w-3 h-3 opacity-30" />
+                        {header.replace(/_/g, ' ')}
+                      </div>
+                    </th>
+                  ))}
+                  <th className="px-6 py-6 text-[10px] font-black text-slate-500 uppercase tracking-[3px] min-w-[180px] text-center">
+                    Outreach Control
+                  </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.03]">
               {filteredCompanies.map((company, i) => (
-                <tr key={company.id} className="hover:bg-blue-500/[0.04] transition-all group">
+                <tr key={company.id} className={`hover:bg-blue-500/[0.04] transition-all group ${selectedIds.includes(company.id) ? 'bg-blue-500/[0.06]' : ''}`}>
+                  <td className="px-6 py-4 text-center">
+                    <input 
+                      type="checkbox" 
+                      className="w-4 h-4 rounded border-white/10 bg-transparent text-blue-500 focus:ring-offset-0 focus:ring-0 cursor-pointer"
+                      checked={selectedIds.includes(company.id)}
+                      onChange={() => toggleSelectRow(company.id)}
+                    />
+                  </td>
                   {headers.map((header) => (
                     <td key={header} className="p-0 border-r border-white/5 last:border-0">
                       <input 
@@ -230,6 +505,33 @@ const CompanyDatabase = () => {
                       />
                     </td>
                   ))}
+                  <td className="px-4 py-2">
+                    <div className="flex items-center justify-center gap-2">
+                      <button
+                        onClick={() => handleEditClick(company)}
+                        className="p-2.5 rounded-xl bg-slate-500/10 hover:bg-white/10 text-slate-400 transition-all group/btn"
+                        title="Edit Detailed Metadata"
+                      >
+                         <Pencil className="w-4 h-4 group-hover/btn:scale-110 transition-transform" />
+                      </button>
+                      <button
+                        onClick={() => handleGenerateDraft(company.id)}
+                        disabled={processingId === company.id}
+                        className="p-2.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 transition-all group/btn"
+                        title="Generate Draft in Pipeline"
+                      >
+                         {processingId === company.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 group-hover/btn:scale-110 transition-transform" />}
+                      </button>
+                      <button
+                        onClick={() => handleSendEmail(company.id)}
+                        disabled={processingId === company.id}
+                        className="p-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-all group/btn"
+                        title="Mark as Sent in Pipeline"
+                      >
+                         {processingId === company.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4 group-hover/btn:scale-110 transition-transform" />}
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -256,6 +558,43 @@ const CompanyDatabase = () => {
           Live Data Studio Linked
         </span>
       </div>
+      {renderEditDrawer()}
+
+      {/* Bulk Action Bar */}
+      {selectedIds.length > 0 && (
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[90] animate-in slide-in-from-bottom-8 duration-500">
+          <div className="bg-[#1e293b] border border-blue-500/30 rounded-2xl px-8 py-5 shadow-2xl flex items-center gap-10">
+            <div className="flex items-center gap-3 pr-10 border-r border-white/10">
+              <div className="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center text-white font-black text-xs">
+                {selectedIds.length}
+              </div>
+              <span className="text-[10px] font-black text-white uppercase tracking-widest">Companies Selected</span>
+            </div>
+            
+            <div className="flex items-center gap-4">
+              <button 
+                onClick={handleBulkExport}
+                className="flex items-center gap-2 px-6 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white text-[11px] font-black uppercase tracking-widest transition-all"
+              >
+                <Download className="w-4 h-4" /> Export Selected
+              </button>
+              <button 
+                onClick={handleBulkDelete}
+                className="flex items-center gap-2 px-6 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-500 text-[11px] font-black uppercase tracking-widest transition-all"
+              >
+                <Trash2 className="w-4 h-4" /> Delete Selected
+              </button>
+              <button 
+                onClick={() => setSelectedIds([])}
+                className="p-2 text-slate-500 hover:text-white transition-colors"
+                title="Deselect All"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

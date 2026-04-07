@@ -264,7 +264,13 @@ const BulkSearch = () => {
 
     const processData = async (data) => {
       try {
-        const cleanData = data.filter(row => row.email || row.Email || row.Name || row.name);
+        // Be extremely generous with column headers
+        const cleanData = data.filter(row => 
+          Object.keys(row).some(k => {
+            const kLower = k.toLowerCase().replace(/[- ]/g, '');
+            return (kLower.includes('email') || kLower.includes('name')) && row[k];
+          })
+        );
         const response = await api.post('/api/leads/bulk-import', cleanData);
         showNotification('success', response.data.message || 'Import successful');
         fetchBulkLeads();
@@ -300,28 +306,6 @@ const BulkSearch = () => {
     }
   };
 
-  const handleSheetImport = async () => {
-    const input = document.querySelector('input[name="google_sheet_url"]');
-    const rawUrl = input?.value;
-    if (!rawUrl) {
-      showNotification('error', 'Please enter a valid Google Sheet URL.');
-      return;
-    }
-
-    let exportUrl = rawUrl;
-    setIsSyncing(true);
-    
-    try {
-      const response = await api.post('/api/leads/import-gsheet', { url: exportUrl });
-      showNotification('success', response.data.message || 'Import successful');
-      fetchBulkLeads();
-      if (input) input.value = '';
-    } catch (err) {
-      showNotification('error', 'Import failed: ' + (err.response?.data?.detail || err.message));
-    } finally {
-      setIsSyncing(false);
-    }
-  };
 
   const downloadTemplate = () => {
     const template = [
@@ -619,33 +603,6 @@ const BulkSearch = () => {
               </button>
             </div>
 
-            <div className="flex items-center gap-4 text-slate-500 text-[10px] font-black uppercase tracking-[3px] py-2">
-              <div className="flex-1 border-t border-white/5"></div>
-              <span>OR DIRECT SYNC FROM CLOUD</span>
-              <div className="flex-1 border-t border-white/5"></div>
-            </div>
-
-            <div className="bg-[#1e293b]/30 border border-emerald-500/20 p-6 rounded-[16px]">
-              <label className="text-[10px] font-extrabold text-emerald-500 uppercase tracking-widest flex items-center gap-2 mb-4">
-                <FileSpreadsheet className="w-4 h-4" /> Public Google Sheet Link
-              </label>
-              <div className="flex flex-col sm:flex-row gap-4">
-                <input
-                  type="url"
-                  name="google_sheet_url"
-                  className="flex-1 bg-[#050810] border border-white/5 rounded-[14px] py-4 px-5 text-[14px] font-medium text-white placeholder:text-slate-700 focus:outline-none focus:border-emerald-500/30 focus:ring-1 focus:ring-emerald-500/20 transition-all"
-                  placeholder="https://docs.google.com/spreadsheets/d/.../edit"
-                />
-                <button
-                  type="button"
-                  onClick={handleSheetImport}
-                  disabled={isSyncing}
-                  className="px-10 py-4 rounded-[14px] bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[12px] uppercase tracking-[2px] transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50 min-w-[200px] cursor-pointer flex items-center justify-center"
-                >
-                  {isSyncing ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Sync Connected Sheet'}
-                </button>
-              </div>
-            </div>
           </div>
         )}
       </div>

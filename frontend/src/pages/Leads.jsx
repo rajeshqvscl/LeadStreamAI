@@ -95,9 +95,9 @@ const Leads = () => {
 
   const [lookupMode, setLookupMode] = useState('search');
 
-  const showNotification = (type, message) => {
-    setNotification({ type, message });
-    setTimeout(() => setNotification(null), 5000);
+  const showNotification = (type, message, action = null) => {
+    setNotification({ type, message, action });
+    setTimeout(() => setNotification(null), 8000); // Longer timeout for action items
   };
 
   const fetchLeads = async () => {
@@ -200,7 +200,15 @@ const Leads = () => {
       });
       fetchLeads();
     } catch (err) {
-      showNotification('error', 'Failed to create lead: ' + (err.response?.data?.detail || err.message));
+      if (err.response?.data?.error === 'DUPLICATE_LEAD') {
+        const leadId = err.response.data.lead_id;
+        showNotification('error', err.response.data.detail, {
+          label: 'View Lead',
+          onClick: () => navigate(`/leads/${leadId}`)
+        });
+      } else {
+        showNotification('error', 'Failed to create lead: ' + (err.response?.data?.detail || err.message));
+      }
     } finally {
       setIsCreatingLead(false);
     }
@@ -408,7 +416,7 @@ const Leads = () => {
         </div>
         <button
           onClick={() => setShowAddModal(true)}
-          className="btn btn-primary px-6 py-2.5 text-[11px] font-black uppercase tracking-widest rounded-xl flex items-center gap-2 shadow-blue-500/20"
+          className="btn btn-primary px-6 py-2.5 text-[11px] font-black uppercase tracking-widest rounded-xl flex items-center gap-2 shadow-blue-500/20 cursor-pointer"
         >
           <Plus className="w-4 h-4" /> New Lead
         </button>
@@ -692,7 +700,7 @@ const Leads = () => {
           <button
             onClick={handleGenerateDomainDrafts}
             disabled={isBulkActionLoading}
-            className="btn btn-ghost py-2 px-4 shadow-none bg-white/5 border-white/10 hover:bg-white/10 text-slate-200 disabled:opacity-50"
+            className="btn btn-ghost py-2 px-4 shadow-none bg-white/5 border-white/10 hover:bg-white/10 text-slate-200 disabled:opacity-50 cursor-pointer"
           >
             {isBulkActionLoading ? <Loader2 className="w-4 h-4 mr-2 text-blue-400 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2 text-blue-400" />}
             Generate Drafts
@@ -700,7 +708,7 @@ const Leads = () => {
           <button
             onClick={handleApproveDomainDrafts}
             disabled={isBulkActionLoading}
-            className="btn btn-ghost py-2 px-4 shadow-none bg-white/5 border-white/10 hover:bg-white/10 text-slate-200 disabled:opacity-50"
+            className="btn btn-ghost py-2 px-4 shadow-none bg-white/5 border-white/10 hover:bg-white/10 text-slate-200 disabled:opacity-50 cursor-pointer"
           >
             {isBulkActionLoading ? <Loader2 className="w-4 h-4 mr-2 text-blue-400 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-2 text-blue-400" />}
             Approve Selected
@@ -708,7 +716,7 @@ const Leads = () => {
           <button
             onClick={handleSendDomainEmails}
             disabled={isBulkActionLoading}
-            className="btn btn-ghost py-2 px-4 shadow-none bg-white/5 border-white/10 hover:bg-white/10 text-slate-200 disabled:opacity-50"
+            className="btn btn-ghost py-2 px-4 shadow-none bg-white/5 border-white/10 hover:bg-white/10 text-slate-200 disabled:opacity-50 cursor-pointer"
           >
             {isBulkActionLoading ? <Loader2 className="w-4 h-4 mr-2 text-emerald-400 animate-spin" /> : <Rocket className="w-4 h-4 mr-2 text-emerald-400" />}
             Send Selected
@@ -716,14 +724,14 @@ const Leads = () => {
           <button
             onClick={handleAddLabelToSelected}
             disabled={isBulkActionLoading}
-            className="btn btn-primary py-2 px-4 shadow-none disabled:opacity-50"
+            className="btn btn-primary py-2 px-4 shadow-none disabled:opacity-50 cursor-pointer"
           >
             <Tag className="w-4 h-4 mr-2" /> Assign Labels
           </button>
           <button
             onClick={handleBulkDelete}
             disabled={isBulkActionLoading}
-            className="btn btn-ghost py-2 px-4 shadow-none bg-rose-500/5 border-rose-500/10 hover:bg-rose-500/10 text-rose-400 font-bold disabled:opacity-50"
+            className="btn btn-ghost py-2 px-4 shadow-none bg-rose-500/5 border-rose-500/10 hover:bg-rose-500/10 text-rose-400 font-bold disabled:opacity-50 cursor-pointer"
           >
             {isBulkActionLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
             Delete Selected
@@ -884,19 +892,19 @@ const Leads = () => {
                         <button
                           onClick={() => navigate(`/dashboard/leads/${lead.id}`)}
                           title="Edit Lead"
-                          className="p-2 hover:bg-blue-500/10 rounded-lg text-slate-500 hover:text-blue-400 transition-all shadow-sm"
+                          className="p-2 hover:bg-blue-500/10 rounded-lg text-slate-500 hover:text-blue-400 transition-all shadow-sm cursor-pointer"
                         >
                           <Pencil className="w-5 h-5" />
                         </button>
                         <button
                           onClick={() => navigate(`/dashboard/leads/${lead.id}`)}
-                          className="p-2 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all shadow-sm group"
+                          className="p-2 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all shadow-sm group cursor-pointer"
                         >
                           <ChevronRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleDeleteSingle(lead.id); }}
-                          className="p-2 hover:bg-rose-500/10 rounded-lg text-slate-500 hover:text-rose-400 transition-all shadow-sm"
+                          className="p-2 hover:bg-rose-500/10 rounded-lg text-slate-500 hover:text-rose-400 transition-all shadow-sm cursor-pointer"
                         >
                           <Trash2 className="w-5 h-5" />
                         </button>
@@ -916,7 +924,7 @@ const Leads = () => {
           <button
             disabled={pagination.page === 1}
             onClick={() => setPagination(v => ({ ...v, page: v.page - 1 }))}
-            className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-800 border border-white/5 text-slate-400 disabled:opacity-20 translate-y-0 hover:-translate-y-0.5 transition-all"
+            className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-800 border border-white/5 text-slate-400 disabled:opacity-20 translate-y-0 hover:-translate-y-0.5 transition-all cursor-pointer"
           >
             <ChevronLeft className="w-5 h-5" />
           </button>
@@ -926,7 +934,7 @@ const Leads = () => {
               <button
                 key={i}
                 onClick={() => setPagination(v => ({ ...v, page: i + 1 }))}
-                className={`w-10 h-10 rounded-xl font-bold text-sm transition-all ${pagination.page === i + 1
+                className={`w-10 h-10 rounded-xl font-bold text-sm transition-all cursor-pointer ${pagination.page === i + 1
                   ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
                   : 'bg-slate-800 border border-white/5 text-slate-400 hover:bg-slate-700'
                   }`}
@@ -939,7 +947,7 @@ const Leads = () => {
           <button
             disabled={pagination.page === pagination.total_pages}
             onClick={() => setPagination(v => ({ ...v, page: v.page + 1 }))}
-            className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-800 border border-white/5 text-slate-400 disabled:opacity-20 translate-y-0 hover:-translate-y-0.5 transition-all"
+            className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-800 border border-white/5 text-slate-400 disabled:opacity-20 translate-y-0 hover:-translate-y-0.5 transition-all cursor-pointer"
           >
             <ChevronRight className="w-5 h-5" />
           </button>
@@ -1121,7 +1129,20 @@ const Leads = () => {
             : 'bg-red-500/10 border-red-500/20 text-red-400'
             }`}>
             {notification.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
-            <p className="text-sm font-bold tracking-tight">{notification.message}</p>
+            <div className="flex flex-col gap-1">
+              <p className="text-sm font-bold tracking-tight">{notification.message}</p>
+              {notification.action && (
+                <button
+                  onClick={() => {
+                    notification.action.onClick();
+                    setNotification(null);
+                  }}
+                  className="text-[11px] font-black uppercase tracking-widest text-white hover:text-white/80 transition-colors w-fit underline underline-offset-4"
+                >
+                  {notification.action.label} →
+                </button>
+              )}
+            </div>
             <button
               onClick={() => setNotification(null)}
               className="ml-4 p-1 hover:bg-white/10 rounded-lg transition-colors"
