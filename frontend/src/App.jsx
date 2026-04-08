@@ -86,7 +86,7 @@ function App() {
           <Route path="users" element={<Users />} />
           <Route path="family-offices" element={<FamilyOffices />} />
           <Route path="family-offices/:officeId" element={<ErrorBoundary><FamilyOfficeDetail /></ErrorBoundary>} />
-          <Route path="generate" element={<GenerateSector />} />
+          {/* <Route path="generate" element={<GenerateSector />} /> */}
           <Route path="bulk-search" element={<BulkSearch />} />
           <Route path="companies" element={<CompanyDatabase />} />
         </Route>

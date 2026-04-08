@@ -204,7 +204,7 @@ const Leads = () => {
         const leadId = err.response.data.lead_id;
         showNotification('error', err.response.data.detail, {
           label: 'View Lead',
-          onClick: () => navigate(`/leads/${leadId}`)
+          onClick: () => navigate(`/dashboard/leads/${leadId}`)
         });
       } else {
         showNotification('error', 'Failed to create lead: ' + (err.response?.data?.detail || err.message));
@@ -739,7 +739,7 @@ const Leads = () => {
         </div>
       </div>
 
-      {/* Results Sheet-Style Table */}
+      {/* Results Data Table */}
       {isLoading ? (
         <div className="leads-table-container">
           <table className="leads-table">

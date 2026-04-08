@@ -156,6 +156,7 @@ const LeadDetail = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [drafts, setDrafts] = useState([]);
   const [notification, setNotification] = useState(null);
+  const [error, setError] = useState(null);
   const [familyOffices, setFamilyOffices] = useState([]);
 
   // Form state - synced dynamically from lead data
@@ -170,6 +171,7 @@ const LeadDetail = () => {
 
   const fetchData = async () => {
     setIsLoading(true);
+    setError(null);
     try {
       const [leadRes, logsRes] = await Promise.all([
         api.get(`/api/leads/${leadId}`),
@@ -186,7 +188,7 @@ const LeadDetail = () => {
         email: l.email || '',
         designation: l.designation || '',
         industry: l.industry || '',
-        phone: l.phone || '', // Explicitly bind phone
+        phone: l.phone || '',
         linkedin_url: l.linkedin_url || l.linkedin || '',
         city: l.city || '',
         country: l.country || '',
@@ -213,6 +215,7 @@ const LeadDetail = () => {
       }
     } catch (err) {
       console.error('Failed to fetch lead details', err);
+      setError(err.response?.data?.detail || 'This lead profile could not be retrieved. It may have been deleted or you may not have permission to view it.');
     } finally {
       setIsLoading(false);
     }
@@ -280,11 +283,31 @@ const LeadDetail = () => {
     }
   };
 
-  if (isLoading || !lead) {
+  if (isLoading) {
     return (
       <div className="py-20 flex flex-col items-center justify-center">
         <Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-4" />
         <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Loading Profile...</p>
+      </div>
+    );
+  }
+
+  if (error || !lead) {
+    return (
+      <div className="py-20 flex flex-col items-center justify-center text-center px-4">
+        <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-6">
+          <AlertCircle className="w-8 h-8 text-red-500" />
+        </div>
+        <h2 className="text-white text-xl font-bold mb-3">Lead Access Denied or Not Found</h2>
+        <p className="text-slate-400 text-sm max-w-md mb-8 leading-relaxed">
+          {error || "The requested lead record could not be found in the database. It might have been deleted or unassigned from your account."}
+        </p>
+        <Link
+          to="/dashboard/leads"
+          className="btn btn-ghost px-8 py-3 rounded-xl border border-white/10 hover:bg-white/5 text-slate-300 font-bold"
+        >
+          Return to Pipeline
+        </Link>
       </div>
     );
   }
@@ -479,7 +502,7 @@ const LeadDetail = () => {
                     placeholder="None"
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-[10px] font-bold text-[#64748b] mb-1.5">Remarks / Internal Notes</label>
                   <textarea
@@ -621,9 +644,8 @@ const LeadDetail = () => {
                     <div key={d.id} className="bg-[#0f121b] border border-[#ffffff08] rounded-xl p-4 cursor-pointer hover:border-blue-500/50 transition-colors shadow-md group" onClick={() => navigate(`/dashboard/emails/${d.id}/edit`)}>
                       <div className="flex justify-between items-start mb-2 gap-3">
                         <h4 className="text-[11px] font-bold text-white line-clamp-2 leading-relaxed flex-1 group-hover:text-blue-400 transition-colors">{d.subject || 'Follow-up on operational strategies'}</h4>
-                        <span className={`shrink-0 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${
-                          d.status === 'SENT' ? 'bg-[#10b981]/20 text-[#10b981]' : 'bg-emerald-500/10 text-emerald-400'
-                        }`}>
+                        <span className={`shrink-0 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${d.status === 'SENT' ? 'bg-[#10b981]/20 text-[#10b981]' : 'bg-emerald-500/10 text-emerald-400'
+                          }`}>
                           {d.status || 'DRAFT'}
                         </span>
                       </div>
@@ -656,18 +678,18 @@ const LeadDetail = () => {
                   {pendingDelete ? 'Delete Lead?' : 'Opt-out Lead?'}
                 </h4>
                 <p className="text-[#64748b] text-[12px] font-medium leading-relaxed mb-4">
-                  {pendingDelete 
-                    ? 'Permanently delete this lead? This action cannot be undone and all associated data will be removed.' 
+                  {pendingDelete
+                    ? 'Permanently delete this lead? This action cannot be undone and all associated data will be removed.'
                     : 'Are you sure you want to opt-out this lead? They will be blacklisted from all future outreach.'}
                 </p>
                 <div className="flex items-center gap-3">
-                  <button 
+                  <button
                     onClick={pendingDelete ? confirmDelete : confirmOptOut}
                     className="bg-red-500 hover:bg-red-600 text-white text-[11px] font-bold px-4 py-2 rounded-lg transition-colors cursor-pointer"
                   >
                     Confirm {pendingDelete ? 'Delete' : 'Opt-out'}
                   </button>
-                  <button 
+                  <button
                     onClick={() => { setPendingOptOut(false); setPendingDelete(false); }}
                     className="bg-white/5 hover:bg-white/10 text-slate-300 text-[11px] font-bold px-4 py-2 rounded-lg transition-colors cursor-pointer"
                   >

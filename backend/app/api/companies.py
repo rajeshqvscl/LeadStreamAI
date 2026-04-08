@@ -9,6 +9,8 @@ import io
 import re
 from app.models.lead import insert_lead, save_email_draft
 from app.services.llm_services import EmailGenerator
+from psycopg2.extras import execute_values
+import time
 
 router = APIRouter()
 
@@ -18,14 +20,19 @@ def normalize_user_id(user_id: Optional[str]) -> str:
     return user_id
 
 @router.get("/companies")
-def list_companies(user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Returns company profiles from the internal company registry database."""
+def list_companies(page: int = 1, limit: int = 500, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Returns company profiles from the internal company registry database with pagination."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    offset = (page - 1) * limit
     
     try:
-        # Fetch from the internal registry instead of external sheets
-        cur.execute("SELECT id, row_data FROM company_registry ORDER BY id ASC")
+        # Total count for pagination
+        cur.execute("SELECT COUNT(*) FROM company_registry")
+        total = cur.fetchone()[0]
+
+        # Paginated fetch
+        cur.execute("SELECT id, row_data FROM company_registry ORDER BY id ASC LIMIT %s OFFSET %s", (limit, offset))
         rows = cur.fetchall()
         
         companies = []
@@ -37,33 +44,41 @@ def list_companies(user_id: Optional[str] = Header(None, alias="X-User-Id")):
 
         return {
             "companies": companies,
-            "total": len(companies)
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": (total + limit - 1) // limit
         }
     except Exception as e:
-        return { "companies": [], "error": str(e) }
+        return { "companies": [], "error": str(e), "total": 0 }
     finally:
         cur.close()
         conn.close()
 
 @router.post("/companies/import")
 def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Clears the current registry and imports a new batch of spreadsheet data."""
+    """Clears the current registry and imports a new batch of spreadsheet data using fast batch insertion."""
     uid = normalize_user_id(user_id)
     conn = get_db_connection()
     cur = conn.cursor()
     
+    start_time = time.time()
     try:
-        # Clear existing data for a fresh import (or we could append, but clear is usually cleaner for 'Replace')
+        # Clear existing data for a fresh import
         cur.execute("DELETE FROM company_registry")
         
-        # Batch Insert
-        for row in rows:
-            cur.execute(
-                "INSERT INTO company_registry (row_data, user_id) VALUES (%s, %s)",
-                (json.dumps(row), uid)
+        # Fast Batch Insert
+        if rows:
+            data_to_insert = [(json.dumps(row), uid) for row in rows]
+            execute_values(
+                cur,
+                "INSERT INTO company_registry (row_data, user_id) VALUES %s",
+                data_to_insert
             )
         
         conn.commit()
+        end_time = time.time()
+        print(f"Imported {len(rows)} companies in {end_time - start_time:.2f} seconds.")
         return {"success": True, "count": len(rows)}
     except Exception as e:
         conn.rollback()
@@ -128,16 +143,19 @@ def import_companies_gsheet(req: Dict[str, str], user_id: Optional[str] = Header
     export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv&gid={gid}"
     
     try:
-        resp = requests.get(export_url, allow_redirects=True, timeout=15)
+        print(f"Fetching GSheet export from: {export_url}")
+        resp = requests.get(export_url, allow_redirects=True, timeout=60)
         if resp.status_code != 200:
             raise HTTPException(status_code=400, detail="Sheet is private or not found.")
         
         reader = csv.DictReader(io.StringIO(resp.text))
         rows = [dict(row) for row in reader]
+        print(f"Parsed {len(rows)} rows from GSheet.")
         
         # Reuse existing import logic
         return import_companies(rows, user_id)
     except Exception as e:
+        print(f"GSheet import error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/companies/{row_id}/generate-draft")

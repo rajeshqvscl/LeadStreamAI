@@ -265,7 +265,7 @@ const BulkSearch = () => {
     const processData = async (data) => {
       try {
         // Be extremely generous with column headers
-        const cleanData = data.filter(row => 
+        const cleanData = data.filter(row =>
           Object.keys(row).some(k => {
             const kLower = k.toLowerCase().replace(/[- ]/g, '');
             return (kLower.includes('email') || kLower.includes('name')) && row[k];
@@ -399,7 +399,7 @@ const BulkSearch = () => {
             onClick={() => setSyncMode('spreadsheet')}
             className={`px-6 py-2.5 rounded-[10px] text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${syncMode === 'spreadsheet' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-slate-500 hover:text-slate-300'}`}
           >
-            Spreadsheet Import
+            Excel / CSV Import
           </button>
         </div>
 
@@ -709,7 +709,7 @@ const BulkSearch = () => {
             {[
               { key: 'all', label: 'All Sources' },
               { key: 'bulk', label: '🚀 RocketReach' },
-              { key: 'csv_import', label: '📊 Excel / CSV / Sheet' },
+              { key: 'csv_import', label: '📊 Excel / CSV' },
             ].map(tab => (
               <button
                 key={tab.key}
@@ -797,7 +797,7 @@ const BulkSearch = () => {
                     <td className="px-6 py-4">
                       {lead.source === 'csv_import' ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          📊 Excel / CSV / Sheet
+                          📊 Excel / CSV
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">

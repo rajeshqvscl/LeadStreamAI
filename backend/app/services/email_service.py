@@ -49,15 +49,26 @@ def send_smtp_fallback(to_email: str, subject: str, html_content: str, from_emai
 
 def format_outreach_html(text: str) -> str:
     """
-    Converts markdown-style bold and bullets into clean HTML.
-    Specifically targets **Heading** -> <strong>Heading</strong>
-    and • Bullet -> <li>Bullet</li>
+    Converts markdown-style bold, bullets, and links into clean HTML.
+    Specifically targets:
+    - **Bold** -> <strong>
+    - • Bullet -> <li>
+    - [Link](url) -> <a href="url">
     """
     import re
-    # Convert bold **text** to <strong>text</strong>
+    
+    # 1. Convert markdown links [text](url) to <a href="url">text</a>
+    # Specifically targeting the blue accent for links
+    text = re.sub(
+        r'\[(.*?)\]\((.*?)\)', 
+        r'<a href="\2" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', 
+        text
+    )
+
+    # 2. Convert bold **text** to <strong>text</strong>
     text = re.sub(r'\*\*(.*?)\*\*', r'<strong style="color: #ffffff; font-size: 14px;">\1</strong>', text)
     
-    # Convert bullet points • text to list items
+    # 3. Convert bullet points • text to list items
     lines = text.split('\n')
     formatted_lines = []
     in_list = False

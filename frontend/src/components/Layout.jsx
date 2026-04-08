@@ -10,6 +10,7 @@ const Layout = () => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [time, setTime] = useState('');
   const [totalLeads, setTotalLeads] = useState(0);
+  const [totalCompanies, setTotalCompanies] = useState(0);
 
   useEffect(() => {
     const updateTime = () => setTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
@@ -22,8 +23,9 @@ const Layout = () => {
     const fetchStats = async () => {
       try {
         const { data } = await import('../services/api').then(m => m.default.get('/api/dashboard/stats'));
-        if (data && data.total_leads !== undefined) {
-          setTotalLeads(data.total_leads);
+        if (data) {
+          if (data.total_leads !== undefined) setTotalLeads(data.total_leads);
+          if (data.total_companies !== undefined) setTotalCompanies(data.total_companies);
         }
       } catch (err) {
         console.error('Failed to fetch topbar stats', err);
@@ -68,18 +70,20 @@ const Layout = () => {
           <Link to="/dashboard/bulk-search" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'bulk-search' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'bulk-search' ? 'text-white' : 'text-[#94a3b8]'}`}>🚀</span> Bulk Search
           </Link>
-          <Link to="/dashboard/family-offices" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'family-offices' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
-            <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'family-offices' ? 'text-white' : 'text-[#94a3b8]'}`}>🏢</span> Family Offices
-          </Link>
           <Link to="/dashboard/companies" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'companies' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'companies' ? 'text-white' : 'text-[#94a3b8]'}`}>📊</span> Company Database
+          </Link>
+          <Link to="/dashboard/family-offices" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'family-offices' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+            <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'family-offices' ? 'text-white' : 'text-[#94a3b8]'}`}>🏢</span> Family Offices
           </Link>
           <Link to="/dashboard/emails" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'emails' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'emails' ? 'text-white' : 'text-[#94a3b8]'}`}>✉️</span> Email Drafts
           </Link>
+          {/* 
           <Link to="/dashboard/generate" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'generate' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'generate' ? 'text-white' : 'text-[#94a3b8]'}`}>✨</span> AI Generation
-          </Link>
+          </Link> 
+          */}
           <Link to="/dashboard/campaigns" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'campaigns' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'campaigns' ? 'text-white' : 'text-[#94a3b8]'}`}>🎯</span> Campaigns
           </Link>
@@ -126,6 +130,13 @@ const Layout = () => {
             <span className="text-[9px] font-semibold uppercase tracking-[0.8px] text-[#64748b] leading-none">Total Leads</span>
             <div className="flex items-baseline gap-1.5 mt-1">
               <span className="text-[18px] font-bold text-white">{totalLeads}</span>
+            </div>
+          </div>
+          <div className="w-px h-8 bg-white/10 mx-1" />
+          <div className="flex flex-col">
+            <span className="text-[9px] font-semibold uppercase tracking-[0.8px] text-[#64748b] leading-none">Total Registry</span>
+            <div className="flex items-baseline gap-1.5 mt-1">
+              <span className="text-[18px] font-bold text-white">{totalCompanies}</span>
             </div>
           </div>
           <div className="bg-black/20 border border-white/5 px-4 py-2 rounded-[10px] flex items-center gap-3">

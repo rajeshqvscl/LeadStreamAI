@@ -35,6 +35,50 @@ class BulkDraftRequest(BaseModel):
 class BulkSendRequest(BaseModel):
     lead_ids: List[int]
 
+class BulkActionRequest(BaseModel):
+    lead_ids: List[int]
+    action: str  # APPROVED, ARCHIVED, SENT, REJECTED
+    reason: Optional[str] = None
+
+@router.post("/emails/bulk-action")
+def bulk_email_action(req: BulkActionRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        if not req.lead_ids:
+            return {"message": "No leads provided"}
+            
+        format_strings = ','.join(['%s'] * len(req.lead_ids))
+        where_params = tuple(req.lead_ids)
+        
+        # User restriction
+        user_clause = ""
+        if user_id and user_id != "admin":
+            user_clause = " AND user_id = %s"
+            where_params += (user_id,)
+        elif user_id == "admin":
+            pass
+        else:
+            user_clause = " AND user_id IS NULL"
+
+        # Update status
+        cur.execute(f"UPDATE leads_raw SET email_status = %s, updated_at = NOW() WHERE id IN ({format_strings}) {user_clause}", (req.action, *where_params))
+        
+        # Log activity
+        from app.models.lead import add_activity_log
+        for lid in req.lead_ids:
+            add_activity_log(lid, f"BULK_{req.action}", f"Bulk {req.action.lower()} action applied. {f'Reason: {req.reason}' if req.reason else ''}", "admin")
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return {"message": f"Successfully updated {len(req.lead_ids)} leads to {req.action}"}
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e)}
+
 def normalize_lead(lead):
     if isinstance(lead, dict):
         return lead
@@ -126,10 +170,9 @@ def generate_draft(req: DraftRequest, user_id: Optional[str] = Header(None, alia
         return {"error": str(e)}
 
 # --- Fetch Drafts ---
-# Supports both /pending-drafts (user prompt) and /emails (frontend Axios)
 @router.get("/pending-drafts")
 @router.get("/emails")
-def get_pending_drafts(page: int = 1, status: Optional[str] = None, per_page: int = 20, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Optional[str] = None, geo: Optional[str] = None, per_page: int = 20, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
@@ -141,21 +184,35 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, per_page: in
         where_clause += " AND user_id = %s"
         params.append(user_id)
     elif user_id == "admin":
-        pass # Admin sees all
+        pass
     else:
         where_clause += " AND user_id IS NULL"
+
+    if status:
+        where_clause += " AND email_status = %s"
+        params.append(status)
+
+    if region:
+        if region == 'US':
+            where_clause += " AND country IN ('USA', 'US', 'United States', 'Canada')"
+        elif region == 'EU':
+            where_clause += " AND country IN ('UK', 'Germany', 'France', 'Spain', 'Italy', 'Netherlands', 'Sweden')"
+        elif region == 'APAC':
+            where_clause += " AND country IN ('India', 'Singapore', 'Australia', 'Japan', 'China')"
+
+    if geo:
+        tier1_countries = ('USA', 'US', 'Canada', 'UK', 'Germany', 'France', 'Australia', 'Japan')
+        if geo == 'Tier1':
+            where_clause += f" AND country IN {tier1_countries}"
+        elif geo == 'Emerging':
+            where_clause += f" AND country NOT IN {tier1_countries}"
 
     query = f"""
         SELECT id, first_name, last_name, email, email_draft, email_status, company_name, persona, fit_score, updated_at 
         FROM leads_raw 
         {where_clause}
+        ORDER BY COALESCE(updated_at, created_at) DESC LIMIT %s OFFSET %s
     """
-
-    if status:
-        query += " AND email_status = %s"
-        params.append(status)
-        
-    query += " ORDER BY COALESCE(updated_at, created_at) DESC LIMIT %s OFFSET %s"
     params.extend([per_page, (page - 1) * per_page])
     
     cur.execute(query, tuple(params))
@@ -163,13 +220,9 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, per_page: in
     
     # count total
     count_query = f"SELECT COUNT(*) FROM leads_raw {where_clause}"
-    count_params = [user_id] if user_id else []
-    if status:
-        count_query += " AND email_status = %s"
-        count_params.append(status)
-    cur.execute(count_query, tuple(count_params))
-
+    cur.execute(count_query, tuple(params[:-2])) # exclude limit/offset
     total = cur.fetchone()[0]
+    pages = (total + per_page - 1) // per_page
     
     cur.close()
     conn.close()

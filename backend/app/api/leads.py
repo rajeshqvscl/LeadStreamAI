@@ -30,6 +30,7 @@ class LeadUpdate(BaseModel):
     family_office_name: Optional[str] = None
     source: Optional[str] = None
     remarks: Optional[str] = None
+    designation: Optional[str] = None
 
 class LeadCreate(BaseModel):
     first_name: str
@@ -76,7 +77,13 @@ def get_leads(
     # Dynamically extract designation if needed (to handle cases where schema update was blocked)
     query = """
         SELECT *, 
-               COALESCE(designation, raw_payload->>'Designation', raw_payload->>'Role/Designation', raw_payload->>'designation', persona) as designation, 
+               COALESCE(
+                   NULLIF(designation, ''), 
+                   raw_payload->>'Designation', 
+                   raw_payload->>'Role/Designation', 
+                   raw_payload->>'designation', 
+                   persona
+               ) as designation, 
                labels, remarks 
         FROM leads_raw 
         WHERE 1=1
@@ -104,9 +111,9 @@ def get_leads(
 
     is_bulk_context = (source in ('bulk', 'csv_import')) or (exclude_source == 'direct')
     if is_bulk_context:
-        # 1. Must have a basic identity (Name and Company)
-        query += " AND (first_name IS NOT NULL OR last_name IS NOT NULL) AND (COALESCE(first_name,'') != '' OR COALESCE(last_name,'') != '')"
-        query += " AND company_name IS NOT NULL AND COALESCE(company_name,'') != ''"
+        # Relaxed filter: Just ensure we have some name or company data
+        query += " AND (first_name IS NOT NULL OR last_name IS NOT NULL OR company_name IS NOT NULL)"
+        query += " AND (COALESCE(first_name,'') != '' OR COALESCE(last_name,'') != '' OR COALESCE(company_name,'') != '')"
 
         # 2. Block dummy / test records in name and email content
         bad_names = r'test|dummy|sample|example|unknown|admin|user|lead test|mock|noreply'
@@ -240,9 +247,16 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    if user_id:
-        cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (lead_id, user_id))
+    is_admin = (str(user_id).lower() == 'admin' or str(user_id) == '1')
+
+    if is_admin:
+        # Admin can view any lead in the system
+        cur.execute("SELECT * FROM leads_raw WHERE id = %s", (lead_id,))
+    elif user_id:
+        # Regular user can view their own leads, or leads with no owner
+        cur.execute("SELECT * FROM leads_raw WHERE id = %s AND (user_id = %s OR user_id IS NULL)", (lead_id, user_id))
     else:
+        # Fallback for unauthenticated or system-level requests
         cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (lead_id,))
         
     row = cur.fetchone()
@@ -281,12 +295,16 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
     lead["phone"] = phone or payload.get("phone") or ""
     
     # ensure job title is included (designation)
-    if payload:
-        lead["designation"] = payload.get("current_title", "")
+    # PRIORITIZE existing designation column over payload to prevent wiping out manual entries
+    if not lead.get("designation") and payload:
+        lead["designation"] = payload.get("current_title", payload.get("designation", ""))
         
     # Serialize datetime
     if lead.get("created_at"):
-        lead["created_at"] = lead["created_at"].isoformat() + "Z"
+        if hasattr(lead["created_at"], "isoformat"):
+            lead["created_at"] = lead["created_at"].isoformat() + "Z"
+        else:
+            lead["created_at"] = str(lead["created_at"])
         
     # Normalize email_draft content to handle literal escapes
     if lead.get("email_draft"):
@@ -562,9 +580,9 @@ def bulk_import(
                 cur.execute("""
                     INSERT INTO leads_raw (
                         first_name, last_name, email, company_name, linkedin_url, 
-                        city, country, persona, phone, source, user_id, raw_payload, remarks
+                        city, country, persona, phone, source, user_id, raw_payload, remarks, designation
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (email) DO UPDATE SET
                         first_name = EXCLUDED.first_name,
                         last_name = EXCLUDED.last_name,
@@ -577,11 +595,12 @@ def bulk_import(
                         source = EXCLUDED.source,
                         user_id = COALESCE(EXCLUDED.user_id, leads_raw.user_id),
                         raw_payload = EXCLUDED.raw_payload,
-                        remarks = COALESCE(EXCLUDED.remarks, leads_raw.remarks)
+                        remarks = COALESCE(EXCLUDED.remarks, leads_raw.remarks),
+                        designation = COALESCE(EXCLUDED.designation, leads_raw.designation)
                 """, (
                     f_name, l_name, email, company, linkedin, 
                     city, country, persona, phone, "csv_import", db_user_id, 
-                    json.dumps(lead), lead.get("remarks", "")
+                    json.dumps(lead), lead.get("remarks", ""), designation
                 ))
                 if cur.rowcount > 0:
                     inserted += 1

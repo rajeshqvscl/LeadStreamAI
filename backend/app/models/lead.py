@@ -18,6 +18,10 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
 
     # Extract designation from payload if not explicitly provided
     designation = payload.get("current_title", payload.get("designation", payload.get("Designation", ""))) if payload else ""
+    if not designation or not str(designation).strip():
+        designation = None
+    else:
+        designation = str(designation).strip()
 
     cur.execute(
         """

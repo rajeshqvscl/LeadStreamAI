@@ -27,23 +27,30 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
     """)
     conn.commit()
 
-    cur.execute(f"SELECT COUNT(*) as total FROM leads_raw {where_clause}", params)
+    # Exclude bulk/csv_import sources from total_leads and pending counts
+    leads_filter = "AND (source IS NULL OR source NOT IN ('bulk', 'csv_import'))"
+    
+    cur.execute(f"SELECT COUNT(*) as total FROM leads_raw {where_clause} {leads_filter}", params)
     total_leads = cur.fetchone()['total']
     
-    cur.execute(f"SELECT COUNT(*) as valid FROM leads_raw {where_clause} AND validation_status = 'VALID'", params)
+    cur.execute(f"SELECT COUNT(*) as valid FROM leads_raw {where_clause} AND validation_status = 'VALID' {leads_filter}", params)
     valid_leads = cur.fetchone()['valid']
     
-    cur.execute(f"SELECT COUNT(*) as classified FROM leads_raw {where_clause} AND persona IS NOT NULL AND persona != ''", params)
+    cur.execute(f"SELECT COUNT(*) as classified FROM leads_raw {where_clause} AND persona IS NOT NULL AND persona != '' {leads_filter}", params)
     classified = cur.fetchone()['classified']
     
-    cur.execute(f"SELECT COUNT(*) as pending FROM leads_raw {where_clause} AND (email_status = 'PENDING_APPROVAL' OR email_status = 'pending')", params)
+    cur.execute(f"SELECT COUNT(*) as pending FROM leads_raw {where_clause} AND (email_status = 'PENDING_APPROVAL' OR email_status = 'pending') {leads_filter}", params)
     pending = cur.fetchone()['pending']
     
-    cur.execute(f"SELECT COUNT(*) as sent FROM leads_raw {where_clause} AND email_status = 'SENT'", params)
+    cur.execute(f"SELECT COUNT(*) as sent FROM leads_raw {where_clause} AND email_status = 'SENT' {leads_filter}", params)
     sent = cur.fetchone()['sent'] or 0
     
-    cur.execute(f"SELECT COUNT(*) as refined FROM leads_raw {where_clause} AND email_draft IS NOT NULL", params)
+    cur.execute(f"SELECT COUNT(*) as refined FROM leads_raw {where_clause} AND email_draft IS NOT NULL {leads_filter}", params)
     refined = cur.fetchone()['refined'] or 0
+
+    # Company Registry Count
+    cur.execute("SELECT COUNT(*) as total FROM company_registry")
+    total_companies = cur.fetchone()['total'] or 0
     
     # Engagement Pulse - Joining with campaigns to ensure user-isolation
     events_join = "JOIN campaigns c ON ce.campaign_id = c.id"
@@ -127,5 +134,6 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         "total_unsubs": total_unsubs,
         "unsub_rate": unsub_rate,
         "recent_logs": recent_logs,
-        "persona_data": persona_data if persona_data else { "FOUNDER": 0, "INVESTOR": 0, "PARTNER": 0 }
+        "persona_data": persona_data if persona_data else { "FOUNDER": 0, "INVESTOR": 0, "PARTNER": 0 },
+        "total_companies": total_companies
     }
