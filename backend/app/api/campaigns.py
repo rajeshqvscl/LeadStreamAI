@@ -19,6 +19,7 @@ class CampaignCreate(BaseModel):
     context_prompt: Optional[str] = None
     strategy_prompt: Optional[str] = None
     is_active: Optional[bool] = True
+    target_companies: Optional[str] = None
 
 class CampaignUpdate(BaseModel):
     name: Optional[str] = None
@@ -31,6 +32,7 @@ class CampaignUpdate(BaseModel):
     context_prompt: Optional[str] = None
     strategy_prompt: Optional[str] = None
     is_active: Optional[bool] = None
+    target_companies: Optional[str] = None
 
 @router.post("/campaigns")
 def api_create_campaign(campaign: CampaignCreate, user_id: Optional[str] = Header(None, alias="X-User-Id")):

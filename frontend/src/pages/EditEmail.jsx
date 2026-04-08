@@ -326,7 +326,7 @@ const EditEmail = () => {
               </div>
               <div className="grid grid-cols-[120px_1fr] items-center text-[11px] font-medium border-t border-[#ffffff05] pt-3">
                 <span className="text-[#64748b]">Approved By</span>
-                <span className="text-white">{(draft.email_status === 'SENT' || draft.email_status === 'APPROVED') ? 'Admin' : '—'}</span>
+                <span className="text-white">{(draft.email_status === 'SENT' || draft.email_status === 'APPROVED') ? (draft.verifier || 'Admin') : '—'}</span>
               </div>
               <div className="grid grid-cols-[120px_1fr] items-center text-[11px] font-medium border-t border-[#ffffff05] pt-3">
                 <span className="text-[#64748b]">Sent At</span>

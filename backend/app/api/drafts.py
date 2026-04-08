@@ -208,7 +208,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
             where_clause += f" AND country NOT IN {tier1_countries}"
 
     query = f"""
-        SELECT id, first_name, last_name, email, email_draft, email_status, company_name, persona, fit_score, updated_at 
+        SELECT id, first_name, last_name, email, email_draft, email_status, company_name, persona, fit_score, updated_at, email_approved_by 
         FROM leads_raw 
         {where_clause}
         ORDER BY COALESCE(updated_at, created_at) DESC LIMIT %s OFFSET %s
@@ -270,7 +270,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
             ],
             "status": r["email_status"] or "PENDING_APPROVAL",
             "performance": {"opens": 0, "clicks": 0}, # Placeholders
-            "verifier": "admin" if r["email_status"] in ["APPROVED", "SENT"] else None,
+            "verifier": r.get("email_approved_by") or ("admin" if r["email_status"] in ["APPROVED", "SENT"] else None),
             "updated_at": r.get("updated_at", "").isoformat() if r.get("updated_at") else ""
         })
 
@@ -378,8 +378,8 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
 
     if success:
         cur.execute(
-            "UPDATE leads_raw SET email_draft = %s, email_status = 'SENT', updated_at = NOW() WHERE id = %s",
-            (draft_content, draft_id)
+            "UPDATE leads_raw SET email_draft = %s, email_status = 'SENT', email_approved_by = %s, updated_at = NOW() WHERE id = %s",
+            (draft_content, sender_name, draft_id)
         )
         conn.commit()
         from app.models.lead import add_activity_log

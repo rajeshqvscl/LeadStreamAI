@@ -161,6 +161,7 @@ const LeadDetail = () => {
 
   // Form state - synced dynamically from lead data
   const [form, setForm] = useState({});
+  const [isDirty, setIsDirty] = useState(false);
   const [pendingOptOut, setPendingOptOut] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(false);
 
@@ -192,7 +193,7 @@ const LeadDetail = () => {
         linkedin_url: l.linkedin_url || l.linkedin || '',
         city: l.city || '',
         country: l.country || '',
-        campaign_id: l.campaign_id || '',
+        campaign_id: l.campaign_id || null,
         company_name: l.company_name || '',
         family_office_name: l.family_office_name || '',
         remarks: l.remarks || ''
@@ -225,17 +226,37 @@ const LeadDetail = () => {
 
   const handleChange = (e) => {
     setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    setIsDirty(true);
   };
 
   const handleUpdate = async (e) => {
     e.preventDefault();
     setIsSaving(true);
     try {
-      await api.patch(`/api/leads/${leadId}`, form);
+      // Sanitize fields before sending to API
+      const sanitizedForm = { ...form };
+      
+      // Convert campaign_id to integer or null
+      if (typeof sanitizedForm.campaign_id === 'string') {
+        if (sanitizedForm.campaign_id.trim() === '') {
+          sanitizedForm.campaign_id = null;
+        } else if (!isNaN(parseInt(sanitizedForm.campaign_id))) {
+          sanitizedForm.campaign_id = parseInt(sanitizedForm.campaign_id);
+        }
+      }
+
+      // Ensure fit_score is int
+      if (sanitizedForm.fit_score && typeof sanitizedForm.fit_score === 'string') {
+        sanitizedForm.fit_score = parseInt(sanitizedForm.fit_score);
+      }
+
+      await api.patch(`/api/leads/${leadId}`, sanitizedForm);
       showNotification('success', 'Lead updated successfully');
+      setIsDirty(false);
       fetchData();
-    } catch {
-      showNotification('error', 'Failed to update lead');
+    } catch (err) {
+      console.error('Update failed:', err);
+      showNotification('error', err.response?.data?.detail || 'Failed to update lead');
     } finally {
       setIsSaving(false);
     }
@@ -403,7 +424,7 @@ const LeadDetail = () => {
                       name="email"
                       value={form.email || ''}
                       onChange={handleChange}
-                      className="w-full bg-[#0f121b] border border-[#ffffff08] rounded-md px-3 py-2.5 text-white text-[11px] font-medium focus:border-blue-500/50 outline-none transition-colors"
+                      className={`w-full bg-[#0f121b] border rounded-md px-3 py-2.5 text-white text-[11px] font-medium focus:border-blue-500/50 outline-none transition-all ${isDirty ? 'border-amber-500/30' : 'border-[#ffffff08]'}`}
                     />
                   </div>
                 </div>
@@ -514,16 +535,6 @@ const LeadDetail = () => {
                   />
                 </div>
 
-                <div className="pt-2">
-                  <button
-                    type="submit"
-                    disabled={isSaving}
-                    className="flex items-center gap-2 px-4 py-2 rounded-md bg-[#2563eb] text-white text-[11px] font-bold hover:bg-blue-600 transition-all disabled:opacity-50"
-                  >
-                    {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                    Save Changes
-                  </button>
-                </div>
               </form>
             </div>
           </div>
@@ -664,6 +675,21 @@ const LeadDetail = () => {
 
         </div>
       </div>
+
+      {/* Floating Save Button */}
+      {isDirty && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[4000] animate-in slide-in-from-bottom-8 duration-500">
+          <button
+            onClick={handleUpdate}
+            disabled={isSaving}
+            className="flex items-center gap-2.5 px-8 py-4 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-[13px] font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-2xl shadow-blue-500/40 cursor-pointer group"
+          >
+            {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4 group-hover:rotate-12 transition-transform" />}
+            {isSaving ? 'Saving Changes...' : 'Save Changes Now'}
+            <div className="absolute -top-1 -right-1 w-3 h-3 bg-amber-500 rounded-full animate-pulse border-2 border-[#0a0f1a]" />
+          </button>
+        </div>
+      )}
 
       {/* Action Toast (Confirmation) */}
       {(pendingOptOut || pendingDelete) && (

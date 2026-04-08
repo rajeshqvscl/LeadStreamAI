@@ -74,6 +74,7 @@ def create_tables():
         ("linkedin_url", "TEXT"),
         ("labels", "TEXT[] DEFAULT '{}'"),
         ("user_id", "INTEGER"),
+        ("email_approved_by", "TEXT"),
         ("updated_at", "TIMESTAMP DEFAULT NOW()")
     ]
     for col_name, col_type in columns_to_add:
@@ -116,6 +117,7 @@ def create_tables():
         context_prompt TEXT,
         strategy_prompt TEXT,
         is_active BOOLEAN DEFAULT TRUE,
+        target_companies TEXT,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
     );

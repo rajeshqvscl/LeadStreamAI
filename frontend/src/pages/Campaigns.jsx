@@ -22,9 +22,13 @@ const Campaigns = () => {
     html_body: '',
     context_prompt: '',
     strategy_prompt: '',
-    is_active: true
+    is_active: true,
+    target_companies: []
   });
   
+  const [companies, setCompanies] = useState([]);
+  const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
+  const [companySearch, setCompanySearch] = useState('');
   const [showPersonaDropdown, setShowPersonaDropdown] = useState(false);
   const [showIndustryDropdown, setShowIndustryDropdown] = useState(false);
   const [industrySearch, setIndustrySearch] = useState('');
@@ -67,8 +71,18 @@ const Campaigns = () => {
     }
   };
 
+  const fetchCompanies = async () => {
+    try {
+      const resp = await api.get('/api/leads/unique-companies');
+      setCompanies(resp.data || []);
+    } catch (err) {
+      console.error('Failed to fetch lead companies', err);
+    }
+  };
+
   useEffect(() => {
     fetchCampaigns();
+    fetchCompanies();
   }, []);
 
   const handleCreate = async (e) => {
@@ -81,7 +95,8 @@ const Campaigns = () => {
         target_industry: '', target_persona: '',
         subject: '', html_body: '',
         context_prompt: '', strategy_prompt: '',
-        is_active: true
+        is_active: true,
+        target_companies: []
       });
       fetchCampaigns();
     } catch (err) {
@@ -435,6 +450,79 @@ const Campaigns = () => {
                     </>
                   )}
                 </div>
+              </div>
+
+              <div className="space-y-3 relative">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Target Companies</label>
+                <div 
+                  className="w-full bg-black/40 border border-white/10 rounded-2xl py-3 px-4 text-sm text-white min-h-[46px] cursor-pointer flex flex-wrap gap-2 items-center hover:border-blue-500/30 transition-all font-medium"
+                  onClick={() => setShowCompanyDropdown(!showCompanyDropdown)}
+                >
+                  {formData.target_companies?.length === 0 ? (
+                    <span className="text-slate-600">Select companies (optional)...</span>
+                  ) : (
+                    formData.target_companies.map(c => (
+                      <span key={c} className="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded-lg text-[10px] font-black flex items-center gap-1 border border-blue-500/20">
+                        {c}
+                        <X 
+                          className="w-2.5 h-2.5 cursor-pointer hover:text-white" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setFormData({
+                              ...formData,
+                              target_companies: formData.target_companies.filter(item => item !== c)
+                            });
+                          }} 
+                        />
+                      </span>
+                    ))
+                  )}
+                  <ChevronDown className={`ml-auto w-4 h-4 text-slate-500 transition-transform ${showCompanyDropdown ? 'rotate-180' : ''}`} />
+                </div>
+
+                {showCompanyDropdown && (
+                  <>
+                    <div className="fixed inset-0 z-[60]" onClick={() => setShowCompanyDropdown(false)}></div>
+                    <div className="absolute top-full left-0 right-0 mt-3 bg-[#0f172a] border border-white/10 rounded-2xl shadow-2xl z-[70] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                      <div className="p-3 border-b border-white/5 bg-white/5">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+                          <input 
+                            type="text"
+                            placeholder="Search companies..."
+                            value={companySearch}
+                            onChange={(e) => setCompanySearch(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-full bg-black/40 border border-white/10 rounded-xl py-2 pl-9 pr-3 text-xs text-white focus:outline-none focus:border-blue-500/50"
+                          />
+                        </div>
+                      </div>
+                      <div className="max-h-[200px] overflow-y-auto p-2 space-y-1 custom-scrollbar">
+                        {companies
+                          .filter(c => c.toLowerCase().includes(companySearch.toLowerCase()))
+                          .map(c => (
+                            <div 
+                              key={c}
+                              onClick={() => {
+                                const current = formData.target_companies || [];
+                                const next = current.includes(c) 
+                                  ? current.filter(item => item !== c)
+                                  : [...current, c];
+                                setFormData({...formData, target_companies: next});
+                              }}
+                              className={`px-4 py-3 rounded-xl cursor-pointer transition-all flex justify-between items-center ${formData.target_companies?.includes(c) ? 'bg-blue-600/10 text-blue-400' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
+                            >
+                              <span className="text-sm font-bold">{c}</span>
+                              {formData.target_companies?.includes(c) && <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />}
+                            </div>
+                        ))}
+                        {companies.length === 0 && (
+                          <div className="px-4 py-8 text-center text-slate-600 text-xs italic">No companies found in leads database.</div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 

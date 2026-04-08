@@ -23,6 +23,9 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
     else:
         designation = str(designation).strip()
 
+    # Convert empty linkedin_url to NULL so the unique constraint allows multiple blank entries
+    linkedin = linkedin if linkedin and str(linkedin).strip() else None
+
     cur.execute(
         """
         INSERT INTO leads_raw

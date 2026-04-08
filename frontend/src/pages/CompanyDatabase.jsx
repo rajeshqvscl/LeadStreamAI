@@ -155,11 +155,35 @@ const CompanyDatabase = () => {
     setProcessingId(id);
     try {
       await api.post(`/api/companies/${id}/generate-draft`);
-      showNotification('success', 'Draft Synchronized: Moved to lead pipeline.');
+      showNotification('success', 'Draft added to Email Drafts.');
     } catch (err) {
       showNotification('error', 'Draft Generation Fault: ' + (err.response?.data?.detail || err.message));
     } finally {
       setProcessingId(null);
+    }
+  };
+
+  const [isBulkDrafting, setIsBulkDrafting] = useState(false);
+
+  const handleBulkGenerateDrafts = async () => {
+    if (selectedIds.length === 0) return;
+    setIsBulkDrafting(true);
+    let success = 0;
+    let failed = 0;
+    for (const id of selectedIds) {
+      try {
+        await api.post(`/api/companies/${id}/generate-draft`);
+        success++;
+      } catch {
+        failed++;
+      }
+    }
+    setIsBulkDrafting(false);
+    setSelectedIds([]);
+    if (failed === 0) {
+      showNotification('success', `${success} draft${success > 1 ? 's' : ''} added to Email Drafts.`);
+    } else {
+      showNotification('error', `${success} drafted, ${failed} failed. Check email fields.`);
     }
   };
 
@@ -612,20 +636,28 @@ const CompanyDatabase = () => {
 
             <div className="flex items-center gap-4">
               <button
+                onClick={handleBulkGenerateDrafts}
+                disabled={isBulkDrafting}
+                className="flex items-center gap-2 px-6 py-2 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-[11px] font-black uppercase tracking-widest transition-all disabled:opacity-50 cursor-pointer"
+              >
+                {isBulkDrafting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {isBulkDrafting ? 'Drafting...' : 'Generate Drafts'}
+              </button>
+              <button
                 onClick={handleBulkExport}
-                className="flex items-center gap-2 px-6 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white text-[11px] font-black uppercase tracking-widest transition-all"
+                className="flex items-center gap-2 px-6 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white text-[11px] font-black uppercase tracking-widest transition-all cursor-pointer"
               >
                 <Download className="w-4 h-4" /> Export Selected
               </button>
               <button
                 onClick={handleBulkDelete}
-                className="flex items-center gap-2 px-6 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-500 text-[11px] font-black uppercase tracking-widest transition-all"
+                className="flex items-center gap-2 px-6 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-500 text-[11px] font-black uppercase tracking-widest transition-all cursor-pointer"
               >
                 <Trash2 className="w-4 h-4" /> Delete Selected
               </button>
               <button
                 onClick={() => setSelectedIds([])}
-                className="p-2 text-slate-500 hover:text-white transition-colors"
+                className="p-2 text-slate-500 hover:text-white transition-colors cursor-pointer"
                 title="Deselect All"
               >
                 <X className="w-4 h-4" />

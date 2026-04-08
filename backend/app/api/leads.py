@@ -627,6 +627,35 @@ def bulk_import(
 class GSheetImportRequest(BaseModel):
     url: str
 
+@router.get("/unique-companies")
+def get_unique_companies(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    is_admin = (str(user_id).lower() == 'admin' or str(user_id) == '1')
+    query = "SELECT DISTINCT company_name FROM leads_raw WHERE company_name IS NOT NULL AND company_name != ''"
+    params = []
+    
+    if not is_admin:
+        if user_id:
+            query += " AND user_id = %s"
+            params.append(user_id)
+        else:
+            query += " AND user_id IS NULL"
+            
+    query += " ORDER BY company_name ASC"
+    
+    try:
+        cur.execute(query, tuple(params))
+        rows = cur.fetchall()
+        companies = [r[0] for r in rows if r[0]]
+        return companies
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
 @router.post("/leads/import-gsheet")
 def import_from_gsheet(
     req: GSheetImportRequest,
