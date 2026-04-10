@@ -182,11 +182,11 @@ def get_user_productivity(user_id: Optional[str] = Header(None, alias="X-User-Id
             
         # 1. Count actual leads from leads_raw
         cur.execute("""
-            SELECT u.username, u.full_name, COUNT(l.id) as count
+            SELECT u.username, u.full_name, u.credits_used, COUNT(l.id) as count
             FROM users u
             LEFT JOIN leads_raw l ON u.id = l.user_id
             WHERE l.created_at > NOW() - INTERVAL '30 days'
-            GROUP BY u.username, u.full_name
+            GROUP BY u.username, u.full_name, u.credits_used
         """)
         lead_rows = cur.fetchall()
         
@@ -206,13 +206,13 @@ def get_user_productivity(user_id: Optional[str] = Header(None, alias="X-User-Id
         # Initialize with lead counts
         for r in lead_rows:
             uname = r['full_name'] or r['username']
-            stats[uname] = {"name": uname, "leads": r['count'], "outreach": 0, "valid": 0}
+            stats[uname] = {"name": uname, "leads": r['count'], "outreach": 0, "valid": 0, "credits": r.get('credits_used') or 0}
             
         # Add activity counts
         for r in activity_rows:
             uname = r['full_name'] or r['username']
             if uname not in stats:
-                stats[uname] = {"name": uname, "leads": 0, "outreach": 0, "valid": 0}
+                stats[uname] = {"name": uname, "leads": 0, "outreach": 0, "valid": 0, "credits": 0}
             
             action = r['action']
             count = r['count']
@@ -324,6 +324,44 @@ def trigger_admin_report(user_id: Optional[str] = Header(None, alias="X-User-Id"
             print("--- REPORT DISPATCH ERROR ---")
             print(traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"Report Pipeline Error: {str(e)}")
+    finally:
+        cur.close()
+        conn.close()
+
+@router.get("/users/my-history")
+def get_my_history(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Retrieves personal activity log for the current user."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    # Normalize ID (handles 'admin' string etc if needed, but endpoint is for users)
+    real_uid = user_id if user_id and user_id.isdigit() else "1"
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    try:
+        cur.execute("""
+            SELECT 
+                al.*, 
+                l.first_name || ' ' || l.last_name as lead_name,
+                l.email as lead_email,
+                l.company_name as lead_company
+            FROM activity_log al
+            LEFT JOIN leads_raw l ON al.lead_id = l.id
+            WHERE al.user_id = %s
+            ORDER BY al.created_at DESC
+            LIMIT 200
+        """, (real_uid,))
+        
+        logs = [dict(r) for r in cur.fetchall()]
+        
+        # Serialization fix
+        for log in logs:
+            if log.get("created_at"):
+                log["created_at"] = log["created_at"].isoformat()
+                
+        return logs
     finally:
         cur.close()
         conn.close()

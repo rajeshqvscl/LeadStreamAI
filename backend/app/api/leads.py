@@ -285,6 +285,18 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
     
     lead["city"] = city
     lead["country"] = country
+
+    # Populate company_name fallback: family_office_name → email domain
+    if not lead.get("company_name"):
+        if lead.get("family_office_name"):
+            lead["company_name"] = lead["family_office_name"]
+        else:
+            email = lead.get("email", "")
+            if email and "@" in email:
+                domain = email.split("@")[-1].split(".")[0].lower()
+                generic = {"gmail", "yahoo", "hotmail", "outlook", "protonmail", "icloud", "qvscl", "me", "live", "microsoft", "samsung", "sea", "example"}
+                if domain not in generic:
+                    lead["company_name"] = domain.capitalize()
     
     # Robust phone extraction fallback for details
     phone = lead.get("phone")
@@ -305,6 +317,12 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
             lead["created_at"] = lead["created_at"].isoformat() + "Z"
         else:
             lead["created_at"] = str(lead["created_at"])
+            
+    if lead.get("scheduled_at"):
+        if hasattr(lead["scheduled_at"], "isoformat"):
+            lead["scheduled_at"] = lead["scheduled_at"].isoformat() + "Z"
+        else:
+            lead["scheduled_at"] = str(lead["scheduled_at"])
         
     # Normalize email_draft content to handle literal escapes
     if lead.get("email_draft"):
@@ -680,6 +698,20 @@ def import_from_gsheet(
     try:
         resp = http_requests.get(export_url, allow_redirects=True, timeout=15)
         content_type = resp.headers.get("Content-Type", "")
+        
+        if resp.status_code == 200 and "csv" in content_type.lower():
+            reader = csv.DictReader(io.StringIO(resp.text))
+            
+            # Use our generous backend bulk-import logic!
+            return bulk_import([dict(row) for row in reader], user_id)
+            
+        else:
+            raise HTTPException(status_code=400, detail="Sheet is fully private or not found. Please make sure 'Anyone with the link can view'.")
+            
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
+        raise HTTPException(status_code=500, detail=str(e))
         
         if resp.status_code == 200 and "csv" in content_type.lower():
             reader = csv.DictReader(io.StringIO(resp.text))

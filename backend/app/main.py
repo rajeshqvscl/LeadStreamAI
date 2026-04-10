@@ -10,8 +10,25 @@ load_dotenv(dotenv_path=env_path)
 
 from app.api import ingest, drafts, dashboard, leads, auth, family_offices, campaigns, users, prompts, admin, companies
 from app.database import create_tables
+from contextlib import asynccontextmanager
+import asyncio
 
-app = FastAPI()
+async def scheduler_loop():
+    from app.services.email_service import check_scheduled_emails
+    while True:
+        try:
+            check_scheduled_emails()
+        except Exception:
+            pass
+        await asyncio.sleep(60)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(scheduler_loop())
+    yield
+    task.cancel()
+
+app = FastAPI(lifespan=lifespan)
 
 # Get allowed origins from environment variable
 raw_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")

@@ -56,7 +56,8 @@ def create_tables():
         family_office_name TEXT,
         labels TEXT[] DEFAULT '{}',
         user_id INTEGER,
-        created_at TIMESTAMP DEFAULT NOW()
+        created_at TIMESTAMP DEFAULT NOW(),
+        scheduled_at TIMESTAMP
     );
     """)
 
@@ -75,14 +76,44 @@ def create_tables():
         ("labels", "TEXT[] DEFAULT '{}'"),
         ("user_id", "INTEGER"),
         ("email_approved_by", "TEXT"),
-        ("updated_at", "TIMESTAMP DEFAULT NOW()")
+        ("updated_at", "TIMESTAMP DEFAULT NOW()"),
+        ("scheduled_at", "TIMESTAMP")
     ]
     for col_name, col_type in columns_to_add:
         try:
             cur.execute(f"ALTER TABLE leads_raw ADD COLUMN {col_name} {col_type};")
+            conn.commit()
         except psycopg2.Error:
             conn.rollback()
             continue
+
+    # Migrate: Replace single-column email UNIQUE with composite (email, user_id) UNIQUE
+    # This enables true per-user data isolation — same email can exist for different users
+    try:
+        # Drop the old global email unique constraint if it exists
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'leads_raw_email_key' AND conrelid = 'leads_raw'::regclass
+                ) THEN
+                    ALTER TABLE leads_raw DROP CONSTRAINT leads_raw_email_key;
+                END IF;
+            END$$;
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
+    try:
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS leads_raw_email_user_unique
+            ON leads_raw (email, COALESCE(user_id, -1));
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
     
     cur.execute("""
     CREATE TABLE IF NOT EXISTS activity_log (
@@ -99,6 +130,7 @@ def create_tables():
     # Ensure user_id exists in activity_log
     try:
         cur.execute("ALTER TABLE activity_log ADD COLUMN user_id INTEGER;")
+        conn.commit()
     except psycopg2.Error:
         conn.rollback()
 
@@ -160,6 +192,7 @@ def create_tables():
         is_approved BOOLEAN DEFAULT FALSE,
         has_db_access BOOLEAN DEFAULT FALSE,
         google_id TEXT,
+        credits_used INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT NOW()
     );
     """)
@@ -169,7 +202,8 @@ def create_tables():
         ("is_approved", "BOOLEAN DEFAULT FALSE"),
         ("has_db_access", "BOOLEAN DEFAULT FALSE"),
         ("google_id", "TEXT"),
-        ("email", "TEXT UNIQUE")
+        ("email", "TEXT UNIQUE"),
+        ("credits_used", "INTEGER DEFAULT 0")
     ]
     for col_name, col_type in user_cols:
         try:

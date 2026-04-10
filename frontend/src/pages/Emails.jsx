@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, Edit3, Loader2, Send, ChevronLeft, ChevronRight, X, Archive, CheckCircle2 } from 'lucide-react';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
 import api from '../services/api';
 
 const Emails = () => {
@@ -12,11 +14,14 @@ const Emails = () => {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterRegion, setFilterRegion] = useState('');
   const [filterGeo, setFilterGeo] = useState('');
+  const [filterCompany, setFilterCompany] = useState('');
   const [isBatchSending, setIsBatchSending] = useState(false);
   const [notification, setNotification] = useState(null);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectingIds, setRejectingIds] = useState([]);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState(null);
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
@@ -26,7 +31,7 @@ const Emails = () => {
   const fetchEmails = async () => {
     try {
       setIsLoading(true);
-      const res = await api.get(`/api/emails?page=${pagination.page}&status=${filterStatus}&region=${filterRegion}&geo=${filterGeo}`);
+      const res = await api.get(`/api/emails?page=${pagination.page}&status=${filterStatus}&region=${filterRegion}&geo=${filterGeo}&company=${filterCompany}`);
       setEmails(res.data.drafts);
       setPagination(prev => ({ ...prev, total: res.data.pages }));
     } catch {
@@ -37,8 +42,11 @@ const Emails = () => {
   };
 
   useEffect(() => {
-    fetchEmails();
-  }, [pagination.page, filterStatus]);
+    const timer = setTimeout(() => {
+      fetchEmails();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [pagination.page, filterStatus, filterRegion, filterGeo, filterCompany]);
 
   const handleApprove = async (id) => {
     try {
@@ -101,6 +109,26 @@ const Emails = () => {
       fetchEmails();
     } catch {
       showNotification('error', 'Bulk action failed');
+    }
+  };
+
+  const confirmBulkSchedule = async () => {
+    if (!scheduledAt) {
+      showNotification('error', 'Please select a date and time');
+      return;
+    }
+    try {
+      const isoString = new Date(scheduledAt).toISOString();
+      await api.post('/api/emails/bulk-schedule', {
+        lead_ids: selectedIds,
+        scheduled_at: isoString
+      });
+      showNotification('success', `Successfully scheduled ${selectedIds.length} emails`);
+      setSelectedIds([]);
+      setShowScheduleModal(false);
+      fetchEmails();
+    } catch {
+      showNotification('error', 'Bulk scheduling failed');
     }
   };
 
@@ -181,6 +209,7 @@ const Emails = () => {
               <option value="">STATUS: All Stages</option>
               <option value="PENDING_APPROVAL">STATUS: Pending</option>
               <option value="APPROVED">STATUS: Approved</option>
+              <option value="SCHEDULED">STATUS: Scheduled</option>
               <option value="SENT">STATUS: Sent</option>
               <option value="REJECTED">STATUS: Rejected</option>
               <option value="FAILED">STATUS: Failed</option>
@@ -216,8 +245,18 @@ const Emails = () => {
             <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500 text-[8px]">▼</div>
           </div>
 
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="COMPANY / INVESTOR..."
+              className="appearance-none bg-[#0f121b] border border-[#ffffff10] rounded-md px-3 py-1.5 text-[10px] font-bold text-slate-300 uppercase tracking-widest outline-none focus:border-blue-500/50 w-[140px]"
+              value={filterCompany}
+              onChange={(e) => setFilterCompany(e.target.value)}
+            />
+          </div>
+
           <button
-            onClick={() => { setFilterStatus(''); setFilterRegion(''); setFilterGeo(''); }}
+            onClick={() => { setFilterStatus(''); setFilterRegion(''); setFilterGeo(''); setFilterCompany(''); }}
             className="px-3 py-1.5 rounded-md text-[10px] font-bold text-slate-400 hover:text-white uppercase tracking-widest transition-colors ml-1 cursor-pointer"
           >
             Reset
@@ -237,7 +276,8 @@ const Emails = () => {
                     onChange={toggleSelectAll}
                   />
                 </th>
-                <th className="px-6 py-4 text-[9px] font-black text-[#64748b] uppercase tracking-[2px] border-b border-[#ffffff08]">LEAD / COMPANY</th>
+                <th className="px-6 py-4 text-[9px] font-black text-[#64748b] uppercase tracking-[2px] border-b border-[#ffffff08]">LEAD</th>
+                <th className="px-6 py-4 text-[9px] font-black text-[#64748b] uppercase tracking-[2px] border-b border-[#ffffff08]">COMPANY / INVESTOR</th>
                 <th className="px-6 py-4 text-[9px] font-black text-[#64748b] uppercase tracking-[2px] border-b border-[#ffffff08]">SUBJECT LINE</th>
                 <th className="px-6 py-4 text-[9px] font-black text-[#64748b] uppercase tracking-[2px] border-b border-[#ffffff08]">STATE</th>
                 <th className="px-6 py-4 text-[9px] font-black text-[#64748b] uppercase tracking-[2px] border-b border-[#ffffff08]">OPENS/BOUNCE</th>
@@ -262,7 +302,10 @@ const Emails = () => {
                   </td>
                   <td className="px-6 py-4">
                     <div className="font-bold text-white text-[12px] group-hover:text-blue-400 transition-colors cursor-pointer" onClick={() => navigate(`/dashboard/leads/${email.lead_id}`)}>{email.lead_name}</div>
-                    <div className="text-[10px] text-[#64748b] font-medium tracking-wide mt-0.5">{email.lead_email}</div>
+                    <div className="text-[9px] text-[#64748b] font-medium tracking-wide mt-0.5">{email.lead_email}</div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="text-[11px] text-[#94a3b8] font-bold tracking-wide">{email.company_name || '—'}</div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="text-[#94a3b8] font-medium text-[11px] max-w-[300px] truncate">{email.subject || '—'}</div>
@@ -277,13 +320,23 @@ const Emails = () => {
                     {(email.status === 'SENT' || email.status === 'APPROVED') && (
                       <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-[1px] border border-[#10b981] text-[#10b981]">{email.status}</span>
                     )}
+                    {email.status === 'SCHEDULED' && (
+                      <div className="flex flex-col gap-1 items-start">
+                        <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-[1px] border border-blue-400 text-blue-400">SCHEDULED</span>
+                        {email.scheduled_at && (
+                          <span className="text-[9px] text-[#94a3b8] font-bold">
+                            {new Date(email.scheduled_at).toLocaleDateString('en-US', {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'})}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     {email.status === 'FAILED' && (
                       <span className="text-[8px] font-black uppercase tracking-[1px] text-red-500">FAILED</span>
                     )}
                     {email.status === 'ARCHIVED' && (
                       <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-[1px] border border-[#3b82f6] text-[#3b82f6]">ARCHIVED</span>
                     )}
-                    {(!['REJECTED', 'PENDING_APPROVAL', 'SENT', 'APPROVED', 'FAILED', 'ARCHIVED'].includes(email.status)) && (
+                    {(!['REJECTED', 'PENDING_APPROVAL', 'SENT', 'APPROVED', 'SCHEDULED', 'FAILED', 'ARCHIVED'].includes(email.status)) && (
                       <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-[1px] border border-slate-500 text-slate-400">{email.status}</span>
                     )}
                   </td>
@@ -398,6 +451,51 @@ const Emails = () => {
         </div>
       )}
 
+      {/* Schedule Modal */}
+      {showScheduleModal && (
+        <div className="fixed inset-0 z-[4000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="w-full max-w-md bg-[#0d1117] border border-blue-500/20 rounded-[28px] overflow-hidden shadow-[0_0_50px_rgba(59,130,246,0.1)] p-8 space-y-6">
+            <div className="text-center space-y-4">
+              <div className="w-14 h-14 bg-blue-500/10 rounded-2xl flex items-center justify-center text-blue-500 mx-auto">
+                <Send className="w-7 h-7" />
+              </div>
+              <h3 className="text-lg font-black text-white uppercase tracking-tight">Schedule Bulk Dispatch</h3>
+              <p className="text-slate-500 text-[11px] font-black uppercase tracking-[2px]">Select dispatch time for {selectedIds.length} drafts.</p>
+            </div>
+            
+            <DatePicker
+              selected={scheduledAt}
+              onChange={(date) => setScheduledAt(date)}
+              showTimeSelect
+              timeFormat="HH:mm"
+              timeIntervals={15}
+              timeCaption="Time"
+              dateFormat="MMMM d, yyyy h:mm aa"
+              placeholderText="Select dispatch time"
+              className="w-full bg-[#131722] border border-white/10 rounded-2xl p-4 text-white text-[13px] focus:outline-none focus:border-blue-500/50 transition-all font-medium"
+              wrapperClassName="w-full"
+              minDate={new Date()}
+            />
+            
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={confirmBulkSchedule}
+                disabled={!scheduledAt}
+                className="w-full py-4 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-[11px] font-black uppercase tracking-widest rounded-2xl transition-all shadow-lg shadow-blue-500/20 active:scale-[0.98] cursor-pointer"
+              >
+                Confirm Schedule
+              </button>
+              <button 
+                onClick={() => setShowScheduleModal(false)}
+                className="w-full py-4 bg-white/5 hover:bg-white/10 text-slate-400 text-[11px] font-black uppercase tracking-widest rounded-2xl transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Bulk Action Bar */}
       {selectedIds.length > 0 && (
         <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[3000] animate-in slide-in-from-bottom-10 duration-500">
@@ -415,6 +513,15 @@ const Emails = () => {
                 className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-white text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer border border-emerald-500/20"
               >
                 Approve
+              </button>
+              <button 
+                onClick={() => {
+                  setScheduledAt(null);
+                  setShowScheduleModal(true);
+                }}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#1e293b]/50 hover:bg-[#1e293b] text-slate-300 hover:text-white text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer border border-white/10"
+              >
+                Schedule
               </button>
               <button 
                 onClick={() => handleBulkAction('SENT')}

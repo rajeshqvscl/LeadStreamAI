@@ -1,7 +1,10 @@
-from fastapi import APIRouter, HTTPException, Header, Query
+from fastapi import APIRouter, HTTPException, Header, Query, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 from datetime import datetime, timedelta
+import io
+import csv
 from app.database import get_db_connection
 import psycopg2
 import psycopg2.extras
@@ -419,6 +422,170 @@ async def dispatch_admin_report(user_id: Optional[str] = Header(None, alias="X-U
             logger.error(f"MIS DISPATCH SMTP ERROR: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Email Dispatch Failed: {str(e)}")
 
+    finally:
+        cur.close()
+        conn.close()
+
+@router.get("/admin/users-stats")
+def get_users_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    uid = normalize_user_id(user_id)
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        cur.execute("SELECT role FROM users WHERE id = %s", (uid,))
+        caller = cur.fetchone()
+        if not caller or caller['role'] != 'ADMIN':
+            raise HTTPException(status_code=403, detail="Unauthorized")
+
+        cur.execute("""
+            SELECT 
+                u.id, 
+                u.username, 
+                u.full_name, 
+                u.email,
+                u.role,
+                (SELECT COUNT(*) FROM leads_raw l WHERE l.user_id::integer = u.id OR (u.role = 'ADMIN' AND l.user_id IS NULL)) as total_leads,
+                (SELECT COUNT(*) FROM search_history sh WHERE sh.user_id::integer = u.id) as total_searches,
+                (SELECT COALESCE(SUM(leads_ingested), 0) FROM search_history sh WHERE sh.user_id::integer = u.id) as captured_leads
+            FROM users u
+            WHERE u.is_active = TRUE
+            ORDER BY total_leads DESC
+        """)
+        users = [dict(r) for r in cur.fetchall()]
+        return users
+    finally:
+        cur.close()
+        conn.close()
+
+@router.get("/admin/audit-logs")
+def get_audit_logs(
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    target_user_id: Optional[int] = Query(None),
+    action_type: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200)
+):
+    """Granular activity log with user and lead metadata."""
+    uid = normalize_user_id(user_id)
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    try:
+        cur.execute("SELECT role FROM users WHERE id = %s", (uid,))
+        caller = cur.fetchone()
+        if not caller or caller['role'] != 'ADMIN':
+            raise HTTPException(status_code=403, detail="Admin access required")
+
+        where_clauses = []
+        params = []
+
+        if target_user_id:
+            where_clauses.append("al.user_id = %s")
+            params.append(target_user_id)
+        
+        if action_type:
+            where_clauses.append("al.action = %s")
+            params.append(action_type)
+
+        where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        offset = (page - 1) * limit
+
+        # Fetch Logs
+        query = f"""
+            SELECT 
+                al.*, 
+                u.full_name as actor_name, 
+                u.username as actor_username,
+                l.first_name || ' ' || l.last_name as lead_name,
+                l.email as lead_email,
+                l.company_name as lead_company
+            FROM activity_log al
+            LEFT JOIN users u ON al.user_id = u.id
+            LEFT JOIN leads_raw l ON al.lead_id = l.id
+            {where_sql}
+            ORDER BY al.created_at DESC
+            LIMIT %s OFFSET %s
+        """
+        cur.execute(query, params + [limit, offset])
+        logs = [dict(r) for r in cur.fetchall()]
+
+        # Total Count
+        cur.execute(f"SELECT COUNT(*) FROM activity_log al {where_sql}", params)
+        total = cur.fetchone()[0]
+
+        # Serialization fix for datetime
+        for log in logs:
+            if log.get("created_at"):
+                log["created_at"] = log["created_at"].isoformat()
+
+        return {
+            "logs": logs,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": (total + limit - 1) // limit
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+@router.get("/admin/audit-logs/export")
+def export_audit_logs(
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    target_user_id: Optional[int] = Query(None)
+):
+    """Generates a CSV export of the activity audit trail."""
+    uid = normalize_user_id(user_id)
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    try:
+        cur.execute("SELECT role FROM users WHERE id = %s", (uid,))
+        caller = cur.fetchone()
+        if not caller or caller['role'] != 'ADMIN':
+            raise HTTPException(status_code=403, detail="Admin access required")
+
+        where_sql = " WHERE al.user_id = %s" if target_user_id else ""
+        params = [target_user_id] if target_user_id else []
+
+        query = f"""
+            SELECT 
+                al.created_at, 
+                u.full_name as actor,
+                al.action, 
+                al.details,
+                l.first_name || ' ' || l.last_name as target_lead,
+                l.email as lead_email
+            FROM activity_log al
+            LEFT JOIN users u ON al.user_id = u.id
+            LEFT JOIN leads_raw l ON al.lead_id = l.id
+            {where_sql}
+            ORDER BY al.created_at DESC
+            LIMIT 5000
+        """
+        cur.execute(query, params)
+        rows = cur.fetchall()
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["Timestamp", "Actor", "Action", "Details", "Target Lead", "Email"])
+        
+        for r in rows:
+            writer.writerow([
+                r['created_at'].strftime('%Y-%m-%d %H:%M:%S') if r['created_at'] else '',
+                r['actor'] or 'System',
+                r['action'],
+                r['details'] or '',
+                r['target_lead'] or '',
+                r['lead_email'] or ''
+            ])
+
+        output.seek(0)
+        return StreamingResponse(
+            io.BytesIO(output.getvalue().encode('utf-8')),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=leadstream_audit_log.csv"}
+        )
     finally:
         cur.close()
         conn.close()

@@ -374,10 +374,10 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Main Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1.8fr_1fr] gap-8 mb-10">
+      {/* Velocity Chart */}
+      <div className="mb-8">
         <div className="bg-[#111827] border border-white/5 rounded-[32px] p-8 shadow-2xl relative overflow-hidden">
-          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-6 mb-10">
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-6 mb-8">
             <div>
               <div className="flex items-center gap-3 mb-2">
                 <div className="px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded-full text-[9px] font-black text-blue-500 uppercase tracking-widest leading-none">Admin Authority</div>
@@ -385,24 +385,19 @@ const Dashboard = () => {
               </div>
               <h1 className="text-3xl font-black text-white tracking-tight">Command <span className="bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent italic">Center</span></h1>
             </div>
-
-            <div className="flex flex-wrap items-center gap-4">
-
-              <div className="flex bg-[#131722] border border-white/10 rounded-2xl p-1 gap-1">
-                {['daily', 'weekly', 'monthly', 'quarterly'].map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => setPeriod(p)}
-                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${period === p ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-slate-500 hover:text-white hover:bg-white/5'
-                      }`}
-                  >
-                    {p}
-                  </button>
-                ))}
-              </div>
+            <div className="flex bg-[#131722] border border-white/10 rounded-2xl p-1 gap-1">
+              {['daily', 'weekly', 'monthly', 'quarterly'].map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setPeriod(p)}
+                  className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${period === p ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}
+                >
+                  {p}
+                </button>
+              ))}
             </div>
           </div>
-          <div className="h-[350px] w-full">
+          <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={velocity}>
                 <defs>
@@ -420,21 +415,63 @@ const Dashboard = () => {
             </ResponsiveContainer>
           </div>
         </div>
+      </div>
 
-        <div className="bg-[#111827] border border-white/5 rounded-[32px] p-8 shadow-2xl">
-          <h3 className="text-sm font-black text-white uppercase tracking-widest mb-8">User Productivity Pulse</h3>
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={productivity} layout="vertical">
-                <XAxis type="number" hide />
-                <YAxis dataKey="name" type="category" stroke="#475569" fontSize={10} axisLine={false} tickLine={false} width={80} />
-                <Tooltip cursor={{ fill: '#ffffff05' }} contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #ffffff10' }} />
-                <Bar name="Leads Generated" dataKey="leads" fill="#3b82f6" radius={[0, 4, 4, 0]} barSize={15} />
-                <Bar name="Emails/Outreach" dataKey="outreach" fill="#8b5cf6" radius={[0, 4, 4, 0]} barSize={15} />
-                <Bar name="Validation/Auth" dataKey="valid" fill="#10b981" radius={[0, 4, 4, 0]} barSize={15} />
-              </BarChart>
-            </ResponsiveContainer>
+      {/* Team Performance Graph — Leads / Emails / Credits per User */}
+      <div className="bg-[#111827] border border-white/5 rounded-[32px] p-8 shadow-2xl mb-10">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
+          <div>
+            <div className="text-[9px] font-black text-slate-500 uppercase tracking-[3px] mb-1">Real-Time Intelligence</div>
+            <h3 className="text-xl font-black text-white tracking-tight">Team Performance <span className="bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">Breakdown</span></h3>
           </div>
+          {/* Legend */}
+          <div className="flex items-center gap-6">
+            {[
+              { color: '#3b82f6', label: 'Leads Generated' },
+              { color: '#8b5cf6', label: 'Emails Sent' },
+              { color: '#ef4444', label: 'Credits Used (RR)' },
+            ].map(({ color, label }) => (
+              <div key={label} className="flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full" style={{ background: color }} />
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Summary Totals Row */}
+        <div className="grid grid-cols-3 gap-4 mb-8">
+          {[
+            { label: 'Total Leads Generated', val: productivity.reduce((s, u) => s + (u.leads || 0), 0), color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/20' },
+            { label: 'Total Emails Sent', val: productivity.reduce((s, u) => s + (u.outreach || 0), 0), color: 'text-purple-400', bg: 'bg-purple-500/10 border-purple-500/20' },
+            { label: 'Total Credits Used', val: productivity.reduce((s, u) => s + (u.credits || 0), 0), color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/20' },
+          ].map(({ label, val, color, bg }) => (
+            <div key={label} className={`p-4 rounded-2xl border ${bg} flex items-center justify-between`}>
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{label}</span>
+              <span className={`text-2xl font-black ${color}`}>{val}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="h-[340px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={productivity} barGap={4} barCategoryGap="30%">
+              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+              <XAxis dataKey="name" stroke="#475569" fontSize={11} axisLine={false} tickLine={false} />
+              <YAxis stroke="#475569" fontSize={10} axisLine={false} tickLine={false} />
+              <Tooltip
+                cursor={{ fill: '#ffffff04' }}
+                contentStyle={{ backgroundColor: '#0d1117', border: '1px solid #ffffff15', borderRadius: '12px', fontSize: '12px' }}
+                formatter={(value, name) => [value, name]}
+              />
+              <Legend
+                wrapperStyle={{ paddingTop: '20px', fontSize: '10px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '2px' }}
+              />
+              <Bar name="Leads Generated" dataKey="leads" fill="#3b82f6" radius={[6, 6, 0, 0]} maxBarSize={40} />
+              <Bar name="Emails Sent" dataKey="outreach" fill="#8b5cf6" radius={[6, 6, 0, 0]} maxBarSize={40} />
+              <Bar name="Credits Used (RR)" dataKey="credits" fill="#ef4444" radius={[6, 6, 0, 0]} maxBarSize={40} />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       </div>
     </div>

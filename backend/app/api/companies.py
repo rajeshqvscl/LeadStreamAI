@@ -192,15 +192,23 @@ def generate_company_draft(row_id: int, user_id: Optional[str] = Header(None, al
         f_name = parts[0]
         l_name = parts[1] if len(parts) > 1 else ""
         
+        real_uid = normalize_user_id(user_id)
+
         # Add the lead to the main pipeline (source: direct)
         insert_lead(
             f_name, l_name, email, "", norm.get("linkedin", ""), 
-            company, "direct", data, user_id=normalize_user_id(user_id)
+            company, "direct", data, user_id=real_uid
         )
-        
+
+        # Force ownership to the current user (handles cases where lead existed under different user)
+        cur.execute("UPDATE leads_raw SET user_id = %s WHERE email = %s", (real_uid, email))
+        conn.commit()
+
         # Get the new/updated lead ID
-        cur.execute("SELECT id FROM leads_raw WHERE email = %s", (email,))
+        cur.execute("SELECT id FROM leads_raw WHERE email = %s ORDER BY created_at DESC LIMIT 1", (email,))
         lead_row = cur.fetchone()
+        if not lead_row:
+            raise HTTPException(status_code=500, detail="Lead creation failed — could not retrieve lead ID.")
         lead_id = lead_row[0]
         
         # Generate Draft
@@ -208,7 +216,7 @@ def generate_company_draft(row_id: int, user_id: Optional[str] = Header(None, al
         # Fetch sender name if possible
         sender_name = "the team"
         if user_id:
-            cur.execute("SELECT full_name, username FROM users WHERE id = %s", (normalize_user_id(user_id),))
+            cur.execute("SELECT full_name, username FROM users WHERE id = %s", (real_uid,))
             u = cur.fetchone()
             if u: sender_name = u['full_name'] or u['username']
             
@@ -218,6 +226,10 @@ def generate_company_draft(row_id: int, user_id: Optional[str] = Header(None, al
         email_content = f"Subject: {subject}\n\n{body}"
         
         save_email_draft(lead_id, email_content)
+
+        # Remove from company registry - it's now in the lead pipeline
+        cur.execute("DELETE FROM company_registry WHERE id = %s", (row_id,))
+        conn.commit()
         
         return {"success": True, "lead_id": lead_id, "message": "Draft generated and moved to Lead Pipeline."}
         

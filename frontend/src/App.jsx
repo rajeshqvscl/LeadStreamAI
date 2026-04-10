@@ -21,11 +21,21 @@ import FamilyOfficeDetail from './pages/FamilyOfficeDetail';
 import GenerateSector from './pages/GenerateSector';
 import BulkSearch from './pages/BulkSearch';
 import CompanyDatabase from './pages/CompanyDatabase';
+import History from './pages/History';
 
 const ProtectedRoute = ({ children }) => {
   const token = localStorage.getItem('token') || localStorage.getItem('token_admin');
   if (!token || token === 'undefined') {
     return <Navigate to="/login" replace />;
+  }
+  return children;
+};
+
+const AdminRoute = ({ children }) => {
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const token = localStorage.getItem('token') || localStorage.getItem('token_admin');
+  if (!token || user.role !== 'ADMIN') {
+    return <Navigate to="/dashboard" replace />;
   }
   return children;
 };
@@ -89,6 +99,7 @@ function App() {
           {/* <Route path="generate" element={<GenerateSector />} /> */}
           <Route path="bulk-search" element={<BulkSearch />} />
           <Route path="companies" element={<CompanyDatabase />} />
+          <Route path="history" element={<AdminRoute><History /></AdminRoute>} />
         </Route>
 
         {/* Root Redirect */}

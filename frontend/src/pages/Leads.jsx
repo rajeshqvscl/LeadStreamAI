@@ -1169,13 +1169,13 @@ const Leads = () => {
                 {confirmDialog.message}
               </p>
               <div className="flex gap-3">
-                <button 
+                <button
                   onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
                   className="flex-1 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-xs uppercase tracking-widest transition-colors border border-white/5"
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   onClick={() => {
                     confirmDialog.onConfirm();
                     setConfirmDialog(prev => ({ ...prev, isOpen: false }));

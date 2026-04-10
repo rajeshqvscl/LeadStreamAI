@@ -31,7 +31,7 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
         INSERT INTO leads_raw
         (first_name, last_name, email, domain, linkedin_url, company_name, source, raw_payload, fit_score, persona, phone, user_id, designation)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        ON CONFLICT (email) DO UPDATE SET
+        ON CONFLICT (email, COALESCE(user_id, -1)) DO UPDATE SET
             first_name = EXCLUDED.first_name,
             last_name = EXCLUDED.last_name,
             domain = EXCLUDED.domain,
@@ -42,7 +42,7 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
             fit_score = EXCLUDED.fit_score,
             persona = EXCLUDED.persona,
             phone = EXCLUDED.phone,
-            user_id = COALESCE(leads_raw.user_id, EXCLUDED.user_id),
+            user_id = EXCLUDED.user_id,
             designation = EXCLUDED.designation,
             created_at = CURRENT_TIMESTAMP
         """,
@@ -169,3 +169,18 @@ def save_email_draft(lead_id, draft):
     except:
         pass
         pass
+        pass
+
+def add_search_history(user_id, query_params, results_count=0, leads_ingested=0, sector=None, company=None):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO search_history (user_id, query_params, results_count, leads_ingested, sector, company, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, NOW())
+        """,
+        (user_id, json.dumps(query_params), results_count, leads_ingested, sector, company)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()

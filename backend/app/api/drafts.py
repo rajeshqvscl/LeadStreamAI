@@ -40,6 +40,13 @@ class BulkActionRequest(BaseModel):
     action: str  # APPROVED, ARCHIVED, SENT, REJECTED
     reason: Optional[str] = None
 
+class ScheduleRequest(BaseModel):
+    scheduled_at: str
+
+class BulkScheduleRequest(BaseModel):
+    lead_ids: List[int]
+    scheduled_at: str
+
 @router.post("/emails/bulk-action")
 def bulk_email_action(req: BulkActionRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     try:
@@ -169,115 +176,138 @@ def generate_draft(req: DraftRequest, user_id: Optional[str] = Header(None, alia
         traceback.print_exc()
         return {"error": str(e)}
 
-# --- Fetch Drafts ---
 @router.get("/pending-drafts")
 @router.get("/emails")
-def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Optional[str] = None, geo: Optional[str] = None, per_page: int = 20, user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
-    # Base condition
-    where_clause = "WHERE email_draft IS NOT NULL"
-    params = []
-    
-    if user_id and user_id != "admin":
-        where_clause += " AND user_id = %s"
-        params.append(user_id)
-    elif user_id == "admin":
-        pass
-    else:
-        where_clause += " AND user_id IS NULL"
+def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Optional[str] = None, geo: Optional[str] = None, company: Optional[str] = None, per_page: int = 20, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        # Base condition
+        where_clause = "WHERE email_draft IS NOT NULL"
+        params = []
+        
+        if user_id and user_id != "admin":
+            where_clause += " AND user_id = %s"
+            params.append(user_id)
+        elif user_id == "admin":
+            pass
+        else:
+            where_clause += " AND user_id IS NULL"
 
-    if status:
-        where_clause += " AND email_status = %s"
-        params.append(status)
+        if status:
+            where_clause += " AND email_status = %s"
+            params.append(status)
 
-    if region:
-        if region == 'US':
-            where_clause += " AND country IN ('USA', 'US', 'United States', 'Canada')"
-        elif region == 'EU':
-            where_clause += " AND country IN ('UK', 'Germany', 'France', 'Spain', 'Italy', 'Netherlands', 'Sweden')"
-        elif region == 'APAC':
-            where_clause += " AND country IN ('India', 'Singapore', 'Australia', 'Japan', 'China')"
+        if region:
+            if region == 'US':
+                where_clause += " AND country IN ('USA', 'US', 'United States', 'Canada')"
+            elif region == 'EU':
+                where_clause += " AND country IN ('UK', 'Germany', 'France', 'Spain', 'Italy', 'Netherlands', 'Sweden')"
+            elif region == 'APAC':
+                where_clause += " AND country IN ('India', 'Singapore', 'Australia', 'Japan', 'China')"
 
-    if geo:
-        tier1_countries = ('USA', 'US', 'Canada', 'UK', 'Germany', 'France', 'Australia', 'Japan')
-        if geo == 'Tier1':
-            where_clause += f" AND country IN {tier1_countries}"
-        elif geo == 'Emerging':
-            where_clause += f" AND country NOT IN {tier1_countries}"
+        if geo:
+            tier1_countries = ('USA', 'US', 'Canada', 'UK', 'Germany', 'France', 'Australia', 'Japan')
+            if geo == 'Tier1':
+                where_clause += f" AND country IN {tier1_countries}"
+            elif geo == 'Emerging':
+                where_clause += f" AND country NOT IN {tier1_countries}"
 
-    query = f"""
-        SELECT id, first_name, last_name, email, email_draft, email_status, company_name, persona, fit_score, updated_at, email_approved_by 
-        FROM leads_raw 
-        {where_clause}
-        ORDER BY COALESCE(updated_at, created_at) DESC LIMIT %s OFFSET %s
-    """
-    params.extend([per_page, (page - 1) * per_page])
-    
-    cur.execute(query, tuple(params))
-    rows = cur.fetchall()
-    
-    # count total
-    count_query = f"SELECT COUNT(*) FROM leads_raw {where_clause}"
-    cur.execute(count_query, tuple(params[:-2])) # exclude limit/offset
-    total = cur.fetchone()[0]
-    pages = (total + per_page - 1) // per_page
-    
-    cur.close()
-    conn.close()
+        if company:
+            where_clause += " AND (company_name ILIKE %s OR family_office_name ILIKE %s)"
+            params.extend([f"%{company}%", f"%{company}%"])
 
-    drafts = []
-    for r in rows:
-        draft_content = r["email_draft"] or ""
-        # Normalize literal \n to real newlines for consistent parsing
-        draft_content = draft_content.replace("\\n", "\n").replace("\\r\\n", "\n")
-            
-        subject = ""
-        body = draft_content
-        if "Subject: " in draft_content:
-            # First split by double newline to separate subject line from body
-            parts = draft_content.split("\n\n", 1)
-            # If no double newline, maybe it's just a single newline after Subject:
-            if len(parts) == 1:
-                parts = draft_content.split("\n", 1)
+        query = f"""
+            SELECT id, first_name, last_name, email, email_draft, email_status, company_name, family_office_name, persona, fit_score, updated_at, email_approved_by, scheduled_at
+            FROM leads_raw 
+            {where_clause}
+            ORDER BY COALESCE(updated_at, created_at) DESC LIMIT %s OFFSET %s
+        """
+        params.extend([per_page, (page - 1) * per_page])
+        
+        cur.execute(query, tuple(params))
+        rows = cur.fetchall()
+        
+        # count total
+        count_query = f"SELECT COUNT(*) FROM leads_raw {where_clause}"
+        cur.execute(count_query, tuple(params[:-2])) # exclude limit/offset
+        total = cur.fetchone()[0]
+        
+        cur.close()
+        conn.close()
+
+        # Helper: extract company name with domain fallback
+        def _company_from_email(email, company_name, family_office_name):
+            if company_name:
+                return company_name
+            if family_office_name:
+                return family_office_name
+            if email and "@" in email:
+                domain = email.split("@")[-1].split(".")[0].lower()
+                generic = {"gmail", "yahoo", "hotmail", "outlook", "protonmail", "icloud", "qvscl", "me", "live", "microsoft", "samsung", "sea"}
+                if domain not in generic:
+                    return domain.capitalize()
+            return None
+
+        drafts = []
+        for r in rows:
+            draft_content = r["email_draft"] or ""
+            # Normalize literal \\n to real newlines for consistent parsing
+            draft_content = draft_content.replace("\\n", "\n").replace("\\r\\n", "\n")
                 
-            subject = parts[0].replace("Subject: ", "").strip()
-            if len(parts) > 1:
-                body = parts[1].strip()
-        elif "Subject:" in draft_content:
-            # Handle missing space after Subject:
-            parts = draft_content.split("\n\n", 1)
-            if len(parts) == 1:
-                parts = draft_content.split("\n", 1)
-            subject = parts[0].replace("Subject:", "").strip()
-            if len(parts) > 1:
-                body = parts[1].strip()
-                
-        drafts.append({
-            "id": r["id"],
-            "lead_id": r["id"],
-            "lead_name": f"{r['first_name'] or ''} {r['last_name'] or ''}".strip(),
-            "lead_email": r["email"],
-            "company_name": r["company_name"],
-            "persona": r["persona"],
-            "fit_score": r.get("fit_score", 0),
-            "subject": subject,
-            "body": body,
-            "attachments": [
-                {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB", "type": "application/pdf"},
-                {"name": "Lalit_Huria_Profile.pdf", "size": "250 KB", "type": "application/pdf"}
-            ],
-            "status": r["email_status"] or "PENDING_APPROVAL",
-            "performance": {"opens": 0, "clicks": 0}, # Placeholders
-            "verifier": r.get("email_approved_by") or ("admin" if r["email_status"] in ["APPROVED", "SENT"] else None),
-            "updated_at": r.get("updated_at", "").isoformat() if r.get("updated_at") else ""
-        })
+            subject = ""
+            body = draft_content
+            if "Subject: " in draft_content:
+                # First split by double newline to separate subject line from body
+                parts = draft_content.split("\n\n", 1)
+                # If no double newline, maybe it's just a single newline after Subject:
+                if len(parts) == 1:
+                    parts = draft_content.split("\n", 1)
+                    
+                subject = parts[0].replace("Subject: ", "").strip()
+                if len(parts) > 1:
+                    body = parts[1].strip()
+            elif "Subject:" in draft_content:
+                # Handle missing space after Subject:
+                parts = draft_content.split("\n\n", 1)
+                if len(parts) == 1:
+                    parts = draft_content.split("\n", 1)
+                subject = parts[0].replace("Subject:", "").strip()
+                if len(parts) > 1:
+                    body = parts[1].strip()
+                    
+            drafts.append({
+                "id": r["id"],
+                "lead_id": r["id"],
+                "lead_name": f"{r['first_name'] or ''} {r['last_name'] or ''}".strip(),
+                "lead_email": r["email"],
+                "company_name": _company_from_email(r["email"], r["company_name"], r["family_office_name"]),
+                "persona": r["persona"],
+                "fit_score": r.get("fit_score", 0),
+                "subject": subject,
+                "body": body,
+                "attachments": [
+                    {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB", "type": "application/pdf"},
+                    {"name": "Lalit_Huria_Profile.pdf", "size": "250 KB", "type": "application/pdf"}
+                ],
+                "status": r["email_status"] or "PENDING_APPROVAL",
+                "performance": {"opens": 0, "clicks": 0},
+                "verifier": r.get("email_approved_by") or ("admin" if r["email_status"] in ["APPROVED", "SENT"] else None),
+                "updated_at": r.get("updated_at", "").isoformat() if r.get("updated_at") and hasattr(r.get("updated_at"), 'isoformat') else str(r.get("updated_at")) if r.get("updated_at") else "",
+                "scheduled_at": r.get("scheduled_at").isoformat() + "Z" if r.get("scheduled_at") and hasattr(r.get("scheduled_at"), 'isoformat') else str(r.get("scheduled_at")) if r.get("scheduled_at") else ""
+            })
 
-    return {
-        "drafts": drafts,
-        "total": total
-    }
+        return {
+            "drafts": drafts,
+            "total": total
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        # Return error nicely instead of 500
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e) + "\n" + traceback.format_exc())
 
 class RefineRequest(BaseModel):
     instruction: str
@@ -422,6 +452,72 @@ def reject_draft(draft_id: int, req: Optional[RejectRequest] = None, user_id: Op
     add_activity_log(draft_id, "EMAIL_REJECTED", f"Reason: {req.rejected_reason if req else ''}", "admin")
     
     return {"status": "rejected", "message": "Draft rejected"}
+
+@router.post("/schedule-email/{draft_id}")
+def schedule_email(draft_id: int, req: ScheduleRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        user_clause = ""
+        params = [req.scheduled_at, draft_id]
+        if user_id and user_id != "admin":
+            user_clause = " AND user_id = %s"
+            params.append(user_id)
+        elif user_id == "admin":
+            pass
+        else:
+            user_clause = " AND user_id IS NULL"
+            
+        cur.execute(
+            f"UPDATE leads_raw SET email_status = 'SCHEDULED', scheduled_at = %s, updated_at = NOW() WHERE id = %s {user_clause}",
+            tuple(params)
+        )
+        conn.commit()
+        from app.models.lead import add_activity_log
+        add_activity_log(draft_id, "EMAIL_SCHEDULED", f"Email scheduled for {req.scheduled_at}", get_user_name(user_id))
+        cur.close()
+        conn.close()
+        return {"status": "scheduled", "message": f"Draft scheduled for {req.scheduled_at}"}
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e)}
+
+@router.post("/emails/bulk-schedule")
+def bulk_schedule_emails(req: BulkScheduleRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        if not req.lead_ids:
+             return {"message": "No leads provided"}
+             
+        format_strings = ','.join(['%s'] * len(req.lead_ids))
+        where_params = [req.scheduled_at] + list(req.lead_ids)
+        
+        user_clause = ""
+        if user_id and user_id != "admin":
+            user_clause = " AND user_id = %s"
+            where_params.append(user_id)
+        elif user_id == "admin":
+            pass
+        else:
+            user_clause = " AND user_id IS NULL"
+            
+        cur.execute(
+            f"UPDATE leads_raw SET email_status = 'SCHEDULED', scheduled_at = %s, updated_at = NOW() WHERE id IN ({format_strings}) {user_clause}",
+            tuple(where_params)
+        )
+        conn.commit()
+        from app.models.lead import add_activity_log
+        for lid in req.lead_ids:
+            add_activity_log(lid, "EMAIL_SCHEDULED", f"Email scheduled for {req.scheduled_at}", get_user_name(user_id))
+            
+        cur.close()
+        conn.close()
+        return {"message": f"Successfully scheduled {len(req.lead_ids)} emails for {req.scheduled_at}"}
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e)}
 
 @router.post("/approve-bulk-domain-drafts")
 def approve_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):

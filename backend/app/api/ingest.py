@@ -156,6 +156,18 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
                 add_activity_log(None, "BULK_INGESTION", details, "admin", user_id=user_id)
             except: pass
 
+        if len(leads) > 0 and user_id and str(user_id).lower() != "admin":
+            try:
+                from app.database import get_db_connection
+                c_conn = get_db_connection()
+                ccc = c_conn.cursor()
+                ccc.execute("UPDATE users SET credits_used = COALESCE(credits_used, 0) + %s WHERE id = %s", (len(leads), user_id))
+                c_conn.commit()
+                ccc.close()
+                c_conn.close()
+            except Exception as metric_err:
+                logger.error("rocketreach_credits_metric_failed", error=str(metric_err))
+
         return {
             "success": True,
             "fetched": len(leads),

@@ -94,6 +94,11 @@ const Layout = () => {
           <Link to="/dashboard/metrics" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'metrics' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'metrics' ? 'text-white' : 'text-[#94a3b8]'}`}>📈</span> Reports
           </Link>
+          {user.role === 'ADMIN' && (
+            <Link to="/dashboard/history" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'history' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+              <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'history' ? 'text-white' : 'text-[#94a3b8]'}`}>🕒</span> History
+            </Link>
+          )}
         </div>
 
         <div className="p-3 pb-0">
@@ -175,14 +180,14 @@ const Layout = () => {
                       </div>
                     </div>
                   </div>
-                  <button 
-                    onClick={() => { 
-                      localStorage.removeItem('token'); 
-                      localStorage.removeItem('user'); 
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem('token');
+                      localStorage.removeItem('user');
                       localStorage.removeItem('token_admin');
                       localStorage.removeItem('user_admin');
                       window.location.href = '/login?logout=success';
-                    }} 
+                    }}
                     className="block w-full text-left px-3.5 py-2.5 text-[13px] text-[#f43f5e] font-medium hover:bg-white/5 transition-colors"
                   >
                     🚪 Sign Out

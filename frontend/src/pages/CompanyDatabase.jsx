@@ -155,7 +155,8 @@ const CompanyDatabase = () => {
     setProcessingId(id);
     try {
       await api.post(`/api/companies/${id}/generate-draft`);
-      showNotification('success', 'Draft added to Email Drafts.');
+      showNotification('success', '✓ Lead moved to pipeline. Draft added to Email Queue.');
+      fetchCompanies(); // Refresh — company is removed from registry
     } catch (err) {
       showNotification('error', 'Draft Generation Fault: ' + (err.response?.data?.detail || err.message));
     } finally {
@@ -180,10 +181,11 @@ const CompanyDatabase = () => {
     }
     setIsBulkDrafting(false);
     setSelectedIds([]);
+    fetchCompanies(); // Refresh — drafted companies are removed from registry
     if (failed === 0) {
-      showNotification('success', `${success} draft${success > 1 ? 's' : ''} added to Email Drafts.`);
+      showNotification('success', `✓ ${success} lead${success > 1 ? 's' : ''} moved to pipeline. Drafts added to Email Queue.`);
     } else {
-      showNotification('error', `${success} drafted, ${failed} failed. Check email fields.`);
+      showNotification('error', `${success} moved to pipeline, ${failed} failed. Check email fields.`);
     }
   };
 

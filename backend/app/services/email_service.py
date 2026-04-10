@@ -184,3 +184,74 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
             return False
     else:
         return send_smtp_fallback(to_email, subject, final_html, final_from_email, final_from_name)
+
+def check_scheduled_emails():
+    """
+    Checks the database for any emails in 'SCHEDULED' state where
+    scheduled_at <= NOW(). Attempts to send them and updates state to SENT.
+    """
+    try:
+        from app.database import get_db_connection
+        from app.models.lead import add_activity_log
+        import psycopg2.extras
+        
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        cur.execute("""
+            SELECT l.id, l.email, l.email_draft, u.email as sender_email, u.full_name, u.username
+            FROM leads_raw l
+            LEFT JOIN users u ON l.user_id = u.id
+            WHERE l.email_status = 'SCHEDULED' AND l.scheduled_at <= NOW()
+        """)
+        
+        due_leads = cur.fetchall()
+        
+        if not due_leads:
+            cur.close()
+            conn.close()
+            return
+            
+        logger.info(f"Found {len(due_leads)} scheduled emails due for dispatch.")
+        
+        for lead in due_leads:
+            lead_id = lead['id']
+            to_email = lead['email']
+            draft_content = lead['email_draft']
+            sender_email = lead['sender_email']
+            sender_name = lead['full_name'] or lead['username'] or "the team"
+            
+            if not draft_content or not to_email:
+                continue
+                
+            subject = "Following up"
+            body = draft_content
+            if "Subject: " in draft_content:
+                parts = draft_content.split("\n\n", 1)
+                subject = parts[0].replace("Subject: ", "").strip()
+                body = parts[1].strip() if len(parts) > 1 else ""
+                
+            logger.info(f"Dispatching scheduled email to {to_email}")
+            
+            success = send_email(
+                to_email=to_email,
+                subject=subject,
+                html_content=body.replace("\n", "<br>"),
+                from_email=sender_email,
+                from_name=sender_name
+            )
+            
+            if success:
+                cur.execute("UPDATE leads_raw SET email_status = 'SENT', updated_at = NOW() WHERE id = %s", (lead_id,))
+                conn.commit()
+                try:
+                    add_activity_log(lead_id, "EMAIL_SENT", f"Scheduled email dispatched automatically", "system")
+                except:
+                    pass
+            else:
+                logger.error(f"Failed to send scheduled email {lead_id} to {to_email}")
+                
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error in check_scheduled_emails: {str(e)}")
