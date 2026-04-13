@@ -65,8 +65,15 @@ def format_outreach_html(text: str) -> str:
         text
     )
 
-    # 2. Convert bold **text** to <strong>text</strong>
+    # 2. Convert bold/italic markdown into clean <strong> tags
+    # Handle Triple Stars (Bold + Italic)
+    text = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong style="color: #ffffff; font-size: 15px;">\1</strong>', text)
+    # Handle Double Stars (Bold)
     text = re.sub(r'\*\*(.*?)\*\*', r'<strong style="color: #ffffff; font-size: 14px;">\1</strong>', text)
+    # Handle Single Stars (often used for headers by LLMs)
+    text = re.sub(r'(?m)^\* (.*?)$', r'<li style="margin-bottom: 4px;">\1</li>', text) # Handle list style bullets if they use * space
+    text = re.sub(r'\* (.*?)\n', r'<li style="margin-bottom: 4px;">\1</li>\n', text)
+    text = re.sub(r'\*(.*?)\*', r'<strong style="color: #ffffff; font-size: 14px;">\1</strong>', text)
     
     # 3. Convert bullet points • text to list items
     lines = text.split('\n')
@@ -95,11 +102,9 @@ def format_outreach_html(text: str) -> str:
         
     return "\n".join(formatted_lines)
 
-def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None) -> bool:
-    """
-    Sends an email using Resend (production) or SMTP (fallback).
-    Strictly follows dynamic identity.
-    """
+def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None, lead_id: Optional[int] = None, is_system_email: bool = False) -> bool:
+    # Force hot-reload of environment to catch manual .env updates instantly
+    load_dotenv(dotenv_path=env_path, override=True)
     provider = os.getenv("EMAIL_PROVIDER", "resend").lower()
     
     if not from_email:
@@ -110,15 +115,18 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     final_from_name = from_name or "LeadStream Outreach"
     sender_line = f"{final_from_name} <{final_from_email}>"
     
-    # Process HTML Formatting (Markdown-to-HTML)
-    formatted_html = format_outreach_html(html_content)
-    
-    # Wrap in a clean container
-    final_html = f"""
-    <div style="font-family: 'Inter', sans-serif; background-color: #0f172a; color: #cbd5e1; padding: 40px; border-radius: 12px; max-width: 600px; margin: auto;">
-        {formatted_html}
-    </div>
-    """
+    if is_system_email:
+        final_html = html_content
+    else:
+        # Process HTML Formatting (Markdown-to-HTML)
+        formatted_html = format_outreach_html(html_content)
+        
+        # Wrap in a clean container
+        final_html = f"""
+        <div style="font-family: 'Inter', sans-serif; background-color: #0f172a; color: #cbd5e1; padding: 40px; border-radius: 12px; max-width: 600px; margin: auto;">
+            {formatted_html}
+        </div>
+        """
     
     logger.info(f"Targeting dispatch to {to_email} via {provider}. Sender: {sender_line}")
 
@@ -144,6 +152,13 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 "subject": subject,
                 "html": final_html,
             }
+
+            if lead_id:
+                base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+                unsub_url = f"{base_url}/api/leads/unsubscribe/{lead_id}"
+                params["headers"] = {
+                    "List-Unsubscribe": f"<{unsub_url}>"
+                }
             
             # Attach default profiles from assets
             if not attachments:
@@ -238,11 +253,21 @@ def check_scheduled_emails():
                 subject=subject,
                 html_content=body.replace("\n", "<br>"),
                 from_email=sender_email,
-                from_name=sender_name
+                from_name=sender_name,
+                lead_id=lead_id
             )
             
             if success:
-                cur.execute("UPDATE leads_raw SET email_status = 'SENT', updated_at = NOW() WHERE id = %s", (lead_id,))
+                cur.execute("""
+                    UPDATE leads_raw 
+                    SET email_status = 'SENT', 
+                        updated_at = NOW(),
+                        last_outreach_at = NOW(),
+                        followup_status = 'ACTIVE',
+                        followup_stage = 0,
+                        is_responded = FALSE
+                    WHERE id = %s
+                """, (lead_id,))
                 conn.commit()
                 try:
                     add_activity_log(lead_id, "EMAIL_SENT", f"Scheduled email dispatched automatically", "system")

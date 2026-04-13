@@ -238,26 +238,26 @@ const EditEmail = () => {
 
               <div className="pt-6 flex flex-col gap-4">
                 <div className="flex items-center gap-4 w-full">
-                    <button
-                      onClick={() => handleSave()}
-                      disabled={isSaving}
-                      className="bg-[#1e293b] hover:bg-[#334155] text-white text-[12px] font-bold px-5 py-2.5 rounded-md transition-colors disabled:opacity-50 flex items-center border border-[#ffffff10] cursor-pointer shrink-0"
-                    >
-                      {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-                      Save Changes
-                    </button>
-                    <button
-                      onClick={() => setShowDatePicker(!showDatePicker)}
-                      className="bg-[#1e293b] hover:bg-[#334155] text-slate-300 hover:text-white text-[12px] font-bold px-5 py-2.5 rounded-md transition-colors disabled:opacity-50 flex items-center border border-[#ffffff10] cursor-pointer shrink-0"
-                    >
-                      Schedule...
-                    </button>
-                    <button
-                      onClick={handleApproveAndSend}
-                      className="flex-1 bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-600 hover:to-red-700 text-white text-[12px] font-black uppercase tracking-widest px-4 py-2.5 rounded-md transition-all shadow-lg shadow-red-500/20 flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      Approve & Send Now <Send className="w-4 h-4" />
-                    </button>
+                  <button
+                    onClick={() => handleSave()}
+                    disabled={isSaving}
+                    className="bg-[#1e293b] hover:bg-[#334155] text-white text-[12px] font-bold px-5 py-2.5 rounded-md transition-colors disabled:opacity-50 flex items-center border border-[#ffffff10] cursor-pointer shrink-0"
+                  >
+                    {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                    Save Changes
+                  </button>
+                  <button
+                    onClick={() => setShowDatePicker(!showDatePicker)}
+                    className="bg-[#1e293b] hover:bg-[#334155] text-slate-300 hover:text-white text-[12px] font-bold px-5 py-2.5 rounded-md transition-colors disabled:opacity-50 flex items-center border border-[#ffffff10] cursor-pointer shrink-0"
+                  >
+                    Schedule...
+                  </button>
+                  <button
+                    onClick={handleApproveAndSend}
+                    className="flex-1 bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-600 hover:to-red-700 text-white text-[12px] font-black uppercase tracking-widest px-4 py-2.5 rounded-md transition-all shadow-lg shadow-red-500/20 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    Approve & Send Now <Send className="w-4 h-4" />
+                  </button>
                 </div>
 
                 {showDatePicker && (
@@ -276,14 +276,14 @@ const EditEmail = () => {
                       wrapperClassName="w-auto"
                       minDate={new Date()}
                     />
-                    <button 
+                    <button
                       onClick={handleSchedule}
                       disabled={!scheduledAt || isSaving}
                       className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded text-[12px] font-bold cursor-pointer disabled:opacity-50 transition-colors shadow-lg shadow-blue-500/20"
                     >
                       Confirm Schedule
                     </button>
-                    <button 
+                    <button
                       onClick={() => setShowDatePicker(false)}
                       className="text-slate-400 hover:text-white text-[12px] ml-auto font-medium cursor-pointer transition-colors"
                     >
@@ -336,12 +336,16 @@ const EditEmail = () => {
                   {subject || '(No subject specified)'}
                 </span>
               </div>
-              
-              <div 
-                className={`text-[13px] leading-relaxed whitespace-pre-wrap font-medium ${body ? 'text-slate-300' : 'text-slate-600 italic text-[11px]'}`}
-                dangerouslySetInnerHTML={{ 
+
+              <div
+                className={`text-[13px] leading-relaxed font-medium ${body ? 'text-slate-300' : 'text-slate-600 italic text-[11px]'}`}
+                dangerouslySetInnerHTML={{
                   __html: (body || 'Generate AI draft to begin...')
-                    .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white font-black text-[14px] mt-4 block">$1</strong>') 
+                    .replace(/\*\*\*(.*?)\*\*\*/g, '<em class="text-white font-black text-[13px] not-italic block mt-1 tracking-tight">$1</em>') // bold-italics
+                    .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white font-black text-[14px] mt-4 block mb-1">$1</strong>')
+                    .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" class="text-blue-400 underline hover:text-blue-300 transition-colors font-bold">$1</a>')
+                    .replace(/^--$/m, '<div class="border-t border-[#ffffff10] my-6 w-16"></div>')
+                    .replace(/\n/g, '<br>')
                 }}
               />
 
@@ -379,14 +383,13 @@ const EditEmail = () => {
             <div className="space-y-4 max-w-[400px]">
               <div className="grid grid-cols-[120px_1fr] items-center text-[11px]">
                 <span className="text-[#64748b] font-medium">Status</span>
-                <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-[1px] bg-transparent w-max ${
-                  draft.email_status === 'SENT' || draft.email_status === 'APPROVED' ? 'text-[#10b981]' : 
-                  draft.email_status === 'REJECTED' || draft.email_status === 'FAILED' ? 'text-red-500' : 
-                  draft.email_status === 'SCHEDULED' ? 'text-blue-400' : 
-                  'text-amber-500'
-                }`}>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-[1px] bg-transparent w-max ${draft.email_status === 'SENT' || draft.email_status === 'APPROVED' ? 'text-[#10b981]' :
+                    draft.email_status === 'REJECTED' || draft.email_status === 'FAILED' ? 'text-red-500' :
+                      draft.email_status === 'SCHEDULED' ? 'text-blue-400' :
+                        'text-amber-500'
+                  }`}>
                   {draft.email_status || 'PENDING APPROVAL'}
-                  {draft.email_status === 'SCHEDULED' && draft.scheduled_at && ` (For ${new Date(draft.scheduled_at).toLocaleDateString('en-US', {month: 'short', day: 'numeric', hour:'2-digit', minute:'2-digit'})})`}
+                  {draft.email_status === 'SCHEDULED' && draft.scheduled_at && ` (For ${new Date(draft.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })})`}
                 </span>
               </div>
               <div className="grid grid-cols-[120px_1fr] items-center text-[11px] font-medium border-t border-[#ffffff05] pt-3">

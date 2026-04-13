@@ -15,9 +15,11 @@ import asyncio
 
 async def scheduler_loop():
     from app.services.email_service import check_scheduled_emails
+    from app.services.followup_service import process_outreach_sequences
     while True:
         try:
             check_scheduled_emails()
+            process_outreach_sequences()
         except Exception:
             pass
         await asyncio.sleep(60)

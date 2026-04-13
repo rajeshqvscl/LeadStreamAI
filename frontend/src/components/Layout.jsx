@@ -87,6 +87,9 @@ const Layout = () => {
           <Link to="/dashboard/campaigns" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'campaigns' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'campaigns' ? 'text-white' : 'text-[#94a3b8]'}`}>🎯</span> Campaigns
           </Link>
+          <Link to="/dashboard/followups" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'followups' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+            <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'followups' ? 'text-white' : 'text-[#94a3b8]'}`}>🔄</span> Follow-ups
+          </Link>
         </div>
 
         <div className="p-3 pb-0">
@@ -123,7 +126,19 @@ const Layout = () => {
               <span className="inline-flex items-center px-2.5 py-1 rounded-[4px] text-[9px] font-bold uppercase tracking-[0.5px] bg-blue-500/15 text-blue-500">
                 {user.role || 'ADMIN'}
               </span>
-              <Link to="/login?logout=success" onClick={() => { localStorage.removeItem('token'); localStorage.removeItem('user'); }} className="text-[11px] text-[#f43f5e] font-semibold transition-colors hover:text-rose-400">Logout →</Link>
+              <button 
+                onClick={async () => { 
+                  try { await api.post('/api/auth/logout'); } catch (e) { console.error(e); } 
+                  localStorage.removeItem('token'); 
+                  localStorage.removeItem('user'); 
+                  localStorage.removeItem('token_admin'); 
+                  localStorage.removeItem('user_admin'); 
+                  window.location.href = '/login?logout=success';
+                }} 
+                className="text-[11px] text-[#f43f5e] font-semibold transition-colors hover:text-rose-400 cursor-pointer"
+              >
+                Logout →
+              </button>
             </div>
           </div>
         </div>
@@ -181,7 +196,12 @@ const Layout = () => {
                     </div>
                   </div>
                   <button
-                    onClick={() => {
+                    onClick={async () => {
+                      try {
+                        await api.post('/api/auth/logout');
+                      } catch (e) {
+                        console.error('Logout API failed:', e);
+                      }
                       localStorage.removeItem('token');
                       localStorage.removeItem('user');
                       localStorage.removeItem('token_admin');

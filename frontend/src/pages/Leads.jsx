@@ -180,7 +180,21 @@ const Leads = () => {
         showNotification('success', `Extraction complete. ${response.data.inserted} new lead(s) added.`);
       }
     } catch (err) {
-      showNotification('error', 'Extraction failed: ' + (err.response?.data?.detail || err.message));
+      const isUnauthorized = err.response?.status === 403;
+      if (isUnauthorized) {
+        showNotification('error', 'Access denied. An approval email has been sent to the administrator.');
+        const userStr = localStorage.getItem('user');
+        if (userStr) {
+          try {
+            const user = JSON.parse(userStr);
+            await api.post('/api/auth/request-access', { user_id: user.id });
+          } catch (e) {
+            console.error("Failed to auto-send auth request", e);
+          }
+        }
+      } else {
+        showNotification('error', 'Extraction failed: ' + (err.response?.data?.detail || err.message));
+      }
     } finally {
       setDiscoveryLoading(false);
     }

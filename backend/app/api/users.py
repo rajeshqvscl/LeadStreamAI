@@ -18,6 +18,9 @@ class UserBase(BaseModel):
     is_active: bool = True
     is_approved: bool = False
     has_db_access: bool = False
+    job_title: Optional[str] = None
+    phone: Optional[str] = None
+    linkedin_url: Optional[str] = None
 
 class UserCreate(UserBase):
     password: str
@@ -30,6 +33,9 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
     is_approved: Optional[bool] = None
     has_db_access: Optional[bool] = None
+    job_title: Optional[str] = None
+    phone: Optional[str] = None
+    linkedin_url: Optional[str] = None
     password: Optional[str] = None
 
 @router.get("/users/")
@@ -37,13 +43,13 @@ def list_users(role: Optional[str] = None):
     conn = get_db_connection()
     cur = conn.cursor()
     
-    query = "SELECT id, username, email, full_name, role, is_active, is_approved, has_db_access, created_at FROM users"
+    query = "SELECT id, username, email, full_name, role, is_active, is_approved, has_db_access, created_at, updated_at, job_title, phone, linkedin_url FROM users"
     params = []
     if role:
         query += " WHERE role = %s"
         params.append(role)
     
-    query += " ORDER BY created_at DESC"
+    query += " ORDER BY COALESCE(updated_at, created_at) DESC"
     cur.execute(query, params)
     users = cur.fetchall()
     
@@ -61,10 +67,10 @@ def create_user(user: UserCreate):
     
     try:
         cur.execute("""
-            INSERT INTO users (username, email, full_name, password_hash, role, is_active, is_approved, has_db_access)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id, username, email, full_name, role, is_active, is_approved, has_db_access, created_at
-        """, (user.username, user.email, user.full_name, password_hash, user.role, user.is_active, user.is_approved, user.has_db_access))
+            INSERT INTO users (username, email, full_name, password_hash, role, is_active, is_approved, has_db_access, job_title, phone, linkedin_url)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id, username, email, full_name, role, is_active, is_approved, has_db_access, created_at, updated_at, job_title, phone, linkedin_url
+        """, (user.username, user.email, user.full_name, password_hash, user.role, user.is_active, user.is_approved, user.has_db_access, user.job_title, user.phone, user.linkedin_url))
         
         new_user = cur.fetchone()
         conn.commit()
@@ -93,7 +99,7 @@ def update_user(user_id: int, user: UserUpdate):
     params = list(update_data.values())
     params.append(user_id)
     
-    cur.execute(f"UPDATE users SET {set_clause} WHERE id = %s RETURNING id, username, email, full_name, role, is_active, is_approved, has_db_access, created_at", params)
+    cur.execute(f"UPDATE users SET {set_clause}, updated_at = NOW() WHERE id = %s RETURNING id, username, email, full_name, role, is_active, is_approved, has_db_access, created_at, updated_at, job_title, phone, linkedin_url", params)
     updated_user = cur.fetchone()
     
     if not updated_user:
@@ -363,5 +369,7 @@ def get_my_history(user_id: Optional[str] = Header(None, alias="X-User-Id")):
                 
         return logs
     finally:
+        cur.close()
+        conn.close()
         cur.close()
         conn.close()

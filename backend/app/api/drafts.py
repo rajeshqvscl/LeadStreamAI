@@ -3,6 +3,7 @@ from pydantic import BaseModel
 import traceback
 from typing import Optional, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
 
 from app.models.lead import get_lead_by_id
 from app.models.draft import insert_draft
@@ -97,22 +98,71 @@ def normalize_lead(lead):
         }
     return {}
 
-def get_user_name(user_id):
-    if not user_id:
-        return "the team"
+def get_sender_profile(user_id: Optional[str]) -> dict:
+    """Fetches the full sender profile for signature construction, using ID or falling back to defaults."""
+    uid = normalize_user_id(user_id)
     try:
-        from app.database import get_db_connection
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cur.execute("SELECT full_name, username FROM users WHERE id = %s", (user_id,))
+        # Select all relevant signature fields
+        cur.execute("SELECT full_name, username, job_title, phone, linkedin_url FROM users WHERE id = %s", (uid,))
         user = cur.fetchone()
         cur.close()
         conn.close()
         if user:
-            return user['full_name'] or user['username']
-    except:
-        pass
-    return "the team"
+            return dict(user)
+    except Exception as e:
+        logger.error(f"Error fetching sender profile: {e}")
+    
+    return {
+        "full_name": "System Admin", 
+        "username": "admin",
+        "job_title": "ITTEAM", 
+        "phone": "8527083798", 
+        "linkedin_url": "https://linkedin.com"
+    }
+
+def inject_signature(body: str, profile: dict, lead_id: int) -> str:
+    """Appends a premium standardized signature and mandatory unsubscribe link."""
+    base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+    unsubscribe_url = f"{base_url}/api/leads/unsubscribe/{lead_id}"
+    
+    # Simple check to avoid double-injecting if it already looks like it has a signature
+    if "unsubscribe" in body.lower() or "---" in body:
+        return body
+
+    # ROBUST SIGN-OFF STRIPPING
+    # We scan the last 10 lines for common sign-off markers and truncate the body there.
+    sign_offs = ["Sincerely", "Best regards", "Thanks & Regards", "Thanks,", "Regards,", "--"]
+    lines = body.strip().split("\n")
+    clean_body_lines = lines[:]
+    
+    # Check last 10 lines for a sign-off
+    for i in range(len(lines) - 1, max(-1, len(lines) - 10), -1):
+        line = lines[i].strip()
+        if any(line.startswith(s) for s in sign_offs):
+            # Found a sign-off, truncate everything from this line onwards
+            clean_body_lines = lines[:i]
+            break
+            
+    clean_body = "\n".join(clean_body_lines).strip()
+
+    # Construct Professional Signature (Removing bold stars for cleaner draft view)
+    signature_parts = [
+        "",
+        f"[Click here to unsubscribe]({unsubscribe_url})",
+        "",
+        "---",
+        "Thanks & Regards,",
+        "",
+        f"{profile.get('full_name') or profile.get('username') or 'The Team'},",
+        profile.get('job_title') if profile.get('job_title') else None,
+        f"[LinkedIn Profile]({profile.get('linkedin_url')})" if profile.get('linkedin_url') else None,
+        profile.get('phone') if profile.get('phone') else None
+    ]
+    
+    signature_block = "\n".join([str(p) for p in signature_parts if p is not None])
+    return f"{clean_body}\n{signature_block}"
 
 # --- Generate Draft ---
 # Supports both /generate-draft (user prompt) and /generate-email (frontend Axios)
@@ -136,15 +186,15 @@ def generate_draft(req: DraftRequest, user_id: Optional[str] = Header(None, alia
             return {"error": "Lead not found"}
         lead = normalize_lead(lead)
         
-        sender_name = get_user_name(user_id)
+        profile = get_sender_profile(user_id)
         generator = EmailGenerator()
-        email_data = generator.generate_email(lead, sender_name=sender_name)
+        email_data = generator.generate_email(lead, sender_name=profile.get('full_name') or profile.get('username'))
         
         subject = email_data.get("subject", "Following up")
-        body = email_data.get("body", "Hello, we would love to connect.")
+        ai_body = email_data.get("body", "Hello, we would love to connect.")
         
-        # The AI now generates the full email including greeting and sign-off.
-        # We just need to prepend the Subject for consistent database storage.
+        # Inject professional signature
+        body = inject_signature(ai_body, profile, req.lead_id)
         email_content = f"Subject: {subject}\n\n{body}"
         
         # update leads_raw.email_draft and email_status='PENDING_APPROVAL'
@@ -333,11 +383,12 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[s
         if not lead:
             return {"error": "Lead not found"}
             
+        profile = get_sender_profile(user_id)
         generator = EmailGenerator()
         refined_data = generator.refine_email(req.subject, req.body, req.instruction)
-        
-        # Update DB
-        new_content = f"Subject: {refined_data['subject']}\n\n{refined_data['body']}"
+        # Inject professional signature (ensures it's present and correct after refinement)
+        full_body = inject_signature(refined_data['body'], profile, draft_id)
+        new_content = f"Subject: {refined_data['subject']}\n\n{full_body}"
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("UPDATE leads_raw SET email_draft = %s, updated_at = NOW() WHERE id = %s", (new_content, draft_id))
@@ -347,7 +398,7 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[s
         
         return {
             "subject": refined_data["subject"],
-            "body": refined_data["body"]
+            "body": full_body
         }
         
     except Exception as e:
@@ -403,14 +454,23 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         subject=subject,
         html_content=body.replace("\n", "<br>"),
         from_email=sender_email,
-        from_name=sender_name
+        from_name=sender_name,
+        lead_id=draft_id
     )
 
     if success:
-        cur.execute(
-            "UPDATE leads_raw SET email_draft = %s, email_status = 'SENT', email_approved_by = %s, updated_at = NOW() WHERE id = %s",
-            (draft_content, sender_name, draft_id)
-        )
+        cur.execute("""
+            UPDATE leads_raw 
+            SET email_draft = %s, 
+                email_status = 'SENT', 
+                email_approved_by = %s, 
+                updated_at = NOW(),
+                last_outreach_at = NOW(),
+                followup_status = 'ACTIVE',
+                followup_stage = 0,
+                is_responded = FALSE
+            WHERE id = %s
+        """, (draft_content, sender_name, draft_id))
         conn.commit()
         from app.models.lead import add_activity_log
         add_activity_log(draft_id, "EMAIL_SENT", f"Email dispatched via Resend from {sender_email}", sender_name)
@@ -658,11 +718,23 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
                 subject=subject,
                 html_content=body.replace("\n", "<br>"),
                 from_email=sender_email,
-                from_name=sender_name
+                from_name=sender_name,
+                lead_id=lead['id']
             )
 
             if success:
-                cur.execute("UPDATE leads_raw SET email_status = 'SENT', updated_at = NOW() WHERE id = %s", (lead['id'],))
+                # 4. Update Status and Initialize Follow-up Sequence (Plan A)
+                cur.execute("""
+                    UPDATE leads_raw 
+                    SET email_status = 'SENT', 
+                        updated_at = NOW(),
+                        last_outreach_at = NOW(),
+                        followup_status = 'ACTIVE',
+                        followup_stage = 0,
+                        is_responded = FALSE
+                    WHERE id = %s
+                """, (lead['id'],))
+                conn.commit()
                 from app.models.lead import add_activity_log
                 add_activity_log(lead['id'], "EMAIL_SENT", f"Email dispatched via Resend from {sender_email}", "system")
                 sent_count += 1
@@ -838,13 +910,20 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                     subject=subject,
                     html_content=body.replace("\n", "<br>"),
                     from_email=sender_email,
-                    from_name=sender_name
+                    from_name=sender_name,
+                    lead_id=lead['id']
                 )
 
                 if success:
                     cur.execute("""
                         UPDATE leads_raw 
-                        SET email_draft = %s, email_status = 'SENT', updated_at = NOW() 
+                        SET email_draft = %s, 
+                            email_status = 'SENT', 
+                            updated_at = NOW(),
+                            last_outreach_at = NOW(),
+                            followup_status = 'ACTIVE',
+                            followup_stage = 0,
+                            is_responded = FALSE
                         WHERE id = %s
                     """, (email_content, lead['id']))
                     add_activity_log(lead['id'], "EMAIL_SENT", f"Bulk domain email dispatched via Resend from {sender_email}", "system")

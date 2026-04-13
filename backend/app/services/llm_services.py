@@ -134,7 +134,12 @@ Thanks & Regards,
         
         Instruction: {instruction}
         
-        Please refine the email based on the instruction. Return ONLY valid JSON with 'subject' and 'body'.
+        CRITICAL GUIDELINES:
+        1. Refine the body based on the instructions.
+        2. KEEP the tone professional.
+        3. DO NOT generate any sign-off (like "Sincerely", "Best regards") or signature block at the end. 
+        4. The system will automatically handle the signature separator (--) and the contact details.
+        5. Return ONLY valid JSON with 'subject' and 'body'.
         """
         
         try:

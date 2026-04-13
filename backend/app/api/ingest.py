@@ -73,11 +73,41 @@ def categorize_lead(payload):
     # Other
     return "OTHER", random.randint(40, 65)
 
-@router.post("/ingest")
 @router.post("/ingest-leads")
 def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     from app.services.rocketreach_service import search_leads, lookup_by_email, lookup_by_name
+    from app.database import get_db_connection
+    import psycopg2.extras
+    from fastapi import HTTPException
 
+    # --- AUTHORIZATION & CREDIT GATE ---
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required to perform discovery.")
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("SELECT is_approved, is_active, credits_used, COALESCE(credits_limit, 200) as c_limit, role FROM users WHERE id = %s", (user_id,))
+        user_record = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if not user_record:
+            raise HTTPException(status_code=401, detail="User account not found.")
+        
+        is_admin_user = user_record['role'] == 'ADMIN' or str(user_id).lower() == 'admin'
+        
+        if not is_admin_user:
+            if not user_record['is_active']:
+                raise HTTPException(status_code=403, detail="Your account is deactivated.")
+            if not user_record['is_approved']:
+                raise HTTPException(status_code=403, detail="Discovery access pending approval.")
+            if user_record['credits_used'] >= user_record['c_limit']:
+                raise HTTPException(status_code=402, detail=f"Discovery quota exceeded ({user_record['c_limit']} leads).")
+    except HTTPException: raise
+    except Exception as e:
+        logger.error("auth_check_failed", error=str(e))
+        raise HTTPException(status_code=500, detail="Authorization service unavailable.")
     # Log search activity before processing
     try:
         from app.models.lead import add_activity_log

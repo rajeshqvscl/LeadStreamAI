@@ -27,7 +27,10 @@ const Users = () => {
     password: '',
     role: 'USER',
     is_approved: false,
-    has_db_access: false
+    has_db_access: false,
+    job_title: '',
+    phone: '',
+    linkedin_url: ''
   });
 
   const fetchUsers = async () => {
@@ -59,7 +62,10 @@ const Users = () => {
         password: '',
         role: user.role,
         is_approved: user.is_approved,
-        has_db_access: user.has_db_access
+        has_db_access: user.has_db_access,
+        job_title: user.job_title || '',
+        phone: user.phone || '',
+        linkedin_url: user.linkedin_url || ''
       });
     } else {
       setEditingUser(null);
@@ -70,7 +76,10 @@ const Users = () => {
         password: '',
         role: 'USER',
         is_approved: true, // Manual creation defaults to approved
-        has_db_access: false
+        has_db_access: false,
+        job_title: '',
+        phone: '',
+        linkedin_url: ''
       });
     }
     setShowDrawer(true);
@@ -174,10 +183,10 @@ const Users = () => {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-900/50">
-                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Identity</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider text-center">Identity</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Access Level</th>
-                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Approval</th>
-                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">DB Access</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Approval Status</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Last Change</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider text-right">Settings</th>
               </tr>
@@ -211,33 +220,30 @@ const Users = () => {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
-                       {user.is_approved ? (
-                         <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-500">
-                           <Check className="w-3 h-3" />
-                           <span className="text-[9px] font-black uppercase">Approved</span>
-                         </div>
-                       ) : (
-                         <button 
-                           onClick={() => handleSubmit({ preventDefault: () => {} }, { ...user, is_approved: true, id: user.id })}
-                           className="flex items-center gap-1.5 px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 text-amber-500 hover:bg-amber-500/20 transition-all"
-                         >
-                           <RotateCcw className="w-3 h-3" />
-                           <span className="text-[9px] font-black uppercase">Pending</span>
-                         </button>
-                       )}
+                      {user.is_approved ? (
+                        <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-500">
+                          <Check className="w-3 h-3" />
+                          <span className="text-[9px] font-black uppercase">Approved</span>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => handleSubmit({ preventDefault: () => { } }, { ...user, is_approved: true, id: user.id })}
+                          className="flex items-center gap-1.5 px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 text-amber-500 hover:bg-amber-500/20 transition-all"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span className="text-[9px] font-black uppercase">Pending</span>
+                        </button>
+                      )}
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                       <button 
-                         onClick={() => {
-                           const newStatus = !user.has_db_access;
-                           api.put(`/api/users/${user.id}`, { has_db_access: newStatus }).then(() => fetchUsers());
-                         }}
-                         className={`px-2 py-1 rounded border transition-all text-[9px] font-black uppercase ${user.has_db_access ? 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400' : 'bg-slate-800 border-white/5 text-slate-500'}`}
-                       >
-                         {user.has_db_access ? 'Unlocked' : 'Locked'}
-                       </button>
+                    <div className="flex flex-col">
+                      <span className="text-white font-bold text-[11px]">
+                        {user.updated_at ? new Date(user.updated_at).toLocaleDateString() : new Date(user.created_at).toLocaleDateString()}
+                      </span>
+                      <span className="text-slate-500 text-[9px] font-medium uppercase tracking-tighter">
+                        {user.updated_at ? new Date(user.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : new Date(user.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -355,8 +361,47 @@ const Users = () => {
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   />
                 </div>
+                <div className="form-group border-t border-white/5 pt-6 mt-6">
+                  <div className="flex items-center gap-2 mb-4">
+                    <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                    <span className="text-[11px] font-black text-white uppercase tracking-widest">Professional Signature</span>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div className="form-group">
+                      <label>Job Title / Role</label>
+                      <input
+                        type="text"
+                        className="form-control bg-slate-900/50"
+                        placeholder="e.g. Founder, CEO"
+                        value={formData.job_title}
+                        onChange={(e) => setFormData({ ...formData, job_title: e.target.value })}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Phone Number</label>
+                      <input
+                        type="text"
+                        className="form-control bg-slate-900/50"
+                        placeholder="+1 (555) 000-0000"
+                        value={formData.phone}
+                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>LinkedIn Profile URL</label>
+                      <input
+                        type="url"
+                        className="form-control bg-slate-900/50"
+                        placeholder="https://linkedin.com/in/username"
+                        value={formData.linkedin_url}
+                        onChange={(e) => setFormData({ ...formData, linkedin_url: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                </div>
 
-                <div className="form-group">
+                <div className="form-group border-t border-white/5 pt-6 mt-6">
                   <label>Global Permission Role</label>
                   <div className="space-y-3 mt-3">
                     {[

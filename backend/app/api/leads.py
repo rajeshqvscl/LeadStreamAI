@@ -7,6 +7,7 @@ import psycopg2
 import psycopg2.extras
 from app.database import get_db_connection
 from app.models.lead import get_lead_by_id, update_lead, get_activity_log, add_activity_log
+from app.api.drafts import get_sender_profile, inject_signature
 
 import logging
 
@@ -326,14 +327,150 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
         
     # Normalize email_draft content to handle literal escapes
     if lead.get("email_draft"):
-        lead["email_draft"] = lead["email_draft"].replace("\\n", "\n").replace("\\r\\n", "\n")
+        draft_raw = lead["email_draft"].replace("\\n", "\n").replace("\\r\\n", "\n")
+        
+        # DYNAMIC REPAIR: If signature/unsubscribe is missing, inject it on the fly (but don't save to DB)
+        if "unsubscribe" not in draft_raw.lower():
+            try:
+                # Parse subject/body to inject correctly
+                subject = "Following up"
+                body = draft_raw
+                if "Subject: " in draft_raw:
+                    parts = draft_raw.split("\n\n", 1)
+                    subject = parts[0].replace("Subject: ", "").strip()
+                    body = parts[1].strip() if len(parts) > 1 else ""
+                
+                from app.api.drafts import get_sender_profile, inject_signature
+                profile = get_sender_profile(user_id)
+                repaired_body = inject_signature(body, profile, lead_id)
+                draft_raw = f"Subject: {subject}\n\n{repaired_body}"
+            except Exception as e:
+                logger.error(f"Dynamic signature repair failed: {e}")
+                
+        lead["email_draft"] = draft_raw
     
     return lead
 
-@router.patch("/leads/{lead_id}")
-def update_lead_endpoint(lead_id: int, req: LeadUpdate, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+class UpdateLeadRequest(BaseModel):
+    email_draft: Optional[str] = None
+    remarks: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    company_name: Optional[str] = None
+    is_responded: Optional[bool] = None
 
-    update_data = req.dict(exclude_unset=True)
+@router.patch("/leads/{lead_id}")
+def update_lead(lead_id: int, req: UpdateLeadRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Updates specific lead fields (draft, remarks, etc.)."""
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    # Verify ownership
+    uid = normalize_user_id(user_id)
+    cur.execute("SELECT user_id FROM leads_raw WHERE id = %s", (lead_id,))
+    lead = cur.fetchone()
+    if not lead:
+        cur.close()
+        conn.close()
+        return JSONResponse({"detail": "Lead not found"}, status_code=404)
+        
+    if user_id != "admin" and lead['user_id'] != uid:
+        cur.close()
+        conn.close()
+        return JSONResponse({"detail": "Unauthorized"}, status_code=403)
+
+    # Build DYN update
+    updates = []
+    params = []
+    for field, value in req.dict(exclude_unset=True).items():
+        updates.append(f"{field} = %s")
+        params.append(value)
+    
+    if not updates:
+        cur.close()
+        conn.close()
+        return {"message": "No changes requested"}
+
+    params.append(lead_id)
+    cur.execute(f"UPDATE leads_raw SET {', '.join(updates)}, updated_at = NOW() WHERE id = %s", tuple(params))
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    return {"message": "Lead updated successfully"}
+
+@router.post("/leads/{lead_id}/respond")
+def mark_lead_responded(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Manually mark a lead as responded to stop automated follow-ups."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Stop follow-up sequence
+        cur.execute("""
+            UPDATE leads_raw 
+            SET is_responded = TRUE, 
+                followup_status = 'STOPPED', 
+                updated_at = NOW() 
+            WHERE id = %s
+        """, (lead_id,))
+        
+        from app.models.lead import add_activity_log
+        add_activity_log(lead_id, "RESPONDED", "Marked as responded (Follow-up stopped)", get_user_name(user_id))
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"message": "Lead marked as responded. Follow-ups stopped."}
+    except Exception as e:
+        return {"error": str(e)}
+
+@router.get("/followups")
+def get_followups_endpoint(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Returns all leads currently in an active follow-up sequence."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        query = "SELECT * FROM leads_raw WHERE followup_status = 'ACTIVE' AND is_responded = FALSE"
+        params = []
+        
+        if user_id and user_id != "admin":
+            query += " AND user_id = %s"
+            params.append(normalize_user_id(user_id))
+            
+        query += " ORDER BY last_outreach_at DESC"
+        cur.execute(query, tuple(params))
+        rows = cur.fetchall()
+        
+        results = []
+        for r in rows:
+            results.append(dict(r))
+            
+        cur.close()
+        conn.close()
+        return results
+    except Exception as e:
+        return {"error": str(e)}
+
+def get_user_name(user_id):
+    if not user_id: return "system"
+    if user_id == "admin": return "admin"
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT username FROM users WHERE id = %s", (normalize_user_id(user_id),))
+        u = cur.fetchone()
+        cur.close()
+        conn.close()
+        return u['username'] if u else "unknown"
+    except:
+        return "user"
+
+def normalize_user_id(uid):
+    if not uid: return None
+    try: return int(uid)
+    except: return None
     if not update_data:
         return {"message": "No changes provided"}
     
@@ -479,8 +616,17 @@ def bulk_approve(req: List[int]):
         conn.close()
     return {"message": "Leads approved and moved to pipeline"}
 
-@router.post("/leads/{lead_id}/unsubscribe")
-def unsubscribe_lead(lead_id: int):
+@router.get("/leads/unsubscribe/{lead_id}")
+def unsubscribe_lead_get(lead_id: int):
+    """Public GET endpoint for email unsubscribe links."""
+    return process_unsubscribe(lead_id)
+
+@router.post("/leads/unsubscribe/{lead_id}")
+def unsubscribe_lead_post(lead_id: int):
+    """API POST endpoint for manual unsubscribe actions."""
+    return process_unsubscribe(lead_id)
+
+def process_unsubscribe(lead_id: int):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
@@ -507,7 +653,14 @@ def unsubscribe_lead(lead_id: int):
         cur.close()
         conn.close()
         
-    return {"message": "Lead unsubscribed and blacklisted successfully"}
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content="""
+        <div style="font-family: sans-serif; text-align: center; padding: 50px;">
+            <h1 style="color: #6366f1;">Unsubscribe Successful</h1>
+            <p>You have been successfully removed from our outreach list.</p>
+            <p style="color: #64748b; font-size: 14px;">You can now close this window.</p>
+        </div>
+    """)
 
 @router.post("/leads/bulk-delete")
 def bulk_delete(req: List[int]):

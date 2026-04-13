@@ -77,7 +77,12 @@ def create_tables():
         ("user_id", "INTEGER"),
         ("email_approved_by", "TEXT"),
         ("updated_at", "TIMESTAMP DEFAULT NOW()"),
-        ("scheduled_at", "TIMESTAMP")
+        ("scheduled_at", "TIMESTAMP"),
+        # Follow-up sequence columns
+        ("followup_stage", "INTEGER DEFAULT 0"),
+        ("followup_status", "TEXT DEFAULT 'IDLE'"), # IDLE, ACTIVE, COMPLETED, STOPPED
+        ("last_outreach_at", "TIMESTAMP"),
+        ("is_responded", "BOOLEAN DEFAULT FALSE")
     ]
     for col_name, col_type in columns_to_add:
         try:
@@ -203,7 +208,8 @@ def create_tables():
         ("has_db_access", "BOOLEAN DEFAULT FALSE"),
         ("google_id", "TEXT"),
         ("email", "TEXT UNIQUE"),
-        ("credits_used", "INTEGER DEFAULT 0")
+        ("credits_used", "INTEGER DEFAULT 0"),
+        ("credits_limit", "INTEGER DEFAULT 200")
     ]
     for col_name, col_type in user_cols:
         try:
@@ -270,7 +276,11 @@ def create_tables():
             
             ("Default Context Prompt", "CONTEXT",
              "We are a technology company that helps businesses automate their workflows and improve operational efficiency through AI-powered solutions.",
-             "Default company context for emails.")
+             "Default company context for emails."),
+            
+            ("Default Follow-up Prompt", "FOLLOWUP_GENERATION",
+             "You are an AI assistant writing a gentle, professional follow-up email. \n\nOriginal Email Context: {original_content}\nRecipient: {lead_name}\n\nGuidelines:\n1. Be extremely brief and respectful of their time.\n2. Do NOT hard-sell. Instead, ask if they had any questions about the previous message.\n3. Keep the tone helpful and consultative.\n4. DO NOT include any signature. The system will append it.\n\nWrite the follow-up nudge now:",
+             "Default prompt for generating Day 2 and Day 4 follow-up emails.")
         ]
         for name, p_type, content, desc in default_prompts:
             cur.execute("""
