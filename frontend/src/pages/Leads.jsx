@@ -204,8 +204,17 @@ const Leads = () => {
     e.preventDefault();
     setIsCreatingLead(true);
     try {
-      await api.post('/api/leads', newLeadData);
-      showNotification('success', 'Lead created successfully and added to pipeline.');
+      const response = await api.post('/api/leads', newLeadData);
+      
+      if (response.data.was_duplicate) {
+        showNotification('success', response.data.message, {
+          label: 'View Lead',
+          onClick: () => navigate(`/dashboard/leads/${response.data.lead_id}`)
+        });
+      } else {
+        showNotification('success', 'Lead created successfully and added to pipeline.');
+      }
+      
       setShowAddModal(false);
       setNewLeadData({
         first_name: '', last_name: '', email: '', company_name: '',

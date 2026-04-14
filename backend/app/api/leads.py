@@ -91,13 +91,15 @@ def get_leads(
     """
     params = []
     
+    # Re-standardize user_id for private pipeline filtering
+    uid = normalize_user_id(user_id)
     is_admin = (str(user_id).lower() == 'admin' or str(user_id) == '1')
 
     if is_admin:
-        pass  # Admin sees all leads — no user_id filter applied
-    elif user_id:
+        pass  # Admin sees all leads
+    elif uid:
         query += " AND user_id = %s"
-        params.append(user_id)
+        params.append(uid)
     else:
         query += " AND user_id IS NULL"
 
@@ -126,20 +128,23 @@ def get_leads(
         query += f" AND COALESCE(email,'') !~* '{bad_domains}'"
 
     if source == 'direct':
-        # Apply strict filtering for Lead Pipeline ONLY
-        
-        # Dummy Names
+        # Apply strict filtering for Lead Pipeline — but EXEMPT manual/promoted leads
+        # so users always see what they manually add
         bad_names = r'test|dummy|sample|example|unknown|admin|user|lead test|mock|noreply'
-        query += f" AND COALESCE(first_name,'') !~* '{bad_names}'"
-        query += f" AND COALESCE(last_name,'') !~* '{bad_names}'"
-
-        # Invalid Email Domains
         bad_domains = r'@(test|dummy|example|mailinator|fake|temp|noemail)\.(com|net|io|org)$'
-        query += f" AND COALESCE(email,'') !~* '{bad_domains}'"
-
-        # Active Role Filter
         bad_titles = r'\b(ex|former|previous|past|advisor|retired|consultant|board member)\b'
-        query += f" AND COALESCE(designation, raw_payload->>'Designation', raw_payload->>'Role/Designation', raw_payload->>'designation', persona, '') !~* '{bad_titles}'"
+        
+        query += f""" 
+            AND (
+                COALESCE(manual_entry, FALSE) IS TRUE 
+                OR (
+                    COALESCE(first_name,'') !~* '{bad_names}'
+                    AND COALESCE(last_name,'') !~* '{bad_names}'
+                    AND COALESCE(email,'') !~* '{bad_domains}'
+                    AND COALESCE(designation, raw_payload->>'Designation', raw_payload->>'Role/Designation', raw_payload->>'designation', persona, '') !~* '{bad_titles}'
+                )
+            )
+        """
         
     # Global Blacklist Exclusion
     query += " AND (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)"
@@ -148,7 +153,9 @@ def get_leads(
     # ──────────────────────────────────────────────────────────────────────────
 
     if exclude_drafted:
-        query += " AND (email_status IS NULL OR email_status = '')"
+        # Include leads that are PENDING or have no status, but hide those with active DRAFTS
+        # Also ensure manual entries are NEVER hidden by this filter
+        query += " AND (COALESCE(email_status, '') IN ('', 'PENDING') OR COALESCE(manual_entry, FALSE) IS TRUE)"
     
     if search:
         query += " AND (first_name ILIKE %s OR last_name ILIKE %s OR email ILIKE %s OR company_name ILIKE %s OR raw_payload->>'current_title' ILIKE %s OR persona ILIKE %s OR phone ILIKE %s)"
@@ -242,30 +249,21 @@ def get_leads(
         "total": total
     }
 
-
 @router.get("/leads/{lead_id}")
 def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Retrieves full details for a single lead. Access is open to all authenticated users."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    is_admin = (str(user_id).lower() == 'admin' or str(user_id) == '1')
-
-    if is_admin:
-        # Admin can view any lead in the system
-        cur.execute("SELECT * FROM leads_raw WHERE id = %s", (lead_id,))
-    elif user_id:
-        # Regular user can view their own leads, or leads with no owner
-        cur.execute("SELECT * FROM leads_raw WHERE id = %s AND (user_id = %s OR user_id IS NULL)", (lead_id, user_id))
-    else:
-        # Fallback for unauthenticated or system-level requests
-        cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (lead_id,))
+    # Universal access - no user_id filtering for detail view
+    cur.execute("SELECT * FROM leads_raw WHERE id = %s", (lead_id,))
         
     row = cur.fetchone()
     cur.close()
     conn.close()
 
     if not row:
-        return {"error": "Lead not found"}
+        raise HTTPException(status_code=404, detail="Lead not found")
     
     # Convert to mutable dict
     lead = dict(row)
@@ -352,11 +350,21 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
     return lead
 
 class UpdateLeadRequest(BaseModel):
+    email: Optional[str] = None
     email_draft: Optional[str] = None
     remarks: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     company_name: Optional[str] = None
+    designation: Optional[str] = None
+    phone: Optional[str] = None
+    city: Optional[str] = None
+    country: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    persona: Optional[str] = None
+    campaign_id: Optional[int] = None
+    industry: Optional[str] = None
+    family_office_name: Optional[str] = None
     is_responded: Optional[bool] = None
 
 @router.patch("/leads/{lead_id}")
@@ -365,31 +373,35 @@ def update_lead(lead_id: int, req: UpdateLeadRequest, user_id: Optional[str] = H
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    # Verify ownership
-    uid = normalize_user_id(user_id)
-    cur.execute("SELECT user_id FROM leads_raw WHERE id = %s", (lead_id,))
+    # Verify existence
+    cur.execute("SELECT id FROM leads_raw WHERE id = %s", (lead_id,))
     lead = cur.fetchone()
     if not lead:
         cur.close()
         conn.close()
         return JSONResponse({"detail": "Lead not found"}, status_code=404)
         
-    if user_id != "admin" and lead['user_id'] != uid:
-        cur.close()
-        conn.close()
-        return JSONResponse({"detail": "Unauthorized"}, status_code=403)
-
-    # Build DYN update
-    updates = []
-    params = []
-    for field, value in req.dict(exclude_unset=True).items():
-        updates.append(f"{field} = %s")
-        params.append(value)
-    
-    if not updates:
+    update_data = req.model_dump(exclude_unset=True)
+    if not update_data:
         cur.close()
         conn.close()
         return {"message": "No changes requested"}
+
+    updates = []
+    params = []
+    
+    # Map of frontend fields to DB columns
+    valid_fields = [
+        'first_name', 'last_name', 'email', 'linkedin_url', 
+        'company_name', 'designation', 'phone', 'persona', 'city', 
+        'country', 'remarks', 'fit_score', 'campaign_id', 
+        'family_office_name', 'industry', 'email_draft', 'is_responded'
+    ]
+
+    for field, value in update_data.items():
+        if field in valid_fields:
+            updates.append(f"{field} = %s")
+            params.append(value)
 
     params.append(lead_id)
     cur.execute(f"UPDATE leads_raw SET {', '.join(updates)}, updated_at = NOW() WHERE id = %s", tuple(params))
@@ -471,14 +483,6 @@ def normalize_user_id(uid):
     if not uid: return None
     try: return int(uid)
     except: return None
-    if not update_data:
-        return {"message": "No changes provided"}
-    
-    success = update_lead(lead_id, update_data)
-    if success:
-        add_activity_log(lead_id, "UPDATE_LEAD", f"Updated fields: {', '.join(update_data.keys())}", "admin")
-        return {"message": "Lead updated successfully"}
-    return {"error": "Failed to update lead"}
 
 @router.get("/leads/{lead_id}/activity")
 def get_lead_activity(lead_id: int):
@@ -510,16 +514,24 @@ def create_manual_lead(req: LeadCreate, user_id: Optional[str] = Header(None, al
     conn.close()
     
     if existing:
-        is_li_match = li_url and existing['linkedin_url'] == li_url
-        conflict_type = "LinkedIn URL" if is_li_match else "email"
-        status_msg = f" (Status: {existing['email_status']})" if existing['email_status'] else ""
-        
+        # If the lead exists anywhere (bulk, extraction, or even previously in pipeline),
+        # ALWAYS assign it to the current user, set source to 'direct', and flag as manual_entry
+        # This makes the "manual add" experience seamless and guarantees visibility
+        conn2 = get_db_connection()
+        cur2 = conn2.cursor()
+        cur2.execute(
+            "UPDATE leads_raw SET source = 'direct', user_id = %s, manual_entry = TRUE WHERE id = %s",
+            (normalize_user_id(user_id), existing['id'])
+        )
+        conn2.commit()
+        cur2.close()
+        conn2.close()
         return JSONResponse(
-            status_code=400,
+            status_code=200,
             content={
-                "error": "DUPLICATE_LEAD",
+                "message": "Lead already exists in global database — successfully moved to your Lead Pipeline!",
                 "lead_id": existing['id'],
-                "detail": f"A lead with this {conflict_type} already exists in your database{status_msg}."
+                "was_duplicate": True
             }
         )
 
@@ -617,11 +629,13 @@ def bulk_approve(req: List[int]):
     return {"message": "Leads approved and moved to pipeline"}
 
 @router.get("/leads/unsubscribe/{lead_id}")
+@router.get("/leads/{lead_id}/unsubscribe")
 def unsubscribe_lead_get(lead_id: int):
     """Public GET endpoint for email unsubscribe links."""
     return process_unsubscribe(lead_id)
 
 @router.post("/leads/unsubscribe/{lead_id}")
+@router.post("/leads/{lead_id}/unsubscribe")
 def unsubscribe_lead_post(lead_id: int):
     """API POST endpoint for manual unsubscribe actions."""
     return process_unsubscribe(lead_id)
