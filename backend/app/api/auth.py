@@ -143,7 +143,7 @@ def request_access(req: AccessRequest):
         to_email=admin['email'],
         subject=subject,
         html_content=html_content,
-        from_email=os.getenv("DEFAULT_FROM_EMAIL", admin['email']),
+        from_email=os.getenv("SMTP_USER", admin['email']),
         from_name="LeadStream Security",
         is_system_email=True
     )
