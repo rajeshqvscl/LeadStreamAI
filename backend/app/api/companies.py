@@ -196,7 +196,7 @@ def generate_company_draft(row_id: int, user_id: Optional[str] = Header(None, al
         if not email:
             raise HTTPException(status_code=400, detail="Company record is missing an email address.")
             
-        name = norm.get("name") or norm.get("fullname") or norm.get("leadname") or f"{norm.get('firstname', '')} {norm.get('lastname', '')}".strip()
+        name = norm.get("teammember") or norm.get("name") or norm.get("fullname") or norm.get("leadname") or f"{norm.get('firstname', '')} {norm.get('lastname', '')}".strip()
         if not name:
             name = "Contact"
             
