@@ -15,8 +15,8 @@ import time
 router = APIRouter()
 
 def normalize_user_id(user_id: Optional[str]) -> str:
-    if not user_id or user_id.strip() == "" or user_id.lower() == "admin":
-        return "1"
+    if not user_id or user_id.strip() == "":
+        return None
     return user_id
 
 @router.get("/companies")
@@ -26,13 +26,24 @@ def list_companies(page: int = 1, limit: int = 500, user_id: Optional[str] = Hea
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     offset = (page - 1) * limit
     
+    uid = normalize_user_id(user_id)
+    is_admin = (str(user_id or '').lower() == 'admin')
+    
     try:
-        # Total count for pagination
-        cur.execute("SELECT COUNT(*) FROM company_registry")
-        total = cur.fetchone()[0]
-
-        # Paginated fetch
-        cur.execute("SELECT id, row_data FROM company_registry ORDER BY id ASC LIMIT %s OFFSET %s", (limit, offset))
+        # Total count and Fetch with admin bypass
+        if is_admin:
+            cur.execute("SELECT COUNT(*) FROM company_registry")
+            total = cur.fetchone()[0]
+            cur.execute("SELECT id, row_data FROM company_registry ORDER BY id ASC LIMIT %s OFFSET %s", (limit, offset))
+        elif uid:
+            cur.execute("SELECT COUNT(*) FROM company_registry WHERE user_id = %s", (uid,))
+            total = cur.fetchone()[0]
+            cur.execute("SELECT id, row_data FROM company_registry WHERE user_id = %s ORDER BY id ASC LIMIT %s OFFSET %s", (uid, limit, offset))
+        else:
+            cur.execute("SELECT COUNT(*) FROM company_registry WHERE user_id IS NULL")
+            total = cur.fetchone()[0]
+            cur.execute("SELECT id, row_data FROM company_registry WHERE user_id IS NULL ORDER BY id ASC LIMIT %s OFFSET %s", (limit, offset))
+            
         rows = cur.fetchall()
         
         companies = []
@@ -65,7 +76,7 @@ def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header
     start_time = time.time()
     try:
         # Clear existing data for a fresh import
-        cur.execute("DELETE FROM company_registry")
+        cur.execute("DELETE FROM company_registry WHERE user_id = %s", (uid,))
         
         # Fast Batch Insert
         if rows:
@@ -90,13 +101,14 @@ def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header
 @router.patch("/companies/{row_id}")
 def update_company(row_id: int, row_data: Dict[str, Any], user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Updates a specific row in the company registry."""
+    uid = normalize_user_id(user_id)
     conn = get_db_connection()
     cur = conn.cursor()
     
     try:
         cur.execute(
-            "UPDATE company_registry SET row_data = %s, updated_at = NOW() WHERE id = %s",
-            (json.dumps(row_data), row_id)
+            "UPDATE company_registry SET row_data = %s, updated_at = NOW() WHERE id = %s AND user_id = %s",
+            (json.dumps(row_data), row_id, uid)
         )
         conn.commit()
         return {"success": True}
@@ -108,12 +120,13 @@ def update_company(row_id: int, row_data: Dict[str, Any], user_id: Optional[str]
         conn.close()
 
 @router.delete("/companies/clear")
-def clear_companies():
+def clear_companies(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Wipes the entire company registry."""
+    uid = normalize_user_id(user_id)
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("DELETE FROM company_registry")
+        cur.execute("DELETE FROM company_registry WHERE user_id = %s", (uid,))
         conn.commit()
         return {"success": True}
     finally:
@@ -164,8 +177,10 @@ def generate_company_draft(row_id: int, user_id: Optional[str] = Header(None, al
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
+    uid = normalize_user_id(user_id)
+    
     try:
-        cur.execute("SELECT row_data FROM company_registry WHERE id = %s", (row_id,))
+        cur.execute("SELECT row_data FROM company_registry WHERE id = %s AND user_id = %s", (row_id, uid))
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Company record not found")
@@ -228,7 +243,7 @@ def generate_company_draft(row_id: int, user_id: Optional[str] = Header(None, al
         save_email_draft(lead_id, email_content)
 
         # Remove from company registry - it's now in the lead pipeline
-        cur.execute("DELETE FROM company_registry WHERE id = %s", (row_id,))
+        cur.execute("DELETE FROM company_registry WHERE id = %s AND user_id = %s", (row_id, uid))
         conn.commit()
         
         return {"success": True, "lead_id": lead_id, "message": "Draft generated and moved to Lead Pipeline."}

@@ -11,21 +11,18 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
     # Base condition for data isolation
-    # Handle cases where user_id might be 'admin' or an empty string from headers
-    if user_id == "admin":
-        user_id = "1"
-    
-    where_clause = "WHERE user_id = %s" if user_id and user_id.strip() else "WHERE user_id IS NULL"
-    params = (user_id,) if user_id and user_id.strip() else ()
+    # 'admin' literal header → sees ALL data (no user filter)
+    is_admin = (str(user_id or '').lower() == 'admin')
 
-    # Hotpatch: Auto-link leads with missing office names that belong to user_id=1 for specific common offices
-    # This solves the immediate visibility issue for the user's recent search
-    cur.execute("""
-        UPDATE leads_raw 
-        SET family_office_name = 'Samsung Biologics' 
-        WHERE user_id = 1 AND family_office_name IS NULL AND company_name ILIKE '%Samsung%'
-    """)
-    conn.commit()
+    if is_admin:
+        where_clause = "WHERE 1=1"
+        params = ()
+    elif user_id and user_id.strip():
+        where_clause = "WHERE user_id = %s"
+        params = (user_id,)
+    else:
+        where_clause = "WHERE user_id IS NULL"
+        params = ()
 
     # Exclude bulk/csv_import sources from total_leads and pending counts
     leads_filter = "AND (source IS NULL OR source NOT IN ('bulk', 'csv_import'))"
@@ -48,13 +45,23 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
     cur.execute(f"SELECT COUNT(*) as refined FROM leads_raw {where_clause} AND email_draft IS NOT NULL {leads_filter}", params)
     refined = cur.fetchone()['refined'] or 0
 
-    # Company Registry Count
-    cur.execute("SELECT COUNT(*) as total FROM company_registry")
+    # Company Registry Count — scoped to the logged-in user
+    if is_admin:
+        cur.execute("SELECT COUNT(*) as total FROM company_registry")
+    elif user_id and user_id.strip():
+        cur.execute("SELECT COUNT(*) as total FROM company_registry WHERE user_id = %s", (user_id,))
+    else:
+        cur.execute("SELECT COUNT(*) as total FROM company_registry WHERE user_id IS NULL")
     total_companies = cur.fetchone()['total'] or 0
     
     # Engagement Pulse - Joining with campaigns to ensure user-isolation
     events_join = "JOIN campaigns c ON ce.campaign_id = c.id"
-    events_where = "WHERE c.user_id = %s" if user_id else "WHERE c.user_id IS NULL"
+    if is_admin:
+        events_where = "WHERE 1=1"
+    elif user_id and user_id.strip():
+        events_where = "WHERE c.user_id = %s"
+    else:
+        events_where = "WHERE c.user_id IS NULL"
     
     cur.execute(f"SELECT COUNT(DISTINCT ce.recipient_id) as opens FROM campaign_events ce {events_join} {events_where} AND ce.event_type = 'OPEN'", params)
     unique_opens = cur.fetchone()['opens'] or 0

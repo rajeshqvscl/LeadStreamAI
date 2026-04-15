@@ -93,7 +93,8 @@ def get_leads(
     
     # Re-standardize user_id for private pipeline filtering
     uid = normalize_user_id(user_id)
-    is_admin = (str(user_id).lower() == 'admin' or str(user_id) == '1')
+    # Only treat as admin if the header literal value is 'admin' — numeric ids always filter by owner
+    is_admin = (str(user_id).lower() == 'admin')
 
     if is_admin:
         pass  # Admin sees all leads
@@ -191,9 +192,6 @@ def get_leads(
     query += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
     params.extend([per_page, (page - 1) * per_page])
     cur.execute(query, tuple(params))
-    leads = cur.fetchall()
-    
-    cur.execute(query, tuple(params))
     rows = cur.fetchall()
     
     cur.close()
@@ -251,12 +249,19 @@ def get_leads(
 
 @router.get("/leads/{lead_id}")
 def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Retrieves full details for a single lead. Access is open to all authenticated users."""
+    """Retrieves full details for a single lead, scoped to the requesting user."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    # Universal access - no user_id filtering for detail view
-    cur.execute("SELECT * FROM leads_raw WHERE id = %s", (lead_id,))
+    uid = normalize_user_id(user_id)
+    is_admin = (str(user_id).lower() == 'admin')
+
+    if is_admin:
+        cur.execute("SELECT * FROM leads_raw WHERE id = %s", (lead_id,))
+    elif uid:
+        cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (lead_id, uid))
+    else:
+        cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (lead_id,))
         
     row = cur.fetchone()
     cur.close()
@@ -369,17 +374,25 @@ class UpdateLeadRequest(BaseModel):
 
 @router.patch("/leads/{lead_id}")
 def update_lead(lead_id: int, req: UpdateLeadRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Updates specific lead fields (draft, remarks, etc.)."""
+    """Updates specific lead fields (draft, remarks, etc.) — scoped to the requesting user."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    # Verify existence
-    cur.execute("SELECT id FROM leads_raw WHERE id = %s", (lead_id,))
+    uid = normalize_user_id(user_id)
+    is_admin = (str(user_id).lower() == 'admin')
+
+    # Verify existence and ownership
+    if is_admin:
+        cur.execute("SELECT id FROM leads_raw WHERE id = %s", (lead_id,))
+    elif uid:
+        cur.execute("SELECT id FROM leads_raw WHERE id = %s AND user_id = %s", (lead_id, uid))
+    else:
+        cur.execute("SELECT id FROM leads_raw WHERE id = %s AND user_id IS NULL", (lead_id,))
     lead = cur.fetchone()
     if not lead:
         cur.close()
         conn.close()
-        return JSONResponse({"detail": "Lead not found"}, status_code=404)
+        return JSONResponse({"detail": "Lead not found or access denied"}, status_code=404)
         
     update_data = req.model_dump(exclude_unset=True)
     if not update_data:

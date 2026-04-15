@@ -384,9 +384,9 @@ const EditEmail = () => {
               <div className="grid grid-cols-[120px_1fr] items-center text-[11px]">
                 <span className="text-[#64748b] font-medium">Status</span>
                 <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-[1px] bg-transparent w-max ${draft.email_status === 'SENT' || draft.email_status === 'APPROVED' ? 'text-[#10b981]' :
-                    draft.email_status === 'REJECTED' || draft.email_status === 'FAILED' ? 'text-red-500' :
-                      draft.email_status === 'SCHEDULED' ? 'text-blue-400' :
-                        'text-amber-500'
+                  draft.email_status === 'REJECTED' || draft.email_status === 'FAILED' ? 'text-red-500' :
+                    draft.email_status === 'SCHEDULED' ? 'text-blue-400' :
+                      'text-amber-500'
                   }`}>
                   {draft.email_status || 'PENDING APPROVAL'}
                   {draft.email_status === 'SCHEDULED' && draft.scheduled_at && ` (For ${new Date(draft.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })})`}
