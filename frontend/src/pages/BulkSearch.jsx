@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Rocket, Loader2, CheckCircle, AlertCircle, Database, Filter, MapPin, Building2, Tag, ChevronLeft, ChevronRight, User, FileText, Trash2, Check, Sparkles, FileSpreadsheet, Download, Pencil } from 'lucide-react';
+import { Search, Rocket, Loader2, CheckCircle, AlertCircle, Database, Filter, MapPin, Building2, Tag, ChevronLeft, ChevronRight, User, FileText, Trash2, Check, Sparkles, FileSpreadsheet, Download, Pencil, ShieldAlert } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { useNavigate } from 'react-router-dom';
@@ -21,6 +21,8 @@ const BulkSearch = () => {
 
   const [syncMode, setSyncMode] = useState('rocketreach'); // 'rocketreach' or 'spreadsheet'
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [isRequestingAccess, setIsRequestingAccess] = useState(false);
   const [lastFetched, setLastFetched] = useState(null);
 
   // Confirm Dialog State
@@ -349,23 +351,29 @@ const BulkSearch = () => {
         fetchBulkLeads(1); // Refresh table with newest results
       }
     } catch (err) {
-      const isUnauthorized = err.response?.status === 403;
-      if (isUnauthorized) {
-        showNotification('error', 'Access denied. An approval email has been sent to the administrator.');
-        const userStr = localStorage.getItem('user');
-        if (userStr) {
-          try {
-            const user = JSON.parse(userStr);
-            api.post('/api/auth/request-access', { user_id: user.id });
-          } catch (e) {
-            console.error("Failed to auto-send auth request", e);
-          }
-        }
+      if (err.response?.status === 403) {
+        setShowApprovalModal(true);
       } else {
         showNotification('error', 'Extraction failed: ' + (err.response?.data?.detail || err.message));
       }
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleRequestAccess = async () => {
+    setIsRequestingAccess(true);
+    try {
+      const userStr = localStorage.getItem('user');
+      if (!userStr) throw new Error("User session not found");
+      const user = JSON.parse(userStr);
+      await api.post('/api/auth/request-access', { user_id: user.id });
+      showNotification('success', 'Access request dispatched to administrator.');
+      setShowApprovalModal(false);
+    } catch (err) {
+      showNotification('error', 'Failed to send request');
+    } finally {
+      setIsRequestingAccess(false);
     }
   };
 
@@ -909,6 +917,49 @@ const BulkSearch = () => {
                   Confirm
                 </button>
               </div>
+            </div>
+          </div>
+        </>
+      )}
+      {/* Approval Required Modal */}
+      {showApprovalModal && (
+        <>
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[5000] animate-in fade-in duration-300" onClick={() => setShowApprovalModal(false)}></div>
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-[#0d1117] border border-white/10 rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)] z-[5001] animate-in zoom-in-95 duration-300 overflow-hidden">
+            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600"></div>
+            <div className="p-8 text-center">
+              <div className="w-20 h-20 bg-blue-600/10 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-inner border border-blue-500/20">
+                <ShieldAlert className="w-10 h-10 text-blue-500" />
+              </div>
+              <h2 className="text-2xl font-black text-white mb-2 tracking-tight">Access Required</h2>
+              <p className="text-slate-400 text-sm leading-relaxed mb-8">
+                To maintain system security and optimize credit usage, the <span className="text-blue-400 font-bold">Lead Discovery & Extraction Engine</span> requires a fresh administrator approval for every session.
+              </p>
+              
+              <div className="space-y-3">
+                <button
+                  onClick={handleRequestAccess}
+                  disabled={isRequestingAccess}
+                  className="w-full py-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs uppercase tracking-widest transition-all shadow-[0_0_20px_rgba(37,99,235,0.3)] flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isRequestingAccess ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Rocket className="w-4 h-4" />
+                  )}
+                  {isRequestingAccess ? 'Requesting Access...' : 'Request Discovery Access'}
+                </button>
+                <button
+                  onClick={() => setShowApprovalModal(false)}
+                  className="w-full py-4 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 font-bold text-xs uppercase tracking-widest transition-colors border border-white/5"
+                >
+                  Cancel
+                </button>
+              </div>
+              
+              <p className="text-[10px] text-slate-500 font-medium mt-8 uppercase tracking-widest">
+                Admin will receive an instant priority notification
+              </p>
             </div>
           </div>
         </>

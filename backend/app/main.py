@@ -8,7 +8,6 @@ env_path = Path(__file__).resolve().parent / ".env"
 load_dotenv(dotenv_path=env_path)
 # Reload trigger
 
-from app.api import ingest, drafts, dashboard, leads, auth, family_offices, campaigns, users, prompts, admin, companies
 from app.database import create_tables
 from contextlib import asynccontextmanager
 import asyncio
@@ -60,7 +59,7 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-from app.api import ingest, drafts, dashboard, leads, auth, family_offices, campaigns, metrics, users, prompts, admin
+from app.api import ingest, drafts, dashboard, leads, auth, family_offices, campaigns, metrics, users, prompts, admin, companies
 
 app.include_router(ingest.router, prefix="/api")
 app.include_router(drafts.router, prefix="/api")

@@ -3,8 +3,7 @@ from app.database import get_db_connection
 import json
 
 
-def insert_lead(first_name, last_name, email, domain, linkedin, company, source, payload, fit_score=0, persona="OTHER", phone=None, user_id=None):
-
+def insert_lead(first_name, last_name, email, domain, linkedin, company, source, payload, fit_score=0, persona="OTHER", phone=None, user_id=None, user_name=None):
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -26,11 +25,10 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
     # Convert empty linkedin_url to NULL so the unique constraint allows multiple blank entries
     linkedin = linkedin if linkedin and str(linkedin).strip() else None
 
-    cur.execute(
-        """
+    update_query = """
         INSERT INTO leads_raw
-        (first_name, last_name, email, domain, linkedin_url, company_name, source, raw_payload, fit_score, persona, phone, user_id, designation)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        (first_name, last_name, email, domain, linkedin_url, company_name, source, raw_payload, fit_score, persona, phone, user_id, user_name, designation)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (email, COALESCE(user_id, -1)) DO UPDATE SET
             first_name = EXCLUDED.first_name,
             last_name = EXCLUDED.last_name,
@@ -43,25 +41,15 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
             persona = EXCLUDED.persona,
             phone = EXCLUDED.phone,
             user_id = EXCLUDED.user_id,
+            user_name = COALESCE(EXCLUDED.user_name, leads_raw.user_name),
             designation = EXCLUDED.designation,
             created_at = CURRENT_TIMESTAMP
-        """,
-        (
-            first_name,
-            last_name,
-            email,
-            domain,
-            linkedin,
-            company,
-            source,
-            json.dumps(payload),
-            fit_score,
-            persona,
-            phone,
-            user_id,
-            designation
-        )
-    )
+    """
+    
+    cur.execute(update_query, (
+        first_name, last_name, email, domain, linkedin, company, source, 
+        json.dumps(payload), fit_score, persona, phone, user_id, user_name, designation
+    ))
 
 
     conn.commit()
@@ -115,12 +103,16 @@ def update_lead(lead_id, data):
     conn.close()
     return True
 
-def add_activity_log(lead_id, action, details=None, performed_by='system', user_id=None):
+def add_activity_log(lead_id, action, details=None, performed_by='system', user_id=None, user_name=None):
     conn = get_db_connection()
     cur = conn.cursor()
+    
+    # If user_name is not provided but user_id is, try to fetch it if it's cheap (optional optimization)
+    # For now, we assume the caller provides it for efficiency.
+    
     cur.execute(
-        "INSERT INTO activity_log (lead_id, action, details, performed_by, user_id) VALUES (%s, %s, %s, %s, %s)",
-        (lead_id, action, details, performed_by, user_id)
+        "INSERT INTO activity_log (lead_id, action, details, performed_by, user_id, user_name) VALUES (%s, %s, %s, %s, %s, %s)",
+        (lead_id, action, details, performed_by, user_id, user_name)
     )
 
     conn.commit()

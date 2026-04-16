@@ -31,9 +31,35 @@ const Layout = () => {
         console.error('Failed to fetch topbar stats', err);
       }
     };
+
+    const fetchStatus = async () => {
+      try {
+        const { data } = await import('../services/api').then(m => m.default.get('/api/auth/me'));
+        if (data) {
+          // Update localStorage to keep status in sync across the app
+          const localUser = JSON.parse(localStorage.getItem('user') || '{}');
+          const updatedUser = { ...localUser, ...data };
+          localStorage.setItem('user', JSON.stringify(updatedUser));
+          
+          // Trigger a re-render if needed by force-updating the user variable logic
+          // (Since 'user' is re-read on every render from localStorage, we just need to trigger a state update)
+          setTotalLeads(prev => prev); // Small hack to trigger render cycle
+        }
+      } catch (err) {
+        console.error('Failed to poll user status', err);
+      }
+    };
+
     fetchStats();
-    const interval = setInterval(fetchStats, 10000); // Pulse every 10s
-    return () => clearInterval(interval);
+    fetchStatus();
+    
+    const statsInterval = setInterval(fetchStats, 15000);
+    const statusInterval = setInterval(fetchStatus, 12000); // Poll status every 12s
+    
+    return () => {
+      clearInterval(statsInterval);
+      clearInterval(statusInterval);
+    };
   }, []);
 
   const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -117,25 +143,40 @@ const Layout = () => {
         </div>
 
         <div className="mt-auto p-3.5 border-t border-[#ffffff15] shrink-0 absolute bottom-0 left-0 w-[240px] bg-[#0e121d]">
-          <div className="bg-[#151a26] rounded-lg p-3">
-            <div className="text-[9px] font-semibold uppercase tracking-[0.8px] text-[#64748b] mb-0.5">Logged in as</div>
-            <div className="text-[12px] font-semibold text-white mb-2">
-              {user.full_name || 'Admin'}
+          <div className="bg-[#151a26] rounded-xl p-3 border border-white/5">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[9px] font-bold uppercase tracking-[0.8px] text-[#64748b]">Account Status</div>
+              {user.is_approved ? (
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+                  <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></div>
+                  <span className="text-[8px] font-black text-emerald-500 uppercase tracking-tighter">Active</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20">
+                  <div className="w-1 h-1 rounded-full bg-amber-500"></div>
+                  <span className="text-[8px] font-black text-amber-500 uppercase tracking-tighter">Locked</span>
+                </div>
+              )}
             </div>
-            <div className="flex items-center justify-between mt-2">
-              <span className="inline-flex items-center px-2.5 py-1 rounded-[4px] text-[9px] font-bold uppercase tracking-[0.5px] bg-blue-500/15 text-blue-500">
+            
+            <div className="text-[12px] font-bold text-white mb-3 truncate">
+              {user.full_name || user.username || 'Administrator'}
+            </div>
+            
+            <div className="flex items-center justify-between">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-[4px] text-[8px] font-black uppercase tracking-[1px] bg-indigo-500/15 text-indigo-400 border border-indigo-500/20">
                 {user.role || 'ADMIN'}
               </span>
               <button 
                 onClick={async () => { 
-                  try { await api.post('/api/auth/logout'); } catch (e) { console.error(e); } 
+                  try { await import('../services/api').then(m => m.default.post('/api/auth/logout')); } catch (e) { console.error(e); } 
                   localStorage.removeItem('token'); 
                   localStorage.removeItem('user'); 
                   localStorage.removeItem('token_admin'); 
                   localStorage.removeItem('user_admin'); 
                   window.location.href = '/login?logout=success';
                 }} 
-                className="text-[11px] text-[#f43f5e] font-semibold transition-colors hover:text-rose-400 cursor-pointer"
+                className="text-[10px] text-[#f43f5e] font-bold transition-all hover:text-rose-400 cursor-pointer hover:translate-x-0.5"
               >
                 Logout →
               </button>

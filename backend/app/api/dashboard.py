@@ -54,14 +54,14 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         cur.execute("SELECT COUNT(*) as total FROM company_registry WHERE user_id IS NULL")
     total_companies = cur.fetchone()['total'] or 0
     
-    # Engagement Pulse - Joining with campaigns to ensure user-isolation
-    events_join = "JOIN campaigns c ON ce.campaign_id = c.id"
+    # Engagement Pulse - Joining with leads_raw to ensure user-isolation
+    events_join = "JOIN leads_raw l ON ce.recipient_id = l.id"
     if is_admin:
         events_where = "WHERE 1=1"
     elif user_id and user_id.strip():
-        events_where = "WHERE c.user_id = %s"
+        events_where = "WHERE l.user_id = %s"
     else:
-        events_where = "WHERE c.user_id IS NULL"
+        events_where = "WHERE l.user_id IS NULL"
     
     cur.execute(f"SELECT COUNT(DISTINCT ce.recipient_id) as opens FROM campaign_events ce {events_join} {events_where} AND ce.event_type = 'OPEN'", params)
     unique_opens = cur.fetchone()['opens'] or 0

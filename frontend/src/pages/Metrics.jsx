@@ -5,22 +5,63 @@ import api from '../services/api';
 const Metrics = () => {
   const [data, setData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [users, setUsers] = useState([]);
+  const [selectedUserId, setSelectedUserId] = useState('all');
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [dispatchStatus, setDispatchStatus] = useState(null);
 
   useEffect(() => {
-    const fetchMetrics = async () => {
+    const fetchUsers = async () => {
       try {
-        const response = await api.get('/api/metrics');
-        setData(response.data);
+        const response = await api.get('/api/users/');
+        setUsers(response.data.users || []);
       } catch (err) {
-        console.error('Failed to fetch metrics', err);
-      } finally {
-        setIsLoading(false);
+        console.error('Failed to fetch users', err);
       }
     };
-    fetchMetrics();
-    const interval = setInterval(fetchMetrics, 30000);
-    return () => clearInterval(interval);
+    fetchUsers();
   }, []);
+
+  const fetchMetrics = async () => {
+    setIsLoading(true);
+    try {
+      const params = {};
+      const headers = {};
+      if (selectedUserId !== 'all') {
+        headers['X-User-Id'] = selectedUserId;
+      }
+      const response = await api.get('/api/metrics', { headers });
+      setData(response.data);
+    } catch (err) {
+      console.error('Failed to fetch metrics', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMetrics();
+    const interval = setInterval(fetchMetrics, 60000);
+    return () => clearInterval(interval);
+  }, [selectedUserId]);
+
+  const handleDispatchReport = async () => {
+    setIsDispatching(true);
+    setDispatchStatus(null);
+    try {
+      const payload = {};
+      if (selectedUserId !== 'all') {
+        payload.target_user_id = parseInt(selectedUserId);
+      }
+      const response = await api.post('/api/users/report', payload);
+      setDispatchStatus({ type: 'success', message: response.data.message });
+      setTimeout(() => setDispatchStatus(null), 5000);
+    } catch (err) {
+      setDispatchStatus({ type: 'error', message: 'Failed to dispatch report' });
+    } finally {
+      setIsDispatching(false);
+    }
+  };
 
   if (isLoading || !data) {
     return (
@@ -81,7 +122,42 @@ const Metrics = () => {
             Refresh Data
           </button>
         </div>
+      </div>      {/* Team Intelligence & Dispatch Toolbar */}
+      <div className="bg-slate-900/40 border border-white/5 rounded-xl p-4 mb-8 flex flex-wrap items-center justify-between gap-6 backdrop-blur-md shadow-xl">
+        <div className="flex items-center gap-6">
+          <div className="flex flex-col gap-1">
+            <span className="text-[9px] font-black text-slate-500 tracking-[1.5px] uppercase">Intelligence Scope</span>
+            <select 
+              value={selectedUserId}
+              onChange={(e) => setSelectedUserId(e.target.value)}
+              className="bg-slate-950 border border-white/10 rounded-lg px-4 py-2 text-sm font-bold text-white focus:outline-none focus:border-blue-500/50 transition-all min-w-[200px]"
+            >
+              <option value="all">🌐 Full System Analytics</option>
+              {users.map(u => (
+                <option key={u.id} value={u.id}>👤 {u.full_name || u.username}</option>
+              ))}
+            </select>
+          </div>
+          <div className="h-10 w-px bg-white/10 hidden sm:block"></div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[9px] font-black text-slate-500 tracking-[1.5px] uppercase">MIS Management</span>
+            <button
+              onClick={handleDispatchReport}
+              disabled={isDispatching}
+              className={`flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${isDispatching ? 'bg-slate-800 text-slate-500' : 'bg-emerald-600/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-600 hover:text-white cursor-pointer hover:shadow-[0_0_20px_rgba(16,185,129,0.2)]'}`}
+            >
+              {isDispatching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '📧 Dispatch MIS to Email'}
+            </button>
+          </div>
+        </div>
+
+        {dispatchStatus && (
+          <div className={`px-4 py-2 rounded-lg text-[10px] font-bold animate-in slide-in-from-right-4 ${dispatchStatus.type === 'success' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/20 text-rose-400 border border-rose-500/20'}`}>
+            {dispatchStatus.message}
+          </div>
+        )}
       </div>
+
 
       {/* Top Stats Row */}
       <div className="flex gap-4 mb-6">

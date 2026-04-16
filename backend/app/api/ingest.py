@@ -87,7 +87,7 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cur.execute("SELECT is_approved, is_active, credits_used, COALESCE(credits_limit, 200) as c_limit, role FROM users WHERE id = %s", (user_id,))
+        cur.execute("SELECT is_approved, is_active, credits_used, COALESCE(credits_limit, 200) as c_limit, role, full_name, username FROM users WHERE id = %s", (user_id,))
         user_record = cur.fetchone()
         cur.close()
         conn.close()
@@ -95,15 +95,24 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
         if not user_record:
             raise HTTPException(status_code=401, detail="User account not found.")
         
-        is_admin_user = user_record['role'] == 'ADMIN' or str(user_id).lower() == 'admin'
+        # Strictly enforce discovery approval for ALL users (including admins if requested)
+        if not user_record['is_active']:
+            raise HTTPException(status_code=403, detail="Your account is deactivated.")
+        if not user_record['is_approved']:
+            raise HTTPException(status_code=403, detail="Discovery access pending approval.")
         
-        if not is_admin_user:
-            if not user_record['is_active']:
-                raise HTTPException(status_code=403, detail="Your account is deactivated.")
-            if not user_record['is_approved']:
-                raise HTTPException(status_code=403, detail="Discovery access pending approval.")
-            if user_record['credits_used'] >= user_record['c_limit']:
-                raise HTTPException(status_code=402, detail=f"Discovery quota exceeded ({user_record['c_limit']} leads).")
+        user_name = user_record['full_name'] or user_record['username'] or "User"
+        
+        # Enforce Credit Limit (Strict 200 leads as requested)
+        # Even admins are now capped to ensure usage visibility
+        current_usage = user_record['credits_used'] or 0
+        limit = user_record['c_limit'] or 200
+        
+        if current_usage >= limit:
+            raise HTTPException(
+                status_code=402, 
+                detail=f"RocketReach Discovery Limit Reached ({current_usage}/{limit}). Please contact the system administrator to reset your search quota."
+            )
     except HTTPException: raise
     except Exception as e:
         logger.error("auth_check_failed", error=str(e))
@@ -171,7 +180,8 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
                     fit_score=fit_score,
                     persona=persona,
                     phone=lead.get("phone"),
-                    user_id=user_id
+                    user_id=user_id,
+                    user_name=user_name
                 )
                 inserted += 1
             except Exception as e:
@@ -186,15 +196,17 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
                 add_activity_log(None, "BULK_INGESTION", details, "admin", user_id=user_id)
             except: pass
 
-        if len(leads) > 0 and user_id and str(user_id).lower() != "admin":
+        if len(leads) > 0 and user_id:
             try:
                 from app.database import get_db_connection
                 c_conn = get_db_connection()
                 ccc = c_conn.cursor()
+                # Unified credit increment for all users (including admins)
                 ccc.execute("UPDATE users SET credits_used = COALESCE(credits_used, 0) + %s WHERE id = %s", (len(leads), user_id))
                 c_conn.commit()
                 ccc.close()
                 c_conn.close()
+                logger.info("credits_incremented", user_id=user_id, count=len(leads))
             except Exception as metric_err:
                 logger.error("rocketreach_credits_metric_failed", error=str(metric_err))
 

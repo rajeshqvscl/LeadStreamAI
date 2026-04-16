@@ -280,3 +280,87 @@ def check_scheduled_emails():
         conn.close()
     except Exception as e:
         logger.error(f"Error in check_scheduled_emails: {str(e)}")
+def send_admin_report(to_email: str, report_data: dict) -> bool:
+    """
+    Formulates and sends a high-level MIS (Management Information System) report
+    to the administrator, detailing user productivity and system signals.
+    """
+    user_stats = report_data.get("user_stats", [])
+    recent_logs = report_data.get("recent_logs", [])
+    target_user = report_data.get("target_user", "All Team Members")
+    
+    stats_rows = ""
+    for user in user_stats:
+        stats_rows += f"""
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="padding: 12px; font-size: 14px; color: #1e293b; font-weight: 600;">{user['username']}</td>
+            <td style="padding: 12px; font-size: 14px; color: #475569; text-align: center;">{user['leads_count']}</td>
+            <td style="padding: 12px; font-size: 14px; color: #475569; text-align: center;">{user['sent_count']}</td>
+            <td style="padding: 12px; font-size: 14px; color: #6366f1; text-align: right; font-weight: bold;">{user['total_count']}</td>
+        </tr>
+        """
+
+    subject = f"📊 MIS Activity Report: {target_user}"
+    html_content = f"""
+    <div style="font-family: sans-serif; max-width: 700px; margin: auto; padding: 30px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+            <h2 style="color: #1e293b; margin: 0;">Management Information System</h2>
+            <span style="background-color: #f1f5f9; color: #64748b; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold;">{report_data.get('environment', 'Production')}</span>
+        </div>
+        
+        <p style="color: #64748b; font-size: 14px; margin-bottom: 25px;">
+            Activity report generated for <strong>{target_user}</strong> for the period ending {datetime.now().strftime('%Y-%m-%d %H:%M')}.
+        </p>
+
+        <h3 style="color: #475569; font-size: 16px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">User Performance Data</h3>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 30px;">
+            <thead style="background-color: #f8fafc;">
+                <tr>
+                    <th style="padding: 12px; text-align: left; font-size: 11px; text-transform: uppercase; color: #94a3b8;">User</th>
+                    <th style="padding: 12px; text-align: center; font-size: 11px; text-transform: uppercase; color: #94a3b8;">Leads Found</th>
+                    <th style="padding: 12px; text-align: center; font-size: 11px; text-transform: uppercase; color: #94a3b8;">Outreach</th>
+                    <th style="padding: 12px; text-align: right; font-size: 11px; text-transform: uppercase; color: #94a3b8;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {stats_rows if stats_rows else '<tr><td colspan="4" style="padding: 20px; text-align: center; color: #94a3b8;">No activity recorded in target period.</td></tr>'}
+            </tbody>
+        </table>
+
+        <div style="background-color: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #f1f5f9;">
+            <h4 style="margin-top: 0; color: #1e293b; font-size: 14px;">Report Summary</h4>
+            <ul style="margin-bottom: 0; color: #475569; font-size: 13px; line-height: 1.6;">
+                <li><strong>Scope:</strong> {target_user} detailed performance audit.</li>
+                <li><strong>Status:</strong> System operating within normal parameters.</li>
+                <li><strong>Ingestion Velocity:</strong> {sum(u.get('leads_count', 0) or 0 for u in user_stats)} records processed.</li>
+            </ul>
+        </div>
+
+        <p style="text-align: center; margin-top: 40px; color: #94a3b8; font-size: 11px;">
+            This is an automated system report from LeadStreamAI. 
+            <br> Do not reply to this email.
+        </p>
+    </div>
+    """
+
+    # Get admin recipients
+    from app.database import get_db_connection
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT email FROM users WHERE role = 'ADMIN' LIMIT 1")
+    admin = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not admin:
+        logger.error("No admin found to receive MIS report.")
+        return False
+
+    return send_email(
+        to_email=to_email or admin['email'],
+        subject=subject,
+        html_content=html_content,
+        from_email=os.getenv("SMTP_USER", admin['email']),
+        from_name="LeadStream Intelligence",
+        is_system_email=True
+    )

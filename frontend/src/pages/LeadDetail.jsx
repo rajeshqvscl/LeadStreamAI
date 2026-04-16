@@ -397,9 +397,24 @@ const LeadDetail = () => {
         <div className="lg:col-span-2 space-y-6">
           {/* Edit Profile Card */}
           <div className="bg-[#131722] border border-[#ffffff08] rounded-[16px] overflow-hidden">
-            <div className="px-6 py-5 flex items-center gap-2 border-b border-transparent">
-              <span className="text-amber-500 text-sm">✏️</span>
-              <h3 className="text-[13px] font-bold text-slate-300 tracking-wide">Edit Lead</h3>
+            <div className="px-6 py-5 flex items-center justify-between border-b border-[#ffffff08]">
+              <div className="flex items-center gap-2">
+                <span className="text-amber-500 text-sm">✏️</span>
+                <h3 className="text-[13px] font-bold text-slate-300 tracking-wide">Edit Lead Profile</h3>
+              </div>
+              <button
+                type="button"
+                onClick={handleUpdate}
+                disabled={isSaving}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[11px] font-bold transition-all ${
+                  isDirty 
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20' 
+                    : 'bg-white/5 text-slate-500 cursor-not-allowed border border-white/5'
+                }`}
+              >
+                {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                {isSaving ? 'Saving...' : 'Save Profile'}
+              </button>
             </div>
             <div className="p-6 pt-0">
               <form onSubmit={handleUpdate} className="space-y-4">
@@ -413,6 +428,7 @@ const LeadDetail = () => {
                       onChange={(e) => {
                         const parts = e.target.value.split(' ');
                         setForm(prev => ({ ...prev, first_name: parts[0] || '', last_name: parts.slice(1).join(' ') || '' }));
+                        setIsDirty(true);
                       }}
                       className="w-full bg-[#0f121b] border border-[#ffffff08] rounded-md px-3 py-2.5 text-white text-[11px] font-medium focus:border-blue-500/50 outline-none transition-colors"
                     />
@@ -486,14 +502,14 @@ const LeadDetail = () => {
                   <CustomDropdown
                     label="City (Scroll List)"
                     value={form.city}
-                    onChange={(val) => setForm(prev => ({ ...prev, city: val }))}
+                    onChange={(val) => { setForm(prev => ({ ...prev, city: val })); setIsDirty(true); }}
                     options={CITY_OPTIONS}
                     placeholder="Select City"
                   />
                   <CustomDropdown
                     label="Country (Scroll List)"
                     value={form.country}
-                    onChange={(val) => setForm(prev => ({ ...prev, country: val }))}
+                    onChange={(val) => { setForm(prev => ({ ...prev, country: val })); setIsDirty(true); }}
                     options={ALL_COUNTRIES}
                     placeholder="Select Country"
                   />
@@ -501,14 +517,14 @@ const LeadDetail = () => {
 
                 <CampaignField
                   value={form.campaign_id}
-                  onChange={(val) => setForm(prev => ({ ...prev, campaign_id: val }))}
+                  onChange={(val) => { setForm(prev => ({ ...prev, campaign_id: val })); setIsDirty(true); }}
                   options={CAMPAIGN_OPTIONS}
                 />
 
                 <CustomDropdown
                   label="Company (Scroll Options)"
                   value={form.company_name}
-                  onChange={(val) => setForm(prev => ({ ...prev, company_name: val }))}
+                  onChange={(val) => { setForm(prev => ({ ...prev, company_name: val })); setIsDirty(true); }}
                   options={COMPANY_OPTIONS}
                   placeholder="Select Company"
                 />
@@ -518,7 +534,7 @@ const LeadDetail = () => {
                   <CustomDropdown
                     label=""
                     value={form.family_office_name}
-                    onChange={(val) => setForm(prev => ({ ...prev, family_office_name: val }))}
+                    onChange={(val) => { setForm(prev => ({ ...prev, family_office_name: val })); setIsDirty(true); }}
                     options={familyOffices.map(fo => fo.name)}
                     placeholder="None"
                   />

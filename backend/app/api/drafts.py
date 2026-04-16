@@ -88,14 +88,20 @@ def bulk_email_action(req: BulkActionRequest, user_id: Optional[str] = Header(No
         return {"error": str(e)}
 
 def normalize_lead(lead):
+    if not lead:
+        return {}
     if isinstance(lead, dict):
         return lead
-    if isinstance(lead, tuple):
-        return {
-            "first_name": lead[1],
-            "last_name": lead[2],
-            "company_name": lead[3]
-        }
+    # Handle psycopg2 DictRow or actual tuples
+    try:
+        return dict(lead)
+    except (TypeError, ValueError):
+        if isinstance(lead, tuple) and len(lead) >= 4:
+            return {
+                "first_name": lead[1],
+                "last_name": lead[2],
+                "company_name": lead[3]
+            }
     return {}
 
 def get_sender_profile(user_id: Optional[str]) -> dict:
@@ -269,13 +275,17 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
             params.extend([f"%{company}%", f"%{company}%"])
 
         query = f"""
-            SELECT id, first_name, last_name, email, email_draft, email_status, company_name, family_office_name, persona, fit_score, updated_at, email_approved_by, scheduled_at
-            FROM leads_raw 
+            SELECT lr.id, lr.first_name, lr.last_name, lr.email, lr.email_draft, lr.email_status,
+                   lr.company_name, lr.family_office_name, lr.persona, lr.fit_score, lr.updated_at,
+                   lr.email_approved_by, lr.scheduled_at, lr.user_id,
+                   u.full_name as team_member_name, u.username as team_member_username
+            FROM leads_raw lr
+            LEFT JOIN users u ON lr.user_id = u.id
             {where_clause}
-            ORDER BY COALESCE(updated_at, created_at) DESC LIMIT %s OFFSET %s
+            ORDER BY COALESCE(lr.updated_at, lr.created_at) DESC LIMIT %s OFFSET %s
         """
         params.extend([per_page, (page - 1) * per_page])
-        
+
         cur.execute(query, tuple(params))
         rows = cur.fetchall()
         
@@ -327,10 +337,14 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
                 if len(parts) > 1:
                     body = parts[1].strip()
                     
+            # Only use the team member name for metadata, the actual lead name should come from the lead's profile.
+            team_member_name = r.get("team_member_name") or r.get("team_member_username")
+            lead_display_name = f"{r['first_name'] or ''} {r['last_name'] or ''}".strip()
+
             drafts.append({
                 "id": r["id"],
                 "lead_id": r["id"],
-                "lead_name": f"{r['first_name'] or ''} {r['last_name'] or ''}".strip(),
+                "lead_name": lead_display_name if lead_display_name else "Contact",
                 "lead_email": r["email"],
                 "company_name": _company_from_email(r["email"], r["company_name"], r["family_office_name"]),
                 "persona": r["persona"],

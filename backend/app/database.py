@@ -56,7 +56,12 @@ def create_tables():
         family_office_name TEXT,
         labels TEXT[] DEFAULT '{}',
         user_id INTEGER,
+        user_name TEXT,
+        is_unsubscribed BOOLEAN DEFAULT FALSE,
+        manual_entry BOOLEAN DEFAULT FALSE,
+        is_responded BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
         scheduled_at TIMESTAMP
     );
     """)
@@ -81,8 +86,11 @@ def create_tables():
         # Follow-up sequence columns
         ("followup_stage", "INTEGER DEFAULT 0"),
         ("followup_status", "TEXT DEFAULT 'IDLE'"), # IDLE, ACTIVE, COMPLETED, STOPPED
-        ("last_outreach_at", "TIMESTAMP"),
-        ("is_responded", "BOOLEAN DEFAULT FALSE")
+        ("is_responded", "BOOLEAN DEFAULT FALSE"),
+        ("is_unsubscribed", "BOOLEAN DEFAULT FALSE"),
+        ("manual_entry", "BOOLEAN DEFAULT FALSE"),
+        ("remarks", "TEXT"),
+        ("user_name", "TEXT")
     ]
     for col_name, col_type in columns_to_add:
         try:
@@ -132,13 +140,13 @@ def create_tables():
     );
     """)
 
-    # Ensure user_id exists in activity_log
-    try:
-        cur.execute("ALTER TABLE activity_log ADD COLUMN user_id INTEGER;")
-        conn.commit()
-    except psycopg2.Error:
-        conn.rollback()
-
+    # Ensure user_id and user_name exist in activity_log
+    for col, col_type in [("user_id", "INTEGER"), ("user_name", "TEXT")]:
+        try:
+            cur.execute(f"ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS {col} {col_type};")
+            conn.commit()
+        except psycopg2.Error:
+            conn.rollback()
 
     # Campaigns Feature Tables
     cur.execute("""
@@ -155,10 +163,20 @@ def create_tables():
         strategy_prompt TEXT,
         is_active BOOLEAN DEFAULT TRUE,
         target_companies TEXT,
+        user_id INTEGER,
+        user_name TEXT,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
     );
     """)
+
+    # Ensure isolation columns exist in campaigns for existing DBs
+    for col, col_type in [("user_id", "INTEGER"), ("user_name", "TEXT")]:
+        try:
+            cur.execute(f"ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS {col} {col_type};")
+            conn.commit()
+        except psycopg2.Error:
+            conn.rollback()
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS recipients (

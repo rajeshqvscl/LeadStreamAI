@@ -1,0 +1,43 @@
+2026-04-16 11:31:25,539 - INFO - [CREATE] ATTEMPT | UID: 1 | DB: ep-little-term-a1axvptc-pooler.ap-southeast-1.aws.neon.tech/neondb | Email: harshbisht180@gmail.com
+2026-04-16 11:31:26,972 - ERROR - FAIL: Manual lead harshbisht180@gmail.com failed: name 'db_name' is not defined
+2026-04-16 11:32:10,971 - INFO - [CREATE] ATTEMPT | UID: 1 | DB: ep-little-term-a1axvptc-pooler.ap-southeast-1.aws.neon.tech/neondb | Email: harshbisht180@gmail.com
+2026-04-16 11:32:12,364 - INFO - SUCCESS: Manual lead harshbisht180@gmail.com inserted into ep-little-term-a1axvptc-pooler.ap-southeast-1.aws.neon.tech/neondb
+2026-04-16 11:34:35,568 - INFO - [CREATE] ATTEMPT | UID: 1 | DB: ep-little-term-a1axvptc-pooler.ap-southeast-1.aws.neon.tech/neondb | Email: harshbisht180@gmail.com
+2026-04-16 11:34:37,340 - INFO - SUCCESS: Manual lead harshbisht180@gmail.com inserted into ep-little-term-a1axvptc-pooler.ap-southeast-1.aws.neon.tech/neondb
+2026-04-16 11:35:08,057 - INFO - [CREATE] ATTEMPT | UID: 1 | DB: ep-little-term-a1axvptc-pooler.ap-southeast-1.aws.neon.tech/neondb | Email: sravanthi.m@qvscl.com
+2026-04-16 11:35:09,505 - INFO - SUCCESS: Manual lead sravanthi.m@qvscl.com inserted into ep-little-term-a1axvptc-pooler.ap-southeast-1.aws.neon.tech/neondb
+2026-04-16 11:43:39,642 - INFO - [CREATE] ATTEMPT | UID: 1 | DB: ep-little-term-a1axvptc-pooler.ap-southeast-1.aws.neon.tech/neondb | Email: harshbisht180@gmail.com
+2026-04-16 11:43:41,544 - INFO - SUCCESS: Manual lead harshbisht180@gmail.com inserted into ep-little-term-a1axvptc-pooler.ap-southeast-1.aws.neon.tech/neondb
+2026-04-16 11:43:55,865 - INFO - [CREATE] ATTEMPT | UID: 1 | DB: ep-little-term-a1axvptc-pooler.ap-southeast-1.aws.neon.tech/neondb | Email: harshbisht180@gmail.com
+2026-04-16 11:43:57,305 - INFO - SUCCESS: Manual lead harshbisht180@gmail.com inserted into ep-little-term-a1axvptc-pooler.ap-southeast-1.aws.neon.tech/neondb
+2026-04-16 11:44:44,446 - INFO - [CREATE] ATTEMPT | UID: 1 | DB: ep-little-term-a1axvptc-pooler.ap-southeast-1.aws.neon.tech/neondb | Email: harshbisht180@gmail.com
+2026-04-16 11:44:46,524 - INFO - SUCCESS: Manual lead harshbisht180@gmail.com inserted into ep-little-term-a1axvptc-pooler.ap-southeast-1.aws.neon.tech/neondb
+2026-04-16 11:49:20,982 - INFO - [CREATE] ATTEMPT | UID: 1 | DB: ep-little-term-a1axvptc-pooler.ap-southeast-1.aws.neon.tech/neondb | Email: harshbisht180@gmail.com
+2026-04-16 11:49:22,426 - INFO - SUCCESS: Manual lead harshbisht180@gmail.com inserted into ep-little-term-a1axvptc-pooler.ap-southeast-1.aws.neon.tech/neondb
+2026-04-16 11:50:03,961 - INFO - [CREATE] ATTEMPT | UID: 2 | DB: ep-little-term-a1axvptc-pooler.ap-southeast-1.aws.neon.tech/neondb | Email: harshbisht180@gmail.com
+2026-04-16 11:50:05,366 - INFO - SUCCESS: Manual lead harshbisht180@gmail.com inserted into ep-little-term-a1axvptc-pooler.ap-southeast-1.aws.neon.tech/neondb
+2026-04-16 12:03:54,177 - INFO - [CREATE] ATTEMPT | UID: 1 | DB: ep-snowy-dew-a1t9xre3-pooler.ap-southeast-1.aws.neon.tech/neondb | Email: harshbisht180@gmail.com
+2026-04-16 12:03:55,552 - ERROR - FAIL: Manual lead harshbisht180@gmail.com failed: relation "unsubscribe_list" does not exist
+LINE 1: SELECT 1 FROM unsubscribe_list WHERE email = 'harshbisht180@...
+                      ^
+
+2026-04-16 12:04:21,157 - INFO - [CREATE] ATTEMPT | UID: 1 | DB: ep-snowy-dew-a1t9xre3-pooler.ap-southeast-1.aws.neon.tech/neondb | Email: sravnthi.m@qvscl.com
+2026-04-16 12:04:22,562 - ERROR - FAIL: Manual lead sravnthi.m@qvscl.com failed: relation "unsubscribe_list" does not exist
+LINE 1: SELECT 1 FROM unsubscribe_list WHERE email = 'sravnthi.m@qvs...
+                      ^
+
+2026-04-16 12:04:44,703 - INFO - [CREATE] ATTEMPT | UID: 1 | DB: ep-snowy-dew-a1t9xre3-pooler.ap-southeast-1.aws.neon.tech/neondb | Email: harsh.b@qvscl.com
+2026-04-16 12:04:46,121 - ERROR - FAIL: Manual lead harsh.b@qvscl.com failed: relation "unsubscribe_list" does not exist
+LINE 1: SELECT 1 FROM unsubscribe_list WHERE email = 'harsh.b@qvscl....
+                      ^
+
+2026-04-16 12:09:39,046 - INFO - [CREATE] ATTEMPT | UID: 1 | DB: ep-snowy-dew-a1t9xre3-pooler.ap-southeast-1.aws.neon.tech/neondb | Email: harshbisht180@gmail.com
+2026-04-16 12:09:40,574 - ERROR - FAIL: Manual lead harshbisht180@gmail.com failed: column "manual_entry" of relation "leads_raw" does not exist
+LINE 3: ... persona, phone, user_id, user_name, designation, manual_ent...
+                                                             ^
+
+2026-04-16 12:10:08,935 - INFO - [CREATE] ATTEMPT | UID: 1 | DB: ep-snowy-dew-a1t9xre3-pooler.ap-southeast-1.aws.neon.tech/neondb | Email: harshbisht180@gmail.com
+2026-04-16 12:10:10,491 - ERROR - FAIL: Manual lead harshbisht180@gmail.com failed: column "manual_entry" of relation "leads_raw" does not exist
+LINE 3: ... persona, phone, user_id, user_name, designation, manual_ent...
+                                                             ^
+

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Rocket, Search, ChevronDown, CheckCircle, Mail, User, Linkedin,
   Loader2, Sparkles, Tag, Plus, ChevronRight, X, AlertTriangle, AlertCircle,
-  ChevronLeft, ChevronUp, FileSpreadsheet, Download, Trash2, Pencil
+  ChevronLeft, ChevronUp, FileSpreadsheet, Download, Trash2, Pencil, ShieldAlert
 } from 'lucide-react';
 import axios from 'axios';
 import api from '../services/api';
@@ -21,6 +21,8 @@ const Leads = () => {
     country: '',
     city: '',
     company: '',
+    source: '',
+    show_drafted: false,
     show_unsubscribed: false,
   });
 
@@ -28,6 +30,8 @@ const Leads = () => {
   const statuses = ['PENDING', 'VALIDATING', 'VALID', 'INVALID'];
 
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [isRequestingAccess, setIsRequestingAccess] = useState(false);
   const [isBulkActionLoading, setIsBulkActionLoading] = useState(false);
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -112,8 +116,8 @@ const Leads = () => {
         city: filters.city,
         company: filters.company,
         country: filters.country,
-        exclude_drafted: true,
-        source: 'direct',
+        exclude_drafted: !filters.show_drafted,
+        source: filters.source,
       };
       const response = await api.get('/api/leads', { params });
 
@@ -180,18 +184,9 @@ const Leads = () => {
         showNotification('success', `Extraction complete. ${response.data.inserted} new lead(s) added.`);
       }
     } catch (err) {
-      const isUnauthorized = err.response?.status === 403;
-      if (isUnauthorized) {
-        showNotification('error', 'Access denied. An approval email has been sent to the administrator.');
-        const userStr = localStorage.getItem('user');
-        if (userStr) {
-          try {
-            const user = JSON.parse(userStr);
-            await api.post('/api/auth/request-access', { user_id: user.id });
-          } catch (e) {
-            console.error("Failed to auto-send auth request", e);
-          }
-        }
+      if (err.response?.status === 403) {
+        // Show the high-impact approval modal instead of a simple notification
+        setShowApprovalModal(true);
       } else {
         showNotification('error', 'Extraction failed: ' + (err.response?.data?.detail || err.message));
       }
@@ -200,12 +195,29 @@ const Leads = () => {
     }
   };
 
+  const handleRequestAccess = async () => {
+    setIsRequestingAccess(true);
+    try {
+      const userStr = localStorage.getItem('user');
+      if (!userStr) throw new Error("User session not found");
+      const user = JSON.parse(userStr);
+
+      await api.post('/api/auth/request-access', { user_id: user.id });
+      showNotification('success', 'Access request dispatched to administrator.');
+      setShowApprovalModal(false);
+    } catch (err) {
+      showNotification('error', 'Failed to send request: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setIsRequestingAccess(false);
+    }
+  };
+
   const handleCreateManualLead = async (e) => {
     e.preventDefault();
     setIsCreatingLead(true);
     try {
       const response = await api.post('/api/leads', newLeadData);
-      
+
       if (response.data.was_duplicate) {
         showNotification('success', response.data.message, {
           label: 'View Lead',
@@ -214,7 +226,7 @@ const Leads = () => {
       } else {
         showNotification('success', 'Lead created successfully and added to pipeline.');
       }
-      
+
       setShowAddModal(false);
       setNewLeadData({
         first_name: '', last_name: '', email: '', company_name: '',
@@ -564,8 +576,15 @@ const Leads = () => {
             <div className="flex items-center gap-4">
               {lookupMode === 'search' && (
                 <div className="bg-black/30 px-4 py-2 rounded-xl border border-white/5 flex items-center gap-3">
-                  <label className="text-[10px] font-black text-[#475569] uppercase">Limit</label>
-                  <input type="number" name="count" defaultValue="10" min="1" max="100" className="bg-transparent border-none text-white font-black w-8 outline-none text-[15px]" />
+                  <label className="text-[10px] font-black text-[#64748b] uppercase tracking-[1px]">Limit</label>
+                  <input
+                    type="number"
+                    name="count"
+                    defaultValue="5"
+                    min="1"
+                    max="100"
+                    className="bg-white/5 border border-white/10 rounded-lg text-white font-black w-12 h-8 text-center outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all text-[13px]"
+                  />
                 </div>
               )}
               <div className="flex items-center gap-2">
@@ -687,23 +706,41 @@ const Leads = () => {
           </select>
         </div>
 
-        <div className="flex items-center gap-2 px-4">
-          <span className="text-[9px] font-extrabold text-[#475569] uppercase tracking-widest">Location:</span>
+        <div className="flex items-center gap-2 px-4 border-r border-[#ffffff08]">
+          <span className="text-[9px] font-extrabold text-[#475569] uppercase tracking-widest">Source:</span>
           <select
-            name="country"
-            className="bg-transparent text-[#e2e8f0] text-[11px] font-bold outline-none cursor-pointer appearance-none min-w-[60px]"
-            value={filters.country}
+            name="source"
+            className="bg-transparent text-[#e2e8f0] text-[11px] font-bold outline-none cursor-pointer appearance-none min-w-[100px]"
+            value={filters.source}
             onChange={handleFilterChange}
           >
-            <option value="">Global ▼</option>
-            <option value="United States">US</option>
-            <option value="United Kingdom">UK</option>
+            <option value="">All Sources ▼</option>
+            <option value="direct">Direct Discovery</option>
+            <option value="intelligence">Company Intel</option>
+            <option value="bulk">Bulk Search</option>
           </select>
+        </div>
+
+        <div className="flex items-center gap-4 px-4 border-r border-[#ffffff08]">
+          <label className="flex items-center gap-2 cursor-pointer group">
+            <div className="relative">
+              <input
+                type="checkbox"
+                name="show_drafted"
+                checked={filters.show_drafted}
+                onChange={handleFilterChange}
+                className="sr-only"
+              />
+              <div className={`w-8 h-4 rounded-full transition-colors ${filters.show_drafted ? 'bg-blue-600' : 'bg-slate-700'}`}></div>
+              <div className={`absolute left-0.5 top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${filters.show_drafted ? 'translate-x-4' : 'translate-x-0'}`}></div>
+            </div>
+            <span className="text-[9px] font-black text-slate-400 group-hover:text-slate-200 uppercase tracking-widest transition-colors">Include Drafted</span>
+          </label>
         </div>
 
         <div className="flex items-center gap-2 px-4 flex-1 justify-end border-r-0 text-right">
           <button
-            onClick={() => setFilters({ search: '', title: '', company: '', persona: '', status: '', country: '', city: '', show_unsubscribed: false })}
+            onClick={() => setFilters({ search: '', title: '', company: '', persona: '', status: '', country: '', city: '', source: '', show_drafted: false, show_unsubscribed: false })}
             className="flex items-center px-4 py-1.5 bg-[#ffffff05] hover:bg-[#ffffff0a] rounded-lg border border-[#ffffff08] transition-colors text-[10px] font-extrabold text-slate-300 ml-auto"
           >
             Reset
@@ -1208,6 +1245,50 @@ const Leads = () => {
                   Confirm
                 </button>
               </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Approval Required Modal */}
+      {showApprovalModal && (
+        <>
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[5000] animate-in fade-in duration-300" onClick={() => setShowApprovalModal(false)}></div>
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-[#0d1117] border border-white/10 rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)] z-[5001] animate-in zoom-in-95 duration-300 overflow-hidden">
+            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600"></div>
+            <div className="p-8 text-center">
+              <div className="w-20 h-20 bg-blue-600/10 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-inner border border-blue-500/20">
+                <ShieldAlert className="w-10 h-10 text-blue-500" />
+              </div>
+              <h2 className="text-2xl font-black text-white mb-2 tracking-tight">Access Required</h2>
+              <p className="text-slate-400 text-sm leading-relaxed mb-8">
+                To maintain system security and optimize credit usage, the <span className="text-blue-400 font-bold">Lead Discovery & Extraction Engine</span> requires a fresh administrator approval for every session.
+              </p>
+
+              <div className="space-y-3">
+                <button
+                  onClick={handleRequestAccess}
+                  disabled={isRequestingAccess}
+                  className="w-full py-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs uppercase tracking-widest transition-all shadow-[0_0_20px_rgba(37,99,235,0.3)] flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isRequestingAccess ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Rocket className="w-4 h-4" />
+                  )}
+                  {isRequestingAccess ? 'Requesting Access...' : 'Request Discovery Access'}
+                </button>
+                <button
+                  onClick={() => setShowApprovalModal(false)}
+                  className="w-full py-4 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 font-bold text-xs uppercase tracking-widest transition-colors border border-white/5"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              <p className="text-[10px] text-slate-500 font-medium mt-8 uppercase tracking-widest">
+                Admin will receive an instant priority notification
+              </p>
             </div>
           </div>
         </>

@@ -3,10 +3,13 @@ from pydantic import BaseModel
 from typing import List, Optional
 import hashlib
 import os
+import logging
 from app.database import get_db_connection
 import psycopg2
 import psycopg2.extras
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -16,7 +19,7 @@ class UserBase(BaseModel):
     full_name: Optional[str] = None
     role: str = "USER"
     is_active: bool = True
-    is_approved: bool = False
+    is_approved: bool = True
     has_db_access: bool = False
     job_title: Optional[str] = None
     phone: Optional[str] = None
@@ -37,6 +40,9 @@ class UserUpdate(BaseModel):
     phone: Optional[str] = None
     linkedin_url: Optional[str] = None
     password: Optional[str] = None
+
+class ReportRequest(BaseModel):
+    target_user_id: Optional[int] = None
 
 @router.get("/users/")
 def list_users(role: Optional[str] = None):
@@ -266,10 +272,11 @@ def get_active_users(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         conn.close()
 
 @router.post("/users/report")
-def trigger_admin_report(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def trigger_admin_report(req: ReportRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Manually triggers the activity report email to the admin with detailed metrics."""
     from app.services.email_service import send_admin_report
     uid = normalize_user_id(user_id)
+    target_user_id = req.target_user_id
     
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -280,34 +287,52 @@ def trigger_admin_report(user_id: Optional[str] = Header(None, alias="X-User-Id"
         if not admin or admin['role'] != 'ADMIN':
             raise HTTPException(status_code=403, detail="Unauthorized")
 
-        # Aggregate specific user actions (last 24h)
-        cur.execute("""
+        # Determine filtering scope
+        where_filter = ""
+        params = []
+        target_name = "Full System"
+
+        if target_user_id:
+            where_filter = "AND al.user_id = %s"
+            params.append(target_user_id)
+            cur.execute("SELECT username, full_name FROM users WHERE id = %s", (target_user_id,))
+            tu = cur.fetchone()
+            if tu:
+                target_name = tu['full_name'] or tu['username']
+
+        # Aggregate specific user actions (last 30 days for MIS scope)
+        cur.execute(f"""
             SELECT u.username, 
                    COUNT(*) FILTER (WHERE al.action IN ('LEAD_INGESTED', 'BULK_INGESTION')) as leads_count,
                    COUNT(*) FILTER (WHERE al.action IN ('SENT', 'EMAIL_SENT')) as sent_count,
                    COUNT(*) as total_count
             FROM activity_log al
             JOIN users u ON al.user_id = u.id
-            WHERE al.created_at > NOW() - INTERVAL '24 hours'
+            WHERE al.created_at > NOW() - INTERVAL '30 days' {where_filter}
             GROUP BY u.username
-        """)
+        """, params)
         user_stats = [dict(r) for r in cur.fetchall()]
 
-        # Fetch last 10 global actions
-        cur.execute("""
+        # Fetch last 10 actions for this scope
+        cur.execute(f"""
             SELECT u.username, al.action, al.created_at
             FROM activity_log al
             JOIN users u ON al.user_id = u.id
+            WHERE 1=1 {where_filter}
             ORDER BY al.created_at DESC
             LIMIT 10
-        """)
-        recent_logs = [dict(r) for r in cur.fetchall()]
-        for log in recent_logs:
-            log['created_at'] = log['created_at'].isoformat()
+        """, params)
+        recent_logs = []
+        for r in cur.fetchall():
+            log = dict(r)
+            if log.get('created_at'):
+                log['created_at'] = log['created_at'].isoformat()
+            recent_logs.append(log)
         
         report_data = {
             "user_stats": user_stats,
             "recent_logs": recent_logs,
+            "target_user": target_name,
             "environment": os.getenv("ENVIRONMENT", "Production")
         }
         
@@ -316,20 +341,14 @@ def trigger_admin_report(user_id: Optional[str] = Header(None, alias="X-User-Id"
             if success:
                 return {"message": f"System activity report dispatched to {admin['email']}"}
             else:
-                # Resolve the 500 error by returning a 200 with a descriptive warning
-                # This ensures the frontend doesn't show a 'System Crash' when SMTP is just missing
                 return {
-                    "message": "Report generated (Dry Run mode).",
-                    "detail": "SMTP credentials missing in .env. Check server console for report dump.",
-                    "is_dry_run": True
+                    "message": "Report generation bypassed dispatch.",
+                    "detail": "SMTP configuration not found or failed. Check logs.",
+                    "is_warning": True
                 }
-        except HTTPException:
-            raise
         except Exception as e:
-            import traceback
-            print("--- REPORT DISPATCH ERROR ---")
-            print(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=f"Report Pipeline Error: {str(e)}")
+            logger.error(f"Report Dispatch Error: {str(e)}")
+            return {"message": f"Dispatch failure: {str(e)}", "error": True}
     finally:
         cur.close()
         conn.close()

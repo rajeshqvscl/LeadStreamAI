@@ -189,52 +189,73 @@ def generate_company_draft(row_id: int, user_id: Optional[str] = Header(None, al
         if isinstance(data, str):
             data = json.loads(data)
             
-        # Normalize keys for mapping
-        norm = {str(k).lower().replace(" ", "").replace("-", ""): v for k, v in data.items() if v}
+        # Normalize keys for mapping (remove spaces, underscores, and dashes)
+        norm = {str(k).lower().replace(" ", "").replace("-", "").replace("_", ""): v for k, v in data.items() if v}
         
         email = norm.get("email") or norm.get("emailaddress") or norm.get("workemail")
         if not email:
             raise HTTPException(status_code=400, detail="Company record is missing an email address.")
             
-        name = norm.get("teammember") or norm.get("name") or norm.get("fullname") or norm.get("leadname") or f"{norm.get('firstname', '')} {norm.get('lastname', '')}".strip()
-        if not name:
-            name = "Contact"
+        # Robust Name Extraction: Order matters - specific first
+        name = (
+            norm.get("teammember") or 
+            norm.get("name") or 
+            norm.get("fullname") or 
+            norm.get("leadname") or 
+            norm.get("contactname") or
+            norm.get("contact") or
+            norm.get("investor") or
+            norm.get("person") or
+            f"{norm.get('firstname', '')} {norm.get('lastname', '')}".strip()
+        )
+        
+        # If still no name, try to extract it from the email prefix
+        if not name or name.strip() == "":
+            email_prefix = email.split('@')[0]
+            # Handle formats like "john.doe" or "j.doe" or "john_doe"
+            name_guess = email_prefix.replace(".", " ").replace("_", " ").replace("-", " ").title()
+            name = name_guess if name_guess else "Contact"
             
-        company = norm.get("companyname") or norm.get("company") or norm.get("org")
+        company = (
+            norm.get("companyname") or 
+            norm.get("company") or 
+            norm.get("investorname") or
+            norm.get("org") or
+            norm.get("firm") or
+            norm.get("account")
+        )
         
         # Split name for lead insertion
         parts = name.split(" ", 1)
         f_name = parts[0]
         l_name = parts[1] if len(parts) > 1 else ""
         
-        real_uid = normalize_user_id(user_id)
-
-        # Add the lead to the main pipeline (source: direct)
+        # Add the lead to the main pipeline (source: intelligence)
+        sender_name = "the team"
+        if uid:
+            cur.execute("SELECT full_name, username FROM users WHERE id = %s", (uid,))
+            u = cur.fetchone()
+            if u: sender_name = u['full_name'] or u['username']
+            
         insert_lead(
             f_name, l_name, email, "", norm.get("linkedin", ""), 
-            company, "direct", data, user_id=real_uid
+            company, "intelligence", data, user_id=uid, user_name=sender_name
         )
 
-        # Force ownership to the current user (handles cases where lead existed under different user)
-        cur.execute("UPDATE leads_raw SET user_id = %s WHERE email = %s", (real_uid, email))
-        conn.commit()
-
-        # Get the new/updated lead ID
-        cur.execute("SELECT id FROM leads_raw WHERE email = %s ORDER BY created_at DESC LIMIT 1", (email,))
+        # Get the new/updated lead ID - filter by UID for strict isolation
+        cur.execute("SELECT id FROM leads_raw WHERE email = %s AND user_id = %s ORDER BY created_at DESC LIMIT 1", (email, uid))
         lead_row = cur.fetchone()
+        if not lead_row:
+            # Fallback for cases where UID might be NULL
+            cur.execute("SELECT id FROM leads_raw WHERE email = %s ORDER BY created_at DESC LIMIT 1", (email,))
+            lead_row = cur.fetchone()
+            
         if not lead_row:
             raise HTTPException(status_code=500, detail="Lead creation failed — could not retrieve lead ID.")
         lead_id = lead_row[0]
         
         # Generate Draft
         generator = EmailGenerator()
-        # Fetch sender name if possible
-        sender_name = "the team"
-        if user_id:
-            cur.execute("SELECT full_name, username FROM users WHERE id = %s", (real_uid,))
-            u = cur.fetchone()
-            if u: sender_name = u['full_name'] or u['username']
-            
         email_data = generator.generate_email({"first_name": f_name, "last_name": l_name, "company_name": company}, sender_name=sender_name)
         subject = email_data.get("subject", "Following up")
         body = email_data.get("body", "Hello, we would love to connect.")

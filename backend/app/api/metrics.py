@@ -12,9 +12,13 @@ def get_metrics(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    # Base condition
-    where_clause = "WHERE user_id = %s" if user_id else "WHERE user_id IS NULL"
-    params = (user_id,) if user_id else ()
+    # Base condition: If user_id is provided, filter by it. Otherwise show ALL.
+    if user_id and user_id != 'all':
+        where_clause = "WHERE user_id = %s"
+        params = (user_id,)
+    else:
+        where_clause = "WHERE 1=1"
+        params = ()
 
     # Base counts from leads_raw
     cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause}", params)
@@ -32,9 +36,11 @@ def get_metrics(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     cur.execute(f"SELECT COUNT(*) as count FROM campaigns {where_clause} AND is_active = TRUE", params)
     active_campaigns = cur.fetchone()['count'] or 0
 
-    # Mailmergo-style Engagement Metrics mapped to LeadStreamAI schema
     # Isolated via join with campaigns
-    join_where = "WHERE c.user_id = %s" if user_id else "WHERE c.user_id IS NULL"
+    if user_id and user_id != 'all':
+        join_where = "WHERE c.user_id = %s"
+    else:
+        join_where = "WHERE 1=1"
     
     cur.execute(f"""
         SELECT COUNT(DISTINCT e.recipient_id) as count 
@@ -56,7 +62,8 @@ def get_metrics(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         SELECT COUNT(*) as count 
         FROM recipients r
         JOIN campaigns c ON r.campaign_id = c.id
-        {join_where} AND r.is_unsubscribed = TRUE
+        JOIN leads_raw l ON r.lead_id = l.id
+        {join_where} AND l.is_unsubscribed = TRUE
     """, params)
     total_unsubs = cur.fetchone()['count'] or 0
 
@@ -127,12 +134,13 @@ def get_metrics(user_id: Optional[str] = Header(None, alias="X-User-Id")):
 
     # Real-Time Inbound Signals
     cur.execute(f"""
-        SELECT e.event_type as signal_type, e.timestamp as time, e.user_agent as environment_data, r.email, split_part(r.name, ' ', 1) as first_name, split_part(r.name, ' ', 2) as last_name
+        SELECT e.event_type as signal_type, e.created_at as time, e.user_agent as environment_data, l.email, l.first_name, l.last_name
         FROM campaign_events e
         JOIN recipients r ON e.recipient_id = r.id
+        JOIN leads_raw l ON r.lead_id = l.id
         JOIN campaigns c ON e.campaign_id = c.id
         {join_where}
-        ORDER BY e.timestamp DESC
+        ORDER BY e.created_at DESC
         LIMIT 10
     """, params)
     recent_signals = cur.fetchall()

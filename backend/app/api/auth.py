@@ -5,6 +5,8 @@ from typing import Optional
 import os
 import requests
 import hashlib
+import psycopg2
+import psycopg2.extras
 from dotenv import load_dotenv
 from pathlib import Path
 from app.database import get_db_connection
@@ -50,9 +52,19 @@ def login(req: LoginRequest):
     if password_hash != user['password_hash']:
         raise HTTPException(status_code=401, detail="Invalid username or password")
         
-    # Data is preserved across sessions — leads persist after logout/login
+    # Reset is_approved to FALSE on every login for non-admins
+    # This enforces the "approval required every time you login" rule.
+    if user['role'] != 'ADMIN':
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("UPDATE users SET is_approved = FALSE WHERE id = %s", (user['id'],))
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print(f"Login reset failed: {e}")
 
-        
     return {
         "access_token": "dummy_token", # In a real app, generate a JWT here
         "token_type": "bearer",
@@ -61,9 +73,32 @@ def login(req: LoginRequest):
             "username": user['username'],
             "email": user['email'],
             "full_name": user['full_name'],
-            "role": user['role']
+            "role": user['role'],
+            "is_approved": user['is_approved']
         }
     }
+
+@router.get("/auth/me")
+def get_current_user(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Returns the current user profile and approval status."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    # Handle 'admin' string or digits
+    real_uid = user_id if user_id and user_id.isdigit() else "1"
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        cur.execute("SELECT id, username, email, full_name, role, is_active, is_approved, credits_used, COALESCE(credits_limit, 200) as credits_limit FROM users WHERE id = %s", (real_uid,))
+        user = cur.fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        return dict(user)
+    finally:
+        cur.close()
+        conn.close()
 
 # --- LOGOUT & STATE RESET ---
 
@@ -116,11 +151,32 @@ def request_access(req: AccessRequest):
     cur.close()
     conn.close()
     
-    if not user or not admin:
-        raise HTTPException(status_code=404, detail="User or Admin not found")
-
-    base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+    # Resolve Backend URL: Priority .env > Production Guess > Local Fallback
+    import os
+    from dotenv import load_dotenv
+    load_dotenv(dotenv_path=env_path, override=True) # Refresh env
+    
+    # 1. Try environment variables
+    base_url = os.getenv("BACKEND_URL")
+    
+    # 2. Try Render specific variables
+    if not base_url or base_url.lower() == "null" or "localhost" in base_url.lower():
+        # Only use localhost if we are NOT on Render
+        if os.getenv("RENDER_EXTERNAL_URL"):
+            base_url = os.getenv("RENDER_EXTERNAL_URL")
+    
+    # 3. Final Fallback to a valid string, never Null
+    if not base_url or base_url.lower() == "null" or base_url.strip() == "":
+        # We also check the commented out production URL in case it's helpful
+        base_url = "https://lead-backend-ipls.onrender.com" # Probable render URL from .env comments
+    
+    # Clean the URL
+    base_url = base_url.rstrip("/")
+    if not base_url.startswith("http"):
+        base_url = f"https://{base_url}"
+        
     approve_url = f"{base_url}/api/admin/approve-user/{user['id']}"
+    print(f"DEBUG: Generated Approval URL: {approve_url}")
     
     subject = f"🚨 Discovery Access Request: {user['full_name'] or user['username']}"
     html_content = f"""
@@ -179,11 +235,21 @@ def approve_user_landing(user_id: int):
         cur.close()
         conn.close()
 
-    return HTMLResponse(content="""
-        <div style="font-family: sans-serif; text-align: center; padding: 50px;">
-            <div style="font-size: 50px; margin-bottom: 20px;">✅</div>
-            <h1 style="color: #10b981;">User Approved!</h1>
-            <p>Access has been granted. The user can now perform lead extractions and bulk searches.</p>
-            <p style="color: #64748b; margin-top: 30px;">You can now close this window.</p>
+    frontend_url = os.getenv("FRONTEND_URL", "https://lead-frontend-5new.onrender.com")
+    
+    return HTMLResponse(content=f"""
+        <div style="font-family: sans-serif; text-align: center; padding: 50px; background-color: #f8fafc; min-height: 100vh;">
+            <div style="max-width: 500px; margin: auto; background: white; padding: 40px; border-radius: 20px; shadow: 0 10px 15px -3px rgba(0,0,0,0.1);">
+                <div style="font-size: 60px; margin-bottom: 20px;">✅</div>
+                <h1 style="color: #10b981; margin-bottom: 15px;">User Approved!</h1>
+                <p style="color: #475569; font-size: 16px; line-height: 1.6;">Account access has been granted. The user is now active and can perform extractions.</p>
+                
+                <div style="margin-top: 40px;">
+                    <a href="{frontend_url}" style="background-color: #6366f1; color: white; padding: 12px 30px; text-decoration: none; border-radius: 10px; font-weight: bold; display: inline-block;">
+                        Open Dashboard →
+                    </a>
+                </div>
+                <p style="color: #94a3b8; margin-top: 30px; font-size: 12px;">You can now close this tab.</p>
+            </div>
         </div>
     """)

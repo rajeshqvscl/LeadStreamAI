@@ -10,8 +10,8 @@ def create_campaign(data):
     query = """
     INSERT INTO campaigns (
         name, description, tone, target_industry, target_persona, 
-        subject, html_body, context_prompt, strategy_prompt, is_active, user_id, target_companies
-    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        subject, html_body, context_prompt, strategy_prompt, is_active, user_id, user_name, target_companies
+    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     RETURNING *
     """
     params = (
@@ -19,7 +19,7 @@ def create_campaign(data):
         data.get('target_industry'), data.get('target_persona'),
         data.get('subject'), data.get('html_body'),
         data.get('context_prompt'), data.get('strategy_prompt'),
-        data.get('is_active', True), data.get('user_id'), data.get('target_companies')
+        data.get('is_active', True), data.get('user_id'), data.get('user_name'), data.get('target_companies')
     )
     
     try:

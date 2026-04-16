@@ -36,9 +36,24 @@ class CampaignUpdate(BaseModel):
 
 @router.post("/campaigns")
 def api_create_campaign(campaign: CampaignCreate, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    from app.database import get_db_connection
+    import psycopg2.extras
+    
     try:
         data = campaign.dict()
         data['user_id'] = user_id
+        
+        # Fetch user_name for metadata
+        if user_id:
+            conn = get_db_connection()
+            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cur.execute("SELECT full_name, username FROM users WHERE id = %s", (user_id,))
+            u = cur.fetchone()
+            if u:
+                data['user_name'] = u['full_name'] or u['username']
+            cur.close()
+            conn.close()
+            
         return create_campaign(data)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

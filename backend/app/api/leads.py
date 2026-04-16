@@ -44,7 +44,7 @@ class LeadCreate(BaseModel):
     country: Optional[str] = ""
     linkedin_url: Optional[str] = ""
     persona: Optional[str] = "OTHER"
-    source: Optional[str] = "direct"
+    source: Optional[str] = "manual"
     remarks: Optional[str] = ""
 
 from typing import List
@@ -106,15 +106,18 @@ def get_leads(
 
 
     if source:
-        query += " AND source = %s"
-        params.append(source)
+        if source == 'direct':
+            query += " AND (source = 'direct' OR source = 'manual')"
+        else:
+            query += " AND source = %s"
+            params.append(source)
         
     if exclude_source:
         query += " AND source != %s"
         params.append(exclude_source)
 
     is_bulk_context = (source in ('bulk', 'csv_import')) or (exclude_source == 'direct')
-    if is_bulk_context:
+    if is_bulk_context and source != 'intelligence' and exclude_source != 'intelligence':
         # Relaxed filter: Just ensure we have some name or company data
         query += " AND (first_name IS NOT NULL OR last_name IS NOT NULL OR company_name IS NOT NULL)"
         query += " AND (COALESCE(first_name,'') != '' OR COALESCE(last_name,'') != '' OR COALESCE(company_name,'') != '')"
@@ -128,7 +131,7 @@ def get_leads(
         bad_domains = r'@(test|dummy|example|mailinator|fake|temp|noemail)\.(com|net|io|org)$'
         query += f" AND COALESCE(email,'') !~* '{bad_domains}'"
 
-    if source == 'direct':
+    if source in ('direct', 'intelligence', 'manual'):
         # Apply strict filtering for Lead Pipeline — but EXEMPT manual/promoted leads
         # so users always see what they manually add
         bad_names = r'test|dummy|sample|example|unknown|admin|user|lead test|mock|noreply'
@@ -154,9 +157,9 @@ def get_leads(
     # ──────────────────────────────────────────────────────────────────────────
 
     if exclude_drafted:
-        # Include leads that are PENDING or have no status, but hide those with active DRAFTS
-        # Also ensure manual entries are NEVER hidden by this filter
-        query += " AND (COALESCE(email_status, '') IN ('', 'PENDING') OR COALESCE(manual_entry, FALSE) IS TRUE)"
+        # Include leads that are PENDING, PENDING_APPROVAL, or have no status
+        # This ensuring newly drafted intelligence leads stay visible in the pipeline
+        query += " AND (COALESCE(email_status, '') IN ('', 'PENDING', 'PENDING_APPROVAL') OR COALESCE(manual_entry, FALSE) IS TRUE)"
     
     if search:
         query += " AND (first_name ILIKE %s OR last_name ILIKE %s OR email ILIKE %s OR company_name ILIKE %s OR raw_payload->>'current_title' ILIKE %s OR persona ILIKE %s OR phone ILIKE %s)"
@@ -533,7 +536,7 @@ def create_manual_lead(req: LeadCreate, user_id: Optional[str] = Header(None, al
         conn2 = get_db_connection()
         cur2 = conn2.cursor()
         cur2.execute(
-            "UPDATE leads_raw SET source = 'direct', user_id = %s, manual_entry = TRUE WHERE id = %s",
+            "UPDATE leads_raw SET source = 'manual', user_id = %s, manual_entry = TRUE WHERE id = %s",
             (normalize_user_id(user_id), existing['id'])
         )
         conn2.commit()

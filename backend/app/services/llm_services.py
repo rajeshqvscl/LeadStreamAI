@@ -43,9 +43,16 @@ class EmailGenerator:
     def generate_email(self, lead: dict, sender_name: str = "the team"):
         # Personalize greeting
         first_name = lead.get('first_name')
-        if not first_name or str(first_name).strip().lower() == "there":
-            # Fallback to full name if first name is missing or "there"
-            first_name = lead.get('name') or lead.get('full_name') or lead.get('last_name') or ""
+        if not first_name or str(first_name).strip().lower() in ["there", "contact", ""]:
+            # Fallback 1: Try full name or company-level name
+            first_name = lead.get('name') or lead.get('full_name') or lead.get('last_name')
+            
+            # Fallback 2: Try to extract from email if still missing
+            if (not first_name or str(first_name).strip() == "") and lead.get('email'):
+                email_prefix = lead.get('email').split('@')[0]
+                # Extract first part (john.doe -> John)
+                first_part = email_prefix.replace("_", ".").replace("-", ".").split(".")[0]
+                first_name = first_part.capitalize()
         
         greeting = f"Hi {first_name}," if first_name else "Hi,"
         
