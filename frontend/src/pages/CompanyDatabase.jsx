@@ -37,7 +37,15 @@ const CompanyDatabase = () => {
   const fetchCompanies = async (page = 1) => {
     setIsLoading(true);
     try {
-      const response = await api.get(`/api/companies?page=${page}&limit=500`);
+      const filtersJson = JSON.stringify(columnFilters);
+      const queryParams = new URLSearchParams({
+        page: String(page),
+        limit: '500'
+      });
+      if (search) queryParams.append('search', search);
+      if (filtersJson !== '{}') queryParams.append('filters', filtersJson);
+
+      const response = await api.get(`/api/companies?${queryParams.toString()}`);
       setCompanies(response.data.companies || []);
       setTotalCount(response.data.total || 0);
       const limit = response.data.limit || 500;
@@ -52,9 +60,24 @@ const CompanyDatabase = () => {
     }
   };
 
+  // Debounced Search & Filter Effect
   useEffect(() => {
-    fetchCompanies();
-  }, []);
+    const handler = setTimeout(() => {
+      fetchCompanies(1);
+    }, 400); // 400ms debounce
+
+    return () => clearTimeout(handler);
+  }, [search, columnFilters]);
+
+  // Handle manual page changes
+  const handlePageChange = (newPage) => {
+    if (newPage < 1 || newPage > totalPages) return;
+    fetchCompanies(newPage);
+  };
+
+  // Initial fetch is handled by the useEffect above (since search/filters are stable)
+  // However, we can keep a separate mount effect if needed, but it might double-fetch.
+  // The debounced effect will handle the first load.
 
   // Cell Update Logic
   const handleCellUpdate = async (rowId, field, newValue) => {
@@ -276,16 +299,7 @@ const CompanyDatabase = () => {
     XLSX.writeFile(wb, `Bulk_Export_${new Date().getTime()}.xlsx`);
   };
 
-  const filteredCompanies = companies.filter(c => {
-    const matchesSearch = Object.values(c).some(val =>
-      String(val).toLowerCase().includes(search.toLowerCase())
-    );
-    const matchesColumnFilters = Object.entries(columnFilters).every(([key, value]) => {
-      if (!value) return true;
-      return String(c[key] || '').toLowerCase().includes(value.toLowerCase());
-    });
-    return matchesSearch && matchesColumnFilters;
-  });
+  const filteredCompanies = companies;
 
   const getUniqueValues = (column) => {
     const values = companies.map(c => c[column]).filter(v => v !== undefined && v !== null && v !== '');
@@ -386,16 +400,31 @@ const CompanyDatabase = () => {
               placeholder="Search dataset..."
               className="w-full bg-[#131722]/60 border border-white/5 rounded-2xl py-3 pl-12 pr-4 text-white text-sm focus:outline-none focus:border-blue-500/30 transition-all font-medium placeholder:text-slate-700"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setCurrentPage(1);
+              }}
             />
           </div>
 
           <button
             onClick={() => setShowFilters(!showFilters)}
-            className={`btn px-6 h-12 rounded-2xl flex items-center gap-3 text-[11px] font-black uppercase tracking-widest transition-all ${showFilters ? 'bg-blue-500 text-white shadow-blue-500/20' : 'bg-white/5 text-slate-400 border border-white/5'}`}
+            className={`btn px-6 h-12 rounded-2xl flex items-center gap-3 text-[11px] font-black uppercase tracking-widest transition-all cursor-pointer ${showFilters ? 'bg-blue-500 text-white shadow-blue-500/20' : 'bg-white/5 text-slate-400 border border-white/5'}`}
           >
             <Filter className="w-4 h-4" />
             {showFilters ? 'Hide Filters' : 'Filter'}
+          </button>
+
+          <button
+            onClick={() => {
+              setSearch('');
+              setColumnFilters({});
+              setCurrentPage(1);
+            }}
+            className="bg-white/5 hover:bg-white/10 border border-white/5 p-3 rounded-2xl text-slate-500 transition-all hover:text-white cursor-pointer"
+            title="Reset All Matrix Filters"
+          >
+            <X className="w-5 h-5" />
           </button>
 
           <div className="relative flex-1 lg:max-w-md">
@@ -412,7 +441,7 @@ const CompanyDatabase = () => {
           <button
             onClick={handleSyncGSheet}
             disabled={isSyncing}
-            className="btn bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 px-6 h-12 rounded-2xl flex items-center gap-3 text-[11px] font-black uppercase tracking-widest text-emerald-500 shadow-xl shadow-emerald-500/10 disabled:opacity-50"
+            className="btn bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 px-6 h-12 rounded-2xl flex items-center gap-3 text-[11px] font-black uppercase tracking-widest text-emerald-500 shadow-xl shadow-emerald-500/10 disabled:opacity-50 cursor-pointer"
           >
             {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
             Sync Cloud
@@ -421,7 +450,7 @@ const CompanyDatabase = () => {
           <button
             onClick={() => document.getElementById('file-upload').click()}
             disabled={isImporting}
-            className="btn btn-primary px-6 h-12 rounded-2xl flex items-center gap-3 text-[11px] font-black uppercase tracking-widest shadow-xl shadow-blue-500/20 disabled:opacity-50"
+            className="btn btn-primary px-6 h-12 rounded-2xl flex items-center gap-3 text-[11px] font-black uppercase tracking-widest shadow-xl shadow-blue-500/20 disabled:opacity-50 cursor-pointer"
           >
             {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
             Import
@@ -429,7 +458,7 @@ const CompanyDatabase = () => {
 
           <button
             onClick={handleExport}
-            className="bg-white/5 hover:bg-white/10 border border-white/10 px-6 h-12 rounded-2xl flex items-center gap-3 text-[11px] font-black uppercase tracking-widest text-slate-300 transition-all"
+            className="bg-white/5 hover:bg-white/10 border border-white/10 px-6 h-12 rounded-2xl flex items-center gap-3 text-[11px] font-black uppercase tracking-widest text-slate-300 transition-all cursor-pointer"
           >
             <Download className="w-4 h-4" />
             Export
@@ -437,7 +466,7 @@ const CompanyDatabase = () => {
 
           <button
             onClick={handleClear}
-            className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 px-6 h-12 rounded-2xl flex items-center gap-3 text-[11px] font-black uppercase tracking-widest text-red-500 transition-all"
+            className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 px-6 h-12 rounded-2xl flex items-center gap-3 text-[11px] font-black uppercase tracking-widest text-red-500 transition-all cursor-pointer"
           >
             <Trash2 className="w-4 h-4" />
             Purge
@@ -457,7 +486,10 @@ const CompanyDatabase = () => {
                   <select
                     className="w-full appearance-none bg-[#0d1117] border border-white/5 rounded-xl px-4 py-2.5 text-[11px] text-white focus:outline-none focus:border-blue-500/30 transition-all cursor-pointer"
                     value={columnFilters[header] || ''}
-                    onChange={(e) => setColumnFilters(prev => ({ ...prev, [header]: e.target.value }))}
+                    onChange={(e) => {
+                      setColumnFilters(prev => ({ ...prev, [header]: e.target.value }));
+                      setCurrentPage(1);
+                    }}
                   >
                     <option value="">All {header.replace(/_/g, ' ')}</option>
                     {uniqueValues.map(val => (
@@ -469,6 +501,20 @@ const CompanyDatabase = () => {
               </div>
             );
           })}
+          
+          <div className="flex items-end pb-0.5">
+            <button
+              onClick={() => {
+                setSearch('');
+                setColumnFilters({});
+                setCurrentPage(1);
+              }}
+              className="w-full px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-xl text-[10px] font-black text-red-500 uppercase tracking-widest transition-all flex items-center justify-center gap-2 group cursor-pointer"
+            >
+              <Trash2 className="w-3 h-3 group-hover:scale-110 transition-transform" />
+              Reset Filters
+            </button>
+          </div>
         </div>
       )}
 
@@ -602,8 +648,8 @@ const CompanyDatabase = () => {
           <div className="flex items-center gap-2 bg-[#131722]/80 border border-white/5 rounded-2xl p-1.5 backdrop-blur-xl">
             <button
               disabled={currentPage === 1 || isLoading}
-              onClick={() => fetchCompanies(currentPage - 1)}
-              className="p-2.5 rounded-xl hover:bg-white/5 text-slate-400 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+              onClick={() => handlePageChange(currentPage - 1)}
+              className="p-2.5 rounded-xl hover:bg-white/5 text-slate-400 disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
             >
               <ChevronDown className="w-5 h-5 rotate-90" />
             </button>
@@ -615,8 +661,8 @@ const CompanyDatabase = () => {
             </div>
             <button
               disabled={currentPage === totalPages || isLoading}
-              onClick={() => fetchCompanies(currentPage + 1)}
-              className="p-2.5 rounded-xl hover:bg-white/5 text-slate-400 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+              onClick={() => handlePageChange(currentPage + 1)}
+              className="p-2.5 rounded-xl hover:bg-white/5 text-slate-400 disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
             >
               <ChevronDown className="w-5 h-5 -rotate-90" />
             </button>

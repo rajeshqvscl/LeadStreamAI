@@ -70,6 +70,7 @@ def get_leads(
     per_page: int = 25,
     exclude_drafted: bool = False,
     exclude_source: Optional[str] = None,
+    search_type: Optional[str] = "",
     user_id: Optional[str] = Header(None, alias="X-User-Id")
 ):
     conn = get_db_connection()
@@ -111,6 +112,8 @@ def get_leads(
         else:
             query += " AND source = %s"
             params.append(source)
+    elif search_type == 'discovery_only':
+        query += " AND source IN ('bulk', 'csv_import')"
         
     if exclude_source:
         query += " AND source != %s"
@@ -157,9 +160,16 @@ def get_leads(
     # ──────────────────────────────────────────────────────────────────────────
 
     if exclude_drafted:
-        # Include leads that are PENDING, PENDING_APPROVAL, or have no status
-        # This ensuring newly drafted intelligence leads stay visible in the pipeline
-        query += " AND (COALESCE(email_status, '') IN ('', 'PENDING', 'PENDING_APPROVAL') OR COALESCE(manual_entry, FALSE) IS TRUE)"
+        if source == 'bulk' or source == 'csv_import' or search_type == 'discovery_only':
+            # Bulk Discovery: ONLY show leads that are NOT yet drafted
+            query += " AND (COALESCE(email_status, '') IN ('', 'PENDING') AND COALESCE(manual_entry, FALSE) IS FALSE)"
+        else:
+            # Main Pipeline: ONLY show leads that HAVE entered the pipeline phase (if they come from bulk)
+            # OR show Direct/Intel leads (which can be drafted or not)
+            query += " AND ("
+            query += "  (source NOT IN ('bulk', 'csv_import'))" # Intel/Direct always show
+            query += "  OR (COALESCE(email_status, '') NOT IN ('', 'PENDING'))" # Bulk shows if it's drafted, sent, approved, etc.
+            query += ")"
     
     if search:
         query += " AND (first_name ILIKE %s OR last_name ILIKE %s OR email ILIKE %s OR company_name ILIKE %s OR raw_payload->>'current_title' ILIKE %s OR persona ILIKE %s OR phone ILIKE %s)"
@@ -784,7 +794,7 @@ def bulk_import(
                         city, country, persona, phone, source, user_id, raw_payload, remarks, designation
                     )
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (email) DO UPDATE SET
+                    ON CONFLICT (email, COALESCE(user_id, -1)) DO UPDATE SET
                         first_name = EXCLUDED.first_name,
                         last_name = EXCLUDED.last_name,
                         company_name = EXCLUDED.company_name,

@@ -810,6 +810,7 @@ const Leads = () => {
                 </th>
                 <th>Name</th>
                 <th>Company</th>
+                <th>Source</th>
                 <th>Title / Role</th>
                 <th>Location</th>
                 <th>Date and Time</th>
@@ -823,6 +824,7 @@ const Leads = () => {
                   <td><div className="w-4 h-4 bg-slate-800 rounded animate-shimmer"></div></td>
                   <td><div className="h-4 bg-slate-800 rounded w-32 animate-shimmer"></div></td>
                   <td><div className="h-4 bg-slate-800 rounded w-24 animate-shimmer"></div></td>
+                  <td><div className="h-4 bg-slate-800 rounded w-20 animate-shimmer"></div></td>
                   <td><div className="h-4 bg-slate-800 rounded w-28 animate-shimmer"></div></td>
                   <td><div className="h-4 bg-slate-800 rounded w-20 animate-shimmer"></div></td>
                   <td><div className="h-4 bg-slate-800 rounded w-28 animate-shimmer"></div></td>
@@ -864,6 +866,7 @@ const Leads = () => {
                     {sortConfig.key === 'company_name' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
                   </div>
                 </th>
+                <th>Source</th>
                 <th className="sortable" onClick={() => requestSort('persona')}>
                   <div className="flex items-center gap-1">
                     Title / Role
@@ -909,6 +912,18 @@ const Leads = () => {
                     </td>
                     <td className="font-medium text-slate-300">
                       {lead.company_name || lead.family_office_name || 'N/A'}
+                    </td>
+                    <td>
+                      <span className={`px-2 py-0.5 rounded-[4px] text-[9px] font-black uppercase tracking-widest ${
+                        lead.source === 'bulk' || lead.source === 'csv_import' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' :
+                        lead.source === 'intelligence' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+                        'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                      }`}>
+                        {lead.source === 'bulk' || lead.source === 'csv_import' ? 'Bulk Search' :
+                         lead.source === 'intelligence' ? 'Company Intel' :
+                         'Direct Discovery'
+                        }
+                      </span>
                     </td>
                     <td>
                       <span className={`px-2 py-1 rounded-[4px] text-[10px] font-bold tracking-wider ${['FOUNDER', 'C-SUITE', 'EXECUTIVE'].includes(lead.persona) ? 'bg-blue-500/10 text-blue-400' :

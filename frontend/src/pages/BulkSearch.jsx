@@ -105,14 +105,15 @@ const BulkSearch = () => {
         validation_status: filters.status,
         exclude_drafted: true
       };
-      // Filter by import source
+      // Filter by import source strictly
       if (sourceFilter === 'bulk') {
         params.source = 'bulk';
       } else if (sourceFilter === 'csv_import') {
         params.source = 'csv_import';
       } else {
-        // All: exclude sources that aren't bulk-related (e.g. direct pipeline)
-        params.exclude_source = 'direct';
+        // "All Sources" - We want both bulk and csv_import, but excluded intelligence/direct.
+        // We handle this by telling the backend to only return 'discovery' types
+        params.search_type = 'discovery_only';
       }
       const response = await api.get('/api/leads', { params });
       setBulkLeads(response.data.leads || []);
@@ -801,12 +802,6 @@ const BulkSearch = () => {
                         <div>
                           <div className="flex items-center gap-2 leading-none mb-1">
                             <span className="text-[13px] font-bold text-white group-hover:text-indigo-300 transition-colors">{lead.name}</span>
-                            {lead.email_status === 'APPROVED' && (
-                              <span className="text-[8px] font-black bg-emerald-500/10 text-emerald-500 px-1.5 py-0.5 rounded border border-emerald-500/20 uppercase tracking-tighter">Approved</span>
-                            )}
-                            {lead.email_status === 'PENDING_APPROVAL' && (
-                              <span className="text-[8px] font-black bg-indigo-500/10 text-indigo-500 px-1.5 py-0.5 rounded border border-indigo-500/20 uppercase tracking-tighter">Drafted</span>
-                            )}
                           </div>
                           <div className="text-[10px] font-medium text-slate-500">{lead.email}</div>
                         </div>
@@ -935,7 +930,7 @@ const BulkSearch = () => {
               <p className="text-slate-400 text-sm leading-relaxed mb-8">
                 To maintain system security and optimize credit usage, the <span className="text-blue-400 font-bold">Lead Discovery & Extraction Engine</span> requires a fresh administrator approval for every session.
               </p>
-              
+
               <div className="space-y-3">
                 <button
                   onClick={handleRequestAccess}
@@ -956,7 +951,7 @@ const BulkSearch = () => {
                   Cancel
                 </button>
               </div>
-              
+
               <p className="text-[10px] text-slate-500 font-medium mt-8 uppercase tracking-widest">
                 Admin will receive an instant priority notification
               </p>

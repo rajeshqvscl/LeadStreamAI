@@ -300,17 +300,21 @@ def trigger_admin_report(req: ReportRequest, user_id: Optional[str] = Header(Non
             if tu:
                 target_name = tu['full_name'] or tu['username']
 
-        # Aggregate specific user actions (last 30 days for MIS scope)
-        cur.execute(f"""
+        # Aggregate specific user actions (last 30 days for MIS scope) using direct leads_raw count
+        stats_query = """
             SELECT u.username, 
-                   COUNT(*) FILTER (WHERE al.action IN ('LEAD_INGESTED', 'BULK_INGESTION')) as leads_count,
-                   COUNT(*) FILTER (WHERE al.action IN ('SENT', 'EMAIL_SENT')) as sent_count,
-                   COUNT(*) as total_count
-            FROM activity_log al
-            JOIN users u ON al.user_id = u.id
-            WHERE al.created_at > NOW() - INTERVAL '30 days' {where_filter}
-            GROUP BY u.username
-        """, params)
+                   (SELECT COUNT(*) FROM leads_raw l WHERE l.user_id = u.id AND l.created_at > NOW() - INTERVAL '30 days') as leads_count,
+                   (SELECT COUNT(*) FROM activity_log al WHERE al.user_id = u.id AND al.action IN ('SENT', 'EMAIL_SENT') AND al.created_at > NOW() - INTERVAL '30 days') as sent_count,
+                   (SELECT COUNT(*) FROM activity_log al WHERE al.user_id = u.id AND al.created_at > NOW() - INTERVAL '30 days') as total_count
+            FROM users u
+            WHERE 1=1
+        """
+        if target_user_id:
+            stats_query += " AND u.id = %s"
+            cur.execute(stats_query, (target_user_id,))
+        else:
+            cur.execute(stats_query)
+            
         user_stats = [dict(r) for r in cur.fetchall()]
 
         # Fetch last 10 actions for this scope
@@ -335,6 +339,102 @@ def trigger_admin_report(req: ReportRequest, user_id: Optional[str] = Header(Non
             "target_user": target_name,
             "environment": os.getenv("ENVIRONMENT", "Production")
         }
+        
+        # Build comprehensive Excel file with Charts
+        import io
+        import base64
+        import xlsxwriter
+        
+        lead_query = """
+            SELECT l.first_name, l.last_name, l.email, l.company_name, l.validation_status, 
+                   l.persona, l.email_status, l.manual_entry, l.created_at, u.username as owner, u.full_name
+            FROM leads_raw l
+            LEFT JOIN users u ON l.user_id = u.id
+            WHERE 1=1
+        """
+        lead_params = []
+        if target_user_id:
+            lead_query += " AND l.user_id = %s"
+            lead_params.append(target_user_id)
+            
+        cur.execute(lead_query + " ORDER BY l.created_at DESC LIMIT 5000", lead_params)
+        leads = cur.fetchall()
+        
+        if leads:
+            output = io.BytesIO()
+            workbook = xlsxwriter.Workbook(output, {'in_memory': True})
+            worksheet = workbook.add_worksheet('Leads Data')
+            
+            headers = ['Owner', 'First Name', 'Last Name', 'Email', 'Company', 'Validation Status', 'Persona', 'Outreach Status', 'Manual Entry', 'Created At']
+            header_format = workbook.add_format({'bold': True, 'bg_color': '#4F46E5', 'font_color': 'white'})
+            
+            for col_num, data in enumerate(headers):
+                worksheet.write(0, col_num, data, header_format)
+                
+            status_counts = {'NOT STARTED': 0, 'PENDING_APPROVAL': 0, 'APPROVED': 0, 'SENT': 0, 'SCHEDULED': 0}
+            
+            for row_num, l in enumerate(leads, 1):
+                owner_name = l.get('full_name') or l.get('owner') or 'System'
+                worksheet.write(row_num, 0, owner_name)
+                worksheet.write(row_num, 1, l.get('first_name') or '')
+                worksheet.write(row_num, 2, l.get('last_name') or '')
+                worksheet.write(row_num, 3, l.get('email') or '')
+                worksheet.write(row_num, 4, l.get('company_name') or '')
+                worksheet.write(row_num, 5, l.get('validation_status') or 'PENDING')
+                worksheet.write(row_num, 6, l.get('persona') or 'UNKNOWN')
+                
+                raw_status = l.get('email_status') or 'NOT STARTED'
+                if raw_status in ('', 'PENDING'): status = 'NOT STARTED'
+                else: status = raw_status
+                
+                worksheet.write(row_num, 7, status)
+                
+                if status in status_counts:
+                    status_counts[status] += 1
+                    
+                worksheet.write(row_num, 8, 'YES' if l.get('manual_entry') else 'NO')
+                worksheet.write(row_num, 9, l['created_at'].strftime('%Y-%m-%d %H:%M') if l.get('created_at') else '')
+
+            worksheet.set_column(0, 4, 20)
+            worksheet.set_column(5, 7, 18)
+            worksheet.set_column(9, 9, 20)
+            
+            # Analytics Chart Sheet
+            chart_sheet = workbook.add_worksheet('Analytics')
+            chart_sheet.write_column('A1', ['Not Started', 'Drafts Ready', 'Approved', 'Sent', 'Scheduled'])
+            chart_sheet.write_column('B1', [
+                status_counts['NOT STARTED'],
+                status_counts['PENDING_APPROVAL'],
+                status_counts['APPROVED'],
+                status_counts['SENT'],
+                status_counts['SCHEDULED']
+            ])
+            
+            chart = workbook.add_chart({'type': 'column'})
+            chart.add_series({
+                'name': 'Outreach Pipeline',
+                'categories': ['Analytics', 0, 0, 4, 0],
+                'values':     ['Analytics', 0, 1, 4, 1],
+                'data_labels': {'value': True},
+                'fill':   {'color': '#6366f1'}
+            })
+            chart.set_title({'name': f"Pipeline Analytics for {target_name}"})
+            chart.set_x_axis({'name': 'Current Status'})
+            chart.set_y_axis({'name': 'Number of Leads'})
+            
+            chart_sheet.insert_chart('D2', chart, {'x_scale': 1.5, 'y_scale': 1.5})
+            
+            workbook.close()
+            xlsx_content = output.getvalue()
+            xlsx_b64 = base64.b64encode(xlsx_content).decode('utf-8')
+            
+            report_data["attachments"] = [
+                {
+                    "content": xlsx_b64,
+                    "filename": f"MIS_Report_{target_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                }
+            ]
+
         
         try:
             success = send_admin_report(admin['email'], report_data)

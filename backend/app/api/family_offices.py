@@ -106,7 +106,7 @@ def search_rocketreach(office_id: int, req: RocketReachSearch, user_id: Optional
                 INSERT INTO leads_raw 
                 (first_name, last_name, email, domain, linkedin_url, company_name, family_office_name, source, raw_payload, fit_score, persona, phone, user_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (email) DO UPDATE SET family_office_name = EXCLUDED.family_office_name, user_id = EXCLUDED.user_id
+                ON CONFLICT (email, COALESCE(user_id, -1)) DO UPDATE SET family_office_name = EXCLUDED.family_office_name, user_id = EXCLUDED.user_id
             """, (
                 lead.get("first_name", ""), lead.get("last_name", ""), lead.get("email", ""),
                 lead.get("domain", ""), lead.get("linkedin", ""), lead.get("company", ""),

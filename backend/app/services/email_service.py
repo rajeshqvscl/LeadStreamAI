@@ -292,53 +292,76 @@ def send_admin_report(to_email: str, report_data: dict) -> bool:
     stats_rows = ""
     for user in user_stats:
         stats_rows += f"""
-        <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="padding: 12px; font-size: 14px; color: #1e293b; font-weight: 600;">{user['username']}</td>
-            <td style="padding: 12px; font-size: 14px; color: #475569; text-align: center;">{user['leads_count']}</td>
-            <td style="padding: 12px; font-size: 14px; color: #475569; text-align: center;">{user['sent_count']}</td>
-            <td style="padding: 12px; font-size: 14px; color: #6366f1; text-align: right; font-weight: bold;">{user['total_count']}</td>
+        <tr style="background-color: #0f172a; border-bottom: 1px solid #1e293b;">
+            <td style="padding: 14px; font-size: 13px; color: #f8fafc; font-weight: 600;">{user['username']}</td>
+            <td style="padding: 14px; font-size: 13px; color: #cbd5e1; text-align: center;">{user['leads_count']}</td>
+            <td style="padding: 14px; font-size: 13px; color: #cbd5e1; text-align: center;">{user['sent_count']}</td>
+            <td style="padding: 14px; font-size: 13px; color: #8b5cf6; text-align: right; font-weight: bold;">{user['total_count']}</td>
         </tr>
         """
 
     subject = f"📊 MIS Activity Report: {target_user}"
+    
+    total_leads = sum(u.get('leads_count', 0) for u in user_stats)
+    total_sent = sum(u.get('sent_count', 0) for u in user_stats)
+    
     html_content = f"""
-    <div style="font-family: sans-serif; max-width: 700px; margin: auto; padding: 30px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
-            <h2 style="color: #1e293b; margin: 0;">Management Information System</h2>
-            <span style="background-color: #f1f5f9; color: #64748b; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold;">{report_data.get('environment', 'Production')}</span>
+    <div style="font-family: 'Inter', -apple-system, sans-serif; max-width: 650px; margin: auto; padding: 40px; border-radius: 16px; background-color: #0f172a; color: #f8fafc;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; border-bottom: 1px solid #1e293b; padding-bottom: 20px;">
+            <h2 style="color: #f8fafc; margin: 0; font-size: 22px; font-weight: 800;">Management Information System</h2>
+            <span style="background-color: #3b82f620; color: #60a5fa; padding: 6px 14px; border-radius: 20px; font-size: 11px; font-weight: bold; border: 1px solid #3b82f640;">{report_data.get('environment', 'Production')}</span>
         </div>
         
-        <p style="color: #64748b; font-size: 14px; margin-bottom: 25px;">
-            Activity report generated for <strong>{target_user}</strong> for the period ending {datetime.now().strftime('%Y-%m-%d %H:%M')}.
+        <p style="color: #94a3b8; font-size: 14px; margin-bottom: 35px; line-height: 1.6;">
+            The detailed activity audit for <strong style="color: #f8fafc;">{target_user}</strong> has been dynamically generated. Your detailed Microsoft Excel file (.xlsx) containing programmatic pipeline analytics and extensive row-by-row lead data is attached to this email.
         </p>
 
-        <h3 style="color: #475569; font-size: 16px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">User Performance Data</h3>
-        <table style="width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 30px;">
-            <thead style="background-color: #f8fafc;">
+        <!-- Dynamic Pipeline Breakdown -->
+        <h3 style="color: #f8fafc; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 15px;">Target Pipeline Flow</h3>
+        <div style="background-color: #1e293b; padding: 25px; border-radius: 12px; margin-bottom: 35px; border: 1px solid #334155;">
+            <div style="margin-bottom: 15px;">
+                <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: bold; margin-bottom: 8px;">
+                    <span style="color: #cbd5e1;">Leads Acquired</span>
+                    <span style="color: #f8fafc;">{total_leads}</span>
+                </div>
+                <div style="height: 6px; background-color: #0f172a; border-radius: 10px; overflow: hidden;">
+                    <div style="height: 100%; width: 100%; background-color: #8b5cf6; border-radius: 10px;"></div>
+                </div>
+            </div>
+            <div>
+                <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: bold; margin-bottom: 8px;">
+                    <span style="color: #cbd5e1;">Successful Outreach</span>
+                    <span style="color: #f8fafc;">{total_sent}</span>
+                </div>
+                <div style="height: 6px; background-color: #0f172a; border-radius: 10px; overflow: hidden;">
+                    <div style="height: 100%; width: {(total_sent/total_leads*100) if total_leads > 0 else 0}%; background-color: #10b981; border-radius: 10px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <h3 style="color: #f8fafc; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 15px;">Primary Statistics</h3>
+        <table style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 40px; border-radius: 8px; overflow: hidden; border: 1px solid #1e293b;">
+            <thead style="background-color: #1e293b;">
                 <tr>
-                    <th style="padding: 12px; text-align: left; font-size: 11px; text-transform: uppercase; color: #94a3b8;">User</th>
-                    <th style="padding: 12px; text-align: center; font-size: 11px; text-transform: uppercase; color: #94a3b8;">Leads Found</th>
-                    <th style="padding: 12px; text-align: center; font-size: 11px; text-transform: uppercase; color: #94a3b8;">Outreach</th>
-                    <th style="padding: 12px; text-align: right; font-size: 11px; text-transform: uppercase; color: #94a3b8;">Actions</th>
+                    <th style="padding: 14px; text-align: left; font-size: 10px; text-transform: uppercase; color: #64748b; letter-spacing: 1px;">User</th>
+                    <th style="padding: 14px; text-align: center; font-size: 10px; text-transform: uppercase; color: #64748b; letter-spacing: 1px;">New Leads</th>
+                    <th style="padding: 14px; text-align: center; font-size: 10px; text-transform: uppercase; color: #64748b; letter-spacing: 1px;">Outreach</th>
+                    <th style="padding: 14px; text-align: right; font-size: 10px; text-transform: uppercase; color: #64748b; letter-spacing: 1px;">Actions</th>
                 </tr>
             </thead>
-            <tbody>
-                {stats_rows if stats_rows else '<tr><td colspan="4" style="padding: 20px; text-align: center; color: #94a3b8;">No activity recorded in target period.</td></tr>'}
+            <tbody style="background-color: #0f172a;">
+                {stats_rows if stats_rows else '<tr><td colspan="4" style="padding: 24px; text-align: center; color: #64748b; font-size: 13px;">No activity recorded in target period.</td></tr>'}
             </tbody>
         </table>
 
-        <div style="background-color: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #f1f5f9;">
-            <h4 style="margin-top: 0; color: #1e293b; font-size: 14px;">Report Summary</h4>
-            <ul style="margin-bottom: 0; color: #475569; font-size: 13px; line-height: 1.6;">
-                <li><strong>Scope:</strong> {target_user} detailed performance audit.</li>
-                <li><strong>Status:</strong> System operating within normal parameters.</li>
-                <li><strong>Ingestion Velocity:</strong> {sum(u.get('leads_count', 0) or 0 for u in user_stats)} records processed.</li>
-            </ul>
+        <div style="background-color: #3b82f615; padding: 20px; border-radius: 12px; border: 1px solid #3b82f630; text-align: center;">
+            <p style="color: #60a5fa; font-size: 13px; font-weight: bold; margin: 0;">
+                Please refer to the attached Excel (.xlsx) file for complete graphs, flow charts, and granular data matrices.
+            </p>
         </div>
 
-        <p style="text-align: center; margin-top: 40px; color: #94a3b8; font-size: 11px;">
-            This is an automated system report from LeadStreamAI. 
-            <br> Do not reply to this email.
+        <p style="text-align: center; margin-top: 40px; color: #475569; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">
+            LeadStreamAI Automated Dispatch
         </p>
     </div>
     """
@@ -362,5 +385,6 @@ def send_admin_report(to_email: str, report_data: dict) -> bool:
         html_content=html_content,
         from_email=os.getenv("SMTP_USER", admin['email']),
         from_name="LeadStream Intelligence",
-        is_system_email=True
+        is_system_email=True,
+        attachments=report_data.get("attachments")
     )

@@ -20,8 +20,14 @@ def normalize_user_id(user_id: Optional[str]) -> str:
     return user_id
 
 @router.get("/companies")
-def list_companies(page: int = 1, limit: int = 500, user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Returns company profiles from the internal company registry database with pagination."""
+def list_companies(
+    page: int = 1, 
+    limit: int = 500, 
+    search: Optional[str] = None,
+    filters: Optional[str] = None, # JSON string of key-value filters
+    user_id: Optional[str] = Header(None, alias="X-User-Id")
+):
+    """Returns company profiles from the internal company registry database with pagination and global search."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     offset = (page - 1) * limit
@@ -29,21 +35,51 @@ def list_companies(page: int = 1, limit: int = 500, user_id: Optional[str] = Hea
     uid = normalize_user_id(user_id)
     is_admin = (str(user_id or '').lower() == 'admin')
     
+    # Base query construction
+    base_where = ""
+    params = []
+    
+    if is_admin:
+        base_where = "WHERE 1=1"
+    elif uid:
+        base_where = "WHERE user_id = %s"
+        params.append(uid)
+    else:
+        base_where = "WHERE user_id IS NULL"
+        
+    # Apply Global Search
+    if search:
+        search_term = f"%{search}%"
+        base_where += " AND (row_data::text ILIKE %s)"
+        params.append(search_term)
+        
+    # Apply Column Filters
+    if filters:
+        try:
+            filter_map = json.loads(filters)
+            for key, value in filter_map.items():
+                if value:
+                    base_where += f" AND (row_data->>'{key}' ILIKE %s)"
+                    params.append(f"%{value}%")
+        except:
+            pass # Ignore malformed filters
+
     try:
-        # Total count and Fetch with admin bypass
-        if is_admin:
-            cur.execute("SELECT COUNT(*) FROM company_registry")
-            total = cur.fetchone()[0]
-            cur.execute("SELECT id, row_data FROM company_registry ORDER BY id ASC LIMIT %s OFFSET %s", (limit, offset))
-        elif uid:
-            cur.execute("SELECT COUNT(*) FROM company_registry WHERE user_id = %s", (uid,))
-            total = cur.fetchone()[0]
-            cur.execute("SELECT id, row_data FROM company_registry WHERE user_id = %s ORDER BY id ASC LIMIT %s OFFSET %s", (uid, limit, offset))
-        else:
-            cur.execute("SELECT COUNT(*) FROM company_registry WHERE user_id IS NULL")
-            total = cur.fetchone()[0]
-            cur.execute("SELECT id, row_data FROM company_registry WHERE user_id IS NULL ORDER BY id ASC LIMIT %s OFFSET %s", (limit, offset))
-            
+        # Total count with filters
+        count_query = f"SELECT COUNT(*) FROM company_registry {base_where}"
+        cur.execute(count_query, params)
+        total = cur.fetchone()[0]
+        
+        # Fetch with pagination
+        fetch_params = params + [limit, offset]
+        fetch_query = f"""
+            SELECT id, row_data 
+            FROM company_registry 
+            {base_where} 
+            ORDER BY id ASC 
+            LIMIT %s OFFSET %s
+        """
+        cur.execute(fetch_query, fetch_params)
         rows = cur.fetchall()
         
         companies = []
@@ -61,6 +97,8 @@ def list_companies(page: int = 1, limit: int = 500, user_id: Optional[str] = Hea
             "pages": (total + limit - 1) // limit
         }
     except Exception as e:
+        import traceback
+        print(traceback.format_exc())
         return { "companies": [], "error": str(e), "total": 0 }
     finally:
         cur.close()
