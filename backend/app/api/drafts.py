@@ -133,42 +133,49 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
     unsubscribe_url = f"{base_url}/api/leads/unsubscribe/{lead_id}"
     
-    # Simple check to avoid double-injecting if it already looks like it has a signature
-    if "unsubscribe" in body.lower() or "---" in body:
+    # Avoid double-injection
+    if "unsubscribe" in body.lower() or "SIG_START" in body:
         return body
 
-    # ROBUST SIGN-OFF STRIPPING
-    # We scan the last 10 lines for common sign-off markers and truncate the body there.
+    # Strip any existing sign-offs from the AI body
     sign_offs = ["Sincerely", "Best regards", "Thanks & Regards", "Thanks,", "Regards,", "--"]
     lines = body.strip().split("\n")
     clean_body_lines = lines[:]
-    
-    # Check last 10 lines for a sign-off
     for i in range(len(lines) - 1, max(-1, len(lines) - 10), -1):
         line = lines[i].strip()
         if any(line.startswith(s) for s in sign_offs):
-            # Found a sign-off, truncate everything from this line onwards
             clean_body_lines = lines[:i]
             break
-            
     clean_body = "\n".join(clean_body_lines).strip()
 
-    # Construct Professional Signature (Removing bold stars for cleaner draft view)
-    signature_parts = [
-        "",
-        f"[Click here to unsubscribe]({unsubscribe_url})",
-        "",
-        "---",
-        "Thanks & Regards,",
-        "",
-        f"{profile.get('full_name') or profile.get('username') or 'The Team'},",
-        profile.get('job_title') if profile.get('job_title') else None,
-        f"[LinkedIn Profile]({profile.get('linkedin_url')})" if profile.get('linkedin_url') else None,
-        profile.get('phone') if profile.get('phone') else None
-    ]
+    name = profile.get('full_name') or profile.get('username') or 'The Team'
+    title = profile.get('job_title') or ''
+    linkedin = profile.get('linkedin_url') or ''
+    phone = profile.get('phone') or ''
+
+    linkedin_part = f'<sig_link href="{linkedin}">LinkedIn</sig_link>' if linkedin else ''
     
-    signature_block = "\n".join([str(p) for p in signature_parts if p is not None])
-    return f"{clean_body}\n{signature_block}"
+    # Structured signature block (SIG_START/SIG_END markers for preview detection)
+    signature_block = (
+        f"\n\n[Click here to unsubscribe]({unsubscribe_url})"
+        f"\n\nSIG_START"
+        f"\n--"
+        f"\nThanks & Regards,"
+        f"\n{name},"
+        f"\n{title}," if title else f"\n\nSIG_START\n--\nThanks & Regards,\n{name},{linkedin_part}\n{phone}"
+    )
+    
+    # Use cleaner structured format
+    sig_lines = ["\n", "[Click here to unsubscribe](" + unsubscribe_url + ")", "", "SIG_START", "--", "Thanks & Regards,", f"{name},"]
+    if title:
+        sig_lines.append(f"{title},")
+    if linkedin:
+        sig_lines.append(f"SIG_LINK:{linkedin}")
+    if phone:
+        sig_lines.append(phone)
+    sig_lines.append("SIG_END")
+    
+    return clean_body + "\n" + "\n".join(sig_lines)
 
 # --- Generate Draft ---
 # Supports both /generate-draft (user prompt) and /generate-email (frontend Axios)

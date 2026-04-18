@@ -59,7 +59,7 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-from app.api import ingest, drafts, dashboard, leads, auth, family_offices, campaigns, metrics, users, prompts, admin, companies
+from app.api import ingest, drafts, dashboard, leads, auth, family_offices, campaigns, metrics, users, prompts, admin, companies, rocketreach
 
 app.include_router(ingest.router, prefix="/api")
 app.include_router(drafts.router, prefix="/api")
@@ -73,3 +73,4 @@ app.include_router(users.router, prefix="/api")
 app.include_router(prompts.router, prefix="/api")
 app.include_router(admin.router, prefix="/api", tags=["admin"])
 app.include_router(companies.router, prefix="/api", tags=["companies"])
+app.include_router(rocketreach.router, prefix="/api", tags=["rocketreach"])

@@ -96,6 +96,9 @@ const Layout = () => {
           <Link to="/dashboard/bulk-search" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'bulk-search' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'bulk-search' ? 'text-white' : 'text-[#94a3b8]'}`}>🚀</span> Bulk Search
           </Link>
+          <Link to="/dashboard/rocketreach" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'rocketreach' ? 'bg-orange-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+            <span className={`text-[16px] w-[22px] text-center shrink-0`}>🔍</span> RocketReach
+          </Link>
           <Link to="/dashboard/companies" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'companies' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'companies' ? 'text-white' : 'text-[#94a3b8]'}`}>📊</span> Company Database
           </Link>

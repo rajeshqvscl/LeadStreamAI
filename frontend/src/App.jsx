@@ -23,6 +23,7 @@ import BulkSearch from './pages/BulkSearch';
 import CompanyDatabase from './pages/CompanyDatabase';
 import History from './pages/History';
 import Followups from './pages/Followups';
+import RocketReach from './pages/RocketReach';
 
 const ProtectedRoute = ({ children }) => {
   const token = localStorage.getItem('token') || localStorage.getItem('token_admin');
@@ -101,6 +102,7 @@ function App() {
           <Route path="bulk-search" element={<BulkSearch />} />
           <Route path="companies" element={<CompanyDatabase />} />
           <Route path="followups" element={<Followups />} />
+          <Route path="rocketreach" element={<RocketReach />} />
           <Route path="history" element={<AdminRoute><History /></AdminRoute>} />
         </Route>
 

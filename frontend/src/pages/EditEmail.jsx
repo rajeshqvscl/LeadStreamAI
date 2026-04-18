@@ -19,11 +19,84 @@ const EditEmail = () => {
   const [notification, setNotification] = useState(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [scheduledAt, setScheduledAt] = useState(null);
+  const [selectedColor, setSelectedColor] = useState('#ffffff');
+  const bodyRef = React.useRef(null);
+
+  const COLORS = ['#ffffff', '#60a5fa', '#34d399', '#f97316', '#f43f5e', '#a78bfa', '#fbbf24', '#94a3b8'];
+
+  const applyFormat = (tag, attr = '') => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const selected = body.substring(start, end);
+    if (!selected) return;
+    let wrapped;
+    if (tag === 'color') {
+      wrapped = `<span style="color:${attr}">${selected}</span>`;
+    } else if (tag === 'b') {
+      wrapped = `**${selected}**`;
+    } else if (tag === 'i') {
+      wrapped = `_${selected}_`;
+    }
+    const newBody = body.substring(0, start) + wrapped + body.substring(end);
+    setBody(newBody);
+    setTimeout(() => {
+      el.focus();
+      el.setSelectionRange(start + wrapped.length, start + wrapped.length);
+    }, 0);
+  };
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
     setTimeout(() => setNotification(null), 5000);
   };
+
+  const renderEmailPreview = (text) => {
+    if (!text) return 'Generate AI draft to begin...';
+
+    // Replace SIG_START...SIG_END block with styled HTML
+    const sigStartIdx = text.indexOf('SIG_START');
+    if (sigStartIdx !== -1) {
+      const contentPart = text.substring(0, sigStartIdx);
+      const sigPart = text.substring(sigStartIdx + 'SIG_START'.length);
+      const sigEndIdx = sigPart.indexOf('SIG_END');
+      const sigContent = sigEndIdx !== -1 ? sigPart.substring(0, sigEndIdx) : sigPart;
+
+      const sigLines = sigContent.split('\n').filter(l => l.trim());
+      let sigHtml = '<div style="margin-top:20px; border-top:1px solid #ffffff15; padding-top:16px;">';
+      sigLines.forEach(line => {
+        const trimmed = line.trim();
+        if (trimmed === '--') {
+          // separator dash, skip rendering
+        } else if (trimmed.startsWith('SIG_LINK:')) {
+          const url = trimmed.replace('SIG_LINK:', '').trim();
+          sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6;font-style:italic;font-weight:600;text-decoration:underline;display:block;"}>LinkedIn</a>`;
+        } else if (trimmed) {
+          sigHtml += `<span style="color:#64748b;font-style:italic;display:block;line-height:1.7;">${trimmed}</span>`;
+        }
+      });
+      sigHtml += '</div>';
+
+      const renderedContent = contentPart
+        .replace(/\*\*\*(.*?)\*\*\*/g, '<em class="text-white font-black text-[13px] not-italic block mt-1 tracking-tight">$1</em>')
+        .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white font-black text-[14px] mt-4 block mb-1">$1</strong>')
+        .replace(/_(.*?)_/g, '<em style="font-style:italic">$1</em>')
+        .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" class="text-blue-400 underline hover:text-blue-300 transition-colors font-bold">$1</a>')
+        .replace(/\n/g, '<br>');
+
+      return renderedContent + sigHtml;
+    }
+
+    return text
+      .replace(/\*\*\*(.*?)\*\*\*/g, '<em class="text-white font-black text-[13px] not-italic block mt-1 tracking-tight">$1</em>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white font-black text-[14px] mt-4 block mb-1">$1</strong>')
+      .replace(/_(.*?)_/g, '<em style="font-style:italic">$1</em>')
+      .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" class="text-blue-400 underline hover:text-blue-300 transition-colors font-bold">$1</a>')
+      .replace(/^--$/m, '<div class="border-t border-[#ffffff10] my-6 w-16"></div>')
+      .replace(/\n/g, '<br>');
+  };
+
 
   const fetchDraft = async () => {
     setIsLoading(true);
@@ -180,8 +253,38 @@ const EditEmail = () => {
             </div>
 
             <div className="space-y-2 flex-1 flex flex-col">
-              <label className="text-[11px] font-medium text-slate-400">Body</label>
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-medium text-slate-400">Body</label>
+                {/* Formatting Toolbar */}
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    title="Bold (select text first)"
+                    onClick={() => applyFormat('b')}
+                    className="w-7 h-7 flex items-center justify-center rounded bg-white/5 border border-white/10 text-white font-black text-[13px] hover:bg-blue-500/20 hover:border-blue-500/40 transition-all cursor-pointer"
+                  >B</button>
+                  <button
+                    type="button"
+                    title="Italic (select text first)"
+                    onClick={() => applyFormat('i')}
+                    className="w-7 h-7 flex items-center justify-center rounded bg-white/5 border border-white/10 text-white italic font-bold text-[13px] hover:bg-purple-500/20 hover:border-purple-500/40 transition-all cursor-pointer"
+                  >I</button>
+                  <div className="flex items-center gap-1 ml-1">
+                    {COLORS.map(c => (
+                      <button
+                        key={c}
+                        type="button"
+                        title={`Apply color ${c}`}
+                        onClick={() => { setSelectedColor(c); applyFormat('color', c); }}
+                        className={`w-5 h-5 rounded-full border-2 transition-all cursor-pointer hover:scale-110 ${selectedColor === c ? 'border-white scale-125' : 'border-transparent'}`}
+                        style={{ backgroundColor: c }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
               <textarea
+                ref={bodyRef}
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 placeholder="Generate AI draft to begin or write your own message..."
@@ -339,14 +442,7 @@ const EditEmail = () => {
 
               <div
                 className={`text-[13px] leading-relaxed font-medium ${body ? 'text-slate-300' : 'text-slate-600 italic text-[11px]'}`}
-                dangerouslySetInnerHTML={{
-                  __html: (body || 'Generate AI draft to begin...')
-                    .replace(/\*\*\*(.*?)\*\*\*/g, '<em class="text-white font-black text-[13px] not-italic block mt-1 tracking-tight">$1</em>') // bold-italics
-                    .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white font-black text-[14px] mt-4 block mb-1">$1</strong>')
-                    .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" class="text-blue-400 underline hover:text-blue-300 transition-colors font-bold">$1</a>')
-                    .replace(/^--$/m, '<div class="border-t border-[#ffffff10] my-6 w-16"></div>')
-                    .replace(/\n/g, '<br>')
-                }}
+                dangerouslySetInnerHTML={{ __html: renderEmailPreview(body) }}
               />
 
               {/* Attachments Section */}
