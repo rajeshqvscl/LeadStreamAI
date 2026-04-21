@@ -34,6 +34,12 @@ const Leads = () => {
   const [isRequestingAccess, setIsRequestingAccess] = useState(false);
   const [isBulkActionLoading, setIsBulkActionLoading] = useState(false);
 
+  // Template picker
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [customTemplates, setCustomTemplates] = useState([]);
+  const [selectedTemplate, setSelectedTemplate] = useState('ai'); // 'ai' or template name
+  const [isTemplateGenerating, setIsTemplateGenerating] = useState(false);
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [isCreatingLead, setIsCreatingLead] = useState(false);
   const [newLeadData, setNewLeadData] = useState({
@@ -144,6 +150,10 @@ const Leads = () => {
   useEffect(() => {
     fetchLeads();
   }, [pagination.page, filters]);
+
+  useEffect(() => {
+    api.get('/api/custom-draft-templates').then(r => setCustomTemplates(r.data || [])).catch(() => {});
+  }, []);
 
   const handleFilterChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -353,6 +363,35 @@ const Leads = () => {
       showNotification('error', 'Failed to generate drafts: ' + (err.response?.data?.error || err.message));
     } finally {
       setIsBulkActionLoading(false);
+    }
+  };
+
+  const handleGenerateWithTemplate = async () => {
+    if (selectedLeads.size === 0) return;
+    setIsTemplateGenerating(true);
+    const leadIds = Array.from(selectedLeads);
+    try {
+      if (selectedTemplate === 'ai') {
+        await api.post('/api/generate-bulk-domain-drafts', { lead_ids: leadIds });
+        showNotification('success', `AI drafts generated for ${leadIds.length} lead(s).`);
+      } else {
+        // Generate for each lead sequentially using the chosen template
+        let ok = 0;
+        for (const lid of leadIds) {
+          try {
+            await api.post('/api/generate-draft-from-template', { lead_id: lid, template_name: selectedTemplate });
+            ok++;
+          } catch {}
+        }
+        showNotification('success', `Template "${selectedTemplate}" applied to ${ok} lead(s).`);
+      }
+      setShowTemplatePicker(false);
+      setSelectedLeads(new Set());
+      fetchLeads();
+    } catch (err) {
+      showNotification('error', 'Draft generation failed: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setIsTemplateGenerating(false);
     }
   };
 
@@ -758,11 +797,11 @@ const Leads = () => {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={handleGenerateDomainDrafts}
+            onClick={() => setShowTemplatePicker(true)}
             disabled={isBulkActionLoading}
             className="btn btn-ghost py-2 px-4 shadow-none bg-white/5 border-white/10 hover:bg-white/10 text-slate-200 disabled:opacity-50 cursor-pointer"
           >
-            {isBulkActionLoading ? <Loader2 className="w-4 h-4 mr-2 text-blue-400 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2 text-blue-400" />}
+            <Sparkles className="w-4 h-4 mr-2 text-blue-400" />
             Generate Drafts
           </button>
           <button
@@ -1304,6 +1343,79 @@ const Leads = () => {
               <p className="text-[10px] text-slate-500 font-medium mt-8 uppercase tracking-widest">
                 Admin will receive an instant priority notification
               </p>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Template Picker Modal */}
+      {showTemplatePicker && (
+        <>
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[5000] animate-in fade-in duration-300" onClick={() => setShowTemplatePicker(false)} />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-[#0d1117] border border-white/10 rounded-3xl shadow-[0_0_60px_rgba(0,0,0,0.6)] z-[5001] animate-in zoom-in-95 duration-300 overflow-hidden">
+            <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 via-purple-500 to-rose-500" />
+            <div className="p-8">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-lg font-black text-white tracking-tight flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-blue-400" /> Choose Draft Template
+                  </h2>
+                  <p className="text-slate-500 text-[11px] mt-0.5 font-medium">
+                    Generating for <span className="text-white font-bold">{selectedLeads.size}</span> selected lead{selectedLeads.size > 1 ? 's' : ''}
+                  </p>
+                </div>
+                <button onClick={() => setShowTemplatePicker(false)} className="text-slate-500 hover:text-white transition-colors cursor-pointer">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-3 mb-8">
+                {/* Regular AI option */}
+                <label className={`flex items-start gap-4 p-4 rounded-2xl border cursor-pointer transition-all ${selectedTemplate === 'ai' ? 'border-blue-500/60 bg-blue-500/10' : 'border-white/8 bg-white/[0.02] hover:border-white/15'}`}>
+                  <input type="radio" name="template" value="ai" className="sr-only" checked={selectedTemplate === 'ai'} onChange={() => setSelectedTemplate('ai')} />
+                  <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${selectedTemplate === 'ai' ? 'border-blue-500' : 'border-slate-600'}`}>
+                    {selectedTemplate === 'ai' && <div className="w-2 h-2 rounded-full bg-blue-500" />}
+                  </div>
+                  <div>
+                    <p className="text-white font-bold text-sm flex items-center gap-2">
+                      🤖 Regular AI Draft
+                      <span className="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Default</span>
+                    </p>
+                    <p className="text-slate-500 text-[11px] mt-0.5">AI generates a personalized email based on the lead's profile, industry, and persona.</p>
+                  </div>
+                </label>
+
+                {/* Custom templates */}
+                {customTemplates.map(tpl => (
+                  <label key={tpl.name} className={`flex items-start gap-4 p-4 rounded-2xl border cursor-pointer transition-all ${selectedTemplate === tpl.name ? 'border-purple-500/60 bg-purple-500/10' : 'border-white/8 bg-white/[0.02] hover:border-white/15'}`}>
+                    <input type="radio" name="template" value={tpl.name} className="sr-only" checked={selectedTemplate === tpl.name} onChange={() => setSelectedTemplate(tpl.name)} />
+                    <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${selectedTemplate === tpl.name ? 'border-purple-500' : 'border-slate-600'}`}>
+                      {selectedTemplate === tpl.name && <div className="w-2 h-2 rounded-full bg-purple-500" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white font-bold text-sm flex items-center gap-2">
+                        📝 {tpl.name}
+                        <span className="text-[9px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Custom</span>
+                      </p>
+                      <p className="text-slate-500 text-[11px] mt-0.5">{tpl.description || 'Custom template with lead name & company auto-filled.'}</p>
+                      <p className="text-slate-600 text-[10px] mt-1.5 font-mono truncate">{tpl.content?.substring(0, 90)}...</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+
+              <div className="flex gap-3">
+                <button onClick={() => setShowTemplatePicker(false)} className="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 font-bold text-xs uppercase tracking-widest border border-white/5 cursor-pointer transition-colors">
+                  Cancel
+                </button>
+                <button
+                  onClick={handleGenerateWithTemplate}
+                  disabled={isTemplateGenerating}
+                  className="flex-[2] py-3 px-6 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer transition-all"
+                >
+                  {isTemplateGenerating ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</> : <><Sparkles className="w-4 h-4" /> Generate {selectedLeads.size} Draft{selectedLeads.size > 1 ? 's' : ''}</>}
+                </button>
+              </div>
             </div>
           </div>
         </>

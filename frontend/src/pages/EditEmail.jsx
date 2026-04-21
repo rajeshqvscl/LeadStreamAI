@@ -68,12 +68,19 @@ const EditEmail = () => {
       sigLines.forEach(line => {
         const trimmed = line.trim();
         if (trimmed === '--') {
-          // separator dash, skip rendering
+          // separator dash — skip
+        } else if (trimmed.startsWith('SIG_LINK_LABEL:')) {
+          // Format: SIG_LINK_LABEL:Label Text:https://url
+          const rest = trimmed.replace('SIG_LINK_LABEL:', '');
+          const colonIdx = rest.indexOf(':');
+          const label = colonIdx !== -1 ? rest.substring(0, colonIdx).trim() : 'LinkedIn';
+          const url = colonIdx !== -1 ? rest.substring(colonIdx + 1).trim() : rest;
+          sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6;font-style:italic;font-weight:700;text-decoration:underline;display:block;">${label}</a>`;
         } else if (trimmed.startsWith('SIG_LINK:')) {
           const url = trimmed.replace('SIG_LINK:', '').trim();
-          sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6;font-style:italic;font-weight:600;text-decoration:underline;display:block;"}>LinkedIn</a>`;
+          sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6;font-style:italic;font-weight:700;text-decoration:underline;display:block;">LinkedIn</a>`;
         } else if (trimmed) {
-          sigHtml += `<span style="color:#64748b;font-style:italic;display:block;line-height:1.7;">${trimmed}</span>`;
+          sigHtml += `<span style="color:#64748b;font-style:italic;font-weight:700;display:block;line-height:1.7;">${trimmed}</span>`;
         }
       });
       sigHtml += '</div>';

@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import DraftTemplatePicker from '../components/DraftTemplatePicker';
 
 const BulkSearch = () => {
   const navigate = useNavigate();
@@ -18,6 +19,8 @@ const BulkSearch = () => {
   const [selectedLeads, setSelectedLeads] = useState(new Set());
   const [isBulkActionLoading, setIsBulkActionLoading] = useState(false);
   const [processingId, setProcessingId] = useState(null);
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [singleLeadId, setSingleLeadId] = useState(null); // null = bulk mode, number = single row
 
   const [syncMode, setSyncMode] = useState('rocketreach'); // 'rocketreach' or 'spreadsheet'
   const [isSyncing, setIsSyncing] = useState(false);
@@ -162,9 +165,7 @@ const BulkSearch = () => {
     if (selectedLeads.size === 0) return;
     setIsBulkActionLoading(true);
     try {
-      const response = await api.post('/api/generate-bulk-domain-drafts', {
-        lead_ids: Array.from(selectedLeads)
-      });
+      await api.post('/api/generate-bulk-domain-drafts', { lead_ids: Array.from(selectedLeads) });
       showNotification('success', `Drafts generated and moved to Email Drafts.`);
       setSelectedLeads(new Set());
       fetchBulkLeads(pagination.page);
@@ -173,6 +174,42 @@ const BulkSearch = () => {
     } finally {
       setIsBulkActionLoading(false);
     }
+  };
+
+  const handleTemplateGenerate = async (templateName) => {
+    // single-row mode OR bulk mode
+    const leadIds = singleLeadId !== null ? [singleLeadId] : Array.from(selectedLeads);
+    if (leadIds.length === 0) return;
+    singleLeadId !== null ? setProcessingId(singleLeadId) : setIsBulkActionLoading(true);
+    try {
+      if (templateName === 'ai') {
+        await api.post('/api/generate-bulk-domain-drafts', { lead_ids: leadIds });
+        showNotification('success', `AI draft${leadIds.length > 1 ? 's' : ''} generated for ${leadIds.length} lead${leadIds.length > 1 ? 's' : ''}.`);
+      } else {
+        let ok = 0;
+        for (const lid of leadIds) {
+          try {
+            await api.post('/api/generate-draft-from-template', { lead_id: lid, template_name: templateName });
+            ok++;
+          } catch {}
+        }
+        showNotification('success', `Template "${templateName}" applied to ${ok} lead${ok > 1 ? 's' : ''}.`);
+      }
+      setShowTemplatePicker(false);
+      setSingleLeadId(null);
+      if (singleLeadId === null) setSelectedLeads(new Set());
+      fetchBulkLeads(pagination.page);
+    } catch (err) {
+      showNotification('error', 'Draft generation failed: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setIsBulkActionLoading(false);
+      setProcessingId(null);
+    }
+  };
+
+  const openSinglePicker = (leadId) => {
+    setSingleLeadId(leadId);
+    setShowTemplatePicker(true);
   };
 
   const handleBulkApproveDrafts = async () => {
@@ -648,7 +685,7 @@ const BulkSearch = () => {
             {isBulkActionLoading ? 'Processing...' : 'Approve & Draft'}
           </button>
           <button
-            onClick={handleBulkGenerateDrafts}
+            onClick={() => setShowTemplatePicker(true)}
             disabled={isBulkActionLoading}
             className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-[14px] text-[11px] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-600/20 cursor-pointer disabled:opacity-50"
           >
@@ -851,9 +888,9 @@ const BulkSearch = () => {
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
                         <button
-                          onClick={() => handleGenerateDraftSingle(lead.id)}
+                          onClick={() => openSinglePicker(lead.id)}
                           disabled={processingId === lead.id}
-                          title="Generate AI Draft (Review required)"
+                          title="Generate Draft (choose template)"
                           className="p-1.5 rounded-lg bg-indigo-600/10 hover:bg-indigo-600 text-indigo-400 hover:text-white transition-all border border-indigo-600/20 cursor-pointer disabled:opacity-50"
                         >
                           {processingId === lead.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
@@ -959,6 +996,13 @@ const BulkSearch = () => {
           </div>
         </>
       )}
+
+      <DraftTemplatePicker
+        isOpen={showTemplatePicker}
+        onClose={() => { setShowTemplatePicker(false); setSingleLeadId(null); }}
+        selectedCount={singleLeadId !== null ? 1 : selectedLeads.size}
+        onGenerate={handleTemplateGenerate}
+      />
     </div>
   );
 };

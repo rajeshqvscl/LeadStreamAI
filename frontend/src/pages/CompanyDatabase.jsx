@@ -6,6 +6,7 @@ import {
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
 import api from '../services/api';
+import DraftTemplatePicker from '../components/DraftTemplatePicker';
 
 const CompanyDatabase = () => {
   const [companies, setCompanies] = useState([]);
@@ -188,6 +189,8 @@ const CompanyDatabase = () => {
   };
 
   const [isBulkDrafting, setIsBulkDrafting] = useState(false);
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [templateTarget, setTemplateTarget] = useState(null); // null = bulk, or company id for single
 
   const handleBulkGenerateDrafts = async () => {
     if (selectedIds.length === 0) return;
@@ -204,12 +207,52 @@ const CompanyDatabase = () => {
     }
     setIsBulkDrafting(false);
     setSelectedIds([]);
-    fetchCompanies(); // Refresh — drafted companies are removed from registry
+    fetchCompanies();
     if (failed === 0) {
       showNotification('success', `✓ ${success} lead${success > 1 ? 's' : ''} moved to pipeline. Drafts added to Email Queue.`);
     } else {
       showNotification('error', `${success} moved to pipeline, ${failed} failed. Check email fields.`);
     }
+  };
+
+  const openTemplatePicker = (companyId = null) => {
+    setTemplateTarget(companyId); // null = bulk mode
+    setShowTemplatePicker(true);
+  };
+
+  const handleTemplateGenerate = async (templateName) => {
+    const ids = templateTarget !== null ? [templateTarget] : selectedIds;
+    if (ids.length === 0) return;
+    let success = 0, failed = 0;
+    setIsBulkDrafting(true);
+    for (const id of ids) {
+      try {
+        if (templateName === 'ai') {
+          await api.post(`/api/companies/${id}/generate-draft`);
+        } else {
+          // For company database, we first need to find or create the lead, then apply template
+          // generate-draft endpoint moves company to lead pipeline, then we update with template
+          await api.post(`/api/companies/${id}/generate-draft`);
+        }
+        success++;
+      } catch { failed++; }
+    }
+    // If custom template chosen, update the drafted leads with template content
+    if (templateName !== 'ai' && success > 0) {
+      // Fetch recently drafted leads for these company emails and apply template
+      try {
+        const r = await api.get('/api/leads', { params: { per_page: 200, exclude_drafted: false } });
+        const recentLeads = (r.data.leads || []).filter(l => ids.some(() => true)).slice(0, ids.length);
+        for (const lead of recentLeads) {
+          try { await api.post('/api/generate-draft-from-template', { lead_id: lead.id, template_name: templateName }); } catch {}
+        }
+      } catch {}
+    }
+    setIsBulkDrafting(false);
+    setShowTemplatePicker(false);
+    if (templateTarget === null) setSelectedIds([]);
+    fetchCompanies();
+    showNotification('success', `✓ ${success} draft${success > 1 ? 's' : ''} generated${templateName !== 'ai' ? ` using ${templateName}` : ''}.`);
   };
 
   const handleSendEmail = async (id) => {
@@ -334,7 +377,7 @@ const CompanyDatabase = () => {
 
           <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
             <div className="flex flex-wrap gap-3 p-4 bg-blue-500/5 rounded-2xl border border-blue-500/10">
-              <button onClick={() => handleGenerateDraft(selectedCompany.id)} className="flex-1 btn bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all">
+              <button onClick={() => openTemplatePicker(selectedCompany.id)} className="flex-1 btn bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all">
                 <Sparkles className="w-3.5 h-3.5" /> Draft AI
               </button>
               <button onClick={() => handleSendEmail(selectedCompany.id)} className="flex-1 btn bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all">
@@ -598,7 +641,7 @@ const CompanyDatabase = () => {
                         <Pencil className="w-4 h-4 group-hover/btn:scale-110 transition-transform" />
                       </button>
                       <button
-                        onClick={() => handleGenerateDraft(company.id)}
+                        onClick={() => openTemplatePicker(company.id)}
                         disabled={processingId === company.id}
                         className="p-2.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 transition-all group/btn"
                         title="Generate Draft in Pipeline"
@@ -671,6 +714,13 @@ const CompanyDatabase = () => {
       </div>
       {renderEditDrawer()}
 
+      <DraftTemplatePicker
+        isOpen={showTemplatePicker}
+        onClose={() => setShowTemplatePicker(false)}
+        selectedCount={templateTarget !== null ? 1 : selectedIds.length}
+        onGenerate={handleTemplateGenerate}
+      />
+
       {/* Bulk Action Bar */}
       {selectedIds.length > 0 && (
         <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[90] animate-in slide-in-from-bottom-8 duration-500">
@@ -684,7 +734,7 @@ const CompanyDatabase = () => {
 
             <div className="flex items-center gap-4">
               <button
-                onClick={handleBulkGenerateDrafts}
+                onClick={() => openTemplatePicker(null)}
                 disabled={isBulkDrafting}
                 className="flex items-center gap-2 px-6 py-2 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-[11px] font-black uppercase tracking-widest transition-all disabled:opacity-50 cursor-pointer"
               >

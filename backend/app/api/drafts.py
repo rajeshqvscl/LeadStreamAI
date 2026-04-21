@@ -239,6 +239,124 @@ def generate_draft(req: DraftRequest, user_id: Optional[str] = Header(None, alia
         traceback.print_exc()
         return {"error": str(e)}
 
+# --- List Custom Draft Templates (for template picker modal) ---
+@router.get("/custom-draft-templates")
+def list_custom_draft_templates():
+    """Returns all CUSTOM_DRAFT type prompts for use in the template picker."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        traceback.print_exc()
+        return []
+
+class TemplateDraftRequest(BaseModel):
+    lead_id: int
+    template_name: str  # e.g. "palak_mam_Draft_1"
+
+@router.post("/generate-draft-from-template")
+def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Generate a draft using a fixed custom template, replacing {{First Name}}, {{Company Name}} etc."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        # Fetch lead
+        if user_id and user_id != "admin":
+            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (req.lead_id, user_id))
+        elif user_id == "admin":
+            cur.execute("SELECT * FROM leads_raw WHERE id = %s", (req.lead_id,))
+        else:
+            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (req.lead_id,))
+
+        lead = cur.fetchone()
+        if not lead:
+            return {"error": "Lead not found"}
+        lead = normalize_lead(lead)
+
+        # Fetch template
+        cur.execute("SELECT content FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE", (req.template_name,))
+        tpl_row = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if not tpl_row:
+            return {"error": f"Template '{req.template_name}' not found"}
+
+        template_body = tpl_row["content"]
+
+        # Resolve lead fields
+        first_name = (lead.get("first_name") or "").strip() or "there"
+        last_name  = (lead.get("last_name") or "").strip()
+        full_name  = f"{first_name} {last_name}".strip()
+        company    = (lead.get("company_name") or lead.get("family_office_name") or "your organization").strip()
+        designation= (lead.get("designation") or "").strip()
+
+        # Replace all placeholders case-insensitively
+        body = template_body
+        for placeholder, value in [
+            ("{{First Name}}", first_name),
+            ("{{first name}}", first_name),
+            ("{{first_name}}", first_name),
+            ("{{Full Name}}", full_name),
+            ("{{full_name}}", full_name),
+            ("{{Company Name}}", company),
+            ("{{company_name}}", company),
+            ("{{Company}}", company),
+            ("{{Designation}}", designation),
+        ]:
+            body = body.replace(placeholder, value)
+
+        # Subject
+        subject = f"Strategic Partnership Opportunity | QVSCL × {company}"
+
+        # Inject logged-in user's signature ONLY if the template doesn't already embed one
+        profile = get_sender_profile(user_id)
+        if "SIG_START" in body:
+            # Template already has an embedded signature (e.g. palak_mam_Draft_1) — keep as-is
+            body_with_sig = body
+        else:
+            body_with_sig = inject_signature(body, profile, req.lead_id)
+
+
+
+        email_content = f"Subject: {subject}\n\n{body_with_sig}"
+
+        # Save to DB
+        conn2 = get_db_connection()
+        cur2 = conn2.cursor()
+        cur2.execute("""
+            UPDATE leads_raw
+            SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW()
+            WHERE id = %s
+        """, (email_content, req.lead_id))
+        conn2.commit()
+        cur2.close()
+        conn2.close()
+
+        try:
+            from app.models.lead import add_activity_log
+            add_activity_log(req.lead_id, "DRAFT_GENERATED", f"Custom template draft '{req.template_name}' generated", "system")
+        except:
+            pass
+
+        return {
+            "message": "Draft generated from template",
+            "draft_id": req.lead_id,
+            "subject": subject,
+            "body": body_with_sig,
+            "template": req.template_name
+        }
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e)}
+
+
 @router.get("/pending-drafts")
 @router.get("/emails")
 def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Optional[str] = None, geo: Optional[str] = None, company: Optional[str] = None, per_page: int = 20, user_id: Optional[str] = Header(None, alias="X-User-Id")):
