@@ -24,6 +24,14 @@ import CompanyDatabase from './pages/CompanyDatabase';
 import History from './pages/History';
 import Followups from './pages/Followups';
 import RocketReach from './pages/RocketReach';
+import Inbox from './pages/Inbox';
+import InboundDeals from './pages/InboundDeals';
+import DealIntelligence from './pages/DealIntelligence';
+import Meetings from './pages/Meetings';
+import SectorFAQ from './pages/SectorFAQ';
+import GmailDrafts from './pages/GmailDrafts';
+import GmailSent from './pages/GmailSent';
+import DataExport from './pages/DataExport';
 
 const ProtectedRoute = ({ children }) => {
   const token = localStorage.getItem('token') || localStorage.getItem('token_admin');
@@ -103,6 +111,14 @@ function App() {
           <Route path="companies" element={<CompanyDatabase />} />
           <Route path="followups" element={<Followups />} />
           <Route path="rocketreach" element={<RocketReach />} />
+          <Route path="inbox" element={<Inbox />} />
+          <Route path="deals" element={<InboundDeals />} />
+          <Route path="intelligence" element={<DealIntelligence />} />
+          <Route path="meetings" element={<Meetings />} />
+          <Route path="sector-faq" element={<SectorFAQ />} />
+          <Route path="gmail-drafts" element={<GmailDrafts />} />
+          <Route path="gmail-sent" element={<GmailSent />} />
+          <Route path="export" element={<DataExport />} />
           <Route path="history" element={<AdminRoute><History /></AdminRoute>} />
         </Route>
 

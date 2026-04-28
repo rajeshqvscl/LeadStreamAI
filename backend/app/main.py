@@ -12,22 +12,37 @@ from app.database import create_tables
 from contextlib import asynccontextmanager
 import asyncio
 
+async def maintenance_loop():
+    from app.services.google_service import renew_all_gmail_watches
+    while True:
+        try:
+            logger.info("Running background maintenance: Renewing Gmail watches")
+            renew_all_gmail_watches()
+        except Exception as e:
+            logger.error(f"Maintenance loop error: {e}")
+        await asyncio.sleep(86400) # Run every 24 hours
+
 async def scheduler_loop():
     from app.services.email_service import check_scheduled_emails
     from app.services.followup_service import process_outreach_sequences
+    from app.api.gmail import poll_all_users_for_replies
     while True:
         try:
             check_scheduled_emails()
             process_outreach_sequences()
+            # New Active Polling for lead replies
+            poll_all_users_for_replies()
         except Exception:
             pass
         await asyncio.sleep(60)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(scheduler_loop())
+    t1 = asyncio.create_task(scheduler_loop())
+    t2 = asyncio.create_task(maintenance_loop())
     yield
-    task.cancel()
+    t1.cancel()
+    t2.cancel()
 
 app = FastAPI(lifespan=lifespan)
 
@@ -59,7 +74,12 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-from app.api import ingest, drafts, dashboard, leads, auth, family_offices, campaigns, metrics, users, prompts, admin, companies, rocketreach
+from fastapi.staticfiles import StaticFiles
+
+# Mount static directory for PDF serving
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+from app.api import ingest, drafts, dashboard, leads, auth, family_offices, campaigns, metrics, users, prompts, admin, companies, rocketreach, gmail, intelligence
 
 app.include_router(ingest.router, prefix="/api")
 app.include_router(drafts.router, prefix="/api")
@@ -74,3 +94,5 @@ app.include_router(prompts.router, prefix="/api")
 app.include_router(admin.router, prefix="/api", tags=["admin"])
 app.include_router(companies.router, prefix="/api", tags=["companies"])
 app.include_router(rocketreach.router, prefix="/api", tags=["rocketreach"])
+app.include_router(gmail.router, prefix="/api", tags=["gmail"])
+app.include_router(intelligence.router, prefix="/api/intelligence", tags=["intelligence"])

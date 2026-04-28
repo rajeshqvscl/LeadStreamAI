@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Depends, Header
+from pathlib import Path
+from fastapi import APIRouter, HTTPException, Depends, Header, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -8,12 +9,17 @@ import hashlib
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
-from pathlib import Path
+import datetime
 from app.database import get_db_connection
+from app.services.google_service import get_google_flow, register_gmail_watch
 
 # Fix: Ensure .env is loaded in the API layer too
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path, override=True)
+
+# --- OAuth Environment Fixes (Local Testing) ---
+os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
 
 router = APIRouter()
 
@@ -52,18 +58,7 @@ def login(req: LoginRequest):
     if password_hash != user['password_hash']:
         raise HTTPException(status_code=401, detail="Invalid username or password")
         
-    # Reset is_approved to FALSE on every login for non-admins
-    # This enforces the "approval required every time you login" rule.
-    if user['role'] != 'ADMIN':
-        try:
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("UPDATE users SET is_approved = FALSE WHERE id = %s", (user['id'],))
-            conn.commit()
-            cur.close()
-            conn.close()
-        except Exception as e:
-            print(f"Login reset failed: {e}")
+    # Verification removed: Users stay approved once an admin activates them.
 
     return {
         "access_token": "dummy_token", # In a real app, generate a JWT here
@@ -78,6 +73,31 @@ def login(req: LoginRequest):
         }
     }
 
+@router.post("/auth/google/disconnect")
+def disconnect_google(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Forcefully removes all Google tokens for a user (Nuclear Reset)."""
+    uid = user_id if user_id and user_id.isdigit() else "1"
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            UPDATE users 
+            SET google_access_token = NULL, 
+                google_refresh_token = NULL, 
+                google_token_expiry = NULL,
+                google_linked_at = NULL,
+                google_email = NULL
+            WHERE id = %s
+        """, (uid,))
+        conn.commit()
+        return {"status": "success", "message": "Intelligence Layer disconnected."}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
 @router.get("/auth/me")
 def get_current_user(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Returns the current user profile and approval status."""
@@ -90,7 +110,7 @@ def get_current_user(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
-        cur.execute("SELECT id, username, email, full_name, role, is_active, is_approved, credits_used, COALESCE(credits_limit, 200) as credits_limit FROM users WHERE id = %s", (real_uid,))
+        cur.execute("SELECT id, username, email, full_name, role, is_active, is_approved, google_linked_at, google_email, credits_used, COALESCE(credits_limit, 200) as credits_limit FROM users WHERE id = %s", (real_uid,))
         user = cur.fetchone()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
@@ -104,28 +124,38 @@ def get_current_user(user_id: Optional[str] = Header(None, alias="X-User-Id")):
 
 @router.post("/auth/logout")
 def logout(user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Handles logout by resetting the user's approval status, enforcing re-approval upon next login."""
+    """Handles logout."""
     if not user_id:
         return {"success": True}
         
+    return {"success": True, "message": "Logged out"}
+
+# --- ACCESS REQUEST & APPROVAL ---
+
+@router.post("/auth/google/unlink")
+def unlink_google(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Removes the Google connection for the current user."""
     from app.database import get_db_connection
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Missing user context")
+    
     conn = get_db_connection()
     cur = conn.cursor()
-    
     try:
-        # Reset is_approved to FALSE so they must request access again
-        cur.execute("UPDATE users SET is_approved = FALSE WHERE id = %s AND role != 'ADMIN'", (user_id,))
+        cur.execute("""
+            UPDATE users 
+            SET google_refresh_token = NULL, 
+                google_linked_at = NULL 
+            WHERE id = %s OR username = %s
+        """, (user_id if user_id.isdigit() else 0, user_id))
         conn.commit()
+        return {"success": True, "message": "Google account unlinked successfully"}
     except Exception as e:
         conn.rollback()
-        print(f"Logout status reset failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
         conn.close()
-        
-    return {"success": True, "message": "Logged out and approval status reset"}
-
-# --- ACCESS REQUEST & APPROVAL ---
 
 class AccessRequest(BaseModel):
     user_id: int
@@ -222,9 +252,7 @@ def approve_user_landing(user_id: int):
         cur.execute("""
             UPDATE users 
             SET is_approved = TRUE, 
-                is_active = TRUE,
-                credits_limit = 200,
-                credits_used = 0
+                is_active = TRUE
             WHERE id = %s
         """, (user_id,))
         conn.commit()
@@ -253,3 +281,131 @@ def approve_user_landing(user_id: int):
             </div>
         </div>
     """)
+
+# --- GOOGLE OAUTH FLOW ---
+
+@router.get("/auth/google/link")
+def google_link(request: Request, user_id: str = Header(..., alias="X-User-Id")):
+    """Initiates the Google OAuth 2.0 flow for a specific user."""
+    # Use configured redirect URI or fallback to current request host
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
+    if not redirect_uri:
+        redirect_uri = f"{request.base_url.scheme}://{request.base_url.netloc}/api/auth/google/callback"
+    
+    import base64
+    import json
+    
+    flow = get_google_flow(redirect_uri=redirect_uri)
+    
+    # Generate the authorization URL. 
+    # This generates flow.code_verifier internally.
+    authorization_url, _ = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true',
+        prompt='select_account consent'
+    )
+    
+    # Bundle user_id and code_verifier into a tiny state string
+    # 'u' = user_id, 'v' = code_verifier
+    state_payload = json.dumps({"u": user_id, "v": flow.code_verifier})
+    state_str = base64.urlsafe_b64encode(state_payload.encode()).decode()
+    
+    # Regenerate URL with our bundled state
+    authorization_url, _ = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true',
+        prompt='select_account consent',
+        state=state_str
+    )
+    
+    return {"url": authorization_url}
+
+@router.get("/auth/google/callback")
+def google_callback(request: Request, code: str, state: str):
+    """Handles the Google OAuth 2.0 callback, exchanges code for tokens, and performs watch() registration."""
+    import base64
+    import json
+    
+    # Extract user_id and code_verifier from the state bundle
+    try:
+        state_data = json.loads(base64.urlsafe_b64decode(state).decode())
+        user_id = state_data.get('u')
+        code_verifier = state_data.get('v')
+    except Exception as e:
+        print(f"Error decoding OAuth state: {e}")
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+
+    # Use configured redirect URI or fallback to current request host
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
+    if not redirect_uri:
+        redirect_uri = f"{request.base_url.scheme}://{request.base_url.netloc}/api/auth/google/callback"
+    
+    flow = get_google_flow(redirect_uri=redirect_uri)
+    # CRITICAL: Restore the code_verifier so fetch_token succeeds
+    flow.code_verifier = code_verifier
+    
+    # Exchange the authorization code for tokens
+    flow.fetch_token(code=code)
+    creds = flow.credentials
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        # Extract Google Email and ID reliably from userinfo endpoint
+        google_email = None
+        google_id = None
+        try:
+            from googleapiclient.discovery import build
+            user_info_service = build('oauth2', 'v2', credentials=creds)
+            user_info = user_info_service.userinfo().get().execute()
+            google_email = user_info.get('email')
+            google_id = user_info.get('id')
+        except Exception as e:
+            logger.error(f"Failed to fetch Google user info: {e}")
+            pass
+
+        # Store tokens and identity in database
+        # Only update refresh_token if Google provided a new one (to avoid nullifying old working one)
+        if creds.refresh_token:
+            cur.execute("""
+                UPDATE users 
+                SET google_access_token = %s, 
+                    google_refresh_token = %s, 
+                    google_token_expiry = %s,
+                    google_linked_at = NOW(),
+                    google_email = %s,
+                    google_id = %s
+                WHERE id = %s
+            """, (creds.token, creds.refresh_token, creds.expiry, google_email, google_id, user_id))
+        else:
+            cur.execute("""
+                UPDATE users 
+                SET google_access_token = %s, 
+                    google_token_expiry = %s,
+                    google_linked_at = NOW(),
+                    google_email = %s,
+                    google_id = %s
+                WHERE id = %s
+            """, (creds.token, creds.expiry, google_email, google_id, user_id))
+        conn.commit()
+        
+        # Scope Validation: Check if we actually got the required permission
+        has_full_scope = any('mail.google.com' in s for s in (creds.scopes or []))
+        if not has_full_scope:
+            print(f"WARNING: User {user_id} linked account without full mail scope. Scopes received: {creds.scopes}")
+            # Redirect to a specialized error page
+            frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+            return RedirectResponse(url=f"{frontend_url}/dashboard?error=permissions_denied")
+        
+        # Immediately register Gmail watch() for this user
+        register_gmail_watch(int(user_id))
+        
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to link Google account: {str(e)}")
+    finally:
+        cur.close()
+        conn.close()
+
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    return RedirectResponse(url=f"{frontend_url}/dashboard?google=linked")

@@ -3,10 +3,10 @@ import { Link, useLocation, Outlet } from 'react-router-dom';
 
 const Layout = () => {
   const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
   const pathParts = location.pathname.split('/');
-  // If path is /dashboard, pathParts is ["", "dashboard"], so 2nd index is undefined.
-  // If path is /dashboard/leads, pathParts is ["", "dashboard", "leads"]
   const activePage = pathParts[2] || 'dashboard';
+  const activeStatus = searchParams.get('status');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [time, setTime] = useState('');
   const [totalLeads, setTotalLeads] = useState(0);
@@ -74,7 +74,7 @@ const Layout = () => {
 
   return (
     <div className="flex min-h-screen bg-[#0b0f19] text-[#e2e8f0] font-sans">
-      <aside className="w-[240px] bg-[#0e121d] border-r border-[#ffffff15] fixed top-0 left-0 bottom-0 z-[200] flex flex-col overflow-y-auto overflow-x-hidden transition-all pb-14">
+      <aside className="w-[240px] bg-[#0e121d] border-r border-[#ffffff15] fixed top-0 left-0 bottom-0 z-[200] flex flex-col transition-all">
         <div className="flex items-center gap-2.5 p-4 border-b border-[#ffffff15] shrink-0">
           <div className="w-[34px] h-[34px] rounded-lg bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-[18px] shrink-0 shadow-[0_2px_8px_rgba(59,130,246,0.3)] relative overflow-hidden">
             <span className="text-white relative z-10">⚡</span>
@@ -86,7 +86,8 @@ const Layout = () => {
           </div>
         </div>
 
-        <div className="p-3 pb-0">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar pb-40">
+          <div className="p-3 pb-0">
           <Link to="/dashboard" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'dashboard' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'dashboard' ? 'text-white' : 'text-[#94a3b8]'}`}>📊</span> Dashboard
           </Link>
@@ -105,8 +106,8 @@ const Layout = () => {
           <Link to="/dashboard/family-offices" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'family-offices' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'family-offices' ? 'text-white' : 'text-[#94a3b8]'}`}>🏢</span> Family Offices
           </Link>
-          <Link to="/dashboard/emails" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'emails' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
-            <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'emails' ? 'text-white' : 'text-[#94a3b8]'}`}>✉️</span> Email Drafts
+          <Link to="/dashboard/emails?status=PENDING_APPROVAL" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'emails' && activeStatus === 'PENDING_APPROVAL' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+            <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'emails' && activeStatus === 'PENDING_APPROVAL' ? 'text-white' : 'text-[#94a3b8]'}`}>✉️</span> Review Queue
           </Link>
           {/* 
           <Link to="/dashboard/generate" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'generate' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
@@ -119,12 +120,42 @@ const Layout = () => {
           <Link to="/dashboard/followups" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'followups' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'followups' ? 'text-white' : 'text-[#94a3b8]'}`}>🔄</span> Follow-ups
           </Link>
+          <Link to="/dashboard/sector-faq" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'sector-faq' ? 'bg-indigo-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+            <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'sector-faq' ? 'text-white' : 'text-[#94a3b8]'}`}>📚</span> FAQ
+          </Link>
         </div>
+
+        {user.google_linked_at && (
+          <div className="p-3 pb-0 animate-in slide-in-from-left duration-500">
+            <div className="text-[10px] font-semibold uppercase tracking-[1px] text-[#475569] px-2 pt-2.5 pb-1.5">Gmail Workspace</div>
+            <Link to="/dashboard/inbox" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'inbox' ? 'bg-indigo-600 text-white font-semibold shadow-lg shadow-indigo-600/20' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+              <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'inbox' ? 'text-white' : 'text-[#94a3b8]'}`}>📥</span> Inbox
+            </Link>
+            <Link to="/dashboard/gmail-drafts" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'gmail-drafts' ? 'bg-rose-600 text-white font-semibold shadow-lg shadow-rose-600/20' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+              <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'gmail-drafts' ? 'text-white' : 'text-[#94a3b8]'}`}>📧</span> Gmail Drafts
+            </Link>
+            <Link to="/dashboard/gmail-sent" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'gmail-sent' ? 'bg-emerald-600 text-white font-semibold shadow-lg shadow-emerald-600/20' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+              <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'gmail-sent' ? 'text-white' : 'text-[#94a3b8]'}`}>📤</span> Sent Mails
+            </Link>
+            <Link to="/dashboard/deals" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'deals' ? 'bg-emerald-600 text-white font-semibold shadow-lg shadow-emerald-600/20' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+              <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'deals' ? 'text-white' : 'text-[#94a3b8]'}`}>💎</span> Inbound Deals
+            </Link>
+            <Link to="/dashboard/intelligence" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'intelligence' ? 'bg-violet-600 text-white font-semibold shadow-lg shadow-violet-600/20' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+              <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'intelligence' ? 'text-white' : 'text-[#94a3b8]'}`}>🧠</span> AI Deal Intelligence
+            </Link>
+            <Link to="/dashboard/meetings" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'meetings' ? 'bg-blue-600 text-white font-semibold shadow-lg shadow-blue-600/20' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+              <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'meetings' ? 'text-white' : 'text-[#94a3b8]'}`}>📅</span> Meetings
+            </Link>
+          </div>
+        )}
 
         <div className="p-3 pb-0">
           <div className="text-[10px] font-semibold uppercase tracking-[1px] text-[#475569] px-2 pt-2.5 pb-1.5">Analytics</div>
           <Link to="/dashboard/metrics" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'metrics' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'metrics' ? 'text-white' : 'text-[#94a3b8]'}`}>📈</span> Reports
+          </Link>
+          <Link to="/dashboard/export" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'export' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+            <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'export' ? 'text-white' : 'text-[#94a3b8]'}`}>📥</span> Export Data
           </Link>
           {user.role === 'ADMIN' && (
             <Link to="/dashboard/history" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'history' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
@@ -144,6 +175,7 @@ const Layout = () => {
             </Link>
           )}
         </div>
+      </div>
 
         <div className="mt-auto p-3.5 border-t border-[#ffffff15] shrink-0 absolute bottom-0 left-0 w-[240px] bg-[#0e121d]">
           <div className="bg-[#151a26] rounded-xl p-3 border border-white/5">
@@ -172,14 +204,14 @@ const Layout = () => {
               </span>
               <button 
                 onClick={async () => { 
-                  try { await import('../services/api').then(m => m.default.post('/api/auth/logout')); } catch (e) { console.error(e); } 
-                  localStorage.removeItem('token'); 
-                  localStorage.removeItem('user'); 
-                  localStorage.removeItem('token_admin'); 
-                  localStorage.removeItem('user_admin'); 
+                  try { 
+                    const api = await import('../services/api').then(m => m.default);
+                    await api.post('/api/auth/logout'); 
+                  } catch (e) { console.error(e); } 
+                  localStorage.clear();
                   window.location.href = '/login?logout=success';
                 }} 
-                className="text-[10px] text-[#f43f5e] font-bold transition-all hover:text-rose-400 cursor-pointer hover:translate-x-0.5"
+                className="flex items-center gap-1.5 text-[10px] text-rose-500 font-black uppercase tracking-widest transition-all hover:text-rose-400 cursor-pointer bg-rose-500/5 hover:bg-rose-500/10 px-2 py-1 rounded-lg border border-rose-500/10"
               >
                 Logout →
               </button>
@@ -264,7 +296,7 @@ const Layout = () => {
       </header>
 
 
-      <main className="ml-[240px] mt-[64px] flex-1 p-6 z-[100] relative">
+      <main className="ml-[240px] mt-[64px] flex-1 p-6 relative">
         <Outlet />
       </main>
     </div>

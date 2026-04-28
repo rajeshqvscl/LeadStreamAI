@@ -199,6 +199,20 @@ body {
   font-weight: 600;
   border: 1px solid transparent;
   cursor: pointer;
+  .email-content-container * {
+  color: inherit !important;
+}
+
+.email-content-container a {
+  color: #3b82f6 !important;
+  text-decoration: underline;
+}
+
+.email-content-container img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+}
   transition: var(--transition);
   white-space: nowrap;
 }
@@ -716,4 +730,19 @@ input::-webkit-inner-spin-button {
 input[type=number] {
   -moz-appearance: textfield;
 }
-
+
+/* Global Email Content Overrides for Dark Mode */
+.email-content-container * {
+  color: inherit !important;
+}
+
+.email-content-container a {
+  color: #3b82f6 !important;
+  text-decoration: underline;
+}
+
+.email-content-container img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+}

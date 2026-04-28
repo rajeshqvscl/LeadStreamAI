@@ -299,11 +299,49 @@ def generate_company_draft(row_id: int, user_id: Optional[str] = Header(None, al
         body = email_data.get("body", "Hello, we would love to connect.")
         email_content = f"Subject: {subject}\n\n{body}"
         
-        save_email_draft(lead_id, email_content)
+        # --- Step 1: Create Gmail Draft FIRST (so we have the ID) ---
+        gmail_draft_id = None
+        try:
+            from app.services.google_service import get_gmail_service
+            import base64
+            from email.mime.text import MIMEText
+            
+            service = get_gmail_service(int(uid))
+            if service:
+                # Render body as plain text (converts \n to \r\n for MIME)
+                message = MIMEText(body, 'plain')
+                message['to'] = email
+                message['subject'] = subject
+                raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+                
+                # Create Gmail Draft
+                draft_body = {'message': {'raw': raw_message}}
+                created_draft = service.users().drafts().create(userId='me', body=draft_body).execute()
+                gmail_draft_id = created_draft.get('id')
+                print(f"✅ Created Gmail draft {gmail_draft_id} for Lead {lead_id} (from Registry)")
+        except Exception as ge:
+            print(f"⚠️  Gmail draft sync failed for Registry lead (non-blocking): {ge}")
+
+        # --- Step 2: Save to DB with gmail_draft_id ---
+        cur.execute("""
+            UPDATE leads_raw 
+            SET email_draft = %s, 
+                email_status = 'PENDING_APPROVAL', 
+                updated_at = NOW(), 
+                gmail_draft_id = %s
+            WHERE id = %s
+        """, (email_content, gmail_draft_id, lead_id))
 
         # Remove from company registry - it's now in the lead pipeline
         cur.execute("DELETE FROM company_registry WHERE id = %s AND user_id = %s", (row_id, uid))
         conn.commit()
+
+        # Log activity
+        try:
+            from app.models.lead import add_activity_log
+            add_activity_log(lead_id, "DRAFT_GENERATED", f"Draft generated from Intelligence Grid {'(Gmail synced ✅)' if gmail_draft_id else ''}", sender_name)
+        except:
+            pass
         
         return {"success": True, "lead_id": lead_id, "message": "Draft generated and moved to Lead Pipeline."}
         

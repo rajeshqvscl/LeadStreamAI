@@ -1,0 +1,493 @@
+import os
+import datetime
+import json
+from typing import Optional, Dict, Any
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import Flow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+import psycopg2.extras
+from app.database import get_db_connection
+
+# Scopes required for the application
+SCOPES = [
+    'https://mail.google.com/',
+    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/gmail.send',
+    'https://www.googleapis.com/auth/gmail.modify',
+    'https://www.googleapis.com/auth/userinfo.email',
+    'https://www.googleapis.com/auth/calendar.events',
+    'openid'
+]
+
+def get_google_flow(redirect_uri: Optional[str] = None):
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    
+    # Use the provided redirect_uri or fall back to the one in .env
+    final_redirect_uri = redirect_uri or os.getenv("GOOGLE_REDIRECT_URI")
+    
+    client_config = {
+        "web": {
+            "client_id": client_id,
+            "project_id": "leadstreamai",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_secret": client_secret,
+            "redirect_uris": [final_redirect_uri]
+        }
+    }
+    
+    return Flow.from_client_config(
+        client_config,
+        scopes=SCOPES,
+        redirect_uri=final_redirect_uri
+    )
+
+def get_user_credentials(user_id: int) -> Optional[Credentials]:
+    """Retrieves and refreshes Google OAuth credentials for a user."""
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        cur.execute("""
+            SELECT google_access_token, google_refresh_token, google_token_expiry 
+            FROM users WHERE id = %s
+        """, (user_id,))
+        user = cur.fetchone()
+        
+        if not user or not user['google_refresh_token']:
+            return None
+            
+        creds = Credentials(
+            token=user['google_access_token'],
+            refresh_token=user['google_refresh_token'],
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=os.getenv("GOOGLE_CLIENT_ID"),
+            client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+            scopes=SCOPES
+        )
+        
+        # Check if expired and refresh if necessary
+        if creds.expired or (creds.expiry and creds.expiry < datetime.datetime.now(datetime.timezone.utc)):
+            creds.refresh(Request())
+            # Save new tokens
+            cur.execute("""
+                UPDATE users 
+                SET google_access_token = %s, 
+                    google_token_expiry = %s 
+                WHERE id = %s
+            """, (creds.token, creds.expiry, user_id))
+            conn.commit()
+            
+        return creds
+    finally:
+        cur.close()
+        conn.close()
+
+def get_gmail_service(user_id: int):
+    creds = get_user_credentials(user_id)
+    if not creds:
+        return None
+    # Disable discovery cache to avoid scope restriction bugs
+    print(f"DEBUG: Building Gmail service for user {user_id} with SCOPES: {creds.scopes}")
+    return build('gmail', 'v1', credentials=creds, static_discovery=False)
+
+def get_calendar_service(user_id: int):
+    creds = get_user_credentials(user_id)
+    if not creds:
+        return None
+    return build('calendar', 'v3', credentials=creds, static_discovery=False)
+
+def register_gmail_watch(user_id: int):
+    """Call Gmail watch() API for a specific user ID."""
+    service = get_gmail_service(user_id)
+    if not service:
+        print(f"Watch failed: No credentials for user {user_id}")
+        return None
+        
+    topic_name = os.getenv("GMAIL_WATCH_TOPIC")
+    if not topic_name:
+        print("Watch failed: GMAIL_WATCH_TOPIC not set in .env")
+        return None
+        
+    try:
+        request = {
+            'labelIds': ['INBOX'],
+            'topicName': topic_name
+        }
+        res = service.users().watch(userId='me', body=request).execute()
+        print(f"Gmail watch dynamic registration successful for user {user_id}: {res}")
+        return res
+    except Exception as e:
+        print(f"Error registering Gmail watch for user {user_id}: {e}")
+        return None
+
+def extract_message_body(payload: Dict[str, Any]) -> str:
+    """
+    Recursively extracts the body text from a Gmail message payload.
+    Prioritizes text/plain, then text/html.
+    """
+    import base64
+    
+    parts = payload.get('parts', [])
+    
+    # If no parts, check the main body field (for simple messages)
+    if not parts:
+        data = payload.get('body', {}).get('data', '')
+        if data:
+            return base64.urlsafe_b64decode(data).decode('utf-8', errors='replace')
+        return ""
+
+    plain_text = ""
+    html_text = ""
+    
+    def walk_parts(all_parts):
+        nonlocal plain_text, html_text
+        for part in all_parts:
+            mime_type = part.get('mimeType')
+            data = part.get('body', {}).get('data', '')
+            
+            if mime_type == 'text/plain' and not plain_text and data:
+                plain_text = base64.urlsafe_b64decode(data).decode('utf-8', errors='replace')
+            elif mime_type == 'text/html' and not html_text and data:
+                html_text = base64.urlsafe_b64decode(data).decode('utf-8', errors='replace')
+            
+            # Recurse if there are sub-parts
+            if 'parts' in part:
+                walk_parts(part['parts'])
+
+    walk_parts(parts)
+    result = plain_text or html_text or ""
+    
+    # Final aggressive fallback: if result is still empty, look for any part with data
+    if not result:
+        def find_any_data(p_list):
+            for p in p_list:
+                d = p.get('body', {}).get('data', '')
+                if d: return base64.urlsafe_b64decode(d).decode('utf-8', errors='replace')
+                if 'parts' in p:
+                    res = find_any_data(p['parts'])
+                    if res: return res
+            return ""
+        result = find_any_data(parts)
+        
+    return result
+
+def extract_attachments(service, message_id: str, payload: dict) -> list:
+    """
+    Recursively extracts attachments from a Gmail message payload.
+    Returns a list of dicts: {'filename': str, 'mimeType': str, 'data': bytes}
+    """
+    import base64
+    attachments = []
+    
+    def walk_parts(parts):
+        for part in parts:
+            filename = part.get('filename')
+            mime_type = part.get('mimeType')
+            body = part.get('body', {})
+            att_id = body.get('attachmentId')
+            
+            if filename and att_id:
+                try:
+                    att = service.users().messages().attachments().get(
+                        userId='me', messageId=message_id, id=att_id
+                    ).execute()
+                    file_data = base64.urlsafe_b64decode(att['data'])
+                    attachments.append({
+                        'filename': filename,
+                        'mimeType': mime_type,
+                        'data': file_data
+                    })
+                except Exception as e:
+                    print(f"Failed to download attachment {filename}: {e}")
+            
+            if 'parts' in part:
+                walk_parts(part['parts'])
+
+    walk_parts(payload.get('parts', []))
+    return attachments
+
+
+def fetch_thread_messages(user_id: int, thread_id: str):
+    """Fetches full conversation history from Gmail for a thread."""
+    service = get_gmail_service(user_id)
+    if not service: return []
+    
+    try:
+        thread = service.users().threads().get(userId='me', id=thread_id, format='full').execute()
+        messages = []
+        for msg in thread.get('messages', []):
+            payload = msg.get('payload', {})
+            body = extract_message_body(payload)
+            
+            headers = msg.get('payload', {}).get('headers', [])
+            from_email = next((h['value'] for h in headers if h['name'].lower() == 'from'), "Unknown")
+            subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), "No Subject")
+            date = next((h['value'] for h in headers if h['name'].lower() == 'date'), "")
+            
+            messages.append({
+                'id': msg['id'],
+                'from': from_email,
+                'subject': subject,
+                'date': date,
+                'body': body,
+                'snippet': msg.get('snippet', '')
+            })
+        return messages
+    except Exception as e:
+        print(f"Error fetching thread {thread_id}: {e}")
+        return []
+
+def list_gmail_drafts(user_id: int):
+    """Fetches all drafts directly from the user's linked Gmail account."""
+    service = get_gmail_service(user_id)
+    if not service:
+        return []
+    
+    try:
+        results = service.users().drafts().list(userId='me').execute()
+        drafts_list = results.get('drafts', [])
+        
+        full_drafts = []
+        for d in drafts_list:
+            try:
+                # Use metadata format to avoid scope restrictions for the list view
+                draft = service.users().drafts().get(userId='me', id=d['id'], format='metadata').execute()
+                msg = draft.get('message', {})
+                payload = msg.get('payload', {})
+                headers = payload.get('headers', [])
+                
+                subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), "No Subject")
+                to_email = next((h['value'] for h in headers if h['name'].lower() == 'to'), "No Recipient")
+                date = next((h['value'] for h in headers if h['name'].lower() == 'date'), "")
+                
+                # Fetch full body if possible, otherwise use snippet
+                body_content = ""
+                try:
+                    # Attempt to get full content if needed, but for list we can stick to snippet
+                    body_content = msg.get('snippet', '')
+                except:
+                    pass
+
+                full_drafts.append({
+                    'id': d['id'],
+                    'message_id': msg.get('id'),
+                    'subject': subject,
+                    'to': to_email,
+                    'date': date,
+                    'snippet': msg.get('snippet', ''),
+                    'body': body_content
+                })
+            except Exception as inner_e:
+                print(f"Error fetching detail for draft {d['id']}: {inner_e}")
+                continue
+                
+        return full_drafts
+    except Exception as e:
+        print(f"Error listing Gmail drafts for user {user_id}: {e}")
+        return []
+
+def list_gmail_sent(user_id: int):
+    """Fetches all sent emails directly from the user's linked Gmail account."""
+    service = get_gmail_service(user_id)
+    if not service:
+        return []
+    
+    try:
+        # Fetch messages with 'SENT' label - using labelIds for maximum robustness
+        print(f"DEBUG: Fetching sent messages for user {user_id} using labelIds=['SENT']")
+        results = service.users().messages().list(userId='me', labelIds=['SENT']).execute()
+        print(f"DEBUG: Raw Results from Google: {results.keys()}")
+        messages_list = results.get('messages', [])
+        print(f"DEBUG: Found {len(messages_list)} sent messages for user {user_id}")
+        
+        full_messages = []
+        for m in messages_list[:30]: # Limit to last 30 for performance
+            try:
+                # Use metadata format to ensure headers are available even on restricted scopes
+                msg = service.users().messages().get(userId='me', id=m['id'], format='metadata').execute()
+                payload = msg.get('payload', {})
+                headers = payload.get('headers', [])
+                
+                subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), "No Subject")
+                to_email = next((h['value'] for h in headers if h['name'].lower() == 'to'), "No Recipient")
+                date = next((h['value'] for h in headers if h['name'].lower() == 'date'), "")
+                
+                # For the list view, the snippet is usually enough. 
+                # We only fetch full body if explicitly requested or if scope allows.
+                full_messages.append({
+                    'id': m['id'],
+                    'subject': subject,
+                    'to': to_email,
+                    'date': date,
+                    'snippet': msg.get('snippet', ''),
+                    'body': msg.get('snippet', '') # Default to snippet for list view
+                })
+            except Exception as inner_e:
+                print(f"Error fetching detail for message {m['id']}: {inner_e}")
+                continue
+                
+        return full_messages
+    except Exception as e:
+        print(f"Error listing Gmail sent messages for user {user_id}: {e}")
+        return []
+
+def get_gmail_message(user_id: int, message_id: str):
+    """Fetches the full content of a specific Gmail message."""
+    service = get_gmail_service(user_id)
+    if not service:
+        return None
+        
+    try:
+        # 1. Try FULL format
+        try:
+            msg = service.users().messages().get(userId='me', id=message_id, format='full').execute()
+            payload = msg.get('payload', {})
+            headers = payload.get('headers', [])
+            body = extract_message_body(payload) or msg.get('snippet', '')
+            return {
+                'id': message_id,
+                'subject': next((h['value'] for h in headers if h['name'].lower() == 'subject'), "No Subject"),
+                'from': next((h['value'] for h in headers if h['name'].lower() == 'from'), "Unknown Sender"),
+                'to': next((h['value'] for h in headers if h['name'].lower() == 'to'), "No Recipient"),
+                'date': next((h['value'] for h in headers if h['name'].lower() == 'date'), ""),
+                'snippet': msg.get('snippet', ''),
+                'body': body if body else " (Empty Message Body) ",
+                'is_restricted': False
+            }
+        except Exception as full_e:
+            is_restricted = "Metadata scope" in str(full_e)
+            print(f"DEBUG: Format Full failed for {message_id}: {full_e} (Restricted: {is_restricted})")
+            
+            # Fallback to metadata for headers and snippet
+            meta = service.users().messages().get(userId='me', id=message_id, format='metadata').execute()
+            headers = meta.get('payload', {}).get('headers', [])
+            snippet = meta.get('snippet', '')
+            
+            return {
+                'id': message_id,
+                'subject': next((h['value'] for h in headers if h['name'].lower() == 'subject'), "No Subject"),
+                'from': next((h['value'] for h in headers if h['name'].lower() == 'from'), "Unknown Sender"),
+                'to': next((h['value'] for h in headers if h['name'].lower() == 'to'), "No Recipient"),
+                'date': next((h['value'] for h in headers if h['name'].lower() == 'date'), ""),
+                'snippet': snippet,
+                'body': f" (Intelligence Preview) — {snippet}" if snippet else "No message content found.",
+                'is_restricted': is_restricted
+            }
+    except Exception as e:
+        print(f"Error in get_gmail_message for {message_id}: {e}")
+        return None
+
+def update_gmail_draft(user_id: int, draft_id: str, subject: str, body: str):
+    """Updates the content of an existing Gmail draft."""
+    import base64
+    from email.mime.text import MIMEText
+    
+    service = get_gmail_service(user_id)
+    if not service: return None
+    
+    try:
+        # Detect if body is HTML
+        is_html = "<b>" in body or "<i>" in body or "<strong>" in body or "<em>" in body or "<br>" in body
+        
+        # Create a new message structure
+        message = MIMEText(body, 'html' if is_html else 'plain')
+        message['subject'] = subject
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        
+        # Update the draft
+        updated_draft = service.users().drafts().update(
+            userId='me', 
+            id=draft_id, 
+            body={'message': {'raw': raw}}
+        ).execute()
+        return updated_draft
+    except Exception as e:
+        print(f"Error updating Gmail draft {draft_id}: {e}")
+        return None
+
+def send_gmail_draft(user_id: int, draft_id: str):
+    """Sends an existing Gmail draft."""
+    service = get_gmail_service(user_id)
+    if not service: return None
+    
+    try:
+        sent_msg = service.users().drafts().send(
+            userId='me', 
+            body={'id': draft_id}
+        ).execute()
+        return sent_msg
+    except Exception as e:
+        print(f"Error sending Gmail draft {draft_id}: {e}")
+        return None
+
+def create_calendar_event(user_id: int, lead_email: str, summary: str, description: str, start_time: datetime.datetime, duration_minutes: int = 30):
+    """Creates a Google Calendar event with a Google Meet link."""
+    import uuid
+    service = get_calendar_service(user_id)
+    if not service:
+        print(f"Calendar failed: No credentials for user {user_id}")
+        return None
+        
+    end_time = start_time + datetime.timedelta(minutes=duration_minutes)
+    
+    event = {
+        'summary': summary,
+        'description': description,
+        'start': {
+            'dateTime': start_time.isoformat(),
+            'timeZone': 'UTC',
+        },
+        'end': {
+            'dateTime': end_time.isoformat(),
+            'timeZone': 'UTC',
+        },
+        'attendees': [
+            {'email': lead_email},
+        ],
+        'conferenceData': {
+            'createRequest': {
+                'requestId': str(uuid.uuid4()),
+                'conferenceSolutionKey': {'type': 'hangoutsMeet'}
+            }
+        },
+        'reminders': {
+            'useDefault': True,
+        },
+    }
+    
+    try:
+        created_event = service.events().insert(
+            calendarId='primary',
+            body=event,
+            conferenceDataVersion=1
+        ).execute()
+        
+        print(f"Google Calendar event created: {created_event.get('htmlLink')}")
+        return {
+            'event_id': created_event.get('id'),
+            'html_link': created_event.get('htmlLink'),
+            'meet_link': created_event.get('hangoutLink'),
+            'start_time': start_time
+        }
+    except Exception as e:
+        print(f"Error creating calendar event for user {user_id}: {e}")
+        return None
+
+def renew_all_gmail_watches():
+    """Iterate through all linked users and renew their Gmail watch()."""
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        cur.execute("SELECT id FROM users WHERE google_refresh_token IS NOT NULL")
+        users = cur.fetchall()
+        for user in users:
+            try:
+                register_gmail_watch(user['id'])
+            except Exception as e:
+                print(f"Failed to renew watch for user {user['id']}: {e}")
+    finally:
+        cur.close()
+        conn.close()

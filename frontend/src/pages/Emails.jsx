@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Eye, Edit3, Loader2, Send, ChevronLeft, ChevronRight, X, Archive, CheckCircle2 } from 'lucide-react';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
@@ -7,11 +7,14 @@ import api from '../services/api';
 
 const Emails = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialStatus = searchParams.get('status') || '';
+  
   const [emails, setEmails] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, total: 0 });
   const [selectedIds, setSelectedIds] = useState([]);
-  const [filterStatus, setFilterStatus] = useState('');
+  const [filterStatus, setFilterStatus] = useState(initialStatus);
   const [filterRegion, setFilterRegion] = useState('');
   const [filterGeo, setFilterGeo] = useState('');
   const [filterCompany, setFilterCompany] = useState('');
@@ -22,6 +25,9 @@ const Emails = () => {
   const [rejectionReason, setRejectionReason] = useState('');
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [scheduledAt, setScheduledAt] = useState(null);
+  const [sendingId, setSendingId] = useState(null);
+  const [approvingId, setApprovingId] = useState(null); // tracks the item being approved for the popup
+  const [approveStep, setApproveStep] = useState(0); // 0=sending, 1=success
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
@@ -42,6 +48,12 @@ const Emails = () => {
   };
 
   useEffect(() => {
+    const status = searchParams.get('status') || '';
+    setFilterStatus(status);
+    setPagination(prev => ({ ...prev, page: 1 }));
+  }, [searchParams]);
+
+  useEffect(() => {
     const timer = setTimeout(() => {
       fetchEmails();
     }, 500);
@@ -50,11 +62,25 @@ const Emails = () => {
 
   const handleApprove = async (id) => {
     try {
+      setSendingId(id);
+      setApprovingId(id);
+      setApproveStep(0);
       await api.post(`/api/approve-email/${id}`, { approved_by: 'admin' });
-      showNotification('success', 'Email approved successfully');
-      fetchEmails();
-    } catch {
-      showNotification('error', 'Approval failed');
+      setApproveStep(1);
+      // Remove instantly from list for snappy UX
+      setEmails(prev => prev.filter(e => e.id !== id));
+      // Keep success popup visible for 1.8s then close
+      setTimeout(() => {
+        setApprovingId(null);
+        setApproveStep(0);
+        showNotification('success', '✅ Email dispatched & Gmail draft deleted');
+      }, 1800);
+    } catch (err) {
+      setApprovingId(null);
+      setApproveStep(0);
+      showNotification('error', err?.response?.data?.detail || 'Approval failed. Check Gmail connection.');
+    } finally {
+      setSendingId(null);
     }
   };
 
@@ -180,10 +206,20 @@ const Emails = () => {
     <div className="animate-in fade-in duration-500">
       <div className="flex justify-between items-end mb-8">
         <div>
-          <h1 className="text-[28px] font-bold text-white tracking-tight">Review Queue</h1>
-          <p className="text-[#64748b] text-[12px] font-medium mt-1">
-            <span className="font-bold text-slate-400">{pagination.total} drafts total</span> — Human-in-the-loop verification for AI outreach.
-          </p>
+          <h1 className="text-[28px] font-bold text-white tracking-tight">
+            {filterStatus === 'SENT' ? 'Sent Mail' : filterStatus === 'PENDING_APPROVAL' ? 'Email Drafts' : 'Review Queue'}
+          </h1>
+          <div className="flex items-center gap-3 mt-1">
+            <p className="text-[#64748b] text-[12px] font-medium">
+              <span className="font-bold text-slate-400">{pagination.total} {filterStatus === 'SENT' ? 'sent' : 'drafts'} total</span> — {filterStatus === 'SENT' ? 'History of dispatched outreach.' : 'Human-in-the-loop verification.'}
+            </p>
+            {localStorage.getItem('user') && JSON.parse(localStorage.getItem('user')).google_linked_at && (
+              <div className="px-2.5 py-1 bg-blue-500/10 border border-blue-500/20 rounded-lg text-[9px] font-black text-blue-500 uppercase tracking-widest flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
+                Sending From: {JSON.parse(localStorage.getItem('user')).google_email || 'Linked Account'}
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-4">
           <button
@@ -364,8 +400,13 @@ const Emails = () => {
                       
                       {email.status === 'PENDING_APPROVAL' && (
                         <>
-                          <button onClick={() => handleApprove(email.id)} className="p-2 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-all cursor-pointer" title="Approve & Send">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          <button 
+                            onClick={() => handleApprove(email.id)} 
+                            disabled={sendingId === email.id}
+                            className={`p-2 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-all cursor-pointer ${sendingId === email.id ? 'opacity-50' : ''}`} 
+                            title="Approve & Send"
+                          >
+                            {sendingId === email.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                           </button>
                           <button onClick={() => handleReject(email.id)} className="p-2 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-all cursor-pointer" title="Reject Draft">
                             <X className="w-3.5 h-3.5" />
@@ -549,6 +590,80 @@ const Emails = () => {
                 <X className="w-5 h-5" />
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ✨ Approve & Send Loading Popup */}
+      {approvingId && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/80 backdrop-blur-2xl animate-in fade-in duration-300">
+          <div className="w-full max-w-md bg-[#0b0f1a] border border-white/10 rounded-[40px] p-12 shadow-[0_0_100px_rgba(0,0,0,0.8)] flex flex-col items-center gap-8 text-center animate-in zoom-in-95 duration-500">
+            
+            {approveStep === 0 ? (
+              <>
+                {/* Sending Animation */}
+                <div className="relative">
+                  <div className="w-24 h-24 rounded-full bg-blue-500/10 flex items-center justify-center">
+                    <Send className="w-10 h-10 text-blue-400 animate-pulse" />
+                  </div>
+                  <div className="absolute inset-0 rounded-full border-2 border-blue-500/30 animate-ping" />
+                  <div className="absolute inset-[-8px] rounded-full border border-blue-500/10 animate-ping" style={{ animationDelay: '0.3s' }} />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-2xl font-black text-white tracking-tight">Dispatching Outreach</h3>
+                  <p className="text-slate-500 text-[12px] font-bold uppercase tracking-[3px]">Sending email & deleting draft</p>
+                </div>
+                <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-blue-500 to-violet-500 rounded-full animate-pulse" style={{ width: '70%' }} />
+                </div>
+                <div className="flex flex-col gap-3 w-full">
+                  {[
+                    { label: 'Sending via Gmail API', done: true },
+                    { label: 'Deleting Gmail Draft', done: false },
+                    { label: 'Updating Review Queue', done: false },
+                  ].map((step, i) => (
+                    <div key={i} className="flex items-center gap-3 text-left">
+                      <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
+                        step.done ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-slate-600'
+                      }`}>
+                        {step.done ? <CheckCircle2 className="w-3 h-3" /> : <Loader2 className="w-3 h-3 animate-spin" />}
+                      </div>
+                      <span className={`text-[11px] font-bold uppercase tracking-widest ${
+                        step.done ? 'text-emerald-400' : 'text-slate-500'
+                      }`}>{step.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Success State */}
+                <div className="relative">
+                  <div className="w-24 h-24 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                    <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+                  </div>
+                  <div className="absolute inset-0 rounded-full border-2 border-emerald-500/30 animate-ping" />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-2xl font-black text-white tracking-tight">Email Sent! 🎉</h3>
+                  <p className="text-slate-500 text-[12px] font-bold uppercase tracking-[3px]">Draft removed from Gmail & queue</p>
+                </div>
+                <div className="flex flex-col gap-3 w-full">
+                  {[
+                    { label: 'Email Dispatched', done: true },
+                    { label: 'Gmail Draft Deleted', done: true },
+                    { label: 'Review Queue Updated', done: true },
+                  ].map((step, i) => (
+                    <div key={i} className="flex items-center gap-3 text-left">
+                      <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 bg-emerald-500/20 text-emerald-400">
+                        <CheckCircle2 className="w-3 h-3" />
+                      </div>
+                      <span className="text-[11px] font-bold uppercase tracking-widest text-emerald-400">{step.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

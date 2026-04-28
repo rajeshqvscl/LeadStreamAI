@@ -23,6 +23,7 @@ def normalize_user_id(user_id: Optional[str]) -> str:
 
 class DraftRequest(BaseModel):
     lead_id: int
+    template_type: Optional[str] = "standard"
 
 class ApproveRequest(BaseModel):
     approved_by: Optional[str] = "admin"
@@ -149,40 +150,39 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     clean_body = "\n".join(clean_body_lines).strip()
 
     name = profile.get('full_name') or profile.get('username') or 'The Team'
+    name = " ".join([p.capitalize() for p in name.split()])
     title = profile.get('job_title') or ''
     linkedin = profile.get('linkedin_url') or ''
     phone = profile.get('phone') or ''
 
     linkedin_part = f'<sig_link href="{linkedin}">LinkedIn</sig_link>' if linkedin else ''
     
-    # Structured signature block (SIG_START/SIG_END markers for preview detection)
-    signature_block = (
-        f"\n\n[Click here to unsubscribe]({unsubscribe_url})"
-        f"\n\nSIG_START"
-        f"\n--"
-        f"\nThanks & Regards,"
-        f"\n{name},"
-        f"\n{title}," if title else f"\n\nSIG_START\n--\nThanks & Regards,\n{name},{linkedin_part}\n{phone}"
-    )
+    # Structured signature block (Premium bold-italic formatting)
+    sig_lines = [
+        "\n",
+        f"[Click here to unsubscribe]({unsubscribe_url})",
+        "\n--",
+        "***Thanks & Regards,***",
+        f"***{name},***"
+    ]
     
-    # Use cleaner structured format
-    sig_lines = ["\n", "[Click here to unsubscribe](" + unsubscribe_url + ")", "", "SIG_START", "--", "Thanks & Regards,", f"{name},"]
     if title:
-        sig_lines.append(f"{title},")
-    if linkedin:
-        sig_lines.append(f"SIG_LINK:{linkedin}")
+        sig_lines.append(f"***{title},***")
+    
+    # Use user's personal LinkedIn if available, otherwise company link
+    user_linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
+    sig_lines.append(f"[***LinkedIn***]({user_linkedin})")
+    
     if phone:
-        sig_lines.append(phone)
-    sig_lines.append("SIG_END")
+        sig_lines.append(f"***{phone}***")
     
     return clean_body + "\n" + "\n".join(sig_lines)
 
-# --- Generate Draft ---
-# Supports both /generate-draft (user prompt) and /generate-email (frontend Axios)
 @router.post("/generate-draft")
 @router.post("/generate-email")
 def generate_draft(req: DraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     try:
+        uid = normalize_user_id(user_id)
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
@@ -194,6 +194,8 @@ def generate_draft(req: DraftRequest, user_id: Optional[str] = Header(None, alia
             cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (req.lead_id,))
             
         lead = cur.fetchone()
+        cur.close()
+        conn.close()
 
         if not lead:
             return {"error": "Lead not found"}
@@ -201,7 +203,12 @@ def generate_draft(req: DraftRequest, user_id: Optional[str] = Header(None, alia
         
         profile = get_sender_profile(user_id)
         generator = EmailGenerator()
-        email_data = generator.generate_email(lead, sender_name=profile.get('full_name') or profile.get('username'))
+        
+        # Select template
+        if req.template_type == 'palak':
+            email_data = generator.generate_palak_email(lead, sender_name=profile.get('full_name') or profile.get('username'))
+        else:
+            email_data = generator.generate_email(lead, sender_name=profile.get('full_name') or profile.get('username'))
         
         subject = email_data.get("subject", "Following up")
         ai_body = email_data.get("body", "Hello, we would love to connect.")
@@ -210,30 +217,55 @@ def generate_draft(req: DraftRequest, user_id: Optional[str] = Header(None, alia
         body = inject_signature(ai_body, profile, req.lead_id)
         email_content = f"Subject: {subject}\n\n{body}"
         
-        # update leads_raw.email_draft and email_status='PENDING_APPROVAL'
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
+        # --- Step 1: Create Gmail Draft FIRST (so we have the ID) ---
+        gmail_draft_id = None
+        try:
+            from app.services.google_service import get_gmail_service
+            import base64
+            from email.mime.text import MIMEText
+            
+            service = get_gmail_service(int(uid))
+            if service:
+                # Render body as plain text (converts \n to \r\n for MIME)
+                message = MIMEText(body, 'plain')
+                message['to'] = lead.get('email', '')
+                message['subject'] = subject
+                raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+                
+                # Create Gmail Draft
+                draft_body = {'message': {'raw': raw_message}}
+                created_draft = service.users().drafts().create(userId='me', body=draft_body).execute()
+                gmail_draft_id = created_draft.get('id')
+                logger.info(f"✅ Created Gmail draft {gmail_draft_id} for Lead {req.lead_id}")
+        except Exception as ge:
+            logger.warning(f"⚠️  Gmail draft sync failed (non-blocking): {ge}")
+
+        # --- Step 2: Save to DB with gmail_draft_id ---
+        conn2 = get_db_connection()
+        cur2 = conn2.cursor()
+        cur2.execute("""
             UPDATE leads_raw 
-            SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW() 
+            SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW(), gmail_draft_id = %s
             WHERE id = %s
-        """, (email_content, req.lead_id))
-        conn.commit()
-        cur.close()
-        conn.close()
+        """, (email_content, gmail_draft_id, req.lead_id))
+        conn2.commit()
+        cur2.close()
+        conn2.close()
         
         # Log activity
         try:
             from app.models.lead import add_activity_log
-            add_activity_log(req.lead_id, "DRAFT_GENERATED", "AI email draft generated and saved for review", "system")
+            add_activity_log(req.lead_id, "DRAFT_GENERATED", f"AI email draft generated and saved {'(and synced to Gmail Drafts ✅)' if gmail_draft_id else '(Gmail sync not available)'}", profile.get('username') or "system")
         except:
             pass
 
         return {
             "message": "Draft generated",
-            "draft_id": req.lead_id, # frontend uses lead ID as draft ID
+            "draft_id": req.lead_id,
             "subject": subject,
-            "body": body
+            "body": body,
+            "gmail_draft_id": gmail_draft_id,
+            "gmail_synced": gmail_draft_id is not None
         }
     except Exception as e:
         traceback.print_exc()
@@ -327,21 +359,43 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
 
         email_content = f"Subject: {subject}\n\n{body_with_sig}"
 
-        # Save to DB
+        # --- Sync to Gmail Drafts FIRST (so we have the ID) ---
+        gmail_draft_id = None
+        try:
+            from app.services.google_service import get_gmail_service
+            import base64
+            from email.mime.text import MIMEText
+            
+            uid_t = normalize_user_id(user_id)
+            service = get_gmail_service(int(uid_t))
+            if service:
+                to_email = lead.get('email', '')
+                message = MIMEText(body_with_sig, 'plain')
+                message['to'] = to_email
+                message['subject'] = subject
+                raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+                draft_body = {'message': {'raw': raw_message}}
+                created_draft = service.users().drafts().create(userId='me', body=draft_body).execute()
+                gmail_draft_id = created_draft.get('id')
+                logger.info(f"✅ Created Gmail draft {gmail_draft_id} for Lead {req.lead_id} (template)")
+        except Exception as ge:
+            logger.warning(f"⚠️  Gmail draft sync failed (non-blocking): {ge}")
+
+        # Save to DB (with gmail_draft_id)
         conn2 = get_db_connection()
         cur2 = conn2.cursor()
         cur2.execute("""
             UPDATE leads_raw
-            SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW()
+            SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW(), gmail_draft_id = %s
             WHERE id = %s
-        """, (email_content, req.lead_id))
+        """, (email_content, gmail_draft_id, req.lead_id))
         conn2.commit()
         cur2.close()
         conn2.close()
 
         try:
             from app.models.lead import add_activity_log
-            add_activity_log(req.lead_id, "DRAFT_GENERATED", f"Custom template draft '{req.template_name}' generated", "system")
+            add_activity_log(req.lead_id, "DRAFT_GENERATED", f"Custom template draft '{req.template_name}' generated {'(Gmail synced ✅)' if gmail_draft_id else ''}", "system")
         except:
             pass
 
@@ -350,7 +404,9 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
             "draft_id": req.lead_id,
             "subject": subject,
             "body": body_with_sig,
-            "template": req.template_name
+            "template": req.template_name,
+            "gmail_draft_id": gmail_draft_id,
+            "gmail_synced": gmail_draft_id is not None
         }
     except Exception as e:
         traceback.print_exc()
@@ -534,6 +590,41 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[s
         conn.commit()
         cur.close()
         conn.close()
+
+        # --- Update or Create Gmail Draft ---
+        try:
+            from app.services.google_service import get_gmail_service
+            import base64
+            from email.mime.text import MIMEText
+            
+            uid = normalize_user_id(user_id)
+            service = get_gmail_service(int(uid))
+            if service:
+                message = MIMEText(full_body, 'plain')
+                message['to'] = lead.get('email', '')
+                message['subject'] = refined_data['subject']
+                raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+                
+                draft_body_payload = {'message': {'raw': raw_message}}
+                existing_draft_id = lead.get('gmail_draft_id')
+                
+                if existing_draft_id:
+                    # Update existing Gmail draft
+                    service.users().drafts().update(userId='me', id=existing_draft_id, body=draft_body_payload).execute()
+                    logger.info(f"✅ Updated Gmail draft {existing_draft_id} for Lead {draft_id}")
+                else:
+                    # No existing draft → create a new one and save the ID
+                    created = service.users().drafts().create(userId='me', body=draft_body_payload).execute()
+                    new_draft_id = created.get('id')
+                    conn3 = get_db_connection()
+                    cur3 = conn3.cursor()
+                    cur3.execute("UPDATE leads_raw SET gmail_draft_id = %s WHERE id = %s", (new_draft_id, draft_id))
+                    conn3.commit()
+                    cur3.close()
+                    conn3.close()
+                    logger.info(f"✅ Created new Gmail draft {new_draft_id} for Lead {draft_id} during refinement")
+        except Exception as ge:
+            logger.warning(f"⚠️  Gmail draft update failed (non-blocking): {ge}")
         
         return {
             "subject": refined_data["subject"],
@@ -554,18 +645,25 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
     # 1. Fetch User Data for Sender Identity
     sender_email = None
     sender_name = "the team"
+    current_uid = normalize_user_id(user_id)
+    
     if user_id:
-        cur.execute("SELECT email, full_name, username FROM users WHERE id = %s", (normalize_user_id(user_id),))
+        cur.execute("SELECT email, full_name, username, google_id FROM users WHERE id = %s", (current_uid,))
         u = cur.fetchone()
         if u:
             sender_email = u['email']
-            sender_name = u['full_name'] or u['username']
+            sender_name = u['full_name'] or u['username'] or "the team"
+            # Crucial: Verify Google Link
+            if not u['google_id']:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=400, detail="Gmail Not Connected. Please go to Settings and link your Google account to send emails from your own address.")
 
     # 2. Fetch/Prepare Draft
     cur.execute("SELECT first_name, last_name, email, email_draft FROM leads_raw WHERE id = %s", (draft_id,))
     lead = cur.fetchone()
     if not lead:
-        return {"error": "Lead not found"}
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Lead not found")
 
     draft_content = lead.get('email_draft')
     email = lead['email']
@@ -587,17 +685,24 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         body = parts[1].strip() if len(parts) > 1 else ""
 
     # Real Dispatch
-    logging.info(f"Triggering real email dispatch for lead {draft_id} from {sender_email}")
+    uid = normalize_user_id(user_id)
+    logging.info(f"Triggering real email dispatch for lead {draft_id} from {sender_email} (User: {uid})")
     success = send_email(
         to_email=email,
         subject=subject,
         html_content=body.replace("\n", "<br>"),
         from_email=sender_email,
         from_name=sender_name,
-        lead_id=draft_id
+        lead_id=draft_id,
+        user_id=int(uid)
     )
 
     if success:
+        # Fetch gmail_draft_id before updating the row
+        cur.execute("SELECT gmail_draft_id FROM leads_raw WHERE id = %s", (draft_id,))
+        draft_row = cur.fetchone()
+        gmail_draft_id = draft_row['gmail_draft_id'] if draft_row else None
+
         cur.execute("""
             UPDATE leads_raw 
             SET email_draft = %s, 
@@ -607,10 +712,23 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
                 last_outreach_at = NOW(),
                 followup_status = 'ACTIVE',
                 followup_stage = 0,
-                is_responded = FALSE
+                is_responded = FALSE,
+                gmail_draft_id = NULL
             WHERE id = %s
         """, (draft_content, sender_name, draft_id))
         conn.commit()
+
+        # --- Delete Gmail Draft from real Gmail ---
+        if gmail_draft_id:
+            try:
+                from app.services.google_service import get_gmail_service
+                service = get_gmail_service(int(uid))
+                if service:
+                    service.users().drafts().delete(userId='me', id=gmail_draft_id).execute()
+                    logger.info(f"🗑️  Deleted Gmail draft {gmail_draft_id} for Lead {draft_id} after send")
+            except Exception as ge:
+                logger.warning(f"⚠️  Failed to delete Gmail draft after send (non-blocking): {ge}")
+
         from app.models.lead import add_activity_log
         add_activity_log(draft_id, "EMAIL_SENT", f"Email dispatched via Resend from {sender_email}", sender_name)
         cur.close()
@@ -852,13 +970,15 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
                 body = parts[1].strip() if len(parts) > 1 else ""
 
             # Real Dispatch
+            uid_val = normalize_user_id(user_id)
             success = send_email(
                 to_email=lead['email'],
                 subject=subject,
                 html_content=body.replace("\n", "<br>"),
                 from_email=sender_email,
                 from_name=sender_name,
-                lead_id=lead['id']
+                lead_id=lead['id'],
+                user_id=int(uid_val)
             )
 
             if success:
@@ -953,18 +1073,59 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
                 res = future.result()
                 if res: results.append(res)
                 
+        from app.services.google_service import get_gmail_service
+        import base64
+        from email.mime.text import MIMEText
+        
+        uid_t = normalize_user_id(user_id)
+        service = None
+        try:
+            service = get_gmail_service(int(uid_t))
+            if not service:
+                print(f"DEBUG: No Gmail service found for user {uid_t}. Syncing to Gmail skipped.")
+        except Exception as e:
+            print(f"DEBUG: Error initializing Gmail service for sync: {e}")
+            pass
+
         for email_content, group_leads in results:
-            group_ids = [l['id'] for l in group_leads]
-            id_format = ','.join(['%s'] * len(group_ids))
-            
-            cur.execute(f"""
-                UPDATE leads_raw 
-                SET email_draft = REPLACE(%s, '{{first_name}}', COALESCE(NULLIF(first_name, ''), 'there')), 
-                    email_status = 'PENDING_APPROVAL', updated_at = NOW() 
-                WHERE id IN ({id_format})
-            """, (email_content, *group_ids))
-            
-            total_leads_updated += len(group_ids)
+            for lead_item in group_leads:
+                # Resolve content for THIS specific lead
+                first_name = (lead_item.get('first_name') or '').strip() or 'there'
+                resolved_content = email_content.replace('{{first_name}}', first_name)
+                
+                # Parse subject and body
+                subject = "Following up"
+                body = resolved_content
+                if "Subject: " in resolved_content:
+                    parts = resolved_content.split("\n\n", 1)
+                    subject = parts[0].replace("Subject: ", "").strip()
+                    body = parts[1].strip() if len(parts) > 1 else ""
+
+                # Sync to Gmail if service is available
+                gmail_draft_id = None
+                if service:
+                    try:
+                        message = MIMEText(body, 'plain')
+                        message['to'] = lead_item.get('email', '')
+                        message['subject'] = subject
+                        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+                        draft_body = {'message': {'raw': raw_message}}
+                        created_draft = service.users().drafts().create(userId='me', body=draft_body).execute()
+                        gmail_draft_id = created_draft.get('id')
+                    except Exception as ge:
+                        logger.warning(f"⚠️ Gmail sync failed for lead {lead_item['id']}: {ge}")
+
+                # Update DB
+                cur.execute("""
+                    UPDATE leads_raw 
+                    SET email_draft = %s, 
+                        email_status = 'PENDING_APPROVAL', 
+                        updated_at = NOW(),
+                        gmail_draft_id = %s
+                    WHERE id = %s
+                """, (resolved_content, gmail_draft_id, lead_item['id']))
+                
+                total_leads_updated += 1
             
         conn.commit()
         cur.close()
@@ -1044,13 +1205,15 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                     body = parts[1].strip() if len(parts) > 1 else ""
 
                 # Real Dispatch
+                uid_val = normalize_user_id(user_id)
                 success = send_email(
                     to_email=lead['email'],
                     subject=subject,
                     html_content=body.replace("\n", "<br>"),
                     from_email=sender_email,
                     from_name=sender_name,
-                    lead_id=lead['id']
+                    lead_id=lead['id'],
+                    user_id=int(uid_val)
                 )
 
                 if success:

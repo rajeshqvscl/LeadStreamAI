@@ -18,7 +18,7 @@ logger.info(f"Module initialized with env_path: {env_path}")
 # Configure Resend
 resend.api_key = os.getenv("RESEND_API_KEY")
 
-def send_smtp_fallback(to_email: str, subject: str, html_content: str, from_email: str, from_name: str) -> bool:
+def send_smtp_fallback(to_email: str, subject: str, html_content: str, from_email: str, from_name: str, reply_to: Optional[str] = None) -> bool:
     import smtplib
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
@@ -34,6 +34,11 @@ def send_smtp_fallback(to_email: str, subject: str, html_content: str, from_emai
         msg['From'] = sender_line
         msg['To'] = to_email
         msg['Subject'] = subject
+        if reply_to:
+            msg['Reply-To'] = reply_to
+        else:
+            msg['Reply-To'] = from_email
+            
         msg.attach(MIMEText(html_content, 'html'))
 
         server = smtplib.SMTP(smtp_server, smtp_port)
@@ -41,7 +46,7 @@ def send_smtp_fallback(to_email: str, subject: str, html_content: str, from_emai
         server.login(smtp_user, smtp_pass)
         server.send_message(msg)
         server.quit()
-        logger.info(f"Email sent successfully via SMTP to {to_email}")
+        logger.info(f"Email sent successfully via SMTP to {to_email} (Reply-To: {msg['Reply-To']})")
         return True
     except Exception as e:
         logger.error(f"SMTP Dispatch Error: {str(e)}")
@@ -102,9 +107,60 @@ def format_outreach_html(text: str) -> str:
         
     return "\n".join(formatted_lines)
 
-def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None, lead_id: Optional[int] = None, is_system_email: bool = False) -> bool:
-    # Force hot-reload of environment to catch manual .env updates instantly
+def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None, lead_id: Optional[int] = None, is_system_email: bool = False, user_id: Optional[int] = None) -> bool:
+    """Sends an email using Gmail API (if token available) or falls back to Provider/SMTP."""
     load_dotenv(dotenv_path=env_path, override=True)
+    
+    import markdown
+    # Convert markdown to HTML for a premium look
+    if any(marker in html_content for marker in ['**', '###', '[', '\n*']):
+        html_content = markdown.markdown(html_content, extensions=['extra', 'nl2br'])
+        # Add a professional wrapper for high-impact outreach
+        html_content = f"""
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1a202c; max-width: 600px;">
+            {html_content}
+        </div>
+        """
+    
+    # 1. Attempt Gmail API Dispatch (Highly Preferred for Outreach)
+    if user_id and not is_system_email:
+        try:
+            from app.services.google_service import get_gmail_service
+            import base64
+            from email.mime.text import MIMEText
+            
+            service = None
+            try:
+                # Local normalization to avoid circular imports
+                uid_str = str(user_id) if user_id else "1"
+                uid_t = uid_str if uid_str.isdigit() else "1"
+                
+                service = get_gmail_service(int(uid_t))
+                if not service:
+                    logger.warning(f"No Gmail service found for user {uid_t}. personalized dispatch skipped.")
+            except Exception as e:
+                logger.error(f"Error building Gmail service for user {user_id}: {e}")
+                pass
+            
+            if service:
+                logger.info(f"Using Google API for personalized dispatch (User ID: {user_id})")
+                message = MIMEText(html_content, 'html')
+                message['to'] = to_email
+                message['from'] = f"{from_name} <{from_email}>" if from_name and from_email else from_email
+                message['subject'] = subject
+                
+                raw_message = base64.urlsafe_b64encode(message.as_string().encode('utf-8')).decode('utf-8')
+                service.users().messages().send(userId='me', body={'raw': raw_message}).execute()
+                logger.info(f"Gmail API dispatch successful to {to_email}")
+                return True
+        except Exception as e:
+            logger.error(f"Gmail API dispatch failed, falling back: {str(e)}")
+
+    # 2. Fallback to SMTP/Resend logic
+    if user_id and not is_system_email:
+        logger.error(f"Gmail API dispatch failed for User {user_id}. ABORTING FALLBACK to system SMTP for personalized outreach.")
+        return False
+
     provider = os.getenv("EMAIL_PROVIDER", "resend").lower()
     
     if not from_email:
@@ -151,6 +207,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 "to": to_email,
                 "subject": subject,
                 "html": final_html,
+                "reply_to": from_email
             }
 
             if lead_id:
@@ -198,7 +255,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
             logger.error(f"Resend dispatch failed: {str(e)}")
             return False
     else:
-        return send_smtp_fallback(to_email, subject, final_html, final_from_email, final_from_name)
+        return send_smtp_fallback(to_email, subject, final_html, final_from_email, final_from_name, reply_to=from_email)
 
 def check_scheduled_emails():
     """

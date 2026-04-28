@@ -978,9 +978,13 @@ const Leads = () => {
                     <td className="text-[11px] font-bold text-slate-400 whitespace-nowrap">
                       {lead.created_at ? (
                         <>
-                          <span className="text-slate-300">{new Date(lead.created_at).toLocaleDateString([], { day: '2-digit', month: 'short' })}</span>
+                          <span className="text-slate-300">
+                            {new Date(lead.created_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' })}
+                          </span>
                           <span className="mx-1 opacity-30">·</span>
-                          <span className="opacity-70">{new Date(lead.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          <span className="opacity-70">
+                            {new Date(lead.created_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })}
+                          </span>
                         </>
                       ) : '-'}
                     </td>

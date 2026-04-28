@@ -114,8 +114,8 @@ const RocketReach = () => {
         </div>
         <div className="bg-[#0e121d] border border-white/5 rounded-xl p-4">
           <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">Export Credits</div>
-          <div className="text-2xl font-black text-white">{(2400 - creditStats.used).toLocaleString()}</div>
-          <div className="text-xs text-slate-400 font-semibold mt-1">of 2,400 remaining</div>
+          <div className="text-2xl font-black text-white">{(creditStats.limit - creditStats.used).toLocaleString()}</div>
+          <div className="text-xs text-slate-400 font-semibold mt-1">of {creditStats.limit?.toLocaleString()} remaining</div>
           <div className="mt-2 h-1 bg-slate-800 rounded-full overflow-hidden">
             <div className="h-full bg-gradient-to-r from-orange-500 to-rose-500 rounded-full transition-all" style={{ width: `${creditPct}%` }}></div>
           </div>

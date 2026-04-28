@@ -105,16 +105,20 @@ def search_rocketreach(
 
 @router.get("/rocketreach/credits")
 def get_credit_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Returns the number of export credits used from the database."""
+    """Returns the number of credits used and remaining for the current user."""
+    uid = normalize_user_id(user_id)
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
-        cur.execute("SELECT COUNT(*) as used FROM activity_log WHERE action = 'RR_EXPORT'")
+        cur.execute("SELECT credits_used, COALESCE(credits_limit, 200) as credits_limit FROM users WHERE id = %s", (uid,))
         row = cur.fetchone()
-        used = row['used'] if row else 0
-        return {"used": used, "remaining": max(0, 2400 - used)}
+        if row:
+            used = row['credits_used'] or 0
+            limit = row['credits_limit']
+            return {"used": used, "remaining": max(0, limit - used), "limit": limit}
+        return {"used": 0, "remaining": 200, "limit": 200}
     except Exception as e:
-        return {"used": 0, "remaining": 2400}
+        return {"used": 0, "remaining": 200, "limit": 200}
     finally:
         cur.close()
         conn.close()

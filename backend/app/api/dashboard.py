@@ -24,8 +24,8 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         where_clause = "WHERE user_id IS NULL"
         params = ()
 
-    # Exclude bulk/csv_import sources from total_leads and pending counts
-    leads_filter = "AND (source IS NULL OR source NOT IN ('bulk', 'csv_import'))"
+    # Include ALL sources for total dashboard counts
+    leads_filter = "AND 1=1"
     
     cur.execute(f"SELECT COUNT(*) as total FROM leads_raw {where_clause} {leads_filter}", params)
     total_leads = cur.fetchone()['total']

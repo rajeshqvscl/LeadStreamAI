@@ -90,7 +90,12 @@ def create_tables():
         ("is_unsubscribed", "BOOLEAN DEFAULT FALSE"),
         ("manual_entry", "BOOLEAN DEFAULT FALSE"),
         ("remarks", "TEXT"),
-        ("user_name", "TEXT")
+        ("user_name", "TEXT"),
+        ("reply_intent", "TEXT"),
+        ("meeting_link", "TEXT"),
+        ("meeting_time", "TIMESTAMP"),
+        ("deal_size", "TEXT"),
+        ("pitch_deck_url", "TEXT")
     ]
     for col_name, col_type in columns_to_add:
         try:

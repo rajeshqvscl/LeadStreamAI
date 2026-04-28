@@ -247,6 +247,7 @@ def get_leads(
             "country": country,
             "linkedin": r["linkedin_url"],
             "source": r.get("source", ""),
+            "user_name": r.get("user_name") or "System",
             "validation_status": r["validation_status"],
             "email_status": r.get("email_status"),
             "status": r.get("email_status") or "PENDING_APPROVAL",
@@ -259,6 +260,56 @@ def get_leads(
         "leads": leads,
         "total": total
     }
+
+@router.get("/leads/export-all")
+def export_all_leads(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Fetches every lead for the current user for CSV export."""
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    uid = normalize_user_id(user_id)
+    is_admin = (str(user_id).lower() == 'admin')
+    
+    query = "SELECT * FROM leads_raw WHERE (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)"
+    params = []
+    
+    if not is_admin:
+        query += " AND user_id = %s"
+        params.append(uid)
+        
+    query += " ORDER BY created_at DESC"
+    cur.execute(query, tuple(params))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    
+    leads = []
+    for r in rows:
+        payload = r.get("raw_payload") or {}
+        if isinstance(payload, str):
+            try: payload = json.loads(payload)
+            except: payload = {}
+            
+        leads.append({
+            "id": r["id"],
+            "first_name": r["first_name"],
+            "last_name": r["last_name"],
+            "email": r["email"],
+            "company_name": r["company_name"],
+            "designation": r.get("designation") or payload.get("current_title", ""),
+            "linkedin_url": r["linkedin_url"],
+            "phone": r.get("phone") or "",
+            "city": r.get("city") or payload.get("city", ""),
+            "country": r.get("country") or payload.get("country", ""),
+            "industry": r.get("industry") or "",
+            "persona": r["persona"],
+            "email_status": r.get("email_status", "PENDING"),
+            "reply_intent": r.get("reply_intent", "NONE"),
+            "meeting_time": r.get("scheduled_at").isoformat() if r.get("scheduled_at") else "",
+            "created_at": r["created_at"].isoformat() if r["created_at"] else "",
+            "remarks": r.get("remarks", "")
+        })
+    return leads
 
 @router.get("/leads/{lead_id}")
 def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
@@ -519,48 +570,9 @@ def get_lead_activity(lead_id: int):
 def create_manual_lead(req: LeadCreate, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     from app.models.lead import insert_lead
     
-    # 1. Existence Check (Email or LinkedIn)
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    # Normalize empty strings to None to avoid violation of UNIQUE constraint
+    # Data Preparation
     li_url = req.linkedin_url.strip() if req.linkedin_url else None
-    if not li_url: li_url = None
     
-    query = "SELECT id, email_status, email, linkedin_url FROM leads_raw WHERE email = %s"
-    params = [req.email]
-    
-    if li_url:
-        query += " OR (linkedin_url = %s AND linkedin_url IS NOT NULL AND linkedin_url != '')"
-        params.append(li_url)
-        
-    cur.execute(query, tuple(params))
-    existing = cur.fetchone()
-    cur.close()
-    conn.close()
-    
-    if existing:
-        # If the lead exists anywhere (bulk, extraction, or even previously in pipeline),
-        # ALWAYS assign it to the current user, set source to 'direct', and flag as manual_entry
-        # This makes the "manual add" experience seamless and guarantees visibility
-        conn2 = get_db_connection()
-        cur2 = conn2.cursor()
-        cur2.execute(
-            "UPDATE leads_raw SET source = 'manual', user_id = %s, manual_entry = TRUE WHERE id = %s",
-            (normalize_user_id(user_id), existing['id'])
-        )
-        conn2.commit()
-        cur2.close()
-        conn2.close()
-        return JSONResponse(
-            status_code=200,
-            content={
-                "message": "Lead already exists in global database — successfully moved to your Lead Pipeline!",
-                "lead_id": existing['id'],
-                "was_duplicate": True
-            }
-        )
-
     payload = {
         "designation": req.designation,
         "city": req.city,
@@ -570,6 +582,7 @@ def create_manual_lead(req: LeadCreate, user_id: Optional[str] = Header(None, al
     }
     
     try:
+        from app.models.lead import insert_lead
         insert_lead(
             req.first_name,
             req.last_name,
@@ -577,14 +590,16 @@ def create_manual_lead(req: LeadCreate, user_id: Optional[str] = Header(None, al
             "", # domain
             li_url, # Pass None if empty string
             req.company_name,
-            req.source or "direct",
+            req.source or "manual",
             payload,
             fit_score=0,
             persona=req.persona or "OTHER",
             phone=req.phone,
-            user_id=user_id
+            user_id=normalize_user_id(user_id),
+            user_name=get_user_name(user_id)
         )
-        return {"message": "Lead created successfully and added to pipeline."}
+        return {"message": "Lead added to your pipeline successfully."}
+
     except Exception as e:
         logger.error(f"Error creating lead: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Storage Conflict: {str(e)}")

@@ -4,6 +4,7 @@ import os
 import json
 import structlog
 from anthropic import Anthropic
+import google.generativeai as genai
 
 from pathlib import Path
 from dotenv import load_dotenv
@@ -13,17 +14,45 @@ load_dotenv(dotenv_path=env_path)
 
 logger = structlog.get_logger(__name__)
 
-MODEL_NAME = "claude-sonnet-4-6"
+CLAUDE_MODEL = "claude-3-5-sonnet-20240620"
+GEMINI_MODEL = "gemini-3-flash-preview"
+
+REFINEMENT_PROMPT = """
+You are an expert executive assistant. Your task is to refine the provided email draft based on the user's instruction.
+Return ONLY the refined body of the email. Do not include any conversational text, explanations, or subject lines.
+If formatting (bold/italic) is requested, use standard HTML tags: <b></b> and <i></i>.
+
+Current Draft: {content}
+Instruction: {instruction}
+
+Refined Body:
+"""
 
 class EmailGenerator:
 
     def __init__(self):
-        api_key = os.getenv("ANTHROPIC_API_KEY")
+        self.anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        self.gemini_key = os.getenv("GEMINI_API_KEY")
 
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY not set")
+        if not self.anthropic_key and not self.gemini_key:
+            raise ValueError("No LLM API keys found (ANTHROPIC_API_KEY or GEMINI_API_KEY)")
 
-        self.client = Anthropic(api_key=api_key)
+        # Initialize Anthropic if key exists
+        self.anthropic_client = None
+        if self.anthropic_key:
+            try:
+                self.anthropic_client = Anthropic(api_key=self.anthropic_key)
+            except Exception as e:
+                logger.error("anthropic_init_failed", error=str(e))
+
+        # Initialize Gemini if key exists
+        self.gemini_model = None
+        if self.gemini_key:
+            try:
+                genai.configure(api_key=self.gemini_key)
+                self.gemini_model = genai.GenerativeModel(GEMINI_MODEL)
+            except Exception as e:
+                logger.error("gemini_init_failed", error=str(e))
 
     def _get_prompt(self, prompt_type: str):
         """Fetch prompt content from dedicated database table."""
@@ -44,20 +73,17 @@ class EmailGenerator:
         # Personalize greeting
         first_name = lead.get('first_name')
         if not first_name or str(first_name).strip().lower() in ["there", "contact", ""]:
-            # Fallback 1: Try full name or company-level name
             first_name = lead.get('name') or lead.get('full_name') or lead.get('last_name')
-            
-            # Fallback 2: Try to extract from email if still missing
             if (not first_name or str(first_name).strip() == "") and lead.get('email'):
                 email_prefix = lead.get('email').split('@')[0]
-                # Extract first part (john.doe -> John)
                 first_part = email_prefix.replace("_", ".").replace("-", ".").split(".")[0]
                 first_name = first_part.capitalize()
         
         greeting = f"Hi {first_name}," if first_name else "Hi,"
+        company_name = lead.get('company_name') or lead.get('company') or "your organization"
         
         body = f"""{greeting}
-        
+
 I hope you're doing well.
 
 I'm {sender_name} from QVSCL (Gurugram), a strategic advisory firm working with high-growth early-stage ventures. We are currently raising a round for a platform building a vertical AI-powered hiring intelligence layer, combining AI agents, recruitment workflows, and trust-based verification infrastructure.
@@ -112,110 +138,126 @@ I'm {sender_name} from QVSCL (Gurugram), a strategic advisory firm working with 
 • Verification TAT reduced from 15 days to 2 days
 • 40%+ reduction in HR operational workload
 
-**Fundraise**: $1M
+**Fundraise: $1M**
 
 If this aligns with your portfolio focus and does not conflict with it, I’d be happy to share the full presentation or connect over a virtual meeting at your convenience. I have attached the QVSCL Profile. You may also share your investment thesis with us so we can send relevant deal flow in the future.
 
-For more details about our services: [Website](https://qvscl.com/) | [Linkedin](https://www.linkedin.com/company/qvstrategicconsultingllp/?originalSubdomain=in)
+For more details about our services: [Website](https://qvscl.com) | [Linkedin](https://www.linkedin.com/company/qvscl/)
 
 Looking forward to your response.
-
---
-Thanks & Regards,
-{sender_name}"""
-
+"""
         return {
-            "subject": "Quick introduction",
+            "subject": f"Strategic Investment Opportunity: AI-Powered Hiring Infrastructure",
             "body": body
         }
 
-    def refine_email(self, subject: str, body: str, instruction: str):
-        """
-        Refine an existing email based on instructions.
-        """
-        current_email = f"Subject: {subject}\n\nBody: {body}"
+    def generate_palak_email(self, lead: dict, sender_name: str = "the team"):
+        """Generates an email using Palak Mam's specific structure."""
+        first_name = lead.get('first_name') or lead.get('name', '').split(' ')[0]
+        company_name = lead.get('company_name') or lead.get('company') or "your organization"
         
-        prompt = f"""
-        Current Email:
-        {current_email}
+        greeting = f"Hi {first_name}," if first_name else "Hi,"
         
-        Instruction: {instruction}
+        body = f"""{greeting}
+
+I hope you're having a productive week.
+
+I’m {sender_name} from QVSCL. We’ve been closely following the recruitment tech space, and I wanted to reach out regarding a high-growth vertical AI hiring platform we are currently advising for their $1M fundraise.
+
+What caught our attention about this platform is their ability to reduce time-to-hire from weeks to just 2-3 days using vertical AI agents that automate the entire sourcing and verification cycle.
+
+**Key Highlights:**
+• **Proven Traction**: 250+ enterprise customers and 100K+ companies onboarded.
+• **Unified Stack**: Integration of ATS, Sourcing, and Background Verification in one platform.
+• **Market Need**: Solving the 1.5M workforce gap in the Indian market specifically.
+
+We believe this could be a strategic fit for your portfolio. I’ve attached the QVSCL profile for your reference.
+
+Would you be open to a quick 10-minute sync to discuss this further? Alternatively, I can share the pitch deck for your initial review.
+
+Best,
+{sender_name}
+"""
+        return {
+            "subject": f"Investment Memo: AI Hiring Infrastructure | Traction Update",
+            "body": body
+        }
+
+    def refine_email(self, subject: str, body: str, action: str):
+        """Refines an existing email draft based on AI instructions."""
+        instructions = {
+            "shorten": "Make the email more concise while keeping all key information. Aim for brevity.",
+            "professional": "Rewrite the email to sound more formal, executive, and professional.",
+            "fix": "Correct all grammar, spelling, and punctuation errors while improving flow.",
+            "bold": "Identify the most important sentences or key business terms and make them bold using <b></b> tags for emphasis.",
+            "italic": "Add slight emphasis to call-to-actions or expressive phrases using <i></i> tags.",
+            "persuasive": "Make the email more compelling and persuasive to increase the chance of a meeting."
+        }
         
-        CRITICAL GUIDELINES:
-        1. Refine the body based on the instructions.
-        2. KEEP the tone professional.
-        3. DO NOT generate any sign-off (like "Sincerely", "Best regards") or signature block at the end. 
-        4. The system will automatically handle the signature separator (--) and the contact details.
-        5. Return ONLY valid JSON with 'subject' and 'body'.
-        """
+        instruction = instructions.get(action, action)
+        content = f"Subject: {subject}\n\n{body}"
+        prompt = REFINEMENT_PROMPT.format(content=content, instruction=instruction)
         
         try:
-            logger.info("refining_email", model=MODEL_NAME)
-            response = self.client.messages.create(
-                model=MODEL_NAME,
-                max_tokens=4000,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            refined_text = ""
+            if self.anthropic_client:
+                response = self.anthropic_client.messages.create(
+                    model=CLAUDE_MODEL,
+                    max_tokens=2048,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                refined_text = response.content[0].text.strip()
+            elif self.gemini_model:
+                response = self.gemini_model.generate_content(prompt)
+                refined_text = response.text.strip()
             
-            text = "".join([block.text for block in response.content if block.type == "text"]).strip()
-            return self._parse_response(text)
+            # Try to extract subject if AI included it
+            new_subject = subject
+            new_body = refined_text
+            if "Subject:" in refined_text:
+                parts = refined_text.split("\n\n", 1)
+                new_subject = parts[0].replace("Subject:", "").strip()
+                if len(parts) > 1:
+                    new_body = parts[1].strip()
+            
+            return {"subject": new_subject, "body": new_body}
         except Exception as e:
-            logger.error("refine_error", error=str(e))
-            return {"subject": subject, "body": body, "error": str(e)}
+            logger.error("ai_refine_failed", error=str(e))
+            return {"subject": subject, "body": body}
 
-    def _parse_response(self, text: str):
-        """
-        Robustly parse JSON from LLM response.
-        Handles markdown blocks, text prefixes, and partial JSON.
-        """
-        logger.info("parsing_llm_response", text_length=len(text))
+    def classify_reply(self, text: str):
+        """Analyzes a lead's reply to determine intent and extract details."""
+        prompt = f"""
+        Analyze this email reply from a potential investor/client and extract details in JSON format.
         
-        # 1. Try to find JSON within markdown code blocks
-        if "```" in text:
-            blocks = text.split("```")
-            for block in blocks:
-                content = block.strip()
-                if content.startswith("json"):
-                    content = content[4:].strip()
-                
-                if content.startswith("{") and content.endswith("}"):
-                    try:
-                        data = json.loads(content)
-                        if "subject" in data or "body" in data:
-                            return {
-                                "subject": str(data.get("subject") or "Quick introduction"),
-                                "body": str(data.get("body") or "")
-                            }
-                    except:
-                        continue
+        REPLY:
+        {text}
         
-        # 2. Try to find the outermost { } pair anywhere in the text
+        JSON STRUCTURE:
+        {{
+          "intent": "MEETING_REQUESTED" | "INTERESTED" | "NEEDS_MORE_INFO" | "NOT_INTERESTED",
+          "deal_size": "string or null",
+          "has_pitch_deck": boolean,
+          "pitch_deck_url": "string or null"
+        }}
+        """
         try:
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start != -1 and end > start:
-                data = json.loads(text[start:end])
-                return {
-                    "subject": str(data.get("subject") or "Quick introduction"),
-                    "body": str(data.get("body") or "")
-                }
+            if self.anthropic_client:
+                response = self.anthropic_client.messages.create(
+                    model=CLAUDE_MODEL,
+                    max_tokens=512,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                text = response.content[0].text.strip()
+            else:
+                response = self.gemini_model.generate_content(prompt)
+                text = response.text.strip()
+            
+            import re
+            json_match = re.search(r'\{.*\}', text, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group(0))
+            return {"intent": "INTERESTED"}
         except Exception as e:
-            logger.warning("json_substring_parse_failed", error=str(e))
-
-        # 3. Last resort: If it's not JSON, treat the whole thing as the body
-        # but try to extract a subject if it looks like "Subject: ..."
-        subject = "Quick introduction"
-        body = text.strip()
-        
-        if "Subject:" in text:
-            lines = text.split("\n")
-            for line in lines:
-                if line.strip().startswith("Subject:"):
-                    subject = line.replace("Subject:", "").strip()
-                    body = text.replace(line, "").strip()
-                    break
-        
-        return {
-            "subject": subject,
-            "body": body
-        }
+            logger.error("classification_error", error=str(e))
+            return {"intent": "INTERESTED"}

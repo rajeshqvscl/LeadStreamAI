@@ -3,7 +3,7 @@ import axios from '../services/api';
 import { Link } from 'react-router-dom';
 import {
   Users, CheckSquare, Rocket, BarChart3, Sparkles, Activity,
-  ShieldAlert, Mail, Loader2, Zap, Clock, Globe, Target, CheckCircle2, XCircle
+  ShieldAlert, Mail, Loader2, Zap, Clock, Globe, Target, CheckCircle2, XCircle, X, RefreshCw
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -30,7 +30,8 @@ const Dashboard = () => {
     total_unsubs: 0,
     unsub_rate: 0,
     recent_logs: [],
-    persona_data: { FOUNDER: 0, 'C-SUITE': 0, INVESTOR: 0, EXECUTIVE: 0, OTHER: 0 }
+    persona_data: { FOUNDER: 0, 'C-SUITE': 0, INVESTOR: 0, EXECUTIVE: 0, OTHER: 0 },
+    inboxMessages: []
   });
 
   const [adminStats, setAdminStats] = useState(null);
@@ -41,8 +42,22 @@ const Dashboard = () => {
   const [sendingReport, setSendingReport] = useState(false);
   const [period, setPeriod] = useState('daily');
   const [toast, setToast] = useState(null);
+  const [selectedMsg, setSelectedMsg] = useState(null);
+  const [msgDetail, setMsgDetail] = useState(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const renderClickableText = (text) => {
+      if (!text) return text;
+      const urlRegex = /(https?:\/\/[^\s]+)/g;
+      return text.split(urlRegex).map((part, i) => {
+          if (part.match(urlRegex)) {
+              return <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-400 underline decoration-blue-500/30 transition-colors cursor-pointer break-all">{part}</a>;
+          }
+          return part;
+      });
+  };
+
+  const [user, setUser] = useState(JSON.parse(localStorage.getItem('user') || '{}'));
   const isAdmin = user.role === 'ADMIN';
 
   const [isDispatching, setIsDispatching] = useState(false);
@@ -64,6 +79,108 @@ const Dashboard = () => {
     }
   };
 
+  const fetchMessageDetail = async (id) => {
+    setLoadingDetail(true);
+    setMsgDetail(null);
+    try {
+      const { data } = await axios.get(`/api/gmail/message/${id}`);
+      setMsgDetail(data);
+    } catch (err) {
+      console.error('Failed to fetch message detail', err);
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
+
+  const handleGoogleLink = async () => {
+    try {
+      const { data } = await axios.get('/api/auth/google/link');
+      if (data.url) {
+        window.location.href = data.url;
+      }
+    } catch (err) {
+      showToast('error', 'Failed to initialize Google security layer');
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!window.confirm('NUCLEAR RESET: This will completely wipe all Google tokens. Are you sure you want to proceed?')) return;
+    try {
+      await axios.post('/api/auth/google/disconnect');
+      showToast('success', 'Intelligence Layer completely reset.');
+      // Update local state to reflect disconnection
+      setUser(prev => ({ ...prev, google_linked_at: null, google_email: null }));
+      setData(prev => ({ ...prev, inboxMessages: [] }));
+    } catch (err) {
+      showToast('error', 'Failed to reset Intelligence Layer');
+    }
+  };
+
+  const decodeHtml = (html) => {
+    const txt = document.createElement("textarea");
+    txt.innerHTML = html;
+    return txt.value;
+  };
+
+  // Format any date string to Indian Standard Time (IST)
+  const formatIST = (dateStr, compact = false) => {
+    if (!dateStr) return 'Recently';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      if (compact) {
+        return d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' })
+          + ' ' + d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
+      }
+      return d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' })
+        + ', ' + d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })
+        + ' IST';
+    } catch { return dateStr; }
+  };
+
+  const renderEmailContent = (content) => {
+    if (!content) return null;
+    
+    // Detect if content is likely HTML
+    const isHtml = /<[a-z][\s\S]*>/i.test(content);
+    
+    if (isHtml) {
+      return <div className="email-html-content" dangerouslySetInnerHTML={{ __html: content }} />;
+    }
+
+    // Helper to render inline formatting like *bold*
+    const renderLine = (text) => {
+      const parts = text.split(/(\*[^*]+\*)/g);
+      return parts.map((part, i) => {
+        if (part.startsWith('*') && part.endsWith('*')) {
+          return <strong key={i} className="font-black text-blue-400">{part.slice(1, -1)}</strong>;
+        }
+        return part;
+      });
+    };
+
+    // Process plain text for quotes
+    const lines = content.split('\n');
+    return lines.map((line, idx) => {
+      const trimmedLine = line.trim();
+      const isQuote = trimmedLine.startsWith('>');
+      
+      // Clean the line (remove the > arrow)
+      let cleanLine = line;
+      if (isQuote) {
+        cleanLine = line.replace(/^\s*> ?/, '');
+      }
+
+      if (isQuote) {
+        return (
+          <div key={idx} className="pl-4 border-l-2 border-slate-700 text-slate-500 my-1 py-0.5">
+            {renderLine(cleanLine)}
+          </div>
+        );
+      }
+      return <div key={idx} className="min-h-[1.5em]">{renderLine(cleanLine)}</div>;
+    });
+  };
   const fetchData = async () => {
     try {
       const response = await axios.get('/api/dashboard/stats');
@@ -71,15 +188,14 @@ const Dashboard = () => {
         setData(prev => ({ ...prev, ...response.data }));
       }
 
-      if (isAdmin) {
-        const [admRes, prodRes, activeRes] = await Promise.all([
-          axios.get('/api/admin/stats'),
-          axios.get('/api/users/productivity'),
-          axios.get('/api/users/active')
-        ]);
-        setAdminStats(admRes.data);
-        setProductivity(prodRes.data);
-        setActiveUsers(activeRes.data);
+      // Fetch Gmail Intelligence if linked
+      if (user.google_linked_at) {
+        try {
+          const gmailRes = await axios.get('/api/gmail/inbox');
+          setData(prev => ({ ...prev, inboxMessages: gmailRes.data.messages || [] }));
+        } catch (err) {
+          console.error('Gmail sync error:', err);
+        }
       }
 
       setLoading(false);
@@ -88,6 +204,37 @@ const Dashboard = () => {
       setLoading(false);
     }
   };
+
+  // Sync user profile if coming back from successful Gmail link
+  useEffect(() => {
+    const checkParams = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      
+      if (urlParams.get('error') === 'permissions_denied') {
+        showToast('error', 'PERMISSION DENIED: You must check the boxes on the Google screen to allow email access.');
+        // Clear param without reload
+        window.history.replaceState({}, document.title, "/dashboard");
+      }
+
+      if (urlParams.get('link') === 'success' || urlParams.get('google') === 'linked') {
+        try {
+          const { data: updatedUser } = await axios.get('/api/auth/me');
+          if (updatedUser) {
+            localStorage.setItem('user', JSON.stringify(updatedUser));
+            setUser(updatedUser); // This triggers the UI update
+            showToast('success', 'Intelligence layer successfully integrated!');
+            // Refresh page data with new permissions
+            fetchData();
+            // Clear param
+            window.history.replaceState({}, document.title, "/dashboard");
+          }
+        } catch (err) {
+          console.error('Profile sync error:', err);
+        }
+      }
+    };
+    checkParams();
+  }, []);
 
   const fetchVelocity = async () => {
     if (!isAdmin) return;
@@ -149,39 +296,104 @@ const Dashboard = () => {
           { label: 'Outbound Limit', val: `${data.daily_sent_count}/${data.daily_limit}`, sub: 'Daily limits reset', class: 'card-o', border: 'border-l-orange-500' }
         ].map((stat, i) => (
           <div key={i} className={`bg-[#131722] border border-white/5 border-l-4 ${stat.border} rounded-2xl p-6 shadow-xl transition-all hover:scale-105`}>
-            <div className="text-[10px] font-black uppercase tracking-[2px] text-slate-500 mb-3">{stat.label}</div>
-            <div className="text-[32px] font-black text-white mb-1 leading-none">{stat.val}</div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-[10px] font-black uppercase tracking-[2px] text-slate-500">{stat.label}</div>
+              <div className="w-2 h-2 rounded-full bg-blue-500/50 animate-pulse"></div>
+            </div>
+            <div className="text-[32px] font-black text-white mb-1">{stat.val}</div>
             <div className="text-[11px] font-bold text-slate-600 uppercase tracking-tighter">{stat.sub}</div>
           </div>
         ))}
       </div>
-
-      {/* Engagement bar */}
-      <div className="bg-[#151a26] border border-[#ffffff08] rounded-[24px] shadow-2xl mb-10 overflow-hidden">
-        <div className="flex items-center justify-between p-6 border-b border-white/5">
-          <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
-            <Activity className="w-4 h-4 text-blue-500" /> Real-time Engagement Pulse
-          </h3>
-          <Link to="/dashboard/metrics" className="text-[11px] font-black text-blue-500 uppercase tracking-widest hover:text-white transition-colors">Full Intelligence →</Link>
-        </div>
-        <div className="p-6 grid grid-cols-2 md:grid-cols-5 gap-6">
-          {[
-            { label: 'Open Rate', val: `${data.open_rate}%`, sub: `${data.unique_opens} unique`, color: 'text-blue-500' },
-            { label: 'Click Rate', val: `${data.click_rate}%`, sub: `${data.unique_clicks} unique`, color: 'text-emerald-500' },
-            { label: 'Heat Delta', val: `${data.engagement_rate}%`, sub: 'System Reach', color: 'text-purple-500' },
-            { label: 'Bounce', val: `${data.bounce_rate}%`, sub: `${data.total_bounces} events`, color: 'text-orange-500' },
-            { label: 'Opt-outs', val: data.total_unsubs, sub: `${data.unsub_rate.toFixed(1)}% volatility`, color: 'text-red-500' }
-          ].map((p, i) => (
-            <div key={i} className="text-center group">
-              <div className="text-[9px] text-[#475569] uppercase font-black tracking-widest mb-2 group-hover:text-slate-400 transition-colors">{p.label}</div>
-              <div className={`text-[26px] font-black ${p.color}`}>{p.val}</div>
-              <div className="text-[10px] text-[#64748b] mt-1 font-bold uppercase tracking-tighter">{p.sub}</div>
+      {/* Gmail Connectivity Card - Prominent Position */}
+      <div className={`mb-10 p-8 rounded-[32px] border transition-all shadow-2xl relative overflow-hidden group ${user.google_linked_at ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-indigo-600/10 border-indigo-500/30'}`}>
+        <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-8">
+          <div className="flex items-center gap-6">
+            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg ${user.google_linked_at ? 'bg-emerald-500/20 text-emerald-500' : 'bg-indigo-500/20 text-indigo-400'}`}>
+              <Mail size={32} />
             </div>
-          ))}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className={`text-[10px] font-black uppercase tracking-[3px] ${user.google_linked_at ? 'text-emerald-500' : 'text-indigo-400'}`}>
+                  {user.google_linked_at ? 'Google Integrity: Active' : 'Action Required: Intelligence Layer'}
+                </span>
+                {user.google_linked_at && (
+                   <div className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                  </div>
+                )}
+              </div>
+              <h2 className="text-2xl font-black text-white mb-2">
+                {user.google_linked_at ? 'Unified Inbox Syncing' : 'Activate Real-time Gmail Sync'}
+              </h2>
+              <p className="text-slate-400 text-sm max-w-[500px] leading-relaxed">
+                Connect your account to enable AI-powered sentiment analysis and automated meeting scheduling for every lead reply.
+              </p>
+              {user.google_linked_at && (
+                  <div className="mt-2 space-y-1">
+                    <div className="text-[9px] font-black text-blue-500/80 uppercase tracking-widest flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
+                      Connected: {user.google_email || 'Verified Account'}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter">
+                        All replies will be sent via this address
+                      </div>
+                      <button 
+                        onClick={handleDisconnect}
+                        className="text-[8px] font-black text-rose-500 hover:text-rose-400 uppercase tracking-widest cursor-pointer underline underline-offset-4"
+                      >
+                        Disconnect Intelligence
+                      </button>
+                    </div>
+                  </div>
+                )}
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+                {user.google_linked_at ? (
+                  <button 
+                    onClick={handleDisconnect}
+                    className="px-4 py-2 bg-red-500/10 border border-red-500/20 rounded-xl text-[9px] font-black text-red-500 uppercase tracking-widest hover:bg-red-500/20 transition-all active:scale-95 shadow-xl"
+                  >
+                    Disconnect
+                  </button>
+                ) : (
+                  <button 
+                    onClick={handleGoogleLink}
+                    className="px-10 py-5 rounded-2xl text-xs font-black uppercase tracking-[3px] transition-all active:scale-95 shadow-xl bg-indigo-600 text-white hover:bg-indigo-500 shadow-indigo-600/30"
+                  >
+                    🚀 Connect Gmail Now
+                  </button>
+                )}
+          </div>
         </div>
       </div>
 
-      {/* High-Velocity Stream & Persona Dominance Row */}
+      {/* Engagement Pulse Grid */}
+      <div className="bg-[#151a26] border border-[#ffffff08] rounded-[32px] mb-10 shadow-2xl overflow-hidden">
+          <div className="flex items-center justify-between p-8 border-b border-white/5">
+            <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-3">
+              <Activity className="w-5 h-5 text-blue-500" /> Real-time Engagement Pulse
+            </h3>
+            <Link to="/dashboard/metrics" className="text-[11px] font-black text-blue-500 uppercase tracking-widest hover:text-white transition-colors">Full Intelligence Dashboard →</Link>
+          </div>
+          <div className="p-8 grid grid-cols-2 md:grid-cols-5 gap-8">
+            {[
+              { label: 'Open Rate', val: `${data.open_rate}%`, sub: `${data.unique_opens} unique`, color: 'text-blue-500' },
+              { label: 'Click Rate', val: `${data.click_rate}%`, sub: `${data.unique_clicks} unique`, color: 'text-emerald-500' },
+              { label: 'Heat Delta', val: `${data.engagement_rate}%`, sub: 'System Reach', color: 'text-purple-500' },
+              { label: 'Bounce', val: `${data.bounce_rate}%`, sub: `${data.total_bounces} events`, color: 'text-orange-500' },
+              { label: 'Opt-outs', val: data.total_unsubs, sub: `${data.unsub_rate.toFixed(1)}% volatility`, color: 'text-red-500' }
+            ].map((p, i) => (
+              <div key={i} className="text-center group">
+                <div className="text-[10px] text-[#475569] uppercase font-black tracking-widest mb-3 group-hover:text-slate-400 transition-colors">{p.label}</div>
+                <div className={`text-[32px] font-black ${p.color}`}>{p.val}</div>
+                <div className="text-[11px] text-[#64748b] mt-1 font-bold uppercase tracking-tighter">{p.sub}</div>
+              </div>
+            ))}
+          </div>
+      </div>
       <div className="grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-8 mb-10">
         <div className="bg-[#131722] border border-white/5 rounded-[32px] overflow-hidden shadow-2xl h-[450px] flex flex-col">
           <div className="p-6 border-b border-white/5 flex items-center gap-2">
@@ -205,30 +417,71 @@ const Dashboard = () => {
           </div>
         </div>
 
-        <div className="bg-[#131722] border border-white/5 rounded-[32px] p-8 shadow-2xl flex flex-col h-[450px]">
-          <div className="flex items-center gap-2 mb-8">
-            <Globe className="w-4 h-4 text-rose-500" />
-            <h3 className="text-xs font-black text-white uppercase tracking-widest">Persona Dominance</h3>
-          </div>
-          <div className="flex-1 space-y-8 overflow-y-auto custom-scrollbar pr-2">
-            {Object.entries(data.persona_data || {}).map(([persona, count], i) => {
-              const colors = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444'];
-              const percentage = data.total_leads > 0 ? (count / data.total_leads) * 100 : 0;
-              return (
-                <div key={persona}>
-                  <div className="flex justify-between items-center mb-3">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full" style={{ background: colors[i % colors.length] }}></div>
-                      {persona}
-                    </span>
-                    <span className="text-xs font-black text-white">{count} <span className="text-slate-600 font-bold ml-1 uppercase">Leads</span></span>
-                  </div>
-                  <div className="h-1 bg-white/5 rounded-full overflow-hidden">
-                    <div className="h-full transition-all duration-1000" style={{ width: `${percentage}%`, background: colors[i % colors.length] }}></div>
-                  </div>
+        <div className="flex flex-col gap-8 h-[450px]">
+          {/* Live Intelligence Stream */}
+          <div className="bg-[#131722] border border-white/5 rounded-[32px] overflow-hidden shadow-2xl flex-1 flex flex-col">
+            <div className="p-5 border-b border-white/5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Mail className="w-3.5 h-3.5 text-emerald-500" />
+                <h3 className="text-[10px] font-black text-white uppercase tracking-widest">Intelligence Stream</h3>
+              </div>
+              {data.inboxMessages.length > 0 && (
+                <div className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[8px] font-black text-emerald-500 uppercase">
+                  {data.inboxMessages.length} Live
                 </div>
-              );
-            })}
+              )}
+            </div>
+            <div className="p-5 flex-1 overflow-y-auto custom-scrollbar space-y-2.5">
+              {data.inboxMessages.length > 0 ? (
+                data.inboxMessages.map((msg, i) => (
+                  <div 
+                    key={i} 
+                    onClick={() => { setSelectedMsg(msg); fetchMessageDetail(msg.id); }}
+                    className="p-3.5 bg-white/[0.02] border border-white/[0.03] rounded-xl hover:bg-white/[0.04] transition-all group cursor-pointer border-l-2 border-l-transparent hover:border-l-blue-500"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[9px] font-black text-emerald-500 uppercase truncate max-w-[120px]">{msg.from.split('<')[0]}</span>
+                      <span className="text-[8px] font-black text-blue-500 uppercase tabular-nums">{formatIST(msg.date, true)}</span>
+                    </div>
+                    <h4 className="text-[10px] font-bold text-white mb-1 line-clamp-1 opacity-80">{decodeHtml(msg.subject)}</h4>
+                    <p className="text-[10px] text-slate-500 line-clamp-1 leading-relaxed opacity-60 italic">{decodeHtml(msg.snippet)}</p>
+                  </div>
+                ))
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-center opacity-40">
+                  <Clock className="w-5 h-5 text-slate-700 mb-2" />
+                  <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Syncing Stream</div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Persona Dominance */}
+          <div className="bg-[#131722] border border-white/5 rounded-[32px] p-6 shadow-2xl flex flex-col min-h-[160px]">
+            <div className="flex items-center gap-2 mb-5">
+              <Globe className="w-3.5 h-3.5 text-rose-500" />
+              <h3 className="text-[10px] font-black text-white uppercase tracking-widest">Persona Dominance</h3>
+            </div>
+            <div className="flex-1 space-y-4 overflow-y-auto custom-scrollbar pr-2">
+              {Object.entries(data.persona_data || {}).map(([persona, count], i) => {
+                const colors = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444'];
+                const percentage = data.total_leads > 0 ? (count / data.total_leads) * 100 : 0;
+                return (
+                  <div key={persona}>
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                        <div className="w-1 h-1 rounded-full" style={{ background: colors[i % colors.length] }}></div>
+                        {persona}
+                      </span>
+                      <span className="text-[10px] font-black text-white">{count}</span>
+                    </div>
+                    <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                      <div className="h-full transition-all duration-1000" style={{ width: `${percentage}%`, background: colors[i % colors.length] }}></div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>
@@ -522,6 +775,130 @@ const Dashboard = () => {
         }
       `}</style>
       {isAdmin ? renderAdminUI() : renderUserUI()}
+
+      {/* Message Detail Sidebar Drawer */}
+      {selectedMsg && (
+        <div className="fixed inset-0 z-[500] flex justify-end animate-in fade-in duration-300">
+            <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-md" onClick={() => setSelectedMsg(null)}></div>
+            <div className="relative w-full max-w-[600px] bg-[#0b0f1a] border-l border-white/5 shadow-[0_0_80px_rgba(0,0,0,0.9)] flex flex-col h-full animate-in slide-in-from-right duration-700 ease-[cubic-bezier(0.2,0.8,0.2,1)]">
+                {/* Premium Header */}
+                <div className="p-8 border-b border-white/[0.03] flex items-center justify-between bg-gradient-to-r from-blue-500/[0.02] to-transparent">
+                    <div className="flex items-center gap-5">
+                        <div className="w-14 h-14 rounded-[20px] bg-gradient-to-br from-blue-600/20 to-indigo-600/20 border border-blue-500/10 flex items-center justify-center text-blue-400">
+                            <Mail size={26} strokeWidth={1.5} />
+                        </div>
+                        <div>
+                            <h2 className="text-[20px] font-black text-white tracking-tight leading-none mb-2">Message Intelligence</h2>
+                            <div className="flex items-center gap-2">
+                              <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
+                              <p className="text-[10px] font-black text-slate-500 uppercase tracking-[4px]">SECURE CHANNEL</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <button 
+                            onClick={() => fetchMessageDetail(selectedMsg.id)}
+                            className="p-4 bg-white/5 hover:bg-white/10 rounded-2xl transition-all text-slate-400 hover:text-white active:scale-95 border border-white/5 cursor-pointer"
+                            title="Reload Message Content"
+                        >
+                            <RefreshCw size={20} className={loadingDetail ? 'animate-spin' : ''} />
+                        </button>
+                        <button 
+                            onClick={() => setSelectedMsg(null)}
+                            className="p-4 bg-rose-500/10 hover:bg-rose-500/20 rounded-2xl transition-all text-rose-500 hover:text-rose-400 active:scale-95 shadow-xl border border-rose-500/10 cursor-pointer"
+                        >
+                            <X size={20} />
+                        </button>
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-10 bg-gradient-to-b from-transparent to-[#080b13]">
+                    {loadingDetail ? (
+                        <div className="space-y-12">
+                            <div className="space-y-4">
+                                <div className="h-10 w-[70%] bg-white/5 rounded-2xl animate-pulse"></div>
+                                <div className="h-6 w-[40%] bg-white/5 rounded-2xl animate-pulse delay-75"></div>
+                            </div>
+                            <div className="pt-12 border-t border-white/5 space-y-6">
+                                <div className="h-4 w-full bg-white/5 rounded-full animate-pulse"></div>
+                                <div className="h-4 w-full bg-white/5 rounded-full animate-pulse delay-100"></div>
+                                <div className="h-4 w-[60%] bg-white/5 rounded-full animate-pulse delay-200"></div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="animate-in fade-in slide-in-from-bottom-6 duration-700">
+                            {/* Subject & Info */}
+                            <div className="mb-12">
+                              <div className="text-[10px] font-black text-blue-500 uppercase tracking-[6px] mb-6">Verified Transmission</div>
+                              <h1 className="text-[32px] font-black text-white leading-[1.1] mb-10 tracking-tighter drop-shadow-lg">{msgDetail?.subject}</h1>
+                              
+                              <div className="flex items-center justify-between p-6 bg-white/[0.02] border border-white/5 rounded-[32px]">
+                                  <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center text-white font-black shadow-lg">
+                                      {msgDetail?.from[0]}
+                                    </div>
+                                    <div>
+                                      <div className="text-[14px] font-black text-white">{msgDetail?.from.split('<')[0]}</div>
+                                      <div className="text-[10px] font-bold text-slate-600 uppercase tracking-widest leading-none mt-1">{msgDetail?.from.split('<')[1]?.replace('>', '')}</div>
+                                    </div>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-[13px] font-black text-blue-400 tabular-nums">{formatIST(msgDetail?.date)}</div>
+                                    <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest mt-1">IST Timestamp</div>
+                                  </div>
+                              </div>
+                            </div>
+
+                            {/* Email Body */}
+                            <div className="pt-10 mb-20">
+                                <div className="bg-[#0f172a] p-10 rounded-[40px] shadow-2xl overflow-hidden border border-white/5">
+                                    <div className="text-slate-300 whitespace-pre-wrap break-words text-[15px] leading-[1.8] font-sans email-content-container">
+                                        {renderEmailContent(msgDetail?.body)}
+                                    </div>
+                                    {!msgDetail?.body && (
+                                        <div className="py-10 text-center opacity-40 italic text-sm text-slate-400">
+                                            No message content available in this format.
+                                        </div>
+                                    )}
+                                </div>
+                                {msgDetail?.is_restricted && (
+                                    <div className="mt-8 p-8 bg-amber-500/10 border border-amber-500/20 rounded-[32px] flex flex-col gap-6 shadow-2xl">
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-12 h-12 rounded-2xl bg-amber-500/20 flex items-center justify-center text-amber-500 shadow-inner">
+                                                <ShieldAlert size={24} />
+                                            </div>
+                                            <div>
+                                                <div className="text-[11px] font-black text-amber-200 uppercase tracking-[4px] leading-none mb-1">Intelligence Restricted</div>
+                                                <p className="text-[12px] text-amber-200/50 font-medium">Full email body requires re-authorization.</p>
+                                            </div>
+                                        </div>
+                                        <button 
+                                            onClick={handleGoogleLink}
+                                            className="w-full py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-black uppercase tracking-[4px] rounded-2xl transition-all shadow-xl shadow-amber-500/20 active:scale-95 cursor-pointer"
+                                        >
+                                            🚀 Fix Gmail Permissions Now
+                                        </button>
+                                    </div>
+                                )}
+                                </div>
+                            
+                            {/* Action Float Card */}
+                            <div className="p-10 bg-gradient-to-r from-blue-600/10 to-indigo-600/10 border border-white/10 rounded-[40px] flex flex-col sm:flex-row items-center justify-between gap-8 mb-10 relative overflow-hidden group">
+                                <div className="relative z-10">
+                                    <h4 className="text-white font-black text-xl mb-1 tracking-tight">Warp <span className="text-blue-500 italic">Reply</span></h4>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Generate intelligent, context-aware email responses in seconds.</p>
+                                </div>
+                                <button className="relative z-10 px-8 py-4 bg-white text-slate-950 font-black text-[11px] uppercase tracking-[3px] rounded-2xl transition-all hover:scale-105 active:scale-95 shadow-2xl cursor-pointer">
+                                    Initialize Draft
+                                </button>
+                                <Sparkles className="absolute -right-4 -bottom-4 w-32 h-32 text-blue-500/10 group-hover:scale-110 transition-transform duration-1000" />
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+      )}
     </div>
   );
 };

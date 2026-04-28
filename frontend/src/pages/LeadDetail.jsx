@@ -164,6 +164,8 @@ const LeadDetail = () => {
   const [isDirty, setIsDirty] = useState(false);
   const [pendingOptOut, setPendingOptOut] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(false);
+  const [showDraftOptions, setShowDraftOptions] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState('standard');
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
@@ -291,11 +293,15 @@ const LeadDetail = () => {
     }
   };
 
-  const handleGenerateDraft = async () => {
+  const handleGenerateDraft = async (type = 'standard') => {
     setIsGenerating(true);
+    setShowDraftOptions(false);
     try {
-      await api.post('/api/generate-email', { lead_id: parseInt(leadId) });
-      showNotification('success', 'Email created! You can now view it in the drafts section below.');
+      await api.post('/api/generate-email', { 
+        lead_id: parseInt(leadId),
+        template_type: type
+      });
+      showNotification('success', `Email generated using ${type === 'palak' ? "Palak's" : "Standard"} template!`);
       fetchData();
     } catch {
       showNotification('error', 'Failed to generate draft');
@@ -659,10 +665,39 @@ const LeadDetail = () => {
                 <span className="text-white text-sm">✉️</span>
                 <h3 className="text-[13px] font-bold text-white tracking-wide">Email Drafts</h3>
               </div>
-              <button onClick={handleGenerateDraft} disabled={isGenerating} className="bg-[#2563eb] hover:bg-blue-600 text-white text-[10px] font-extrabold px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer">
-                {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                {isGenerating ? 'Generating...' : 'Draft AI Email'}
-              </button>
+              <div className="relative">
+                <button 
+                  onClick={() => setShowDraftOptions(!showDraftOptions)} 
+                  disabled={isGenerating} 
+                  className="bg-[#2563eb] hover:bg-blue-600 text-white text-[10px] font-extrabold px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  {isGenerating ? 'Generating...' : 'Draft AI Email'}
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+                
+                {showDraftOptions && (
+                  <>
+                    <div className="fixed inset-0 z-[100]" onClick={() => setShowDraftOptions(false)} />
+                    <div className="absolute right-0 mt-2 w-48 bg-[#0f121b] border border-[#ffffff15] rounded-xl shadow-2xl z-[101] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                      <div className="p-1">
+                        <button 
+                          onClick={() => handleGenerateDraft('standard')}
+                          className="w-full text-left px-3 py-2.5 text-[10px] font-bold text-slate-300 hover:bg-white/5 hover:text-white rounded-lg transition-colors flex items-center gap-2"
+                        >
+                          <div className="w-1.5 h-1.5 rounded-full bg-blue-500" /> Standard Template
+                        </button>
+                        <button 
+                          onClick={() => handleGenerateDraft('palak')}
+                          className="w-full text-left px-3 py-2.5 text-[10px] font-bold text-slate-300 hover:bg-white/5 hover:text-white rounded-lg transition-colors flex items-center gap-2"
+                        >
+                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Palak's Template
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
             <div className="p-6">
               {drafts.length > 0 ? (

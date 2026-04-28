@@ -114,15 +114,17 @@ const History = () => {
 
   const formatTime = (isoString) => {
     if (!isoString) return 'N/A';
-    const date = new Date(isoString);
-    return date.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
-    });
+    try {
+      const date = new Date(isoString);
+      return date.toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+    } catch { return isoString; }
   };
 
   const getActionBadge = (action) => {
