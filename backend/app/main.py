@@ -1,5 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+
 from dotenv import load_dotenv
 from pathlib import Path
 import os
@@ -73,6 +75,38 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    import traceback
+    error_details = traceback.format_exc()
+    logger.error(f"GLOBAL ERROR: {str(exc)}\n{error_details}")
+    
+    # Get current origins to match CORS
+    raw_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
+    allowed_origins = [origin.strip().rstrip("/") for origin in raw_origins.split(",") if origin.strip()]
+    reported_origin = "https://lead-frontend-5new.onrender.com"
+    if reported_origin not in allowed_origins:
+        allowed_origins.append(reported_origin)
+    
+    origin = request.headers.get("origin")
+    response_origin = origin if origin in allowed_origins else "*"
+
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal Server Error",
+            "message": str(exc),
+            "traceback": error_details if os.getenv("DEBUG") == "True" else None
+        },
+        headers={
+            "Access-Control-Allow-Origin": response_origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
 
 from fastapi.staticfiles import StaticFiles
 

@@ -791,120 +791,132 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[s
 @router.post("/approve-draft/{draft_id}")
 @router.post("/approve-email/{draft_id}")
 def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    from app.services.email_service import send_email
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
-    # 1. Fetch User Data for Sender Identity
-    sender_email = None
-    sender_name = "the team"
-    current_uid = normalize_user_id(user_id)
-    
-    if user_id:
-        cur.execute("SELECT email, full_name, username, google_id FROM users WHERE id = %s", (current_uid,))
-        u = cur.fetchone()
-        if u:
-            sender_email = u['email']
-            sender_name = u['full_name'] or u['username'] or "the team"
-            # Crucial: Verify Google Link
-            if not u['google_id']:
-                from fastapi import HTTPException
-                raise HTTPException(status_code=400, detail="Gmail Not Connected. Please go to Settings and link your Google account to send emails from your own address.")
-
-    # 2. Fetch/Prepare Draft
-    cur.execute("SELECT first_name, last_name, email, email_draft FROM leads_raw WHERE id = %s", (draft_id,))
-    lead = cur.fetchone()
-    if not lead:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Lead not found")
-
-    draft_content = lead.get('email_draft')
-    email = lead['email']
-    
-    if not draft_content:
-        from app.services.llm_services import EmailGenerator
-        generator = EmailGenerator()
-        email_data = generator.generate_email(dict(lead), sender_name=sender_name)
-        subject = email_data.get("subject", "Following up")
-        body = email_data.get("body", "Hello, we would love to connect.")
-        draft_content = f"Subject: {subject}\n\n{body}"
-    
-    # 3. Parse and Dispatch
-    subject = "Following up"
-    body = draft_content
-    if "Subject: " in draft_content:
-        parts = draft_content.split("\n\n", 1)
-        subject = parts[0].replace("Subject: ", "").strip()
-        body = parts[1].strip() if len(parts) > 1 else ""
-
-    # Real Dispatch — Gmail API if connected, else Resend/SMTP
-    uid = normalize_user_id(user_id)
-    logging.info(f"Triggering real email dispatch for lead {draft_id} from {sender_email} (User: {uid})")
-    
-    # Check if user has Gmail connected (so we can log correctly)
-    has_gmail = False
     try:
-        from app.services.google_service import get_gmail_service
-        svc = get_gmail_service(int(uid)) if uid else None
-        has_gmail = svc is not None
-    except:
-        pass
-    
-    success = send_email(
-        to_email=email,
-        subject=subject,
-        html_content=body.replace("\n", "<br>"),
-        from_email=sender_email,
-        from_name=sender_name,
-        lead_id=draft_id,
-        user_id=int(uid)
-    )
-    
-    dispatch_method = "Gmail API" if has_gmail else "Resend/SMTP"
+        from app.services.email_service import send_email
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        # 1. Fetch User Data for Sender Identity
+        sender_email = None
+        sender_name = "the team"
+        current_uid = normalize_user_id(user_id)
+        
+        if user_id:
+            cur.execute("SELECT email, full_name, username, google_id FROM users WHERE id = %s", (current_uid,))
+            u = cur.fetchone()
+            if u:
+                sender_email = u['email']
+                sender_name = u['full_name'] or u['username'] or "the team"
+                # Crucial: Verify Google Link
+                if not u['google_id']:
+                    from fastapi import HTTPException
+                    raise HTTPException(status_code=400, detail="Gmail Not Connected. Please go to Settings and link your Google account to send emails from your own address.")
 
-    if success:
-        # Fetch gmail_draft_id before updating the row
-        cur.execute("SELECT gmail_draft_id FROM leads_raw WHERE id = %s", (draft_id,))
-        draft_row = cur.fetchone()
-        gmail_draft_id = draft_row['gmail_draft_id'] if draft_row else None
+        # 2. Fetch/Prepare Draft
+        cur.execute("SELECT first_name, last_name, email, email_draft FROM leads_raw WHERE id = %s", (draft_id,))
+        lead = cur.fetchone()
+        if not lead:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Lead not found")
 
-        cur.execute("""
-            UPDATE leads_raw 
-            SET email_draft = %s, 
-                email_status = 'SENT', 
-                email_approved_by = %s, 
-                updated_at = NOW(),
-                last_outreach_at = NOW(),
-                followup_status = 'ACTIVE',
-                followup_stage = 0,
-                is_responded = FALSE,
-                gmail_draft_id = NULL
-            WHERE id = %s
-        """, (draft_content, sender_name, draft_id))
-        conn.commit()
+        draft_content = lead.get('email_draft')
+        email = lead.get('email')
+        
+        if not email:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Missing recipient email address for this lead.")
+        
+        if not draft_content:
+            from app.services.llm_services import EmailGenerator
+            generator = EmailGenerator()
+            email_data = generator.generate_email(dict(lead), sender_name=sender_name)
+            subject = email_data.get("subject", "Following up")
+            body = email_data.get("body", "Hello, we would love to connect.")
+            draft_content = f"Subject: {subject}\n\n{body}"
+        
+        # 3. Parse and Dispatch
+        subject = "Following up"
+        body = draft_content
+        if "Subject: " in draft_content:
+            parts = draft_content.split("\n\n", 1)
+            subject = parts[0].replace("Subject: ", "").strip()
+            body = parts[1].strip() if len(parts) > 1 else ""
 
-        # --- Delete Gmail Draft from real Gmail ---
-        if gmail_draft_id:
-            try:
-                from app.services.google_service import get_gmail_service
-                service = get_gmail_service(int(uid))
-                if service:
-                    service.users().drafts().delete(userId='me', id=gmail_draft_id).execute()
-                    logger.info(f"🗑️  Deleted Gmail draft {gmail_draft_id} for Lead {draft_id} after send")
-            except Exception as ge:
-                logger.warning(f"⚠️  Failed to delete Gmail draft after send (non-blocking): {ge}")
+        # Real Dispatch — Gmail API if connected, else Resend/SMTP
+        uid = normalize_user_id(user_id)
+        logging.info(f"Triggering real email dispatch for lead {draft_id} from {sender_email} (User: {uid})")
+        
+        # Check if user has Gmail connected (so we can log correctly)
+        has_gmail = False
+        try:
+            from app.services.google_service import get_gmail_service
+            svc = get_gmail_service(int(uid)) if uid else None
+            has_gmail = svc is not None
+        except:
+            pass
+        
+        success = send_email(
+            to_email=email,
+            subject=subject,
+            html_content=body.replace("\n", "<br>"),
+            from_email=sender_email,
+            from_name=sender_name,
+            lead_id=draft_id,
+            user_id=int(uid)
+        )
+        
+        dispatch_method = "Gmail API" if has_gmail else "Resend/SMTP"
 
-        from app.models.lead import add_activity_log
-        add_activity_log(draft_id, "EMAIL_SENT", f"Email dispatched via {dispatch_method} from {sender_email} — Will appear in Gmail Sent folder" if has_gmail else f"Email dispatched via {dispatch_method} from {sender_email}", sender_name)
-        cur.close()
-        conn.close()
-        return {"status": "sent", "message": f"Success: Email dispatched to {email}"}
-    else:
-        conn.rollback()
-        cur.close()
-        conn.close()
-        from fastapi import HTTPException
-        raise HTTPException(status_code=400, detail="Outreach dispatch failed. Please verify your Resend configuration and sender email in Profile.")
+        if success:
+            # Fetch gmail_draft_id before updating the row
+            cur.execute("SELECT gmail_draft_id FROM leads_raw WHERE id = %s", (draft_id,))
+            draft_row = cur.fetchone()
+            gmail_draft_id = draft_row['gmail_draft_id'] if draft_row else None
+
+            cur.execute("""
+                UPDATE leads_raw 
+                SET email_draft = %s, 
+                    email_status = 'SENT', 
+                    email_approved_by = %s, 
+                    updated_at = NOW(),
+                    last_outreach_at = NOW(),
+                    followup_status = 'ACTIVE',
+                    followup_stage = 0,
+                    is_responded = FALSE,
+                    gmail_draft_id = NULL
+                WHERE id = %s
+            """, (draft_content, sender_name, draft_id))
+            conn.commit()
+
+            # --- Delete Gmail Draft from real Gmail ---
+            if gmail_draft_id:
+                try:
+                    from app.services.google_service import get_gmail_service
+                    service = get_gmail_service(int(uid))
+                    if service:
+                        service.users().drafts().delete(userId='me', id=gmail_draft_id).execute()
+                        logger.info(f"🗑️  Deleted Gmail draft {gmail_draft_id} for Lead {draft_id} after send")
+                except Exception as ge:
+                    logger.warning(f"⚠️  Failed to delete Gmail draft after send (non-blocking): {ge}")
+
+            from app.models.lead import add_activity_log
+            add_activity_log(draft_id, "EMAIL_SENT", f"Email dispatched via {dispatch_method} from {sender_email} — Will appear in Gmail Sent folder" if has_gmail else f"Email dispatched via {dispatch_method} from {sender_email}", sender_name)
+            cur.close()
+            conn.close()
+            return {"status": "sent", "message": f"Success: Email dispatched to {email}"}
+        else:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Outreach dispatch failed. Please verify your Resend configuration and sender email in Profile.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal Server Error during approval: {str(e)}")
+
 
 @router.post("/reject-email/{draft_id}")
 def reject_draft(draft_id: int, req: Optional[RejectRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):

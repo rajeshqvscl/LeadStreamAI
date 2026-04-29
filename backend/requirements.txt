@@ -12,3 +12,5 @@ google-auth-oauthlib
 google-auth
 google-cloud-pubsub
 google-generativeai
+markdown
+
