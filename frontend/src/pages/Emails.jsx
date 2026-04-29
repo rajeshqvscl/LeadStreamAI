@@ -26,8 +26,10 @@ const Emails = () => {
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [scheduledAt, setScheduledAt] = useState(null);
   const [sendingId, setSendingId] = useState(null);
-  const [approvingId, setApprovingId] = useState(null); // tracks the item being approved for the popup
-  const [approveStep, setApproveStep] = useState(0); // 0=sending, 1=success
+  const [approvingId, setApprovingId] = useState(null);
+  const [approveStep, setApproveStep] = useState(0);
+  const [isBulkSending, setIsBulkSending] = useState(false);
+  const [bulkSendResult, setBulkSendResult] = useState(null); // { sent, failed, total }
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
@@ -81,6 +83,25 @@ const Emails = () => {
       showNotification('error', err?.response?.data?.detail || 'Approval failed. Check Gmail connection.');
     } finally {
       setSendingId(null);
+    }
+  };
+
+  const handleBulkSend = async () => {
+    if (selectedIds.length === 0) return;
+    setIsBulkSending(true);
+    setBulkSendResult(null);
+    try {
+      const res = await api.post('/api/send-selected-batch', { lead_ids: selectedIds });
+      const { sent_count, failed_count } = res.data;
+      setBulkSendResult({ sent: sent_count, failed: failed_count, total: selectedIds.length });
+      // Remove sent leads from the queue list
+      setEmails(prev => prev.filter(e => !selectedIds.includes(e.id)));
+      setSelectedIds([]);
+      setTimeout(() => { setBulkSendResult(null); setIsBulkSending(false); }, 3500);
+    } catch (err) {
+      setIsBulkSending(false);
+      setBulkSendResult(null);
+      showNotification('error', err?.response?.data?.detail || 'Bulk send failed. Check Gmail connection.');
     }
   };
 
@@ -550,10 +571,18 @@ const Emails = () => {
             
             <div className="flex items-center gap-4">
               <button 
-                onClick={() => handleBulkAction('APPROVED')}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-white text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer border border-emerald-500/20"
+                onClick={handleBulkSend}
+                disabled={isBulkSending}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer border border-emerald-400/30 disabled:opacity-50 shadow-lg shadow-emerald-500/20"
               >
-                Approve
+                {isBulkSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                {isBulkSending ? 'Sending...' : `Send ${selectedIds.length} Selected`}
+              </button>
+              <button 
+                onClick={() => handleBulkAction('APPROVED')}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-white/5 hover:bg-emerald-500/10 text-emerald-400 hover:text-white text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer border border-white/10"
+              >
+                Mark Approved
               </button>
               <button 
                 onClick={() => {
@@ -563,12 +592,6 @@ const Emails = () => {
                 className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#1e293b]/50 hover:bg-[#1e293b] text-slate-300 hover:text-white text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer border border-white/10"
               >
                 Schedule
-              </button>
-              <button 
-                onClick={() => handleBulkAction('SENT')}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-blue-500/10 hover:bg-blue-500 text-blue-400 hover:text-white text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer border border-blue-500/20"
-              >
-                Mark Sent
               </button>
               <button 
                 onClick={() => handleBulkAction('ARCHIVED')}
@@ -590,6 +613,57 @@ const Emails = () => {
                 <X className="w-5 h-5" />
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Send Progress Popup */}
+      {isBulkSending && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/80 backdrop-blur-2xl animate-in fade-in duration-300">
+          <div className="w-full max-w-md bg-[#0b0f1a] border border-white/10 rounded-[40px] p-12 shadow-[0_0_100px_rgba(0,0,0,0.8)] flex flex-col items-center gap-8 text-center animate-in zoom-in-95 duration-500">
+            {!bulkSendResult ? (
+              <>
+                <div className="relative">
+                  <div className="w-24 h-24 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                    <Send className="w-10 h-10 text-emerald-400 animate-pulse" />
+                  </div>
+                  <div className="absolute inset-0 rounded-full border-2 border-emerald-500/30 animate-ping" />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-2xl font-black text-white tracking-tight">Dispatching {selectedIds.length} Emails</h3>
+                  <p className="text-slate-500 text-[12px] font-bold uppercase tracking-[3px]">Sending via your Gmail account...</p>
+                </div>
+                <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-emerald-500 to-blue-500 rounded-full animate-pulse" style={{ width: '60%' }} />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="relative">
+                  <div className="w-24 h-24 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                    <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+                  </div>
+                  <div className="absolute inset-0 rounded-full border-2 border-emerald-500/30 animate-ping" />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-2xl font-black text-white tracking-tight">Batch Complete! 🎉</h3>
+                  <p className="text-slate-500 text-[12px] font-bold uppercase tracking-[3px]">Emails sent via your Gmail account</p>
+                </div>
+                <div className="w-full space-y-3">
+                  <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
+                    <span className="text-[11px] font-black text-emerald-400 uppercase tracking-widest">✅ Sent Successfully</span>
+                    <span className="text-xl font-black text-emerald-400">{bulkSendResult.sent}</span>
+                  </div>
+                  {bulkSendResult.failed > 0 && (
+                    <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-red-500/10 border border-red-500/20">
+                      <span className="text-[11px] font-black text-red-400 uppercase tracking-widest">❌ Failed</span>
+                      <span className="text-xl font-black text-red-400">{bulkSendResult.failed}</span>
+                    </div>
+                  )}
+                  <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest pt-1">Check your Gmail Sent folder to verify</p>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

@@ -122,12 +122,36 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
         </div>
         """
     
-    # 1. Attempt Gmail API Dispatch (Highly Preferred for Outreach)
+    # 1. Prepare default attachments (used by both Gmail and Resend)
+    if not attachments:
+        attachments = []
+        asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
+        profile_files = ["QVSCL Company Profile.pdf", "Lalit_Huria_Profile.pdf"]
+        
+        logger.info(f"Looking for attachments in: {asset_dir}")
+        for filename in profile_files:
+            path = asset_dir / filename
+            if path.exists():
+                import base64
+                with open(path, "rb") as f:
+                    content_bytes = f.read()
+                    content_b64 = base64.b64encode(content_bytes).decode('utf-8')
+                attachments.append({
+                    "content": content_b64,
+                    "filename": filename
+                })
+                logger.info(f"Loaded attachment successfully: {filename}")
+            else:
+                logger.error(f"Attachment NOT FOUND directly at: {path}")
+
+    # 2. Attempt Gmail API Dispatch (Highly Preferred for Outreach)
     if user_id and not is_system_email:
         try:
             from app.services.google_service import get_gmail_service
             import base64
+            from email.mime.multipart import MIMEMultipart
             from email.mime.text import MIMEText
+            from email.mime.application import MIMEApplication
             
             service = None
             try:
@@ -144,14 +168,29 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
             
             if service:
                 logger.info(f"Using Google API for personalized dispatch (User ID: {user_id})")
-                message = MIMEText(html_content, 'html')
-                message['to'] = to_email
-                message['from'] = f"{from_name} <{from_email}>" if from_name and from_email else from_email
-                message['subject'] = subject
                 
-                raw_message = base64.urlsafe_b64encode(message.as_string().encode('utf-8')).decode('utf-8')
-                service.users().messages().send(userId='me', body={'raw': raw_message}).execute()
-                logger.info(f"Gmail API dispatch successful to {to_email}")
+                # Use MIMEMultipart('mixed') to handle both HTML and attachments
+                msg = MIMEMultipart('mixed')
+                msg['to'] = to_email
+                msg['from'] = f"{from_name} <{from_email}>" if from_name and from_email else from_email
+                msg['subject'] = subject
+                
+                # Attach the HTML body using an 'alternative' container
+                msg_body = MIMEMultipart('alternative')
+                msg_body.attach(MIMEText(html_content, 'html'))
+                msg.attach(msg_body)
+                
+                # Attach the files
+                if attachments:
+                    for attachment in attachments:
+                        file_data = base64.b64decode(attachment['content'])
+                        part = MIMEApplication(file_data, Name=attachment['filename'])
+                        part['Content-Disposition'] = f'attachment; filename="{attachment["filename"]}"'
+                        msg.attach(part)
+                
+                raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode('utf-8')
+                sent = service.users().messages().send(userId='me', body={'raw': raw_message}).execute()
+                logger.info(f"✅ Gmail API dispatch successful to {to_email} with {len(attachments)} attachments — Message ID: {sent.get('id')}")
                 return True
         except Exception as e:
             logger.error(f"Gmail API dispatch failed, falling back: {str(e)}")

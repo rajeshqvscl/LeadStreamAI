@@ -207,9 +207,10 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     
     # Structured signature block (Premium bold-italic formatting)
     sig_lines = [
-        "\n",
+        "",
         f"[Click here to unsubscribe]({unsubscribe_url})",
-        "\n--",
+        "",
+        "**--**",
         "***Thanks & Regards,***",
         f"***{name},***"
     ]
@@ -224,7 +225,8 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     if phone:
         sig_lines.append(f"***{phone}***")
     
-    return clean_body + "\n" + "\n".join(sig_lines)
+    # Use double newlines to force separate lines in Markdown/HTML renderers
+    return clean_body + "\n\n" + "\n\n".join(sig_lines)
 
 @router.post("/generate-draft")
 @router.post("/generate-email")
@@ -835,9 +837,19 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         subject = parts[0].replace("Subject: ", "").strip()
         body = parts[1].strip() if len(parts) > 1 else ""
 
-    # Real Dispatch
+    # Real Dispatch — Gmail API if connected, else Resend/SMTP
     uid = normalize_user_id(user_id)
     logging.info(f"Triggering real email dispatch for lead {draft_id} from {sender_email} (User: {uid})")
+    
+    # Check if user has Gmail connected (so we can log correctly)
+    has_gmail = False
+    try:
+        from app.services.google_service import get_gmail_service
+        svc = get_gmail_service(int(uid)) if uid else None
+        has_gmail = svc is not None
+    except:
+        pass
+    
     success = send_email(
         to_email=email,
         subject=subject,
@@ -847,6 +859,8 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         lead_id=draft_id,
         user_id=int(uid)
     )
+    
+    dispatch_method = "Gmail API" if has_gmail else "Resend/SMTP"
 
     if success:
         # Fetch gmail_draft_id before updating the row
@@ -881,7 +895,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
                 logger.warning(f"⚠️  Failed to delete Gmail draft after send (non-blocking): {ge}")
 
         from app.models.lead import add_activity_log
-        add_activity_log(draft_id, "EMAIL_SENT", f"Email dispatched via Resend from {sender_email}", sender_name)
+        add_activity_log(draft_id, "EMAIL_SENT", f"Email dispatched via {dispatch_method} from {sender_email} — Will appear in Gmail Sent folder" if has_gmail else f"Email dispatched via {dispatch_method} from {sender_email}", sender_name)
         cur.close()
         conn.close()
         return {"status": "sent", "message": f"Success: Email dispatched to {email}"}
@@ -1155,7 +1169,104 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     cur.close()
     conn.close()
     
-    return {"message": f"Successfully sent {sent_count} approved emails via Resend."}
+    return {"message": f"Successfully sent {sent_count} approved emails via Gmail API."}
+
+
+class BulkSendRequest(BaseModel):
+    lead_ids: list
+
+@router.post("/send-selected-batch")
+def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Send emails for a specific list of lead IDs via the logged-in user's Gmail account."""
+    from app.services.email_service import send_email
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    # 1. Fetch sender info
+    sender_email = None
+    sender_name = "the team"
+    uid = normalize_user_id(user_id)
+
+    if uid:
+        cur.execute("SELECT email, full_name, username, google_id FROM users WHERE id = %s", (uid,))
+        u = cur.fetchone()
+        if u:
+            sender_email = u['email']
+            sender_name = u['full_name'] or u['username'] or "the team"
+            if not u['google_id']:
+                cur.close()
+                conn.close()
+                from fastapi import HTTPException
+                raise HTTPException(status_code=400, detail="Gmail Not Connected. Please link your Google account in Settings before sending.")
+
+    # 2. Fetch the requested leads
+    cur.execute(
+        "SELECT id, email, email_draft FROM leads_raw WHERE id = ANY(%s)",
+        (req.lead_ids,)
+    )
+    leads_to_send = cur.fetchall()
+
+    sent_count = 0
+    failed_count = 0
+    results = []
+
+    for lead in leads_to_send:
+        try:
+            draft_content = lead['email_draft'] or ""
+            subject = "Following up"
+            body = draft_content
+            if "Subject: " in draft_content:
+                parts = draft_content.split("\n\n", 1)
+                subject = parts[0].replace("Subject: ", "").strip()
+                body = parts[1].strip() if len(parts) > 1 else ""
+
+            success = send_email(
+                to_email=lead['email'],
+                subject=subject,
+                html_content=body.replace("\n", "<br>"),
+                from_email=sender_email,
+                from_name=sender_name,
+                lead_id=lead['id'],
+                user_id=uid
+            )
+
+            if success:
+                # Update status to SENT and start follow-up sequence
+                cur.execute("""
+                    UPDATE leads_raw 
+                    SET email_status = 'SENT', 
+                        email_approved_by = %s,
+                        updated_at = NOW(),
+                        last_outreach_at = NOW(),
+                        followup_status = 'ACTIVE',
+                        followup_stage = 0,
+                        is_responded = FALSE,
+                        gmail_draft_id = NULL
+                    WHERE id = %s
+                """, (sender_name, lead['id']))
+                conn.commit()
+                from app.models.lead import add_activity_log
+                add_activity_log(lead['id'], "EMAIL_SENT", f"Email dispatched via Gmail API from {sender_email} — Appears in Gmail Sent folder", sender_name)
+                sent_count += 1
+                results.append({"id": lead['id'], "email": lead['email'], "status": "sent"})
+            else:
+                failed_count += 1
+                results.append({"id": lead['id'], "email": lead['email'], "status": "failed"})
+        except Exception as e:
+            logger.error(f"Bulk send error for lead {lead['id']}: {str(e)}")
+            failed_count += 1
+            results.append({"id": lead['id'], "email": lead['email'], "status": "failed", "error": str(e)})
+
+    cur.close()
+    conn.close()
+
+    return {
+        "message": f"Sent {sent_count} of {len(leads_to_send)} emails via Gmail API.",
+        "sent_count": sent_count,
+        "failed_count": failed_count,
+        "results": results
+    }
+
 
 @router.post("/generate-bulk-domain-drafts")
 def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):

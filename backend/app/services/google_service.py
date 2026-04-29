@@ -381,19 +381,51 @@ def get_gmail_message(user_id: int, message_id: str):
         return None
 
 def update_gmail_draft(user_id: int, draft_id: str, subject: str, body: str):
-    """Updates the content of an existing Gmail draft."""
+    """Updates the content of an existing Gmail draft with Markdown-to-HTML support."""
     import base64
+    import re
     from email.mime.text import MIMEText
     
     service = get_gmail_service(user_id)
     if not service: return None
     
     try:
-        # Detect if body is HTML
-        is_html = "<b>" in body or "<i>" in body or "<strong>" in body or "<em>" in body or "<br>" in body
+        # Convert Markdown to HTML for professional Gmail rendering
+        html_body = body
+        
+        # 1. Bold: **text** -> <strong>text</strong>
+        html_body = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', html_body)
+        
+        # 2. Italic: _text_ -> <em>text</em>
+        html_body = re.sub(r'_(.*?)_', r'<em>\1</em>', html_body)
+        
+        # 2.5 Links: [text](url) -> <a href="url">text</a>
+        html_body = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2" target="_blank">\1</a>', html_body)
+        
+        # 3. Lists: * item -> <li>item</li>
+        # Split into paragraphs to handle lists properly
+        paragraphs = html_body.split('\n\n')
+        processed_paragraphs = []
+        for p in paragraphs:
+            lines = p.strip().split('\n')
+            if any(re.match(r'^\s*[\*\-•]\s+', l) for l in lines):
+                list_items = []
+                for l in lines:
+                    match = re.match(r'^\s*[\*\-•]\s+(.*)', l)
+                    if match:
+                        list_items.append(f"<li>{match.group(1).strip()}</li>")
+                    else:
+                        if list_items:
+                            list_items[-1] = list_items[-1].replace("</li>", f" {l.strip()}</li>")
+                processed_paragraphs.append(f"<ul>{''.join(list_items)}</ul>")
+            else:
+                processed_paragraphs.append(f"<p>{p.replace(chr(10), '<br>')}</p>")
+        
+        html_body = "".join(processed_paragraphs)
         
         # Create a new message structure
-        message = MIMEText(body, 'html' if is_html else 'plain')
+        # Always use HTML if we did any conversion, otherwise fallback
+        message = MIMEText(html_body, 'html')
         message['subject'] = subject
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
         

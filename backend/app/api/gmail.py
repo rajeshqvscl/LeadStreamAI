@@ -161,8 +161,10 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             file_path = f"static/pitch_decks/{msg_id}_{safe_filename}"
             with open(file_path, "wb") as f:
                 f.write(pdf_attachment['data'])
-            # We assume backend is running on 8000 for local dev
-            pitch_deck_url = f"http://localhost:8000/{file_path}"
+            
+            # Use dynamic backend URL instead of localhost
+            base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+            pitch_deck_url = f"{base_url}/{file_path}"
             
         print(f"DEBUG: AI detected intent: {intent}, size: {deal_size}, deck: {pitch_deck_url}")
         
@@ -783,7 +785,9 @@ def retro_sync_pdfs(request: Request):
                 with open(file_path, "wb") as f:
                     f.write(pdf_attachment['data'])
                 
-                pitch_deck_url = f"http://localhost:8000/{file_path}"
+                # Use dynamic backend URL instead of localhost
+                base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+                pitch_deck_url = f"{base_url}/{file_path}"
                 
                 # Update database
                 conn = get_db_connection()

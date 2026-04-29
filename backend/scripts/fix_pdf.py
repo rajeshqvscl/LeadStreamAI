@@ -36,7 +36,8 @@ def fix_it():
                 with open(file_path, "wb") as f:
                     f.write(pdf_attachment['data'])
                 
-                pitch_deck_url = f"http://localhost:8000/{file_path}"
+                base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+                pitch_deck_url = f"{base_url}/{file_path}"
                 print(f"Updating DB with: {pitch_deck_url}")
                 cur.execute("UPDATE leads_raw SET pitch_deck_url = %s WHERE id = %s", (pitch_deck_url, lead['id']))
                 conn.commit()

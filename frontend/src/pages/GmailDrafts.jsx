@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Mail, Loader2, RefreshCw, ExternalLink, Calendar, Search, Filter, Edit3, Send, X, Save, Sparkles, Type, Bold, Italic, Wand2, Shield, Zap } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Mail, Loader2, RefreshCw, ExternalLink, Calendar, Search, Filter, Edit3, Send, X, Save, Sparkles, Type, Bold, Italic, Wand2, Shield, Zap, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
 import api from '../services/api';
 
 const GmailDrafts = () => {
@@ -10,10 +10,49 @@ const GmailDrafts = () => {
   const [editingDraft, setEditingDraft] = useState(null);
   const [notification, setNotification] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const editorRef = useRef(null);
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
     setTimeout(() => setNotification(null), 5000);
+  };
+
+  const decodeHTMLEntities = (text) => {
+    if (!text) return '';
+    const textArea = document.createElement('textarea');
+    textArea.innerHTML = text;
+    return textArea.value;
+  };
+
+  const convertHTMLToMarkdown = (html) => {
+    if (!html) return '';
+    
+    let text = html;
+    
+    // 1. Handle common block elements
+    text = text.replace(/<p[^>]*>/gi, '');
+    text = text.replace(/<\/p>/gi, '\n\n');
+    text = text.replace(/<br\s*\/?>/gi, '\n');
+    
+    // 2. Handle lists
+    text = text.replace(/<ul[^>]*>/gi, '');
+    text = text.replace(/<\/ul>/gi, '\n');
+    text = text.replace(/<li[^>]*>(.*?)<\/li>/gi, '* $1\n');
+    
+    // 3. Handle inline formatting
+    text = text.replace(/<(b|strong)[^>]*>(.*?)<\/\1>/gi, '**$2**');
+    text = text.replace(/<(i|em)[^>]*>(.*?)<\/\1>/gi, '_$2_');
+    
+    // 3.5 Handle links (must happen before stripping tags)
+    // <a href="url">text</a> -> [text](url)
+    text = text.replace(/<a\s+(?:[^>]*?\s+)?href=["']([^"']*)["'][^>]*>(.*?)<\/a>/gi, '[$2]($1)');
+
+    
+    // 4. Strip all remaining HTML tags
+    text = text.replace(/<[^>]+>/g, '');
+    
+    // 5. Final decode and trim
+    return decodeHTMLEntities(text).trim();
   };
 
   const fetchGmailDrafts = async (quiet = false) => {
@@ -34,6 +73,22 @@ const GmailDrafts = () => {
   useEffect(() => {
     fetchGmailDrafts();
   }, []);
+
+  const handleEditClick = async (draft) => {
+    setIsProcessing(true);
+    try {
+        // Fetch full message content instead of just the snippet
+        const res = await api.get(`/api/gmail/message/${draft.message_id}`);
+        // Convert HTML back to clean Markdown for the editor
+        const cleanBody = convertHTMLToMarkdown(res.data.body || draft.snippet);
+        setEditingDraft({ ...draft, body: cleanBody });
+    } catch (err) {
+        console.error('Failed to fetch full draft content:', err);
+        setEditingDraft({ ...draft, body: convertHTMLToMarkdown(draft.snippet) });
+    } finally {
+        setIsProcessing(false);
+    }
+  };
 
   const handleUpdateDraft = async () => {
     if (!editingDraft) return;
@@ -85,7 +140,7 @@ const GmailDrafts = () => {
   };
 
   const applyFormat = (tag) => {
-    const textarea = document.getElementById('draft-editor');
+    const textarea = editorRef.current;
     if (!textarea) return;
     
     const start = textarea.selectionStart;
@@ -93,17 +148,66 @@ const GmailDrafts = () => {
     const text = editingDraft.body;
     const selected = text.substring(start, end);
     
+    if (!selected) return;
+
     const before = text.substring(0, start);
     const after = text.substring(end);
     
-    const newBody = `${before}<${tag}>${selected}</${tag}>${after}`;
+    let newBody;
+    if (tag === 'b') newBody = `${before}**${selected}**${after}`;
+    else if (tag === 'i') newBody = `${before}_${selected}_${after}`;
+    else newBody = `${before}<${tag}>${selected}</${tag}>${after}`;
+
     setEditingDraft({ ...editingDraft, body: newBody });
     
     // Reset focus
     setTimeout(() => {
         textarea.focus();
-        textarea.setSelectionRange(start, end + tag.length * 2 + 5);
+        textarea.setSelectionRange(start, start + newBody.length - before.length - after.length);
     }, 10);
+  };
+
+  const renderEmailPreview = (text) => {
+    if (!text) return 'Start typing to see preview...';
+
+    // 1. Split into paragraphs
+    const paragraphs = text.split('\n\n');
+    let htmlParts = [];
+
+    paragraphs.forEach(p => {
+      const trimmed = p.trim();
+      if (!trimmed) return;
+
+      const lines = trimmed.split('\n');
+      
+      // Detect lists (must be star/dash/bullet followed by space)
+      if (lines.some(l => /^\s*[\*\-•]\s+/.test(l))) {
+        let listHtml = '<ul style="margin: 1em 0; padding-left: 1.5em; list-style-type: disc;">';
+        lines.forEach(l => {
+          const match = l.trim().match(/^[\*\-•]\s+(.*)/);
+          if (match) {
+            listHtml += `<li style="margin-bottom: 0.5em; color: #cbd5e1;">${match[1].trim()}</li>`;
+          } else {
+            listHtml += ` ${l.trim()}`;
+          }
+        });
+        listHtml += '</ul>';
+        htmlParts.push(listHtml);
+      } else {
+        // Paragraph: merge single newlines but preserve paragraph breaks
+        const content = trimmed.replace(/\n/g, ' ');
+        htmlParts.push(`<p style="margin-bottom: 1.2em; color: #cbd5e1; line-height: 1.6;">${content}</p>`);
+      }
+    });
+
+    let finalHtml = htmlParts.join('');
+
+    // 2. Inline Styles (Bold, Italic, Links)
+    return finalHtml
+      .replace(/\*\*\*(.*?)\*\*\*/g, '<strong style="color: white; font-weight: 800;"><em>$1</em></strong>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong style="color: white; font-weight: 800;">$1</strong>')
+      .replace(/_(.*?)_/g, '<em style="font-style:italic">$1</em>')
+      .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color: #60a5fa; text-decoration: underline; font-weight: 700;">$1</a>');
   };
 
   const filteredDrafts = drafts.filter(d => 
@@ -211,7 +315,7 @@ const GmailDrafts = () => {
                   <td className="px-6 py-5 text-right">
                     <div className="flex justify-end gap-2">
                         <button 
-                            onClick={() => setEditingDraft(draft)}
+                            onClick={() => handleEditClick(draft)}
                             className="p-2 bg-white/5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-all border border-white/5 cursor-pointer"
                             title="Edit Draft"
                         >
@@ -267,18 +371,18 @@ const GmailDrafts = () => {
           </div>
       </div>
 
-      {/* Edit Modal */}
+      {/* Edit Modal - UPDATED TWO-COLUMN LAYOUT */}
       {editingDraft && (
         <div className="fixed inset-0 z-[5000] flex items-center justify-center p-6 bg-black/80 backdrop-blur-xl animate-in fade-in duration-300">
-            <div className="w-full max-w-4xl bg-[#0b0f19] border border-white/10 rounded-[32px] overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
-                <div className="p-6 border-b border-white/5 flex items-center justify-between">
+            <div className="w-full max-w-[95vw] lg:max-w-7xl bg-[#0b0f19] border border-white/10 rounded-[32px] overflow-hidden shadow-2xl flex flex-col max-h-[95vh]">
+                <div className="p-6 border-b border-white/5 flex items-center justify-between bg-[#0f121b]/50">
                     <div className="flex items-center gap-4">
                         <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400">
                             <Edit3 className="w-5 h-5" />
                         </div>
                         <div>
                             <h2 className="text-lg font-black text-white uppercase tracking-tight">Edit Gmail Draft</h2>
-                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Editing: {editingDraft.to}</p>
+                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Recipient: {editingDraft.to}</p>
                         </div>
                     </div>
                     <button onClick={() => setEditingDraft(null)} className="p-2 hover:bg-white/5 rounded-full text-slate-500 transition-colors cursor-pointer">
@@ -286,78 +390,136 @@ const GmailDrafts = () => {
                     </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar">
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Subject Line</label>
-                        <input 
-                            type="text" 
-                            className="w-full bg-[#131722] border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-blue-500/30 transition-all"
-                            value={editingDraft.subject}
-                            onChange={(e) => setEditingDraft({...editingDraft, subject: e.target.value})}
-                        />
-                    </div>
-                    <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Email Body</label>
-                            <div className="flex items-center gap-2">
-                                <div className="flex items-center bg-white/5 rounded-lg border border-white/5 p-1">
-                                    <button 
-                                        onClick={() => applyFormat('b')}
-                                        className="p-1.5 hover:bg-white/10 rounded text-slate-400 hover:text-white transition-all"
-                                        title="Bold"
-                                    >
-                                        <Bold className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button 
-                                        onClick={() => applyFormat('i')}
-                                        className="p-1.5 hover:bg-white/10 rounded text-slate-400 hover:text-white transition-all"
-                                        title="Italic"
-                                    >
-                                        <Italic className="w-3.5 h-3.5" />
-                                    </button>
+                <div className="flex-1 overflow-hidden flex flex-col lg:flex-row">
+                    {/* Left Panel: Editor */}
+                    <div className="w-full lg:w-1/2 overflow-y-auto p-8 space-y-6 border-r border-white/5 custom-scrollbar bg-[#0d111b]">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Subject Line</label>
+                            <input 
+                                type="text" 
+                                className="w-full bg-[#131722] border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-blue-500/30 transition-all font-bold"
+                                value={editingDraft.subject}
+                                onChange={(e) => setEditingDraft({...editingDraft, subject: e.target.value})}
+                            />
+                        </div>
+                        
+                        <div className="space-y-4">
+                            <div className="flex items-center justify-between">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Email Body</label>
+                                <div className="flex items-center gap-2">
+                                    <div className="flex items-center bg-white/5 rounded-lg border border-white/5 p-1">
+                                        <button 
+                                            onClick={() => applyFormat('b')}
+                                            className="p-1.5 hover:bg-white/10 rounded text-slate-400 hover:text-white transition-all cursor-pointer"
+                                            title="Bold"
+                                        >
+                                            <Bold className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button 
+                                            onClick={() => applyFormat('i')}
+                                            className="p-1.5 hover:bg-white/10 rounded text-slate-400 hover:text-white transition-all cursor-pointer"
+                                            title="Italic"
+                                        >
+                                            <Italic className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+                                    <div className="h-4 w-px bg-white/10 mx-1"></div>
+                                    <div className="flex items-center gap-1.5">
+                                        <button 
+                                            onClick={() => handleAIRefine('professional')}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg text-[10px] font-black text-blue-400 uppercase tracking-tight transition-all cursor-pointer"
+                                        >
+                                            <Shield className="w-3 h-3" /> Professional
+                                        </button>
+                                        <button 
+                                            onClick={() => handleAIRefine('shorten')}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-lg text-[10px] font-black text-purple-400 uppercase tracking-tight transition-all cursor-pointer"
+                                        >
+                                            <Type className="w-3 h-3" /> Concise
+                                        </button>
+                                    </div>
                                 </div>
-                                <div className="h-4 w-px bg-white/10 mx-1"></div>
-                                <div className="flex items-center gap-1.5">
-                                    <button 
-                                        onClick={() => handleAIRefine('professional')}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg text-[10px] font-black text-blue-400 uppercase tracking-tight transition-all"
-                                    >
-                                        <Shield className="w-3 h-3" /> Professional
-                                    </button>
-                                    <button 
-                                        onClick={() => handleAIRefine('shorten')}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-lg text-[10px] font-black text-purple-400 uppercase tracking-tight transition-all"
-                                    >
-                                        <Type className="w-3 h-3" /> Concise
-                                    </button>
-                                    <button 
-                                        onClick={() => handleAIRefine('bold')}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-lg text-[10px] font-black text-emerald-400 uppercase tracking-tight transition-all"
-                                    >
-                                        <Wand2 className="w-3 h-3" /> AI Bold
-                                    </button>
+                            </div>
+                            
+                            <textarea 
+                                ref={editorRef}
+                                className="w-full bg-[#131722] border border-white/10 rounded-xl px-4 py-4 text-white text-sm focus:outline-none focus:border-blue-500/30 transition-all min-h-[400px] leading-relaxed font-mono resize-none"
+                                value={editingDraft.body}
+                                onChange={(e) => setEditingDraft({...editingDraft, body: e.target.value})}
+                            />
+                            
+                            <div className="flex items-center gap-3 p-4 rounded-2xl bg-blue-500/5 border border-blue-500/10">
+                                <Sparkles className="w-4 h-4 text-blue-400" />
+                                <div className="text-[10px] text-slate-400 font-medium leading-relaxed">
+                                    <span className="text-white font-bold">Pro Tip:</span> Use <span className="text-blue-400">**text**</span> for bold and <span className="text-blue-400">* text</span> for lists. 
+                                    Your draft will be saved to Gmail as a professional HTML message.
                                 </div>
                             </div>
                         </div>
-                        <textarea 
-                            id="draft-editor"
-                            className="w-full bg-[#131722] border border-white/10 rounded-xl px-4 py-4 text-white text-sm focus:outline-none focus:border-blue-500/30 transition-all min-h-[350px] leading-relaxed font-mono"
-                            value={editingDraft.body}
-                            onChange={(e) => setEditingDraft({...editingDraft, body: e.target.value})}
-                        />
-                        <div className="flex items-center gap-2 text-[9px] text-slate-500 font-bold uppercase tracking-widest">
-                            <Sparkles className="w-3 h-3 text-blue-400" />
-                            Tip: Select text and click B or I to format. AI Bold will automatically highlight key terms.
+                    </div>
+
+                    {/* Right Panel: Rendered Preview */}
+                    <div className="w-full lg:w-1/2 overflow-y-auto p-10 bg-[#070b14] custom-scrollbar">
+                        <div className="max-w-2xl mx-auto space-y-8">
+                            <div className="flex items-center justify-between pb-6 border-b border-white/5">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-black text-lg shadow-lg">
+                                        {editingDraft.to?.charAt(0).toUpperCase()}
+                                    </div>
+                                    <div>
+                                        <div className="text-[14px] font-bold text-white">{editingDraft.to}</div>
+                                        <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Live Preview</div>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Platform</div>
+                                    <div className="text-[11px] font-black text-red-500 uppercase tracking-widest flex items-center gap-1 justify-end mt-0.5">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
+                                        Gmail
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="space-y-6">
+                                <div className="flex gap-3 text-[13px]">
+                                    <span className="text-slate-500 font-bold uppercase tracking-widest text-[9px] mt-1">Subject:</span>
+                                    <span className="text-white font-bold leading-tight">{editingDraft.subject || '(No Subject)'}</span>
+                                </div>
+
+                                <div className="p-1 rounded-xl bg-white/[0.01] border border-white/[0.03]">
+                                    <div 
+                                        className="text-[14px] text-slate-300 leading-relaxed font-medium p-4"
+                                        dangerouslySetInnerHTML={{ __html: renderEmailPreview(editingDraft.body) }}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Mock Attachments (Visual Placeholder for context) */}
+                            <div className="pt-10 mt-10 border-t border-white/5">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-slate-700"></div>
+                                    <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Shared Assets</span>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 opacity-40 grayscale">
+                                    <div className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/5">
+                                        <FileText className="w-5 h-5 text-slate-500" />
+                                        <div className="min-w-0">
+                                            <p className="text-[10px] font-bold text-slate-400 truncate">Pitch_Deck.pdf</p>
+                                            <p className="text-[8px] text-slate-600 font-bold uppercase">Stored in Gmail</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <div className="p-6 bg-white/[0.02] border-t border-white/5 flex items-center justify-between">
+                <div className="p-6 bg-[#0f121b] border-t border-white/5 flex items-center justify-between">
                     <button 
                         onClick={() => setEditingDraft(null)}
                         className="px-6 py-3 text-slate-500 hover:text-white text-[11px] font-black uppercase tracking-widest transition-colors cursor-pointer"
                     >
-                        Cancel Changes
+                        Discard Changes
                     </button>
                     <div className="flex items-center gap-3">
                         <button 
@@ -366,7 +528,7 @@ const GmailDrafts = () => {
                             className="flex items-center gap-2 px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-[11px] font-black uppercase tracking-widest rounded-2xl transition-all cursor-pointer"
                         >
                             {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                            Save to Gmail
+                            Sync to Gmail
                         </button>
                         <button 
                             onClick={() => handleSendDraft(editingDraft.id)}
@@ -388,6 +550,7 @@ const GmailDrafts = () => {
           <div className={`flex items-center gap-3 px-6 py-4 rounded-2xl shadow-2xl border backdrop-blur-md ${
             notification.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'
           }`}>
+            {notification.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
             <p className="text-[12px] font-bold tracking-tight">{notification.message}</p>
             <button onClick={() => setNotification(null)} className="ml-4 p-1 hover:bg-white/10 rounded-lg transition-colors cursor-pointer">
               <X className="w-4 h-4" />
