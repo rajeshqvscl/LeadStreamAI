@@ -223,36 +223,32 @@ const CompanyDatabase = () => {
   const handleTemplateGenerate = async (templateName) => {
     const ids = templateTarget !== null ? [templateTarget] : selectedIds;
     if (ids.length === 0) return;
-    let success = 0, failed = 0;
+    
     setIsBulkDrafting(true);
+    let success = 0, failed = 0;
+    
     for (const id of ids) {
       try {
-        if (templateName === 'ai') {
-          await api.post(`/api/companies/${id}/generate-draft`);
-        } else {
-          // For company database, we first need to find or create the lead, then apply template
-          // generate-draft endpoint moves company to lead pipeline, then we update with template
-          await api.post(`/api/companies/${id}/generate-draft`);
-        }
+        await api.post(`/api/companies/${id}/generate-draft`, null, {
+          params: { template_name: templateName === 'ai' ? 'standard' : templateName }
+        });
         success++;
-      } catch { failed++; }
+      } catch (err) {
+        console.error("Bulk draft failure:", err);
+        failed++;
+      }
     }
-    // If custom template chosen, update the drafted leads with template content
-    if (templateName !== 'ai' && success > 0) {
-      // Fetch recently drafted leads for these company emails and apply template
-      try {
-        const r = await api.get('/api/leads', { params: { per_page: 200, exclude_drafted: false } });
-        const recentLeads = (r.data.leads || []).filter(l => ids.some(() => true)).slice(0, ids.length);
-        for (const lead of recentLeads) {
-          try { await api.post('/api/generate-draft-from-template', { lead_id: lead.id, template_name: templateName }); } catch {}
-        }
-      } catch {}
-    }
+    
     setIsBulkDrafting(false);
     setShowTemplatePicker(false);
     if (templateTarget === null) setSelectedIds([]);
     fetchCompanies();
-    showNotification('success', `✓ ${success} draft${success > 1 ? 's' : ''} generated${templateName !== 'ai' ? ` using ${templateName}` : ''}.`);
+    
+    if (failed === 0) {
+      showNotification('success', `✓ ${success} lead(s) drafted using "${templateName}" template.`);
+    } else {
+      showNotification('error', `${success} drafted, ${failed} failed.`);
+    }
   };
 
   const handleSendEmail = async (id) => {

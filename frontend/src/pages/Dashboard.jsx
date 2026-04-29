@@ -354,14 +354,14 @@ const Dashboard = () => {
                 {user.google_linked_at ? (
                   <button 
                     onClick={handleDisconnect}
-                    className="px-4 py-2 bg-red-500/10 border border-red-500/20 rounded-xl text-[9px] font-black text-red-500 uppercase tracking-widest hover:bg-red-500/20 transition-all active:scale-95 shadow-xl"
+                    className="px-4 py-2 bg-red-500/10 border border-red-500/20 rounded-xl text-[9px] font-black text-red-500 uppercase tracking-widest hover:bg-red-500/20 transition-all active:scale-95 shadow-xl cursor-pointer"
                   >
                     Disconnect
                   </button>
                 ) : (
                   <button 
                     onClick={handleGoogleLink}
-                    className="px-10 py-5 rounded-2xl text-xs font-black uppercase tracking-[3px] transition-all active:scale-95 shadow-xl bg-indigo-600 text-white hover:bg-indigo-500 shadow-indigo-600/30"
+                    className="px-10 py-5 rounded-2xl text-xs font-black uppercase tracking-[3px] transition-all active:scale-95 shadow-xl bg-indigo-600 text-white hover:bg-indigo-500 shadow-indigo-600/30 cursor-pointer"
                   >
                     🚀 Connect Gmail Now
                   </button>
@@ -643,7 +643,7 @@ const Dashboard = () => {
                 <button
                   key={p}
                   onClick={() => setPeriod(p)}
-                  className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${period === p ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}
+                  className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${period === p ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}
                 >
                   {p}
                 </button>

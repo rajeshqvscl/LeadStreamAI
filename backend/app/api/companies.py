@@ -210,7 +210,7 @@ def import_companies_gsheet(req: Dict[str, str], user_id: Optional[str] = Header
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/companies/{row_id}/generate-draft")
-def generate_company_draft(row_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def generate_company_draft(row_id: int, template_name: Optional[str] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Converts a company registry record to a lead and generates an email draft."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -227,77 +227,56 @@ def generate_company_draft(row_id: int, user_id: Optional[str] = Header(None, al
         if isinstance(data, str):
             data = json.loads(data)
             
-        # Normalize keys for mapping (remove spaces, underscores, and dashes)
+        # Normalize keys for mapping
         norm = {str(k).lower().replace(" ", "").replace("-", "").replace("_", ""): v for k, v in data.items() if v}
         
         email = norm.get("email") or norm.get("emailaddress") or norm.get("workemail")
         if not email:
             raise HTTPException(status_code=400, detail="Company record is missing an email address.")
             
-        # Robust Name Extraction: Order matters - specific first
         name = (
-            norm.get("teammember") or 
-            norm.get("name") or 
-            norm.get("fullname") or 
-            norm.get("leadname") or 
-            norm.get("contactname") or
-            norm.get("contact") or
-            norm.get("investor") or
-            norm.get("person") or
+            norm.get("teammember") or norm.get("name") or norm.get("fullname") or 
+            norm.get("leadname") or norm.get("contactname") or norm.get("contact") or
+            norm.get("investor") or norm.get("person") or
             f"{norm.get('firstname', '')} {norm.get('lastname', '')}".strip()
         )
-        
-        # If still no name, try to extract it from the email prefix
         if not name or name.strip() == "":
             email_prefix = email.split('@')[0]
-            # Handle formats like "john.doe" or "j.doe" or "john_doe"
-            name_guess = email_prefix.replace(".", " ").replace("_", " ").replace("-", " ").title()
-            name = name_guess if name_guess else "Contact"
+            name = email_prefix.replace(".", " ").replace("_", " ").replace("-", " ").title()
             
-        company = (
-            norm.get("companyname") or 
-            norm.get("company") or 
-            norm.get("investorname") or
-            norm.get("org") or
-            norm.get("firm") or
-            norm.get("account")
-        )
+        company = norm.get("companyname") or norm.get("company") or norm.get("investorname") or norm.get("org") or norm.get("firm") or norm.get("account")
         
-        # Split name for lead insertion
         parts = name.split(" ", 1)
         f_name = parts[0]
         l_name = parts[1] if len(parts) > 1 else ""
         
-        # Add the lead to the main pipeline (source: intelligence)
         sender_name = "the team"
         if uid:
             cur.execute("SELECT full_name, username FROM users WHERE id = %s", (uid,))
             u = cur.fetchone()
             if u: sender_name = u['full_name'] or u['username']
             
-        insert_lead(
-            f_name, l_name, email, "", norm.get("linkedin", ""), 
-            company, "intelligence", data, user_id=uid, user_name=sender_name
-        )
+        insert_lead(f_name, l_name, email, "", norm.get("linkedin", ""), company, "intelligence", data, user_id=uid, user_name=sender_name)
 
-        # Get the new/updated lead ID - filter by UID for strict isolation
         cur.execute("SELECT id FROM leads_raw WHERE email = %s AND user_id = %s ORDER BY created_at DESC LIMIT 1", (email, uid))
         lead_row = cur.fetchone()
-        if not lead_row:
-            # Fallback for cases where UID might be NULL
-            cur.execute("SELECT id FROM leads_raw WHERE email = %s ORDER BY created_at DESC LIMIT 1", (email,))
-            lead_row = cur.fetchone()
-            
-        if not lead_row:
-            raise HTTPException(status_code=500, detail="Lead creation failed — could not retrieve lead ID.")
         lead_id = lead_row[0]
         
-        # Generate Draft
-        generator = EmailGenerator()
-        email_data = generator.generate_email({"first_name": f_name, "last_name": l_name, "company_name": company}, sender_name=sender_name)
-        subject = email_data.get("subject", "Following up")
-        body = email_data.get("body", "Hello, we would love to connect.")
+        # --- NEW: Reuse universal generator logic ---
+        from app.api.drafts import generate_email_internal, DraftRequest
+        req = DraftRequest(lead_id=lead_id, template_type=template_name or 'standard')
+        res = generate_email_internal(req, user_id)
+        
+        subject = res.get("subject")
+        body = res.get("body")
+        gmail_draft_id = res.get("gmail_draft_id")
         email_content = f"Subject: {subject}\n\n{body}"
+
+        # Remove from company registry
+        cur.execute("DELETE FROM company_registry WHERE id = %s AND user_id = %s", (row_id, uid))
+        conn.commit()
+
+        return {"success": True, "lead_id": lead_id, "message": "Draft generated and moved to Lead Pipeline."}
         
         # --- Step 1: Create Gmail Draft FIRST (so we have the ID) ---
         gmail_draft_id = None

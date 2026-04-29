@@ -166,6 +166,7 @@ const LeadDetail = () => {
   const [pendingDelete, setPendingDelete] = useState(false);
   const [showDraftOptions, setShowDraftOptions] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState('standard');
+  const [customTemplates, setCustomTemplates] = useState([]);
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
@@ -225,6 +226,10 @@ const LeadDetail = () => {
   };
 
   useEffect(() => { fetchData(); }, [leadId]);
+
+  useEffect(() => {
+    api.get('/api/custom-draft-templates').then(r => setCustomTemplates(r.data || [])).catch(() => {});
+  }, []);
 
   const handleChange = (e) => {
     setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
@@ -297,11 +302,18 @@ const LeadDetail = () => {
     setIsGenerating(true);
     setShowDraftOptions(false);
     try {
-      await api.post('/api/generate-email', { 
-        lead_id: parseInt(leadId),
-        template_type: type
-      });
-      showNotification('success', `Email generated using ${type === 'palak' ? "Palak's" : "Standard"} template!`);
+      if (type === 'standard' || type === 'palak') {
+        await api.post('/api/generate-email', { 
+          lead_id: parseInt(leadId),
+          template_type: type
+        });
+      } else {
+        await api.post('/api/generate-draft-from-template', {
+          lead_id: parseInt(leadId),
+          template_name: type
+        });
+      }
+      showNotification('success', `Email generated using ${type.replace(/_/g, ' ')} template!`);
       fetchData();
     } catch {
       showNotification('error', 'Failed to generate draft');
@@ -683,16 +695,20 @@ const LeadDetail = () => {
                       <div className="p-1">
                         <button 
                           onClick={() => handleGenerateDraft('standard')}
-                          className="w-full text-left px-3 py-2.5 text-[10px] font-bold text-slate-300 hover:bg-white/5 hover:text-white rounded-lg transition-colors flex items-center gap-2"
+                          className="w-full text-left px-3 py-2.5 text-[10px] font-bold text-slate-300 hover:bg-white/5 hover:text-white rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
                         >
-                          <div className="w-1.5 h-1.5 rounded-full bg-blue-500" /> Standard Template
+                          <div className="w-1.5 h-1.5 rounded-full bg-blue-500" /> Standard Template (AI)
                         </button>
-                        <button 
-                          onClick={() => handleGenerateDraft('palak')}
-                          className="w-full text-left px-3 py-2.5 text-[10px] font-bold text-slate-300 hover:bg-white/5 hover:text-white rounded-lg transition-colors flex items-center gap-2"
-                        >
-                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Palak's Template
-                        </button>
+
+                        {customTemplates.map(tpl => (
+                          <button 
+                            key={tpl.name}
+                            onClick={() => handleGenerateDraft(tpl.name)}
+                            className="w-full text-left px-3 py-2.5 text-[10px] font-bold text-slate-300 hover:bg-white/5 hover:text-white rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
+                          >
+                            <div className="w-1.5 h-1.5 rounded-full bg-purple-500" /> {tpl.name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                          </button>
+                        ))}
                       </div>
                     </div>
                   </>

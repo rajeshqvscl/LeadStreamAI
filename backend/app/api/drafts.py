@@ -21,6 +21,54 @@ def normalize_user_id(user_id: Optional[str]) -> str:
         return "1"
     return str(user_id)
 
+def markdown_to_html(text):
+    import re
+    # 1. Handle Signature Block (Keep breaks)
+    sig_match = re.search(r'(SIG_START.*?SIG_END)', text, re.DOTALL)
+    sig_html = ""
+    main_text = text
+    if sig_match:
+        sig_block = sig_match.group(1)
+        main_text = text.replace(sig_block, "[[SIG_PLACEHOLDER]]")
+        sig_html = sig_block.replace("SIG_START", "").replace("SIG_END", "").strip()
+        sig_html = sig_html.replace("\n", "<br>")
+
+    # 2. Split main text into paragraphs
+    paragraphs = main_text.split("\n\n")
+    html_parts = []
+    for p in paragraphs:
+        p = p.strip()
+        if not p: continue
+        if p == "[[SIG_PLACEHOLDER]]":
+            html_parts.append(sig_html)
+            continue
+        
+        # Check for bullet points (must be star/dash/bullet followed by space)
+        lines = p.split("\n")
+        if any(re.match(r'^\s*[\*\-•]\s+', l) for l in lines):
+            list_html = "<ul>"
+            for l in lines:
+                l_strip = l.strip()
+                match = re.match(r'^[\*\-•]\s+(.*)', l_strip)
+                if match:
+                    content = match.group(1)
+                    list_html += f"<li>{content}</li>"
+                else:
+                    list_html += f" {l_strip}" # Append to previous line
+            list_html += "</ul>"
+            html_parts.append(list_html)
+        else:
+            # Regular paragraph: merge single newlines, keep double
+            content = p.replace("\n", " ")
+            html_parts.append(f"<p>{content}</p>")
+    
+    final_html = "".join(html_parts)
+    # 3. Apply Bold/Italic/Links
+    final_html = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', final_html)
+    final_html = re.sub(r'\*(.*?)\*', r'<i>\1</i>', final_html)
+    final_html = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2">\1</a>', final_html)
+    return final_html
+
 class DraftRequest(BaseModel):
     lead_id: int
     template_type: Optional[str] = "standard"
@@ -180,7 +228,10 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 
 @router.post("/generate-draft")
 @router.post("/generate-email")
-def generate_draft(req: DraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def generate_draft_endpoint(req: DraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    return generate_email_internal(req, user_id)
+
+def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
     try:
         uid = normalize_user_id(user_id)
         conn = get_db_connection()
@@ -207,40 +258,98 @@ def generate_draft(req: DraftRequest, user_id: Optional[str] = Header(None, alia
         # Select template
         if req.template_type == 'palak':
             email_data = generator.generate_palak_email(lead, sender_name=profile.get('full_name') or profile.get('username'))
+            subject = email_data.get("subject", "Following up")
+            body = email_data.get("body", "")
+        elif req.template_type != 'standard':
+            # Check if it's a custom template name from DB
+            conn_t = get_db_connection()
+            cur_t = conn_t.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cur_t.execute("SELECT content FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE", (req.template_type,))
+            row_t = cur_t.fetchone()
+            cur_t.close()
+            conn_t.close()
+            
+            if row_t:
+                # Reuse custom template logic
+                template_body = row_t["content"]
+                # Resolve lead fields
+                f_name = (lead.get("first_name") or "").strip() or "there"
+                l_name  = (lead.get("last_name") or "").strip()
+                full_name  = f"{f_name} {l_name}".strip()
+                company    = (lead.get("company_name") or lead.get("family_office_name") or "your organization").strip()
+                # Sender placeholders
+                sender_full_name = profile.get('full_name') or profile.get('username') or "the team"
+                sender_first_name = sender_full_name.split()[0] if sender_full_name else "Team"
+                sender_title = profile.get('job_title') or ""
+                sender_phone = profile.get('phone') or ""
+                sender_linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
+
+                body = template_body.replace("{{First Name}}", f_name).replace("{{first name}}", f_name).replace("{{first_name}}", f_name)
+                body = body.replace("{{Full Name}}", full_name).replace("{{full_name}}", full_name)
+                body = body.replace("{{Company Name}}", company).replace("{{company_name}}", company).replace("{{Company}}", company)
+                body = body.replace("{{Sender Name}}", sender_full_name).replace("{{Sender Title}}", sender_title).replace("{{Sender Phone}}", sender_phone).replace("{{Sender LinkedIn}}", sender_linkedin)
+
+                # Extract Subject
+                subject = f"Strategic Partnership Opportunity | QVSCL × {company}" # Default
+                if body.strip().lower().startswith("subject:"):
+                    lines = body.split("\n", 1)
+                    subject = lines[0][8:].strip()
+                    body = lines[1].strip() if len(lines) > 1 else ""
+            else:
+                email_data = generator.generate_email(lead, sender_name=profile.get('full_name') or profile.get('username'))
+                subject = email_data.get("subject", "Following up")
+                body = email_data.get("body", "")
         else:
             email_data = generator.generate_email(lead, sender_name=profile.get('full_name') or profile.get('username'))
+            subject = email_data.get("subject", "Following up")
+            body = email_data.get("body", "")
         
-        subject = email_data.get("subject", "Following up")
-        ai_body = email_data.get("body", "Hello, we would love to connect.")
+        # Inject professional signature (unless custom template handled it)
+        if "SIG_START" in body:
+            body_with_sig = body
+        else:
+            body_with_sig = inject_signature(body, profile, req.lead_id)
+
+        html_body = markdown_to_html(body_with_sig)
+        email_content = f"Subject: {subject}\n\n{body_with_sig}"
         
-        # Inject professional signature
-        body = inject_signature(ai_body, profile, req.lead_id)
-        email_content = f"Subject: {subject}\n\n{body}"
-        
-        # --- Step 1: Create Gmail Draft FIRST (so we have the ID) ---
-        gmail_draft_id = None
+        # --- NEW: Delete OLD Gmail Draft if it exists ---
+        old_gmail_id = lead.get('gmail_draft_id')
         try:
             from app.services.google_service import get_gmail_service
             import base64
             from email.mime.text import MIMEText
             
-            service = get_gmail_service(int(uid))
+            uid_int = int(normalize_user_id(user_id))
+            service = get_gmail_service(uid_int)
+            if service and old_gmail_id:
+                try:
+                    service.users().drafts().delete(userId='me', id=old_gmail_id).execute()
+                    logger.info(f"🗑️ Deleted old Gmail draft {old_gmail_id}")
+                except:
+                    pass
+        except:
+            pass
+
+        # --- Step 1: Create Gmail Draft ---
+        gmail_draft_id = None
+        try:
+            from app.services.google_service import get_gmail_service
+            service = get_gmail_service(uid_int)
             if service:
-                # Render body as plain text (converts \n to \r\n for MIME)
-                message = MIMEText(body, 'plain')
+                message = MIMEText(html_body, 'html')
                 message['to'] = lead.get('email', '')
                 message['subject'] = subject
                 raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
                 
-                # Create Gmail Draft
                 draft_body = {'message': {'raw': raw_message}}
                 created_draft = service.users().drafts().create(userId='me', body=draft_body).execute()
                 gmail_draft_id = created_draft.get('id')
-                logger.info(f"✅ Created Gmail draft {gmail_draft_id} for Lead {req.lead_id}")
+                logger.info(f"✅ Created NEW Gmail draft {gmail_draft_id} for Lead {req.lead_id}")
         except Exception as ge:
-            logger.warning(f"⚠️  Gmail draft sync failed (non-blocking): {ge}")
+            logger.warning(f"⚠️  Gmail draft sync failed: {ge}")
 
-        # --- Step 2: Save to DB with gmail_draft_id ---
+        # --- Step 2: Save to DB ---
         conn2 = get_db_connection()
         cur2 = conn2.cursor()
         cur2.execute("""
@@ -255,7 +364,7 @@ def generate_draft(req: DraftRequest, user_id: Optional[str] = Header(None, alia
         # Log activity
         try:
             from app.models.lead import add_activity_log
-            add_activity_log(req.lead_id, "DRAFT_GENERATED", f"AI email draft generated and saved {'(and synced to Gmail Drafts ✅)' if gmail_draft_id else '(Gmail sync not available)'}", profile.get('username') or "system")
+            add_activity_log(req.lead_id, "DRAFT_GENERATED", f"Email draft regenerated using '{req.template_type}'", profile.get('username') or "system")
         except:
             pass
 
@@ -263,7 +372,7 @@ def generate_draft(req: DraftRequest, user_id: Optional[str] = Header(None, alia
             "message": "Draft generated",
             "draft_id": req.lead_id,
             "subject": subject,
-            "body": body,
+            "body": body_with_sig,
             "gmail_draft_id": gmail_draft_id,
             "gmail_synced": gmail_draft_id is not None
         }
@@ -329,9 +438,20 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
         company    = (lead.get("company_name") or lead.get("family_office_name") or "your organization").strip()
         designation= (lead.get("designation") or "").strip()
 
+        # Subject
+        subject = f"Strategic Partnership Opportunity | QVSCL × {company}"
+
+        # Resolve sender fields for dynamic templates
+        profile = get_sender_profile(user_id)
+        sender_full_name = profile.get('full_name') or profile.get('username') or "the team"
+        sender_first_name = sender_full_name.split()[0] if sender_full_name else "Team"
+        sender_title = profile.get('job_title') or ""
+        sender_phone = profile.get('phone') or ""
+        sender_linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
+
         # Replace all placeholders case-insensitively
         body = template_body
-        for placeholder, value in [
+        replacements = [
             ("{{First Name}}", first_name),
             ("{{first name}}", first_name),
             ("{{first_name}}", first_name),
@@ -341,26 +461,41 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
             ("{{company_name}}", company),
             ("{{Company}}", company),
             ("{{Designation}}", designation),
-        ]:
-            body = body.replace(placeholder, value)
+            # Sender placeholders
+            ("{{Sender Name}}", sender_full_name),
+            ("{{Sender Full Name}}", sender_full_name),
+            ("{{Sender First Name}}", sender_first_name),
+            ("{{Sender Title}}", sender_title),
+            ("{{Sender Phone}}", sender_phone),
+            ("{{Sender LinkedIn}}", sender_linkedin),
+        ]
+        
+        for placeholder, value in replacements:
+            body = body.replace(placeholder, str(value or ""))
 
-        # Subject
-        subject = f"Strategic Partnership Opportunity | QVSCL × {company}"
+        # --- NEW: Extract Subject from template if it exists ---
+        final_subject = subject  # Default
+        final_body = body
+        if body.strip().lower().startswith("subject:"):
+            lines = body.split("\n", 1)
+            final_subject = lines[0][8:].strip() # Skip "Subject: "
+            final_body = lines[1].strip() if len(lines) > 1 else ""
 
         # Inject logged-in user's signature ONLY if the template doesn't already embed one
         profile = get_sender_profile(user_id)
-        if "SIG_START" in body:
+        if "SIG_START" in final_body:
             # Template already has an embedded signature (e.g. palak_mam_Draft_1) — keep as-is
-            body_with_sig = body
+            body_with_sig = final_body
         else:
-            body_with_sig = inject_signature(body, profile, req.lead_id)
+            body_with_sig = inject_signature(final_body, profile, req.lead_id)
 
+        html_body = markdown_to_html(body_with_sig)
 
+        # Full content for local DB storage
+        email_content = f"Subject: {final_subject}\n\n{body_with_sig}"
 
-        email_content = f"Subject: {subject}\n\n{body_with_sig}"
-
-        # --- Sync to Gmail Drafts FIRST (so we have the ID) ---
-        gmail_draft_id = None
+        # --- NEW: Delete OLD Gmail Draft if it exists ---
+        old_gmail_id = lead.get('gmail_draft_id')
         try:
             from app.services.google_service import get_gmail_service
             import base64
@@ -368,18 +503,34 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
             
             uid_t = normalize_user_id(user_id)
             service = get_gmail_service(int(uid_t))
+            if service and old_gmail_id:
+                try:
+                    service.users().drafts().delete(userId='me', id=old_gmail_id).execute()
+                    logger.info(f"🗑️ Deleted old Gmail draft {old_gmail_id} (template)")
+                except:
+                    pass
+        except:
+            pass
+
+        # --- Sync to Gmail Drafts ---
+        gmail_draft_id = None
+        try:
+            from app.services.google_service import get_gmail_service
+            uid_t = normalize_user_id(user_id)
+            service = get_gmail_service(int(uid_t))
             if service:
                 to_email = lead.get('email', '')
-                message = MIMEText(body_with_sig, 'plain')
+                # Use 'html' subtype for bold/italic support
+                message = MIMEText(html_body, 'html')
                 message['to'] = to_email
-                message['subject'] = subject
+                message['subject'] = final_subject
                 raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
                 draft_body = {'message': {'raw': raw_message}}
                 created_draft = service.users().drafts().create(userId='me', body=draft_body).execute()
                 gmail_draft_id = created_draft.get('id')
-                logger.info(f"✅ Created Gmail draft {gmail_draft_id} for Lead {req.lead_id} (template)")
+                logger.info(f"✅ Created NEW Gmail draft {gmail_draft_id} for Lead {req.lead_id} (template-html)")
         except Exception as ge:
-            logger.warning(f"⚠️  Gmail draft sync failed (non-blocking): {ge}")
+            logger.warning(f"⚠️  Gmail draft sync failed: {ge}")
 
         # Save to DB (with gmail_draft_id)
         conn2 = get_db_connection()
@@ -402,7 +553,7 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
         return {
             "message": "Draft generated from template",
             "draft_id": req.lead_id,
-            "subject": subject,
+            "subject": final_subject,
             "body": body_with_sig,
             "template": req.template_name,
             "gmail_draft_id": gmail_draft_id,
