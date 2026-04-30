@@ -171,13 +171,50 @@ const EditEmail = () => {
     fetchDraft();
   }, [draftId]);
 
+  const [statusModal, setStatusModal] = useState({ show: false, title: '', subtitle: '', type: 'default', progress: 0 });
+
+  const ActionLoader = ({ show, title, subtitle, progress, type }) => {
+    if (!show) return null;
+    return (
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#0a0f1a]/80 backdrop-blur-xl animate-in fade-in duration-300">
+        <div className="w-[380px] bg-[#131722] border border-[#ffffff10] rounded-[24px] p-8 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.5)] flex flex-col items-center text-center">
+          <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-6 ${
+            type === 'success' ? 'bg-emerald-500/10 text-emerald-500' : 
+            type === 'generating' ? 'bg-amber-500/10 text-amber-500' :
+            'bg-blue-500/10 text-blue-500'
+          }`}>
+            {type === 'generating' ? <Sparkles className="w-8 h-8 animate-pulse" /> : <Send className="w-8 h-8 animate-bounce" />}
+          </div>
+          
+          <h2 className="text-white text-[20px] font-bold tracking-tight mb-2">{title}</h2>
+          <p className="text-[#64748b] text-[10px] font-black uppercase tracking-[2px] mb-8">{subtitle}</p>
+          
+          <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+            <div 
+              className={`h-full transition-all duration-500 ease-out ${
+                type === 'generating' ? 'bg-gradient-to-r from-amber-500 to-orange-500' : 'bg-gradient-to-r from-emerald-500 to-blue-500'
+              }`}
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const handleSave = async (silent = false) => {
+    if (!silent) setStatusModal({ show: true, title: 'Saving Changes', subtitle: 'Syncing with secure cloud...', progress: 30, type: 'default' });
     setIsSaving(true);
     try {
+      if (!silent) setStatusModal(prev => ({ ...prev, progress: 70 }));
       const email_draft = `Subject: ${subject}\n\n${body}`;
       await api.patch(`/api/leads/${draftId}`, { email_draft, remarks });
-      if (!silent) showNotification('success', 'Changes saved successfully');
+      if (!silent) {
+        setStatusModal(prev => ({ ...prev, progress: 100, title: 'Saved Successfully', type: 'success' }));
+        setTimeout(() => setStatusModal({ show: false }), 800);
+      }
     } catch {
+      if (!silent) setStatusModal({ show: false });
       showNotification('error', 'Failed to save changes');
     } finally {
       setIsSaving(false);
@@ -188,25 +225,30 @@ const EditEmail = () => {
     const finalInstruction = instruction || aiInstruction;
     if (!finalInstruction) return;
 
+    setStatusModal({ show: true, title: 'AI Refinement', subtitle: 'Analyzing context & generating content...', progress: 20, type: 'generating' });
     setIsRefining(true);
     try {
+      setStatusModal(prev => ({ ...prev, progress: 60 }));
       const response = await api.post(`/api/refine-email/${draftId}`, {
         instruction: finalInstruction,
         subject,
         body
       });
       if (response.data.error) {
+        setStatusModal({ show: false });
         showNotification('error', `AI refinement failed: ${response.data.error}`);
         return;
       }
 
       if (response.data.subject || response.data.body) {
+        setStatusModal(prev => ({ ...prev, progress: 100, title: 'Generation Complete' }));
         setSubject(response.data.subject || '');
         setBody(response.data.body || '');
         setAiInstruction('');
-        showNotification('success', 'Email refined by AI! View the updated preview on the right.');
+        setTimeout(() => setStatusModal({ show: false }), 800);
       }
     } catch {
+      setStatusModal({ show: false });
       showNotification('error', 'AI refinement failed');
     } finally {
       setIsRefining(false);
@@ -214,12 +256,15 @@ const EditEmail = () => {
   };
 
   const handleApproveAndSend = async () => {
+    setStatusModal({ show: true, title: 'Dispatching Email', subtitle: 'Sending via your Gmail account...', progress: 10, type: 'default' });
     await handleSave(true);
+    setStatusModal(prev => ({ ...prev, progress: 50 }));
     try {
       await api.post(`/api/approve-email/${draftId}`);
-      showNotification('success', 'Email approved and ready to send');
-      setTimeout(() => navigate('/dashboard/emails'), 1500);
+      setStatusModal(prev => ({ ...prev, progress: 100, title: 'Email Dispatched', type: 'success' }));
+      setTimeout(() => navigate('/dashboard/emails'), 1200);
     } catch {
+      setStatusModal({ show: false });
       showNotification('error', 'Approval failed');
     }
   };
@@ -229,14 +274,17 @@ const EditEmail = () => {
       showNotification('error', 'Please select a date and time');
       return;
     }
+    setStatusModal({ show: true, title: 'Scheduling Email', subtitle: 'Queuing for automated dispatch...', progress: 40, type: 'default' });
     await handleSave(true);
     setIsSaving(true);
     try {
+      setStatusModal(prev => ({ ...prev, progress: 80 }));
       const isoString = new Date(scheduledAt).toISOString();
       await api.post(`/api/schedule-email/${draftId}`, { scheduled_at: isoString });
-      showNotification('success', 'Email scheduled successfully!');
-      setTimeout(() => navigate('/dashboard/emails'), 1500);
+      setStatusModal(prev => ({ ...prev, progress: 100, title: 'Successfully Scheduled', type: 'success' }));
+      setTimeout(() => navigate('/dashboard/emails'), 1200);
     } catch {
+      setStatusModal({ show: false });
       showNotification('error', 'Scheduling failed');
     } finally {
       setIsSaving(false);
@@ -254,6 +302,7 @@ const EditEmail = () => {
 
   return (
     <div className="animate-in fade-in duration-500 min-h-screen bg-[#0a0f1a] pb-20 p-8">
+      <ActionLoader {...statusModal} />
       {/* Header */}
       <div className="flex items-center gap-4 mb-8">
         <button onClick={() => navigate('/dashboard/emails')} className="px-3 py-1.5 flex items-center gap-1.5 rounded-md bg-[#131722] border border-[#ffffff10] text-slate-300 hover:text-white transition-colors text-[11px] font-bold cursor-pointer">

@@ -173,6 +173,37 @@ const LeadDetail = () => {
     setTimeout(() => setNotification(null), 4000);
   };
 
+  const [statusModal, setStatusModal] = useState({ show: false, title: '', subtitle: '', type: 'default', progress: 0 });
+
+  const ActionLoader = ({ show, title, subtitle, progress, type }) => {
+    if (!show) return null;
+    return (
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#0a0f1a]/80 backdrop-blur-xl animate-in fade-in duration-300">
+        <div className="w-[380px] bg-[#131722] border border-[#ffffff10] rounded-[24px] p-8 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.5)] flex flex-col items-center text-center">
+          <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-6 ${
+            type === 'success' ? 'bg-emerald-500/10 text-emerald-500' : 
+            type === 'generating' ? 'bg-amber-500/10 text-amber-500' :
+            'bg-blue-500/10 text-blue-500'
+          }`}>
+            {type === 'generating' ? <Sparkles className="w-8 h-8 animate-pulse" /> : <Save className="w-8 h-8 animate-bounce" />}
+          </div>
+          
+          <h2 className="text-white text-[20px] font-bold tracking-tight mb-2">{title}</h2>
+          <p className="text-[#64748b] text-[10px] font-black uppercase tracking-[2px] mb-8">{subtitle}</p>
+          
+          <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+            <div 
+              className={`h-full transition-all duration-500 ease-out ${
+                type === 'generating' ? 'bg-gradient-to-r from-amber-500 to-orange-500' : 'bg-gradient-to-r from-emerald-500 to-blue-500'
+              }`}
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const fetchData = async () => {
     setIsLoading(true);
     setError(null);
@@ -237,33 +268,23 @@ const LeadDetail = () => {
   };
 
   const handleUpdate = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
+    setStatusModal({ show: true, title: 'Updating Profile', subtitle: 'Syncing with secure database...', progress: 30, type: 'default' });
     setIsSaving(true);
     try {
-      // Sanitize fields before sending to API
+      setStatusModal(prev => ({ ...prev, progress: 60 }));
       const sanitizedForm = { ...form };
-      
-      // Convert campaign_id to integer or null
-      if (typeof sanitizedForm.campaign_id === 'string') {
-        if (sanitizedForm.campaign_id.trim() === '') {
-          sanitizedForm.campaign_id = null;
-        } else if (!isNaN(parseInt(sanitizedForm.campaign_id))) {
-          sanitizedForm.campaign_id = parseInt(sanitizedForm.campaign_id);
-        }
-      }
-
-      // Ensure fit_score is int
-      if (sanitizedForm.fit_score && typeof sanitizedForm.fit_score === 'string') {
-        sanitizedForm.fit_score = parseInt(sanitizedForm.fit_score);
-      }
+      if (typeof sanitizedForm.campaign_id === 'string' && sanitizedForm.campaign_id.trim() === '') sanitizedForm.campaign_id = null;
+      if (sanitizedForm.fit_score && typeof sanitizedForm.fit_score === 'string') sanitizedForm.fit_score = parseInt(sanitizedForm.fit_score);
 
       await api.patch(`/api/leads/${leadId}`, sanitizedForm);
-      showNotification('success', 'Lead updated successfully');
+      setStatusModal(prev => ({ ...prev, progress: 100, title: 'Profile Updated', type: 'success' }));
       setIsDirty(false);
       fetchData();
+      setTimeout(() => setStatusModal({ show: false }), 800);
     } catch (err) {
-      console.error('Update failed:', err);
-      showNotification('error', err.response?.data?.detail || 'Failed to update lead');
+      setStatusModal({ show: false });
+      showNotification('error', 'Failed to update lead');
     } finally {
       setIsSaving(false);
     }
@@ -299,23 +320,21 @@ const LeadDetail = () => {
   };
 
   const handleGenerateDraft = async (type = 'standard') => {
+    setStatusModal({ show: true, title: 'Generating AI Email', subtitle: 'Crafting personalized outreach...', progress: 20, type: 'generating' });
     setIsGenerating(true);
     setShowDraftOptions(false);
     try {
+      setStatusModal(prev => ({ ...prev, progress: 60 }));
       if (type === 'standard' || type === 'palak') {
-        await api.post('/api/generate-email', { 
-          lead_id: parseInt(leadId),
-          template_type: type
-        });
+        await api.post('/api/generate-email', { lead_id: parseInt(leadId), template_type: type });
       } else {
-        await api.post('/api/generate-draft-from-template', {
-          lead_id: parseInt(leadId),
-          template_name: type
-        });
+        await api.post('/api/generate-draft-from-template', { lead_id: parseInt(leadId), template_name: type });
       }
-      showNotification('success', `Email generated using ${type.replace(/_/g, ' ')} template!`);
+      setStatusModal(prev => ({ ...prev, progress: 100, title: 'Draft Generated', type: 'success' }));
       fetchData();
+      setTimeout(() => setStatusModal({ show: false }), 800);
     } catch {
+      setStatusModal({ show: false });
       showNotification('error', 'Failed to generate draft');
     } finally {
       setIsGenerating(false);
@@ -356,6 +375,7 @@ const LeadDetail = () => {
 
   return (
     <div className="animate-in fade-in duration-500 pb-20">
+      <ActionLoader {...statusModal} />
       {/* Header */}
       <div className="flex justify-between items-center mb-8">
         <div className="flex items-center gap-5">

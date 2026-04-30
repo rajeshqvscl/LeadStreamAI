@@ -5,6 +5,7 @@ import json
 import structlog
 from anthropic import Anthropic
 import google.generativeai as genai
+from groq import Groq
 
 from pathlib import Path
 from dotenv import load_dotenv
@@ -16,6 +17,7 @@ logger = structlog.get_logger(__name__)
 
 CLAUDE_MODEL = "claude-3-5-sonnet-20240620"
 GEMINI_MODEL = "gemini-3-flash-preview"
+GROQ_MODEL = "llama-3.3-70b-versatile"
 
 REFINEMENT_PROMPT = """
 You are an expert executive assistant. Your task is to refine the provided email draft based on the user's instruction.
@@ -33,155 +35,163 @@ class EmailGenerator:
     def __init__(self):
         self.anthropic_key = os.getenv("ANTHROPIC_API_KEY")
         self.gemini_key = os.getenv("GEMINI_API_KEY")
+        self.groq_key = os.getenv("GROQ_API_KEY")
 
-        if not self.anthropic_key and not self.gemini_key:
-            raise ValueError("No LLM API keys found (ANTHROPIC_API_KEY or GEMINI_API_KEY)")
+        if not self.anthropic_key and not self.gemini_key and not self.groq_key:
+            raise ValueError("No LLM API keys found (ANTHROPIC, GEMINI, or GROQ)")
 
-        # Initialize Anthropic if key exists
+        # Initialize clients
         self.anthropic_client = None
         if self.anthropic_key:
-            try:
-                self.anthropic_client = Anthropic(api_key=self.anthropic_key)
-            except Exception as e:
-                logger.error("anthropic_init_failed", error=str(e))
+            try: self.anthropic_client = Anthropic(api_key=self.anthropic_key)
+            except Exception as e: logger.error("anthropic_init_failed", error=str(e))
 
-        # Initialize Gemini if key exists
+        self.groq_client = None
+        if self.groq_key:
+            try: self.groq_client = Groq(api_key=self.groq_key)
+            except Exception as e: logger.error("groq_init_failed", error=str(e))
+
         self.gemini_model = None
         if self.gemini_key:
             try:
                 genai.configure(api_key=self.gemini_key)
                 self.gemini_model = genai.GenerativeModel(GEMINI_MODEL)
-            except Exception as e:
-                logger.error("gemini_init_failed", error=str(e))
+            except Exception as e: logger.error("gemini_init_failed", error=str(e))
 
-    def _get_prompt(self, prompt_type: str):
-        """Fetch prompt content from dedicated database table."""
-        try:
-            from app.database import get_db_connection
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("SELECT content FROM prompts WHERE prompt_type = %s AND is_active = TRUE LIMIT 1", (prompt_type,))
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
-            return row['content'] if row else None
-        except Exception as e:
-            logger.error("error_fetching_prompt", type=prompt_type, error=str(e))
-            return None
+    def _call_llm(self, prompt: str, max_tokens: int = 1024):
+        """Internal helper to call available LLMs in priority: Groq -> Gemini -> Claude."""
+        
+        # 1. Try Groq (Priority 1)
+        if self.groq_client:
+            try:
+                chat_completion = self.groq_client.chat.completions.create(
+                    messages=[{"role": "user", "content": prompt}],
+                    model=GROQ_MODEL,
+                    max_tokens=max_tokens
+                )
+                return chat_completion.choices[0].message.content.strip()
+            except Exception as e:
+                if "429" in str(e) or "limit" in str(e).lower():
+                    logger.error("!!! GROQ KEY EXHAUSTED !!! Falling back to Gemini...")
+                else:
+                    logger.warning("groq_failed", error=str(e))
+
+        # 2. Try Gemini (Priority 2)
+        if self.gemini_model:
+            try:
+                response = self.gemini_model.generate_content(prompt)
+                return response.text.strip()
+            except Exception as e:
+                if "429" in str(e) or "limit" in str(e).lower():
+                    logger.error("!!! GEMINI KEY EXHAUSTED !!! Falling back to Claude...")
+                else:
+                    logger.warning("gemini_failed", error=str(e))
+
+        # 3. Try Anthropic (Claude) (Final Fallback)
+        if self.anthropic_client:
+            try:
+                response = self.anthropic_client.messages.create(
+                    model=CLAUDE_MODEL,
+                    max_tokens=max_tokens,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                return response.content[0].text.strip()
+            except Exception as e:
+                if "429" in str(e) or "limit" in str(e).lower():
+                    logger.error("!!! CLAUDE KEY EXHAUSTED !!! No more fallback options.")
+                else:
+                    logger.error("claude_failed", error=str(e))
+        
+        return None
 
     def generate_email(self, lead: dict, sender_name: str = "the team"):
-        # Personalize greeting
-        first_name = lead.get('first_name')
-        if not first_name or str(first_name).strip().lower() in ["there", "contact", ""]:
-            first_name = lead.get('name') or lead.get('full_name') or lead.get('last_name')
-            if (not first_name or str(first_name).strip() == "") and lead.get('email'):
-                email_prefix = lead.get('email').split('@')[0]
-                first_part = email_prefix.replace("_", ".").replace("-", ".").split(".")[0]
-                first_name = first_part.capitalize()
+        # Fixed Template (Standard/Yashika)
+        first_name = (lead.get('first_name') or lead.get('name') or "there").strip().capitalize()
         
-        greeting = f"Hi {first_name}," if first_name else "Hi,"
-        company_name = lead.get('company_name') or lead.get('company') or "your organization"
-        
-        body = f"""{greeting}
+        body = f"""Hi {first_name},
 
 I hope you're doing well.
 
-I'm {sender_name} from QVSCL (Gurugram), a strategic advisory firm working with high-growth early-stage ventures. We are currently raising a round for a platform building a vertical AI-powered hiring intelligence layer, combining AI agents, recruitment workflows, and trust-based verification infrastructure.
+I'm {sender_name} from QVSCL (Gurugram), a strategic advisory firm working with high-growth early-stage ventures. We are currently raising a round for a <b>climate-focused agritech platform that is building a full-stack renewable energy marketplace for rural India.</b>
 
-**Business Overview**
-• Founded: By industry leaders with 20+ years of experience across HR, fintech, and enterprise technology
-• Focus: Building a unified hiring infrastructure platform that automates and optimizes end-to-end recruitment workflows
-• Platform Offering: A full-stack hiring platform integrating ATS, sourcing, screening, and background verification
-• Technology: AI-powered vertical agents enabling sourcing, scheduling, interviewing, and verification workflows
-• Revenue Model: Enterprise SaaS with multi-layered monetization
-• Core Differentiation: A single unified platform combining hiring + verification + intelligence
+<b>Business Overview</b>
+• <b>Sector</b>: Agritech / Climate / Social Impact
+• <b>Stage</b>: Revenue-generating, growth-stage
+• <b>Positioning</b>: India's first curated marketplace for renewable & green energy products for farmers and rural households
+• <b>Platform Offering</b>:
+    ◦ Multi-brand marketplace with <b>60+ brands and 200+ SKUs</b> across solar, biogas, and green energy solutions
+    ◦ End-to-end solutions spanning <b>product discovery, advisory, deployment, and after-sales service</b>
+    ◦ AI-enabled touchpoints including chatbots and localized support
+• <b>Business Model</b>:
+    ◦ Phygital distribution model combining <b>AI-enabled digital platform + village-level offline stores</b>
+    ◦ Asset-light approach with <b>franchise-led last-mile distribution</b>
+    ◦ Multiple revenue streams across <b>B2C sales, B2B projects, partnerships, franchise fees, and AMC services</b>
 
-**Industry Overview**
-• 3.6M job vacancies are posted monthly in India, but only 2.1M hires are completed
-• 1.5M workforce gap leading to significant unrealized economic output
-• 80% of employers face talent shortages
-• Hiring processes remain largely manual and fragmented
+<b>Problems</b>
+Rural India faces structural inefficiencies in energy access and agri productivity:
+• High dependence on <b>firewood, diesel, and unreliable electricity</b>
+• Limited access to <b>modern technologies and advisory support</b>
+• Fragmented distribution through traditional dealer networks limits penetration
 
-**Market Opportunity**
-• Global Hiring & Recruitment Tech TAM: $150B+
-• Rapid shift toward AI-driven automation, trust, and verification layers (35-45% CAGR)
+<b>Solutions</b>
+A <b>one-stop, full-stack renewable energy platform</b> addressing access, affordability, and adoption:
+• <b>Phygital Marketplace</b>: Seamless online + offline distribution network
+• <b>AI-led Advisory</b>: Personalized product recommendations and assisted buying
+• <b>Last-Mile Reach</b>: Deep rural penetration via trained partners and franchise stores
+• <b>Integrated Offering</b>: Solar, biogas, thermal, and green energy products under one platform
+• <b>Value-Added Services</b>: Financing support, insurance, and long-term after-sales service
 
-**Problems**
-*HR & Recruiter Challenges*
-• 180 applications per hire leading to massive screening overload
-• Recruiters managing higher workloads without increased team size
-• 57% of time spent on repetitive data tasks
+<b>Traction & Impact</b>
+• <b>Revenue</b>: INR 5.1 Cr achieved till Feb'25 with ~105% YoY growth
+• <b>Advance Orders</b>: INR 2 Cr pipeline
+• <b>On-ground Impact (FY20-25)</b>: 1,24,153+ lives impacted; 1,10,000+ women impacted
+• 2,070+ tons of CO2 emissions abated
+• 66,000+ green jobs created; 900+ acres irrigated via solar
 
-*Process Inefficiencies*
-• Fragmented workflows across 20+ tools
-• Manual data handling and long hiring cycles (44 days)
+<b>Differentiation</b>
+• <b>First-mover advantage</b> in building a <b>renewable energy marketplace with advisory layer</b>
+• Strong <b>last-mile rural distribution network</b> vs. e-commerce-led competitors
+• Integrated stack combining <b>commerce, financing, service, and impact delivery</b>
 
-*Trust & Quality Issues*
-• 70% resumes contain inaccuracies and AI-generated profiles flooding pipelines
-• High attrition due to poor matching
-
-**Solutions**
-• AI Hiring Co-Pilot: Vertical AI agents automating sourcing and screening
-• Unified Platform: End-to-end system integrating ATS and BGV
-• Trust Infrastructure: Proprietary trust graph
-• Background Verification: Native BGV system with 20+ checks
-• Workflow Automation: Eliminates manual HR processes
-• Scalable Architecture: APIs and integrations with HRMS/ATS
-
-**Validations & Traction**
-• 100K+ companies onboarded
-• 250+ enterprise customers across 50+ industries
-• 94% customer retention rate
-
-**Operational Impact**
-• Time-to-hire reduced from weeks to 2-3 days
-• Verification TAT reduced from 15 days to 2 days
-• 40%+ reduction in HR operational workload
-
-**Fundraise: $1M**
+<b>Fundraise</b>
+• <b>Raising</b>: USD 500K - 1M
+• <b>Use of Funds</b>: Expansion, product development (AgriVoltaics), team scale-up, and market expansion
 
 If this aligns with your portfolio focus and does not conflict with it, I’d be happy to share the full presentation or connect over a virtual meeting at your convenience. I have attached the QVSCL Profile. You may also share your investment thesis with us so we can send relevant deal flow in the future.
 
-For more details about our services: [Website](https://qvscl.com) | [Linkedin](https://www.linkedin.com/company/qvscl/)
+For more details about our services: Website | Linkedin
 
 Looking forward to your response.
 """
         return {
-            "subject": f"Strategic Investment Opportunity: AI-Powered Hiring Infrastructure",
+            "subject": f"Strategic Investment Opportunity: Climate-focused Agritech Platform",
             "body": body
         }
 
     def generate_palak_email(self, lead: dict, sender_name: str = "the team"):
-        """Generates an email using Palak Mam's specific structure."""
-        first_name = lead.get('first_name') or lead.get('name', '').split(' ')[0]
-        company_name = lead.get('company_name') or lead.get('company') or "your organization"
+        # Exactly the same fixed template for now, or could be a variation
+        return self.generate_email(lead, sender_name)
+
+    def generate_followup(self, lead_name: str, original_content: str, stage: int):
+        """Generates a personalized follow-up email with multi-LLM fallback."""
+        prompt = f"""
+        You are a polite, professional executive assistant. Write a SHORT follow-up email for {lead_name}.
         
-        greeting = f"Hi {first_name}," if first_name else "Hi,"
+        Previous Context:
+        {original_content}
         
-        body = f"""{greeting}
-
-I hope you're having a productive week.
-
-I’m {sender_name} from QVSCL. We’ve been closely following the recruitment tech space, and I wanted to reach out regarding a high-growth vertical AI hiring platform we are currently advising for their $1M fundraise.
-
-What caught our attention about this platform is their ability to reduce time-to-hire from weeks to just 2-3 days using vertical AI agents that automate the entire sourcing and verification cycle.
-
-**Key Highlights:**
-• **Proven Traction**: 250+ enterprise customers and 100K+ companies onboarded.
-• **Unified Stack**: Integration of ATS, Sourcing, and Background Verification in one platform.
-• **Market Need**: Solving the 1.5M workforce gap in the Indian market specifically.
-
-We believe this could be a strategic fit for your portfolio. I’ve attached the QVSCL profile for your reference.
-
-Would you be open to a quick 10-minute sync to discuss this further? Alternatively, I can share the pitch deck for your initial review.
-
-Best,
-{sender_name}
-"""
-        return {
-            "subject": f"Investment Memo: AI Hiring Infrastructure | Traction Update",
-            "body": body
-        }
+        Follow-up Stage: {stage} (1=First nudge, 2=Second nudge, 3=Final follow-up)
+        
+        Guidelines:
+        1. Reference the previous email naturally.
+        2. Keep it under 3-4 sentences.
+        3. Be polite and helpful, not pushy.
+        4. If Stage 3, mention this is the final follow-up.
+        5. Write ONLY the email body. Use HTML for bolding important parts.
+        """
+        
+        res = self._call_llm(prompt)
+        return res if res else "Hi, just following up on my previous email. Let me know if you have any questions!"
 
     def refine_email(self, subject: str, body: str, action: str):
         """Refines an existing email draft based on AI instructions."""
@@ -198,32 +208,18 @@ Best,
         content = f"Subject: {subject}\n\n{body}"
         prompt = REFINEMENT_PROMPT.format(content=content, instruction=instruction)
         
-        try:
-            refined_text = ""
-            if self.anthropic_client:
-                response = self.anthropic_client.messages.create(
-                    model=CLAUDE_MODEL,
-                    max_tokens=2048,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                refined_text = response.content[0].text.strip()
-            elif self.gemini_model:
-                response = self.gemini_model.generate_content(prompt)
-                refined_text = response.text.strip()
-            
-            # Try to extract subject if AI included it
-            new_subject = subject
-            new_body = refined_text
-            if "Subject:" in refined_text:
-                parts = refined_text.split("\n\n", 1)
-                new_subject = parts[0].replace("Subject:", "").strip()
-                if len(parts) > 1:
-                    new_body = parts[1].strip()
-            
-            return {"subject": new_subject, "body": new_body}
-        except Exception as e:
-            logger.error("ai_refine_failed", error=str(e))
-            return {"subject": subject, "body": body}
+        refined_text = self._call_llm(prompt, max_tokens=2048)
+        if not refined_text: return {"subject": subject, "body": body}
+
+        new_subject = subject
+        new_body = refined_text
+        if "Subject:" in refined_text:
+            parts = refined_text.split("\n\n", 1)
+            new_subject = parts[0].replace("Subject:", "").strip()
+            if len(parts) > 1:
+                new_body = parts[1].strip()
+        
+        return {"subject": new_subject, "body": new_body}
 
     def classify_reply(self, text: str):
         """Analyzes a lead's reply to determine intent and extract details."""
@@ -238,26 +234,20 @@ Best,
           "intent": "MEETING_REQUESTED" | "INTERESTED" | "NEEDS_MORE_INFO" | "NOT_INTERESTED",
           "deal_size": "string or null",
           "has_pitch_deck": boolean,
-          "pitch_deck_url": "string or null"
+          "pitch_deck_url": "string or null",
+          "sentiment_score": integer (0-100),
+          "urgency_level": "HIGH" | "MEDIUM" | "LOW"
         }}
         """
-        try:
-            if self.anthropic_client:
-                response = self.anthropic_client.messages.create(
-                    model=CLAUDE_MODEL,
-                    max_tokens=512,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                text = response.content[0].text.strip()
-            else:
-                response = self.gemini_model.generate_content(prompt)
-                text = response.text.strip()
-            
-            import re
-            json_match = re.search(r'\{.*\}', text, re.DOTALL)
-            if json_match:
-                return json.loads(json_match.group(0))
-            return {"intent": "INTERESTED"}
-        except Exception as e:
-            logger.error("classification_error", error=str(e))
-            return {"intent": "INTERESTED"}
+        result_text = self._call_llm(prompt, max_tokens=512)
+        if not result_text: return {"intent": "INTERESTED"}
+
+        import re
+        json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
+        if json_match:
+            try: return json.loads(json_match.group(0))
+            except: pass
+        return {"intent": "INTERESTED"}
+
+class LLMService(EmailGenerator):
+    pass

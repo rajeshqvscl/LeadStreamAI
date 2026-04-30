@@ -23,51 +23,97 @@ def normalize_user_id(user_id: Optional[str]) -> str:
 
 def markdown_to_html(text):
     import re
-    # 1. Handle Signature Block (Keep breaks)
-    sig_match = re.search(r'(SIG_START.*?SIG_END)', text, re.DOTALL)
-    sig_html = ""
-    main_text = text
-    if sig_match:
-        sig_block = sig_match.group(1)
-        main_text = text.replace(sig_block, "[[SIG_PLACEHOLDER]]")
-        sig_html = sig_block.replace("SIG_START", "").replace("SIG_END", "").strip()
-        sig_html = sig_html.replace("\n", "<br>")
+    # 1. Strip technical markers
+    text = text.replace("SIG_START", "").replace("SIG_END", "").replace("[[SIG_PLACEHOLDER]]", "")
+    
+    # 2. Smart Signature Styling (Grey & Italic)
+    # Detect the signature block and handle it separately to preserve line breaks
+    signature_html = ""
+    sig_start_marker = "--"
+    if sig_start_marker in text:
+        parts = text.split(sig_start_marker, 1)
+        main_text = parts[0]
+        raw_sig = sig_start_marker + parts[1]
+        
+        # Style the signature block line-by-line
+        sig_lines = raw_sig.strip().split("\n")
+        formatted_sig_lines = []
+        for line in sig_lines:
+            line = line.strip()
+            if not line:
+                formatted_sig_lines.append('<div style="height: 10px;"></div>') # Exact spacing for blank lines in sig
+                continue
+                
+            disclaimer_text = "Important: This message and its attachments are intended only for the addressee"
+            if disclaimer_text in line:
+                line = f'<span style="font-size: 10px; color: #999; font-style: normal; line-height: 1.2; display: block; margin-top: 5px;">{line}</span>'
+            else:
+                line = f'<span style="color: #666; font-style: italic; display: block; margin-bottom: 2px;">{line}</span>'
+            
+            # Link styling
+            line = line.replace("Add me on LinkedIn", '<a href="https://www.linkedin.com/company/qvscl/" style="color: #0066cc; text-decoration: underline;">LinkedIn</a>')
+            line = line.replace("LinkedIn", '<a href="https://www.linkedin.com/company/qvscl/" style="color: #0066cc; text-decoration: underline;">LinkedIn</a>')
+            
+            formatted_sig_lines.append(line)
+        
+        signature_html = '<div style="margin-top: 25px; line-height: 1.4;">' + "".join(formatted_sig_lines) + '</div>'
+        text = main_text + "[[SIG_BLOCK_PLACEHOLDER]]"
 
-    # 2. Split main text into paragraphs
-    paragraphs = main_text.split("\n\n")
+    # 3. Handle Links (Markdown style [Text](URL) and Specific Keywords)
+    # First, handle markdown links like [Website](https://...)
+    text = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #0066cc; text-decoration: underline;">\1</a>', text)
+    
+    # Then handle remaining keywords if they weren't in markdown format
+    if "Website" in text and "<a" not in text:
+        text = text.replace("Website", '<a href="https://qvscl.com" style="color: #0066cc; text-decoration: underline;">Website</a>')
+    
+    if "Click here to unsubscribe" in text:
+        text = text.replace("Click here to unsubscribe", '<a href="#" style="color: #0066cc; font-size: 11px; text-decoration: underline;">Click here to unsubscribe</a>')
+
+    # 4. Standard Markdown
+    text = re.sub(r'<b>(.*?)</b>', r'__BOLD__\1__BOLD__', text)
+    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
+    text = text.replace('__BOLD__', '<b>')
+
+    # 5. Paragraph splitting with EXACT Spacing
+    paragraphs = text.split("\n\n")
     html_parts = []
     for p in paragraphs:
         p = p.strip()
         if not p: continue
-        if p == "[[SIG_PLACEHOLDER]]":
-            html_parts.append(sig_html)
+        
+        if "[[SIG_BLOCK_PLACEHOLDER]]" in p:
+            html_parts.append(signature_html)
             continue
         
-        # Check for bullet points (must be star/dash/bullet followed by space)
         lines = p.split("\n")
-        if any(re.match(r'^\s*[\*\-•]\s+', l) for l in lines):
-            list_html = "<ul>"
+        # Bullet points with exact Indentation
+        if any(re.match(r'^\s*[◦◦]\s+', l) or re.match(r'^\s{4,}[•\-\*]\s+', l) for l in lines):
+            list_html = "<ul style='margin-top: 0; margin-bottom: 12px; padding-left: 50px; list-style-type: circle;'>"
+            for l in lines:
+                l_strip = l.strip()
+                content = re.sub(r'^\s*[◦◦•\-\*]\s+', '', l_strip)
+                list_html += f"<li style='margin-bottom: 4px; line-height: 1.6; font-family: Arial, sans-serif;'>{content}</li>"
+            list_html += "</ul>"
+            html_parts.append(list_html)
+        elif any(re.match(r'^\s*[\*\-•]\s+', l) for l in lines):
+            list_html = "<ul style='margin-top: 0; margin-bottom: 15px; padding-left: 35px; list-style-type: disc;'>"
             for l in lines:
                 l_strip = l.strip()
                 match = re.match(r'^[\*\-•]\s+(.*)', l_strip)
                 if match:
                     content = match.group(1)
-                    list_html += f"<li>{content}</li>"
+                    list_html += f"<li style='margin-bottom: 6px; line-height: 1.6; font-family: Arial, sans-serif;'>{content}</li>"
                 else:
-                    list_html += f" {l_strip}" # Append to previous line
+                    list_html += f" {l_strip}"
             list_html += "</ul>"
             html_parts.append(list_html)
         else:
-            # Regular paragraph: merge single newlines, keep double
-            content = p.replace("\n", " ")
-            html_parts.append(f"<p>{content}</p>")
+            content = p.replace("\n", "<br>")
+            html_parts.append(f"<p style='margin-top: 0; margin-bottom: 18px; line-height: 1.6; font-family: Arial, sans-serif;'>{content}</p>")
     
-    final_html = "".join(html_parts)
-    # 3. Apply Bold/Italic/Links
-    final_html = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', final_html)
-    final_html = re.sub(r'\*(.*?)\*', r'<i>\1</i>', final_html)
-    final_html = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2">\1</a>', final_html)
-    return final_html
+    return "".join(html_parts)
 
 class DraftRequest(BaseModel):
     lead_id: int
@@ -179,18 +225,22 @@ def get_sender_profile(user_id: Optional[str]) -> dict:
 
 def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     """Appends a premium standardized signature and mandatory unsubscribe link."""
-    base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+    base_url = "https://api.qvscl.com"
     unsubscribe_url = f"{base_url}/api/leads/unsubscribe/{lead_id}"
     
     # Avoid double-injection
-    if "unsubscribe" in body.lower() or "SIG_START" in body:
+    # Check for unsubscribe or common sign-offs
+    body_lower = body.lower().strip()
+    sign_offs = ["thanks & regards", "sincerely", "best regards", "thanks,", "regards,"]
+    
+    if "unsubscribe" in body_lower or any(body_lower.endswith(s) for s in sign_offs):
         return body
 
-    # Strip any existing sign-offs from the AI body
+    # Strip any existing sign-offs
     sign_offs = ["Sincerely", "Best regards", "Thanks & Regards", "Thanks,", "Regards,", "--"]
     lines = body.strip().split("\n")
     clean_body_lines = lines[:]
-    for i in range(len(lines) - 1, max(-1, len(lines) - 10), -1):
+    for i in range(len(lines) - 1, max(-1, len(lines) - 5), -1):
         line = lines[i].strip()
         if any(line.startswith(s) for s in sign_offs):
             clean_body_lines = lines[:i]
@@ -199,34 +249,27 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 
     name = profile.get('full_name') or profile.get('username') or 'The Team'
     name = " ".join([p.capitalize() for p in name.split()])
-    title = profile.get('job_title') or ''
-    linkedin = profile.get('linkedin_url') or ''
-    phone = profile.get('phone') or ''
+    title = profile.get('job_title') or 'Analyst'
+    linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
+    phone = profile.get('phone') or "8527083798"
+    
+    disclaimer = "Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."
 
-    linkedin_part = f'<sig_link href="{linkedin}">LinkedIn</sig_link>' if linkedin else ''
-    
-    # Structured signature block (Premium bold-italic formatting)
-    sig_lines = [
-        "",
-        f"[Click here to unsubscribe]({unsubscribe_url})",
-        "",
-        "**--**",
-        "***Thanks & Regards,***",
-        f"***{name},***"
-    ]
-    
-    if title:
-        sig_lines.append(f"***{title},***")
-    
-    # Use user's personal LinkedIn if available, otherwise company link
-    user_linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
-    sig_lines.append(f"[***LinkedIn***]({user_linkedin})")
-    
-    if phone:
-        sig_lines.append(f"***{phone}***")
-    
-    # Use double newlines to force separate lines in Markdown/HTML renderers
-    return clean_body + "\n\n" + "\n\n".join(sig_lines)
+    # Construct a 100% PLAIN TEXT signature for the editor
+    sig_block = f"""
+Click here to unsubscribe
+
+--
+Thanks & Regards,
+{name},
+{title},
+Add me on LinkedIn
+{phone}
+
+{disclaimer}
+"""
+    return clean_body + "\n\n" + sig_block.strip()
+    return clean_body + "\n\n" + sig_block.strip()
 
 @router.post("/generate-draft")
 @router.post("/generate-email")
@@ -257,7 +300,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         profile = get_sender_profile(user_id)
         generator = EmailGenerator()
         
-        # Select template
+        #         # Select template
         if req.template_type == 'palak':
             email_data = generator.generate_palak_email(lead, sender_name=profile.get('full_name') or profile.get('username'))
             subject = email_data.get("subject", "Following up")
@@ -272,39 +315,36 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
             conn_t.close()
             
             if row_t:
-                # Reuse custom template logic
+                # FIXED replacement (No AI)
                 template_body = row_t["content"]
-                # Resolve lead fields
-                f_name = (lead.get("first_name") or "").strip() or "there"
-                l_name  = (lead.get("last_name") or "").strip()
-                full_name  = f"{f_name} {l_name}".strip()
-                company    = (lead.get("company_name") or lead.get("family_office_name") or "your organization").strip()
-                # Sender placeholders
+                f_name = (lead.get("first_name") or lead.get("name") or "there").strip().capitalize()
+                
+                # Resolving Lead fields
+                l_name = (lead.get("last_name") or "").strip()
+                full_name = f"{f_name} {l_name}".strip()
+                company = (lead.get("company_name") or lead.get("family_office_name") or "your organization").strip()
+                
+                # Resolving Sender fields
                 sender_full_name = profile.get('full_name') or profile.get('username') or "the team"
-                sender_first_name = sender_full_name.split()[0] if sender_full_name else "Team"
                 sender_title = profile.get('job_title') or ""
                 sender_phone = profile.get('phone') or ""
-                sender_linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
-
+                
                 body = template_body.replace("{{First Name}}", f_name).replace("{{first name}}", f_name).replace("{{first_name}}", f_name)
                 body = body.replace("{{Full Name}}", full_name).replace("{{full_name}}", full_name)
-                body = body.replace("{{Company Name}}", company).replace("{{company_name}}", company).replace("{{Company}}", company)
-                body = body.replace("{{Sender Name}}", sender_full_name).replace("{{Sender Title}}", sender_title).replace("{{Sender Phone}}", sender_phone).replace("{{Sender LinkedIn}}", sender_linkedin)
-
-                # Extract Subject
-                subject = f"Strategic Partnership Opportunity | QVSCL × {company}" # Default
-                if body.strip().lower().startswith("subject:"):
-                    lines = body.split("\n", 1)
-                    subject = lines[0][8:].strip()
-                    body = lines[1].strip() if len(lines) > 1 else ""
+                body = body.replace("{{Company}}", company).replace("{{company_name}}", company)
+                body = body.replace("{{Sender Name}}", sender_full_name).replace("{{Sender Title}}", sender_title).replace("{{Sender Phone}}", sender_phone)
+                
+                subject = f"Strategic Partnership Opportunity | QVSCL × {company}"
             else:
+                # Fallback to standard fixed
                 email_data = generator.generate_email(lead, sender_name=profile.get('full_name') or profile.get('username'))
-                subject = email_data.get("subject", "Following up")
-                body = email_data.get("body", "")
+                subject = email_data.get("subject")
+                body = email_data.get("body")
         else:
+            # Standard FIXED template
             email_data = generator.generate_email(lead, sender_name=profile.get('full_name') or profile.get('username'))
-            subject = email_data.get("subject", "Following up")
-            body = email_data.get("body", "")
+            subject = email_data.get("subject")
+            body = email_data.get("body")
         
         # Inject professional signature (unless custom template handled it)
         if "SIG_START" in body:
@@ -858,7 +898,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         success = send_email(
             to_email=email,
             subject=subject,
-            html_content=body.replace("\n", "<br>"),
+            html_content=markdown_to_html(body),
             from_email=sender_email,
             from_name=sender_name,
             lead_id=draft_id,
@@ -1151,7 +1191,7 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
             success = send_email(
                 to_email=lead['email'],
                 subject=subject,
-                html_content=body.replace("\n", "<br>"),
+                html_content=markdown_to_html(body),
                 from_email=sender_email,
                 from_name=sender_name,
                 lead_id=lead['id'],
@@ -1235,7 +1275,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
             success = send_email(
                 to_email=lead['email'],
                 subject=subject,
-                html_content=body.replace("\n", "<br>"),
+                html_content=markdown_to_html(body),
                 from_email=sender_email,
                 from_name=sender_name,
                 lead_id=lead['id'],
@@ -1483,7 +1523,7 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                 success = send_email(
                     to_email=lead['email'],
                     subject=subject,
-                    html_content=body.replace("\n", "<br>"),
+                    html_content=markdown_to_html(body),
                     from_email=sender_email,
                     from_name=sender_name,
                     lead_id=lead['id'],

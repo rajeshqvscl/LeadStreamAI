@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  History, Mail, CheckCircle, Clock, AlertCircle, 
+import {
+  History, Mail, CheckCircle, Clock, AlertCircle,
   ChevronRight, ArrowRight, Loader2, Search,
   Zap, Calendar, User, Linkedin, ExternalLink, Rocket
 } from 'lucide-react';
@@ -47,7 +47,7 @@ const Followups = () => {
     setTimeout(() => setNotification(null), 5000);
   };
 
-  const filteredFollowups = followups.filter(f => 
+  const filteredFollowups = followups.filter(f =>
     f.first_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     f.last_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     f.company_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -67,8 +67,9 @@ const Followups = () => {
     switch (stage) {
       case 0: return 'Initial Sent';
       case 1: return 'Day 2 Follow-up';
-      case 2: return 'Day 4 Follow-up';
-      default: return 'Unknown';
+      case 2: return 'Day 5 Follow-up';
+      case 3: return 'Day 10 Follow-up';
+      default: return 'Completed';
     }
   };
 
@@ -106,12 +107,15 @@ const Followups = () => {
 
       <div className="max-w-[1600px] mx-auto px-8 py-10">
         {/* Sequence Overview Bar */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
           {[
+
             { label: 'Active Sequences', value: followups.length, icon: Zap, color: 'text-indigo-400', bg: 'bg-indigo-400/10' },
             { label: 'Day 2 Nudges', value: followups.filter(f => f.followup_stage === 0).length, icon: Clock, color: 'text-blue-400', bg: 'bg-blue-400/10' },
-            { label: 'Day 4 Nudges', value: followups.filter(f => f.followup_stage === 1).length, icon: Calendar, color: 'text-emerald-400', bg: 'bg-emerald-400/10' }
+            { label: 'Day 5 Nudges', value: followups.filter(f => f.followup_stage === 1).length, icon: Calendar, color: 'text-amber-400', bg: 'bg-amber-400/10' },
+            { label: 'Day 10 Nudges', value: followups.filter(f => f.followup_stage === 2).length, icon: History, color: 'text-emerald-400', bg: 'bg-emerald-400/10' }
           ].map((stat, i) => (
+
             <div key={i} className="bg-[#0f172a] border border-white/[0.05] rounded-2xl p-6 flex items-center justify-between group hover:border-indigo-500/20 transition-all duration-500">
               <div className="space-y-1">
                 <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</p>
@@ -143,7 +147,7 @@ const Followups = () => {
         ) : (
           <div className="grid grid-cols-1 gap-4">
             {filteredFollowups.map((lead) => (
-              <div 
+              <div
                 key={lead.id}
                 className="bg-[#0f172a] border border-white/[0.05] rounded-2xl p-6 transition-all duration-300 hover:bg-[#131722] hover:border-indigo-500/20 group"
               >
@@ -181,13 +185,13 @@ const Followups = () => {
                     <div className="space-y-1">
                       <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">Next Step</p>
                       <p className="text-[12px] font-black text-white italic">
-                        {lead.followup_stage === 0 ? "Automatic Day 2 Nudge" : "Automatic Day 4 Nudge"}
+                        {lead.followup_stage === 0 ? "Automatic Day 2 Nudge" : lead.followup_stage === 1 ? "Automatic Day 5 Nudge" : "Final Day 10 Nudge"}
                       </p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <button 
+                    <button
                       onClick={() => navigate(`/leads/edit/${lead.id}`)}
                       className="p-3 bg-[#1a2235] text-slate-400 rounded-xl border border-white/[0.05] hover:text-white hover:border-white/20 transition-all shadow-sm"
                       title="View Thread"
@@ -195,7 +199,7 @@ const Followups = () => {
                       <Mail className="w-4 h-4" />
                     </button>
                     {lead.linkedin_url && (
-                      <a 
+                      <a
                         href={lead.linkedin_url}
                         target="_blank"
                         rel="noreferrer"
@@ -221,9 +225,8 @@ const Followups = () => {
 
       {/* Notification Toast */}
       {notification && (
-        <div className={`fixed bottom-8 left-1/2 -translate-x-1/2 px-8 py-4 rounded-2xl border backdrop-blur-xl shadow-2xl flex items-center gap-4 z-[100] animate-in fade-in slide-in-from-bottom-5 duration-500 ${
-          notification.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'
-        }`}>
+        <div className={`fixed bottom-8 left-1/2 -translate-x-1/2 px-8 py-4 rounded-2xl border backdrop-blur-xl shadow-2xl flex items-center gap-4 z-[100] animate-in fade-in slide-in-from-bottom-5 duration-500 ${notification.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'
+          }`}>
           {notification.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
           <p className="text-sm font-black uppercase tracking-wide italic">{notification.message}</p>
         </div>

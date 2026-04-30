@@ -198,18 +198,27 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             print(f"Warning: RAG error: {rag_err}")
 
         # Step 2: Update Lead Status (Global Search)
+        # If not interested, we close the lead automatically.
+        final_status = 'REPLIED'
+        if intent == 'NOT_INTERESTED':
+            final_status = 'CLOSED'
+            
         cur.execute("""
             UPDATE leads_raw 
             SET is_responded = TRUE, 
-                email_status = 'REPLIED',
+                email_status = %s,
                 reply_intent = %s,
                 deal_size = %s,
                 pitch_deck_url = %s,
                 rag_advice = %s,
-                updated_at = NOW()
+                sentiment_score = %s,
+                urgency_level = %s,
+                updated_at = NOW(),
+                followup_status = 'STOPPED'
             WHERE LOWER(email) = LOWER(%s)
             RETURNING id, first_name, last_name, user_id
-        """, (intent, deal_size, pitch_deck_url, rag_advice, sender_email))
+        """, (final_status, intent, deal_size, pitch_deck_url, rag_advice, ai_data.get("sentiment_score"), ai_data.get("urgency_level"), sender_email))
+
         
         lead = cur.fetchone()
         
@@ -292,7 +301,8 @@ def get_inbound_deals(user_id: Optional[str] = Header(None, alias="X-User-Id")):
             query = """
                 SELECT id, first_name, last_name, email, company_name, sector,
                        reply_intent, deal_size, pitch_deck_url, rag_advice, updated_at,
-                       meeting_time, meeting_link, is_responded, linkedin_url
+                       meeting_time, meeting_link, is_responded, linkedin_url,
+                       sentiment_score, urgency_level
                 FROM leads_raw
                 WHERE is_responded = TRUE
                 ORDER BY updated_at DESC
@@ -302,12 +312,14 @@ def get_inbound_deals(user_id: Optional[str] = Header(None, alias="X-User-Id")):
             query = """
                 SELECT id, first_name, last_name, email, company_name, sector,
                        reply_intent, deal_size, pitch_deck_url, rag_advice, updated_at,
-                       meeting_time, meeting_link, is_responded, linkedin_url
+                       meeting_time, meeting_link, is_responded, linkedin_url,
+                       sentiment_score, urgency_level
                 FROM leads_raw
                 WHERE user_id = %s AND is_responded = TRUE
                 ORDER BY updated_at DESC
             """
             cur.execute(query, (uid,))
+
             
         leads = cur.fetchall()
         return [dict(l) for l in leads]

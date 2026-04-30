@@ -18,8 +18,9 @@ async def maintenance_loop():
     from app.services.google_service import renew_all_gmail_watches
     while True:
         try:
-            logger.info("Running background maintenance: Renewing Gmail watches")
-            renew_all_gmail_watches()
+            # logger.info("Running background maintenance: Renewing Gmail watches")
+            # renew_all_gmail_watches()
+            pass
         except Exception as e:
             logger.error(f"Maintenance loop error: {e}")
         await asyncio.sleep(86400) # Run every 24 hours
@@ -31,9 +32,9 @@ async def scheduler_loop():
     while True:
         try:
             check_scheduled_emails()
-            process_outreach_sequences()
-            # New Active Polling for lead replies
-            poll_all_users_for_replies()
+            # process_outreach_sequences()
+            # poll_all_users_for_replies()
+            pass
         except Exception:
             pass
         await asyncio.sleep(60)
@@ -129,4 +130,5 @@ app.include_router(admin.router, prefix="/api", tags=["admin"])
 app.include_router(companies.router, prefix="/api", tags=["companies"])
 app.include_router(rocketreach.router, prefix="/api", tags=["rocketreach"])
 app.include_router(gmail.router, prefix="/api", tags=["gmail"])
+app.include_router(intelligence.router, prefix="/api/intelligence", tags=["intelligence"])
 app.include_router(intelligence.router, prefix="/api/intelligence", tags=["intelligence"])

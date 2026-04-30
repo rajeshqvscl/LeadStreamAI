@@ -255,15 +255,43 @@ const InboundDeals = () => {
                           <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-tight">{deal.sector || 'Unknown Sector'}</div>
                         </td>
 
-                        {/* Intent */}
+                        {/* Intent & Urgency */}
                         <td className="px-6 py-5">
                           <div className="flex flex-col items-start gap-2">
-                            <div className={`inline-flex items-center px-3 py-1 rounded-lg border text-[9px] font-black uppercase tracking-widest ${getStatusColor(deal.reply_intent)}`}>
-                              {getStatusLabel(deal.reply_intent)}
+                            <div className="flex items-center gap-2">
+                              <div className={`inline-flex items-center px-3 py-1 rounded-lg border text-[9px] font-black uppercase tracking-widest ${getStatusColor(deal.reply_intent)}`}>
+                                {getStatusLabel(deal.reply_intent)}
+                              </div>
+                              {deal.urgency_level === 'HIGH' && (
+                                <div className="px-2 py-1 bg-red-500/10 border border-red-500/20 rounded-lg text-[8px] font-black text-red-500 uppercase tracking-widest animate-pulse">
+                                  Urgent
+                                </div>
+                              )}
+                              {deal.urgency_level === 'MEDIUM' && (
+                                <div className="px-2 py-1 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[8px] font-black text-amber-500 uppercase tracking-widest">
+                                  Moderate
+                                </div>
+                              )}
                             </div>
+                            
+                            {deal.sentiment_score !== null && (
+                              <div className="w-full max-w-[120px] space-y-1">
+                                <div className="flex justify-between text-[8px] font-black text-slate-500 uppercase tracking-tighter">
+                                  <span>Sentiment</span>
+                                  <span>{deal.sentiment_score}%</span>
+                                </div>
+                                <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+                                  <div 
+                                    className={`h-full rounded-full transition-all duration-1000 ${deal.sentiment_score > 70 ? 'bg-emerald-500' : deal.sentiment_score > 40 ? 'bg-amber-500' : 'bg-red-500'}`}
+                                    style={{ width: `${deal.sentiment_score}%` }}
+                                  />
+                                </div>
+                              </div>
+                            )}
+
                             {hasRag && (
-                              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-violet-500/10 border border-violet-500/20 rounded-md text-[8px] font-black text-violet-400 uppercase tracking-widest">
-                                <Brain className="w-2.5 h-2.5" /> Pitch Deck Attached
+                              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-violet-500/10 border border-violet-500/20 rounded-md text-[8px] font-black text-violet-400 uppercase tracking-widest mt-1">
+                                <Brain className="w-2.5 h-2.5" /> Intelligence Applied
                               </div>
                             )}
                           </div>
@@ -288,8 +316,11 @@ const InboundDeals = () => {
                         {/* Actions */}
                         <td className="px-6 py-5">
                           <div className="flex flex-col gap-2">
-                            {/* Meeting Schedule Button */}
-                            {deal.meeting_time ? (
+                            {deal.reply_intent === 'NOT_INTERESTED' ? (
+                               <div className="px-3 py-1.5 bg-slate-800/50 border border-white/5 rounded-lg text-[9px] font-black text-slate-500 uppercase tracking-widest text-center opacity-60">
+                                 Lead Closed
+                               </div>
+                            ) : deal.meeting_time ? (
                               <div className="flex items-center gap-2">
                                 <div className="px-2 py-1 bg-blue-500/10 border border-blue-500/20 rounded-md text-[8px] font-black text-blue-500 uppercase">
                                   Meet: {(() => { const m = formatIST(deal.meeting_time); return m.date; })()}
@@ -308,6 +339,7 @@ const InboundDeals = () => {
                             )}
                           </div>
                         </td>
+
                       </tr>
                     </React.Fragment>
                   );
