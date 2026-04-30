@@ -256,6 +256,7 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     disclaimer = "Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."
 
     # Construct a 100% PLAIN TEXT signature for the editor
+    # We use markdown format for the LinkedIn link so the renderer catches it
     sig_block = f"""
 Click here to unsubscribe
 
@@ -263,7 +264,7 @@ Click here to unsubscribe
 Thanks & Regards,
 {name},
 {title},
-Add me on LinkedIn
+[LinkedIn]({linkedin})
 {phone}
 
 {disclaimer}
@@ -302,7 +303,11 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         
         #         # Select template
         if req.template_type == 'palak':
-            email_data = generator.generate_palak_email(lead, sender_name=profile.get('full_name') or profile.get('username'))
+            email_data = generator.generate_palak_email(
+                lead, 
+                sender_name=profile.get('full_name') or profile.get('username'),
+                sender_linkedin=profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
+            )
             subject = email_data.get("subject", "Following up")
             body = email_data.get("body", "")
         elif req.template_type != 'standard':
@@ -329,20 +334,30 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 sender_title = profile.get('job_title') or ""
                 sender_phone = profile.get('phone') or ""
                 
+                sender_linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
+                
                 body = template_body.replace("{{First Name}}", f_name).replace("{{first name}}", f_name).replace("{{first_name}}", f_name)
                 body = body.replace("{{Full Name}}", full_name).replace("{{full_name}}", full_name)
                 body = body.replace("{{Company}}", company).replace("{{company_name}}", company)
-                body = body.replace("{{Sender Name}}", sender_full_name).replace("{{Sender Title}}", sender_title).replace("{{Sender Phone}}", sender_phone)
+                body = body.replace("{{Sender Name}}", sender_full_name).replace("{{Sender Title}}", sender_title).replace("{{Sender Phone}}", sender_phone).replace("{{Sender Linkedin}}", sender_linkedin)
                 
                 subject = f"Strategic Partnership Opportunity | QVSCL × {company}"
             else:
                 # Fallback to standard fixed
-                email_data = generator.generate_email(lead, sender_name=profile.get('full_name') or profile.get('username'))
+                email_data = generator.generate_email(
+                    lead, 
+                    sender_name=profile.get('full_name') or profile.get('username'),
+                    sender_linkedin=profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
+                )
                 subject = email_data.get("subject")
                 body = email_data.get("body")
         else:
             # Standard FIXED template
-            email_data = generator.generate_email(lead, sender_name=profile.get('full_name') or profile.get('username'))
+            email_data = generator.generate_email(
+                lead, 
+                sender_name=profile.get('full_name') or profile.get('username'),
+                sender_linkedin=profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
+            )
             subject = email_data.get("subject")
             body = email_data.get("body")
         

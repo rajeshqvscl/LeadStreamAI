@@ -104,7 +104,7 @@ class EmailGenerator:
         
         return None
 
-    def generate_email(self, lead: dict, sender_name: str = "the team"):
+    def generate_email(self, lead: dict, sender_name: str = "the team", sender_linkedin: str = "https://www.linkedin.com/company/qvscl/"):
         # Fixed Template (Standard/Yashika)
         first_name = (lead.get('first_name') or lead.get('name') or "there").strip().capitalize()
         
@@ -159,7 +159,7 @@ A <b>one-stop, full-stack renewable energy platform</b> addressing access, affor
 
 If this aligns with your portfolio focus and does not conflict with it, I’d be happy to share the full presentation or connect over a virtual meeting at your convenience. I have attached the QVSCL Profile. You may also share your investment thesis with us so we can send relevant deal flow in the future.
 
-For more details about our services: Website | Linkedin
+For more details about our services: [Website](https://qvscl.com) | [Linkedin]({sender_linkedin})
 
 Looking forward to your response.
 """
@@ -168,9 +168,8 @@ Looking forward to your response.
             "body": body
         }
 
-    def generate_palak_email(self, lead: dict, sender_name: str = "the team"):
-        # Exactly the same fixed template for now, or could be a variation
-        return self.generate_email(lead, sender_name)
+    def generate_palak_email(self, lead: dict, sender_name: str = "Palak", sender_linkedin: str = "https://linkedin.com/in/palak"):
+        return self.generate_email(lead, sender_name, sender_linkedin)
 
     def generate_followup(self, lead_name: str, original_content: str, stage: int):
         """Generates a personalized follow-up email with multi-LLM fallback."""
