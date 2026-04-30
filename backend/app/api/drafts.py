@@ -26,8 +26,11 @@ def markdown_to_html(text):
     # 1. Strip technical markers
     text = text.replace("SIG_START", "").replace("SIG_END", "").replace("[[SIG_PLACEHOLDER]]", "")
     
-    # 2. Smart Signature Styling (Grey & Italic)
-    # Detect the signature block and handle it separately to preserve line breaks
+    # 2. Handle Links (Markdown style [Text](URL) and Specific Keywords)
+    # Apply to whole text first so it catches links in both body and signature
+    text = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #0066cc; text-decoration: underline;">\1</a>', text)
+    
+    # 3. Smart Signature Styling (Grey & Italic)
     signature_html = ""
     sig_start_marker = "--"
     if sig_start_marker in text:
@@ -51,26 +54,20 @@ def markdown_to_html(text):
                 line = f'<span style="color: #666; font-style: italic; display: block; margin-bottom: 2px;">{line}</span>'
             
             # Link styling
-            line = line.replace("Add me on LinkedIn", '<a href="https://www.linkedin.com/company/qvscl/" style="color: #0066cc; text-decoration: underline;">LinkedIn</a>')
-            line = line.replace("LinkedIn", '<a href="https://www.linkedin.com/company/qvscl/" style="color: #0066cc; text-decoration: underline;">LinkedIn</a>')
-            
+            # General keywords handled after signature processing to avoid conflicts
             formatted_sig_lines.append(line)
         
         signature_html = '<div style="margin-top: 25px; line-height: 1.4;">' + "".join(formatted_sig_lines) + '</div>'
         text = main_text + "[[SIG_BLOCK_PLACEHOLDER]]"
 
-    # 3. Handle Links (Markdown style [Text](URL) and Specific Keywords)
-    # First, handle markdown links like [Website](https://...)
-    text = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #0066cc; text-decoration: underline;">\1</a>', text)
-    
-    # Then handle remaining keywords if they weren't in markdown format
+    # 4. Handle remaining keywords if they weren't in markdown format
     if "Website" in text and "<a" not in text:
         text = text.replace("Website", '<a href="https://qvscl.com" style="color: #0066cc; text-decoration: underline;">Website</a>')
     
     if "Click here to unsubscribe" in text:
         text = text.replace("Click here to unsubscribe", '<a href="#" style="color: #0066cc; font-size: 11px; text-decoration: underline;">Click here to unsubscribe</a>')
 
-    # 4. Standard Markdown
+    # 5. Standard Markdown
     text = re.sub(r'<b>(.*?)</b>', r'__BOLD__\1__BOLD__', text)
     text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
