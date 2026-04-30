@@ -648,8 +648,9 @@ def get_unified_inbox(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         return {"messages": [], "connected": False}
     
     try:
-        # Search for latest 25 messages (Optimal for reload speed)
-        results = service.users().messages().list(userId='me', maxResults=25).execute()
+        # Search for latest 25 INCOMING messages (label:INBOX and not from the user)
+        # This prevents sent messages and self-correspondence from cluttering the view
+        results = service.users().messages().list(userId='me', q='label:INBOX -from:me', maxResults=25).execute()
         messages_meta = results.get('messages', [])
         
         full_messages = []
@@ -662,13 +663,23 @@ def get_unified_inbox(user_id: Optional[str] = Header(None, alias="X-User-Id")):
             subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), "No Subject")
             date = next((h['value'] for h in headers if h['name'].lower() == 'date'), "")
             
+            # Clean Snippet: Strip "Subject:" from the start of the snippet if Gmail included it
+            raw_snippet = msg.get('snippet', '')
+            clean_snippet = raw_snippet
+            if raw_snippet.lower().startswith("subject:"):
+                # Try to skip the subject line part of the snippet
+                # Snippets often look like "Subject: Text... Actual Body Text"
+                # We'll try to find where the subject might end (looking for common body starts or just skipping the length)
+                # For safety, we'll just remove the "Subject:" prefix and let it be
+                clean_snippet = raw_snippet.replace("Subject: ", "", 1).replace("subject: ", "", 1)
+            
             full_messages.append({
                 'id': msg['id'],
                 'threadId': msg['threadId'],
                 'from': sender,
                 'subject': subject,
                 'date': date,
-                'snippet': msg.get('snippet', ''),
+                'snippet': clean_snippet,
                 'is_read': 'UNREAD' not in msg.get('labelIds', [])
             })
         

@@ -364,6 +364,22 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         else:
             body_with_sig = inject_signature(body, profile, req.lead_id)
 
+        # --- NEW: Deduplicate Subject Lines ---
+        # If the template body already has a "Subject:" line, use it as the official subject
+        # and REMOVE it from the body to prevent double-subject issues.
+        if "Subject: " in body_with_sig:
+            try:
+                # Extract first line if it starts with Subject:
+                body_lines = body_with_sig.split("\n")
+                if "Subject: " in body_lines[0]:
+                    subject = body_lines[0].replace("Subject: ", "").strip()
+                    # Keep everything EXCEPT the subject line
+                    body_with_sig = "\n".join(body_lines[1:]).strip()
+            except Exception as e:
+                logger.error(f"Subject extraction error: {e}")
+                pass
+        
+        # RE-GENERATE html_body AFTER deduplication
         html_body = markdown_to_html(body_with_sig)
         email_content = f"Subject: {subject}\n\n{body_with_sig}"
         
@@ -530,10 +546,18 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
         # --- NEW: Extract Subject from template if it exists ---
         final_subject = subject  # Default
         final_body = body
-        if body.strip().lower().startswith("subject:"):
-            lines = body.split("\n", 1)
-            final_subject = lines[0][8:].strip() # Skip "Subject: "
-            final_body = lines[1].strip() if len(lines) > 1 else ""
+        if "subject:" in body.lower():
+            try:
+                body_lines = body.split("\n")
+                if "subject:" in body_lines[0].lower():
+                    # Extract the subject (skip "Subject: " part)
+                    subj_line = body_lines[0]
+                    if ":" in subj_line:
+                        final_subject = subj_line.split(":", 1)[1].strip()
+                    # Keep everything EXCEPT the subject line
+                    final_body = "\n".join(body_lines[1:]).strip()
+            except Exception as e:
+                logger.error(f"Template subject extraction error: {e}")
 
         # Inject logged-in user's signature ONLY if the template doesn't already embed one
         profile = get_sender_profile(user_id)
@@ -543,8 +567,9 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
         else:
             body_with_sig = inject_signature(final_body, profile, req.lead_id)
 
+        # RE-GENERATE html_body AFTER deduplication
         html_body = markdown_to_html(body_with_sig)
-
+        
         # Full content for local DB storage
         email_content = f"Subject: {final_subject}\n\n{body_with_sig}"
 

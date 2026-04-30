@@ -14,7 +14,6 @@ import api from '../services/api';
 const DraftTemplatePicker = ({ isOpen, onClose, selectedCount, onGenerate }) => {
   const [customTemplates, setCustomTemplates] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState('ai');
-  const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
     api.get('/api/custom-draft-templates')
@@ -29,13 +28,8 @@ const DraftTemplatePicker = ({ isOpen, onClose, selectedCount, onGenerate }) => 
 
   if (!isOpen) return null;
 
-  const handleGenerate = async () => {
-    setIsGenerating(true);
-    try {
-      await onGenerate(selectedTemplate);
-    } finally {
-      setIsGenerating(false);
-    }
+  const handleGenerate = () => {
+    onGenerate(selectedTemplate);
   };
 
   return (
@@ -110,13 +104,9 @@ const DraftTemplatePicker = ({ isOpen, onClose, selectedCount, onGenerate }) => 
             </button>
             <button
               onClick={handleGenerate}
-              disabled={isGenerating}
-              className="flex-[2] py-3 px-6 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer transition-all"
+              className="flex-[2] py-3 px-6 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 cursor-pointer transition-all"
             >
-              {isGenerating
-                ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</>
-                : <><Sparkles className="w-4 h-4" /> Generate {selectedCount} Draft{selectedCount !== 1 ? 's' : ''}</>
-              }
+              <Sparkles className="w-4 h-4" /> Generate {selectedCount} Draft{selectedCount !== 1 ? 's' : ''}
             </button>
           </div>
         </div>
