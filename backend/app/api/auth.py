@@ -301,8 +301,8 @@ def google_link(request: Request, user_id: str = Header(..., alias="X-User-Id"))
     # This generates flow.code_verifier internally.
     authorization_url, _ = flow.authorization_url(
         access_type='offline',
-        include_granted_scopes='true',
-        prompt='select_account consent'
+        prompt='consent select_account',
+        include_granted_scopes='false'
     )
     
     # Bundle user_id and code_verifier into a tiny state string
@@ -313,8 +313,8 @@ def google_link(request: Request, user_id: str = Header(..., alias="X-User-Id"))
     # Regenerate URL with our bundled state
     authorization_url, _ = flow.authorization_url(
         access_type='offline',
-        include_granted_scopes='true',
-        prompt='select_account consent',
+        prompt='consent select_account',
+        include_granted_scopes='false',
         state=state_str
     )
     

@@ -32,6 +32,7 @@ import SectorFAQ from './pages/SectorFAQ';
 import GmailDrafts from './pages/GmailDrafts';
 import GmailSent from './pages/GmailSent';
 import DataExport from './pages/DataExport';
+import AdminDashboard from './pages/AdminDashboard';
 
 const ProtectedRoute = ({ children }) => {
   const token = localStorage.getItem('token') || localStorage.getItem('token_admin');
@@ -119,6 +120,7 @@ function App() {
           <Route path="gmail-drafts" element={<GmailDrafts />} />
           <Route path="gmail-sent" element={<GmailSent />} />
           <Route path="export" element={<DataExport />} />
+          <Route path="admin-intelligence" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
           <Route path="history" element={<AdminRoute><History /></AdminRoute>} />
         </Route>
 

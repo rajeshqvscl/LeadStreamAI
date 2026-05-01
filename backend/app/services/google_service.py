@@ -17,6 +17,7 @@ SCOPES = [
     'https://www.googleapis.com/auth/gmail.modify',
     'https://www.googleapis.com/auth/userinfo.email',
     'https://www.googleapis.com/auth/calendar.events',
+    'https://www.googleapis.com/auth/drive.file',
     'openid'
 ]
 
@@ -65,12 +66,23 @@ def get_user_credentials(user_id: int) -> Optional[Credentials]:
             token_uri="https://oauth2.googleapis.com/token",
             client_id=os.getenv("GOOGLE_CLIENT_ID"),
             client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
-            scopes=SCOPES
+            scopes=SCOPES # Explicitly request our full scope set during refresh
         )
         
         # Check if expired and refresh if necessary
         if creds.expired or (creds.expiry and creds.expiry < datetime.datetime.now(datetime.timezone.utc)):
-            creds.refresh(Request())
+            try:
+                creds.refresh(Request())
+            except Exception as e:
+                # If refresh fails due to scope mismatch (invalid_scope), try refreshing with 
+                # a minimal scope set that we know they likely have
+                if "invalid_scope" in str(e).lower():
+                    print(f"CRITICAL: Scope mismatch for user {user_id}. Re-authentication required.")
+                    # Do not downgrade. Let the application handle the 401/403.
+                    raise e
+                else:
+                    raise e
+
             # Save new tokens
             cur.execute("""
                 UPDATE users 
@@ -98,6 +110,12 @@ def get_calendar_service(user_id: int):
     if not creds:
         return None
     return build('calendar', 'v3', credentials=creds, static_discovery=False)
+
+def get_drive_service(user_id: int):
+    creds = get_user_credentials(user_id)
+    if not creds:
+        return None
+    return build('drive', 'v3', credentials=creds, static_discovery=False)
 
 def register_gmail_watch(user_id: int):
     """Call Gmail watch() API for a specific user ID."""
@@ -358,24 +376,30 @@ def get_gmail_message(user_id: int, message_id: str):
                 'is_restricted': False
             }
         except Exception as full_e:
-            is_restricted = "Metadata scope" in str(full_e)
-            print(f"DEBUG: Format Full failed for {message_id}: {full_e} (Restricted: {is_restricted})")
+            error_str = str(full_e).lower()
+            # Catch 403 Forbidden, Metadata restrictions, and Insufficient Permissions
+            is_restricted = "metadata scope" in error_str or "insufficient permission" in error_str or "403" in error_str
+            print(f"DEBUG: Gmail content access failed for {message_id}: {full_e} (Restricted: {is_restricted})")
             
-            # Fallback to metadata for headers and snippet
-            meta = service.users().messages().get(userId='me', id=message_id, format='metadata').execute()
-            headers = meta.get('payload', {}).get('headers', [])
-            snippet = meta.get('snippet', '')
-            
-            return {
-                'id': message_id,
-                'subject': next((h['value'] for h in headers if h['name'].lower() == 'subject'), "No Subject"),
-                'from': next((h['value'] for h in headers if h['name'].lower() == 'from'), "Unknown Sender"),
-                'to': next((h['value'] for h in headers if h['name'].lower() == 'to'), "No Recipient"),
-                'date': next((h['value'] for h in headers if h['name'].lower() == 'date'), ""),
-                'snippet': snippet,
-                'body': f" (Intelligence Preview) — {snippet}" if snippet else "No message content found.",
-                'is_restricted': is_restricted
-            }
+            # Fallback to metadata for headers and snippet so the UI doesn't completely crash
+            try:
+                meta = service.users().messages().get(userId='me', id=message_id, format='metadata').execute()
+                headers = meta.get('payload', {}).get('headers', [])
+                snippet = meta.get('snippet', '')
+                
+                return {
+                    'id': message_id,
+                    'subject': next((h['value'] for h in headers if h['name'].lower() == 'subject'), "No Subject"),
+                    'from': next((h['value'] for h in headers if h['name'].lower() == 'from'), "Unknown Sender"),
+                    'to': next((h['value'] for h in headers if h['name'].lower() == 'to'), "No Recipient"),
+                    'date': next((h['value'] for h in headers if h['name'].lower() == 'date'), ""),
+                    'snippet': snippet,
+                    'body': f" (Security Restriction) — {snippet}" if snippet else "Full message body restricted by Google.",
+                    'is_restricted': True # Force True if we hit the catch for scope reasons
+                }
+            except:
+                # Total failure (likely token invalid)
+                return { 'id': message_id, 'is_restricted': True, 'body': "Error: Insufficient Google Permissions. Please reconnect your account." }
     except Exception as e:
         print(f"Error in get_gmail_message for {message_id}: {e}")
         return None
@@ -506,6 +530,49 @@ def create_calendar_event(user_id: int, lead_email: str, summary: str, descripti
         }
     except Exception as e:
         print(f"Error creating calendar event for user {user_id}: {e}")
+        return None
+
+def upload_to_drive(user_id: int, filename: str, content: bytes, folder_name: str = "LeadStreamAI_Decks"):
+    """Uploads a file to the user's Google Drive and returns a public sharing link."""
+    service = get_drive_service(user_id)
+    if not service:
+        return None
+        
+    try:
+        # 1. Find or Create Folder
+        query = f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+        results = service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
+        folders = results.get('files', [])
+        
+        if not folders:
+            folder_metadata = {'name': folder_name, 'mimeType': 'application/vnd.google-apps.folder'}
+            folder = service.files().create(body=folder_metadata, fields='id').execute()
+            folder_id = folder.get('id')
+        else:
+            folder_id = folders[0].get('id')
+            
+        # 2. Upload File
+        from googleapiclient.http import MediaIoBaseUpload
+        import io
+        
+        file_metadata = {'name': filename, 'parents': [folder_id]}
+        media = MediaIoBaseUpload(io.BytesIO(content), mimetype='application/pdf', resumable=True)
+        
+        file = service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
+        file_id = file.get('id')
+        
+        # 3. Make file accessible (anyone with the link)
+        service.permissions().create(
+            fileId=file_id,
+            body={'type': 'anyone', 'role': 'viewer'}
+        ).execute()
+        
+        # Get the webViewLink
+        updated_file = service.files().get(fileId=file_id, fields='webViewLink').execute()
+        return updated_file.get('webViewLink')
+        
+    except Exception as e:
+        print(f"Error uploading to Drive for user {user_id}: {e}")
         return None
 
 def renew_all_gmail_watches():

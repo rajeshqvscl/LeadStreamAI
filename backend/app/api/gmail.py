@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException, Header, Body
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import base64
 import json
 import os
@@ -13,7 +13,13 @@ from app.services.google_service import (
 from app.services.llm_services import EmailGenerator
 from app.services.email_service import send_email
 import datetime
+import urllib3
 import logging
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# LAST SYNC: 2026-05-01 21:38 (Force Reload)
+RAG_TIMEOUT = 300
+RAG_URL = "https://rag-sys-gz59.onrender.com"
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +27,31 @@ def normalize_user_id(user_id: Optional[str]) -> str:
     """Normalizes the user ID from the header to a valid database ID."""
     if not user_id or user_id.strip() == "" or user_id.lower() == "admin":
         return "1"
+    
+    # If it's already a numeric ID, return it
+    if user_id.isdigit():
+        return user_id
+        
+    # If it's a username, email, or full name (like 'sravanthi'), resolve it to an ID
+    try:
+        from app.database import get_db_connection
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Check username OR email OR full_name
+        cur.execute("""
+            SELECT id FROM users 
+            WHERE LOWER(username) = LOWER(%s) 
+            OR LOWER(email) = LOWER(%s)
+            OR LOWER(full_name) = LOWER(%s)
+        """, (user_id, user_id, user_id))
+        res = cur.fetchone()
+        cur.close()
+        conn.close()
+        if res:
+            return str(res[0])
+    except Exception as e:
+        print(f"Error resolving user identity {user_id}: {e}")
+        
     return user_id
 
 class AIRefineRequest(BaseModel):
@@ -145,6 +176,37 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         attachments = extract_attachments(service, msg_id, payload)
         pdf_attachment = next((att for att in attachments if att['filename'].lower().endswith('.pdf')), None)
 
+        # --- NEW: SELECTIVE ANALYSIS ---
+        # Only perform heavy RAG/Intelligence if this email belongs to an existing lead in our outreach pipeline
+        conn_check = get_db_connection()
+        cur_check = conn_check.cursor()
+        cur_check.execute("SELECT id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND user_id = %s", (sender_email, user_id))
+        lead_exists = cur_check.fetchone()
+        cur_check.close()
+        conn_check.close()
+        
+        if not lead_exists:
+            print(f"DEBUG: Auto-creating new lead for {sender_email}")
+            # Extract name from "From" header (e.g. "John Doe <john@site.com>")
+            full_name = sender.split('<')[0].strip() if '<' in sender else sender_email.split('@')[0]
+            name_parts = full_name.split(' ', 1)
+            f_name = name_parts[0]
+            l_name = name_parts[1] if len(name_parts) > 1 else ""
+            
+            conn_new = get_db_connection()
+            cur_new = conn_new.cursor()
+            cur_new.execute("""
+                INSERT INTO leads_raw (email, first_name, last_name, user_id, is_responded, email_status, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, FALSE, 'REPLIED', NOW(), NOW())
+                RETURNING id
+            """, (sender_email, f_name, l_name, user_id))
+            conn_new.commit()
+            lead_id = cur_new.fetchone()['id']
+            cur_new.close()
+            conn_new.close()
+        else:
+            lead_id = lead_exists['id']
+            
         # Step 1: AI Intent Classification
         print(f"DEBUG: Classifying reply from {sender_email}...")
         llm = EmailGenerator()
@@ -153,71 +215,144 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         deal_size = ai_data.get("deal_size")
         pitch_deck_url = ai_data.get("pitch_deck_url")
         
-        # If we got an actual PDF attachment, override pitch_deck_url to point to the local static server
+        # If we got an actual PDF attachment, upload to Google Drive
         if pdf_attachment:
-            import os
-            os.makedirs("static/pitch_decks", exist_ok=True)
-            safe_filename = "".join(c for c in pdf_attachment['filename'] if c.isalnum() or c in "._-").replace(" ", "_")
-            file_path = f"static/pitch_decks/{msg_id}_{safe_filename}"
-            with open(file_path, "wb") as f:
-                f.write(pdf_attachment['data'])
-            
-            # Use dynamic backend URL instead of localhost
-            base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
-            pitch_deck_url = f"{base_url}/{file_path}"
+            from app.services.google_service import upload_to_drive
+            # We use the user_id of the person who owns this inbox
+            drive_link = upload_to_drive(int(user_id), pdf_attachment['filename'], pdf_attachment['data'])
+            if drive_link:
+                pitch_deck_url = drive_link
+                print(f"DEBUG: Pitch deck uploaded to Drive: {drive_link}")
+            else:
+                # Fallback to local if drive fails
+                import os
+                os.makedirs("static/pitch_decks", exist_ok=True)
+                safe_filename = "".join(c for c in pdf_attachment['filename'] if c.isalnum() or c in "._-").replace(" ", "_")
+                file_path = f"static/pitch_decks/{msg_id}_{safe_filename}"
+                with open(file_path, "wb") as f:
+                    f.write(pdf_attachment['data'])
+                base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+                pitch_deck_url = f"{base_url}/{file_path}"
             
         print(f"DEBUG: AI detected intent: {intent}, size: {deal_size}, deck: {pitch_deck_url}")
         
-        # Step 1b: RAG Intelligence Enhancement (New)
+        # --- STRICT RAG ENHANCEMENT (STABLE SESSION) ---
         rag_advice = None
+        rag_category = None
+        rag_intel = None
         try:
             import requests
-            import io
-            rag_url = "https://rag-sys-gz59.onrender.com"
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.retry import Retry
             
-            # 1. Ingest into RAG memory (Prioritize PDF Pitch Deck if exists)
+            s = requests.Session()
+            retries = Retry(total=3, backoff_factor=1, status_forcelist=[502, 503, 504])
+            s.mount('https://', HTTPAdapter(max_retries=retries))
+            
+            # 0. Wake-Up Check
+            try:
+                s.get(RAG_URL, timeout=10, verify=False)
+            except:
+                pass
+
+            # 1. RAG Processing (PDF vs Text)
             if pdf_attachment:
                 files = {'file': (pdf_attachment['filename'], pdf_attachment['data'])}
-                requests.post(f"{rag_url}/ingest", files=files, timeout=120)
-                query_msg = f"The lead ({sender_email}) attached a pitch deck. Based on their email: '{body[:200]}', analyze the attached deck and summarize the key takeaways, value proposition, and your advice on next steps."
+                process_res = s.post(f"{RAG_URL}/process", files=files, timeout=300, verify=False)
+                if process_res.status_code == 200:
+                    rag_data = process_res.json()
+                    rag_category = rag_data.get('category') or rag_data.get('type')
+                    rag_item_id = rag_data.get('id')
+                    
+                    if rag_item_id:
+                        import time
+                        max_polls = 30
+                        for poll in range(max_polls):
+                            status_res = s.get(f"{RAG_URL}/status/{rag_item_id}", timeout=60, verify=False)
+                            if status_res.status_code == 200:
+                                status_data = status_res.json()
+                                current_status = status_data.get('status', '').lower()
+                                if current_status == 'completed' or current_status == 'success':
+                                    insights = status_data.get('insights', {})
+                                    if insights:
+                                        # Capture FULL "A to Z" Data from RAG
+                                        rag_advice = f"### RAG VERDICT\n{insights.get('verdict', 'N/A')}\n\n"
+                                        rag_advice += f"### SUMMARY\n{insights.get('summary', 'N/A')}\n\n"
+                                        
+                                        if insights.get('actuals'):
+                                            rag_advice += "### ACTUALS & METRICS\n"
+                                            for k, v in insights.get('actuals', {}).items():
+                                                rag_advice += f"- {k.replace('_', ' ').title()}: {v}\n"
+                                            rag_advice += "\n"
+                                            
+                                        if insights.get('strategy'):
+                                            rag_advice += "### STRATEGY RECOMMENDATION\n"
+                                            strat = insights.get('strategy', {})
+                                            rag_advice += f"- Priority: {strat.get('priority', 'MEDIUM')}\n"
+                                            rag_advice += f"- Approach: {strat.get('approach', 'N/A')}\n\n"
+
+                                        rag_category = (insights.get('type') or insights.get('category') or 'INVESTOR').upper()
+                                        
+                                        rag_intel = {
+                                            "answer": rag_advice,
+                                            "source": "Pure Llama 3.1 (RAG Engine)",
+                                            "category": rag_category,
+                                            "sentiment_score": insights.get('score', 80),
+                                            "urgency_level": insights.get('strategy', {}).get('priority', 'MEDIUM').upper(),
+                                            "strategy": insights.get('strategy', {}),
+                                            "actuals": insights.get('actuals', {}),
+                                            "signals": insights.get('breakdown', {}),
+                                            "key_signals": insights.get('key_signal'),
+                                            "verdict": insights.get('verdict'),
+                                            "full_insights": insights # STORE EVERYTHING
+                                        }
+                                        break
+                                elif current_status == 'failed':
+                                    break
+                            time.sleep(10)
             else:
+                import io
                 files = {'file': ('email_reply.txt', io.StringIO(body).getvalue())}
-                requests.post(f"{rag_url}/ingest", files=files, timeout=120)
-                if pitch_deck_url:
-                    query_msg = f"The lead ({sender_email}) sent a pitch deck URL ({pitch_deck_url}). Based on their email: '{body[:300]}', analyze the deal and summarize the key takeaways, value proposition, and your advice on next steps."
-                else:
-                    query_msg = f"Based on this email reply from {sender_email}, what should I do next to close this deal? Reply body: {body[:300]}"
-                
-            # 2. Query RAG for deep advice
-                
-            query_res = requests.get(f"{rag_url}/query", params={"q": query_msg}, timeout=120)
-            if query_res.status_code == 200:
-                rag_data = query_res.json()
-                rag_advice = rag_data.get("answer") or rag_data.get("response") or str(rag_data)
+                s.post(f"{RAG_URL}/ingest", files=files, timeout=60, verify=False)
+                # For non-PDF, we use a simpler /ask
+                query_msg = f"Based on this email reply from {sender_email}, what should I do next to close this deal? Reply body: {body[:300]}"
+                query_res = s.post(f"{RAG_URL}/ask", params={"question": query_msg}, timeout=120, verify=False)
+                if query_res.status_code == 200:
+                    rag_data = query_res.json()
+                    rag_advice = rag_data.get("answer") or rag_data.get("response")
+                    rag_intel = rag_data
         except Exception as rag_err:
             print(f"Warning: RAG error: {rag_err}")
 
-        # Step 2: Update Lead Status (Global Search)
-        # If not interested, we close the lead automatically.
+        # Step 2: Update Lead Status (Strictly Scoped to User)
+        # We only show 'Reverts' that are actually interesting (positive intents)
+        positive_intents = ["INTERESTED", "MEETING_REQUESTED", "NEEDS_MORE_INFO"]
         final_status = 'REPLIED'
+        # Crucial Fix: Only set is_responded=TRUE for actionable human replies
+        should_show_in_intel = intent in positive_intents
+        
         if intent == 'NOT_INTERESTED':
             final_status = 'CLOSED'
             
+        rag_intel_json = json.dumps(rag_intel) if rag_intel else None
+
         cur.execute("""
             UPDATE leads_raw 
-            SET is_responded = TRUE, 
+            SET is_responded = %s, 
                 email_status = %s,
                 reply_intent = %s,
                 deal_size = %s,
                 pitch_deck_url = %s,
                 rag_advice = %s,
+                rag_intelligence = %s,
+                sector = COALESCE(%s, sector),
                 sentiment_score = %s,
                 urgency_level = %s,
                 updated_at = NOW(),
                 followup_status = 'STOPPED'
-            WHERE LOWER(email) = LOWER(%s)
+            WHERE LOWER(email) = LOWER(%s) AND user_id = %s
             RETURNING id, first_name, last_name, user_id
-        """, (final_status, intent, deal_size, pitch_deck_url, rag_advice, ai_data.get("sentiment_score"), ai_data.get("urgency_level"), sender_email))
+        """, (should_show_in_intel, final_status, intent, deal_size, pitch_deck_url, rag_advice, rag_intel_json, rag_category, ai_data.get("sentiment_score"), ai_data.get("urgency_level"), sender_email, user_id))
 
         
         lead = cur.fetchone()
@@ -290,39 +425,57 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         conn.close()
 
 @router.get("/gmail/inbound-deals")
-def get_inbound_deals(user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Fetches leads who have actually responded inbound (is_responded = TRUE) for the Inbound Deals dashboard."""
+def get_inbound_deals(
+    page: int = 1, 
+    per_page: int = 10,
+    user_id: Optional[str] = Header(None, alias="X-User-Id")
+):
+    """Fetches leads who have responded inbound, prioritizing those reached through the site."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     uid = normalize_user_id(user_id)
+    offset = (page - 1) * per_page
     
     try:
+        # Total Bypass: If a meeting exists, it must show up. Otherwise, show replied leads.
+        print(f"DEBUG: Fetching inbound deals for uid: {uid} (Original X-User-Id: {user_id})")
         if user_id == "admin":
-            query = """
-                SELECT id, first_name, last_name, email, company_name, sector,
-                       reply_intent, deal_size, pitch_deck_url, rag_advice, updated_at,
-                       meeting_time, meeting_link, is_responded, linkedin_url,
-                       sentiment_score, urgency_level
-                FROM leads_raw
-                WHERE is_responded = TRUE
-                ORDER BY updated_at DESC
-            """
-            cur.execute(query)
-        else:
-            query = """
-                SELECT id, first_name, last_name, email, company_name, sector,
-                       reply_intent, deal_size, pitch_deck_url, rag_advice, updated_at,
-                       meeting_time, meeting_link, is_responded, linkedin_url,
-                       sentiment_score, urgency_level
-                FROM leads_raw
-                WHERE user_id = %s AND is_responded = TRUE
-                ORDER BY updated_at DESC
-            """
-            cur.execute(query, (uid,))
-
+            count_query = "SELECT COUNT(*) FROM leads_raw WHERE meeting_time IS NOT NULL OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED'))"
+            cur.execute(count_query)
+            count_result = cur.fetchone()
+            total = count_result['count'] if count_result else 0
             
-        leads = cur.fetchall()
-        return [dict(l) for l in leads]
+            query = """
+                SELECT * FROM leads_raw 
+                WHERE meeting_time IS NOT NULL 
+                OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED'))
+                ORDER BY updated_at DESC LIMIT %s OFFSET %s
+            """
+            cur.execute(query, (per_page, offset))
+            leads = cur.fetchall()
+        else:
+            count_query = "SELECT COUNT(*) FROM leads_raw WHERE user_id = %s AND (meeting_time IS NOT NULL OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED')))"
+            cur.execute(count_query, (uid,))
+            count_result = cur.fetchone()
+            total = count_result['count'] if count_result else 0
+            
+            query = """
+                SELECT * FROM leads_raw 
+                WHERE user_id = %s 
+                AND (meeting_time IS NOT NULL OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED')))
+                ORDER BY updated_at DESC LIMIT %s OFFSET %s
+            """
+            cur.execute(query, (uid, per_page, offset))
+            leads = cur.fetchall()
+        
+        print(f"DEBUG: Found {len(leads)} leads for uid {uid}. Total count in DB: {total}")
+        
+        return {
+            "leads": [dict(l) for l in leads],
+            "total": total,
+            "page": page,
+            "per_page": per_page
+        }
     except Exception as e:
         print(f"Error fetching inbound deals: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -342,9 +495,11 @@ def force_sync_inbound(user_id: Optional[str] = Header(None, alias="X-User-Id"))
         raise HTTPException(status_code=400, detail="Google account not linked")
         
     try:
-        # Search Inbox for messages not from me
+        # Search Inbox for messages that look like replies or deal-related
+        # Queries for: replies (Re:), forwards (Fwd:), or keywords like pitch, deck, interested
+        search_query = 'label:INBOX -from:me (subject:Re OR subject:Fwd OR "pitch deck" OR "interested" OR "intro")'
         try:
-            results = service.users().messages().list(userId='me', q='label:INBOX -from:me', maxResults=50).execute()
+            results = service.users().messages().list(userId='me', q=search_query, maxResults=50).execute()
         except Exception as q_err:
             if "Metadata scope" in str(q_err):
                 logger.error(f"Metadata scope restriction detected for user {uid}")
@@ -355,34 +510,36 @@ def force_sync_inbound(user_id: Optional[str] = Header(None, alias="X-User-Id"))
             raise q_err
             
         messages = results.get('messages', [])
-        
         found_count = 0
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
         try:
             for m_meta in messages:
-                msg = service.users().messages().get(userId='me', id=m_meta['id'], format='metadata').execute()
-                headers = msg.get('payload', {}).get('headers', [])
-                sender = next((h['value'] for h in headers if h['name'].lower() == 'from'), "")
+                m_id = m_meta['id']
                 
-                import re
-                email_match = re.search(r'[\w\.-]+@[\w\.-]+', sender)
-                if email_match:
-                    sender_email = email_match.group(0).lower()
+                # PERSISTENT DEDUPLICATION: Skip if already processed in DB
+                cur.execute("SELECT 1 FROM gmail_processed_messages WHERE message_id = %s", (m_id,))
+                if cur.fetchone():
+                    continue
+                
+                # Full Scan: Always process incoming inbox messages to detect deals
+                try:
+                    full_msg = service.users().messages().get(userId='me', id=m_id, format='full').execute()
+                    handle_potential_reply(int(uid), m_id, full_msg)
                     
-                    cur.execute("SELECT id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND is_responded = FALSE LIMIT 1", (sender_email,))
-                    lead = cur.fetchone()
-                    if lead:
-                        # Fetch full content for AI classification
-                        full_msg = service.users().messages().get(userId='me', id=m_meta['id'], format='full').execute()
-                        handle_potential_reply(int(uid), full_msg.get('threadId'), full_msg)
-                        conn.commit()
-                        found_count += 1
+                    # Mark as processed in DB
+                    cur.execute("INSERT INTO gmail_processed_messages (message_id, user_id) VALUES (%s, %s)", (m_id, int(uid)))
+                    conn.commit()
+                    found_count += 1
+                except Exception as msg_err:
+                    print(f"Error processing message {m_id}: {msg_err}")
+                    continue
             
             return {"status": "success", "processed": len(messages), "detected": found_count}
         finally:
             cur.close()
+            conn.close()
             conn.close()
     except Exception as e:
         print(f"Error in manual sync-inbound: {e}")
@@ -577,6 +734,9 @@ def schedule_manual_meeting(lead_id: int, data: dict = Body(...), user_id: Optio
 class RescheduleRequest(BaseModel):
     new_time: str
 
+class BulkMeetingActionRequest(BaseModel):
+    lead_ids: List[int]
+
 @router.post("/gmail/reschedule/{lead_id}")
 def reschedule_meeting(lead_id: int, payload: RescheduleRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Updates the meeting time for an existing scheduled meeting."""
@@ -604,14 +764,37 @@ def reschedule_meeting(lead_id: int, payload: RescheduleRequest, user_id: Option
         if sender_email:
             try:
                 meeting_dt = datetime.datetime.fromisoformat(payload.new_time.replace('Z', '+00:00'))
-                formatted_time = meeting_dt.strftime('%b %d, %Y at %H:%M')
-            except ValueError:
+                formatted_time = meeting_dt.strftime('%A, %B %d at %I:%M %p')
+            except Exception:
                 formatted_time = payload.new_time
+
+            reschedule_body = f"""
+### Strategy Session Updated
+
+Hi {updated_lead['first_name'] or 'there'},
+
+I have successfully adjusted our upcoming strategy session on my end. Our new confirmed temporal slot is:
+
+**{formatted_time} (IST)**
+
+You should receive an updated calendar invitation with the meeting link shortly. For your convenience, the meeting coordinates are also listed below:
+
+**Meeting Link:** {updated_lead['meeting_link'] or 'Pending Confirmation'}
+
+In the meantime, I have attached our latest **Company Profile** and **Executive Summary** to this email. I recommend reviewing these before our session to ensure we can make the most of our time together.
+
+Looking forward to our conversation.
+
+Best regards,
+
+**{sender_user['full_name'] if sender_user else 'LeadStream Team'}**  
+LeadStream Strategy Division
+            """
 
             send_email(
                 to_email=updated_lead['email'],
-                subject=f"Meeting Rescheduled - LeadStream",
-                html_content=f"Hi {updated_lead['first_name'] or ''},\n\nYour strategy session has been successfully rescheduled to {formatted_time}.\n\nMeeting Link: {updated_lead['meeting_link'] or 'Pending'}\n\nLooking forward to speaking with you!\n\nBest,\nLeadStream Team",
+                subject=f"Confirmed: Rescheduled Strategy Session - {updated_lead['first_name'] or ''}",
+                html_content=reschedule_body,
                 from_email=sender_email,
                 from_name=sender_user['full_name'] if sender_user else "LeadStream Team",
                 is_system_email=False,
@@ -621,6 +804,31 @@ def reschedule_meeting(lead_id: int, payload: RescheduleRequest, user_id: Option
         return {"success": True, "message": "Meeting successfully rescheduled"}
     except Exception as e:
         print(f"Error rescheduling: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+@router.post("/gmail/meetings/bulk-cancel")
+def bulk_cancel_meetings(req: BulkMeetingActionRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Clears meeting time and link for multiple leads."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    uid = normalize_user_id(user_id)
+    
+    try:
+        format_strings = ','.join(['%s'] * len(req.lead_ids))
+        if user_id == "admin":
+            query = f"UPDATE leads_raw SET meeting_time = NULL, meeting_link = NULL WHERE id IN ({format_strings})"
+            cur.execute(query, tuple(req.lead_ids))
+        else:
+            query = f"UPDATE leads_raw SET meeting_time = NULL, meeting_link = NULL WHERE id IN ({format_strings}) AND user_id = %s"
+            cur.execute(query, (*req.lead_ids, uid))
+            
+        conn.commit()
+        return {"success": True, "message": f"Successfully cancelled {cur.rowcount} meetings"}
+    except Exception as e:
+        print(f"Error bulk cancelling: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
@@ -648,9 +856,17 @@ def get_unified_inbox(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         return {"messages": [], "connected": False}
     
     try:
-        # Search for latest 25 INCOMING messages (label:INBOX and not from the user)
-        # This prevents sent messages and self-correspondence from cluttering the view
-        results = service.users().messages().list(userId='me', q='label:INBOX -from:me', maxResults=25).execute()
+        # Attempt to search for latest 25 INCOMING messages
+        try:
+            results = service.users().messages().list(userId='me', q='label:INBOX -from:me', maxResults=25).execute()
+        except Exception as list_err:
+            if "Metadata scope does not support 'q' parameter" in str(list_err):
+                print(f"DEBUG: Restricted scope for user {uid}. Falling back to simple list.")
+                # Fallback to simple list without 'q' filter if scope is restricted
+                results = service.users().messages().list(userId='me', maxResults=25).execute()
+            else:
+                raise list_err
+        
         messages_meta = results.get('messages', [])
         
         full_messages = []
@@ -774,19 +990,23 @@ def poll_all_users_for_replies():
         cur.close()
         conn.close()
 
-@router.post("/retro-sync-pdfs")
-def retro_sync_pdfs(request: Request):
-    user_id = request.session.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-        
+@router.post("/gmail/retro-sync-pdfs")
+def retro_sync_pdfs(request: Request, x_user_id: Optional[str] = Header(None)):
+    user_id = normalize_user_id(x_user_id)
+    
     try:
-        service = get_gmail_service(user_id)
-        results = service.users().messages().list(userId='me', labelIds=['INBOX'], maxResults=50).execute()
+        service = get_gmail_service(int(user_id))
+        if not service:
+            return {"success": False, "error": "Gmail service not initialized for this user"}
+            
+        # Scan Gmail for PDFs (all messages, not just Inbox)
+        results = service.users().messages().list(userId='me', q='has:attachment filename:pdf', maxResults=50).execute()
         messages = results.get('messages', [])
         
         count = 0
+        rag_url = "https://rag-sys-gz59.onrender.com"
         from app.services.google_service import extract_attachments
+        
         for msg in messages:
             msg_data = service.users().messages().get(userId='me', id=msg['id'], format='full').execute()
             headers = msg_data.get('payload', {}).get('headers', [])
@@ -802,6 +1022,7 @@ def retro_sync_pdfs(request: Request):
             
             if pdf_attachment:
                 import os
+                import requests
                 os.makedirs("static/pitch_decks", exist_ok=True)
                 safe_filename = "".join(c for c in pdf_attachment['filename'] if c.isalnum() or c in "._-").replace(" ", "_")
                 file_path = f"static/pitch_decks/{msg['id']}_{safe_filename}"
@@ -812,20 +1033,111 @@ def retro_sync_pdfs(request: Request):
                 base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
                 pitch_deck_url = f"{base_url}/{file_path}"
                 
+                # --- STRICT RAG ONLY (STABLE SESSION) ---
+                rag_category = None
+                rag_advice = None
+                rag_intel = None
+                try:
+                    import requests
+                    from requests.adapters import HTTPAdapter
+                    from urllib3.util.retry import Retry
+                    
+                    s = requests.Session()
+                    retries = Retry(total=3, backoff_factor=1, status_forcelist=[502, 503, 504])
+                    s.mount('https://', HTTPAdapter(max_retries=retries))
+                    
+                    # 0. Wake-Up Check (No verify for speed/stability)
+                    try:
+                        s.get(RAG_URL, timeout=10, verify=False)
+                    except:
+                        pass
+
+                    files = {'file': (pdf_attachment['filename'], pdf_attachment['data'])}
+                    process_res = s.post(f"{RAG_URL}/process", files=files, timeout=300, verify=False)
+                    
+                    if process_res.status_code == 200:
+                        rag_data = process_res.json()
+                        rag_category = rag_data.get('category') or rag_data.get('type')
+                        rag_item_id = rag_data.get('id')
+                        
+                        if rag_item_id:
+                            import time
+                            max_polls = 30
+                            for poll in range(max_polls):
+                                status_res = s.get(f"{RAG_URL}/status/{rag_item_id}", timeout=60, verify=False)
+                                if status_res.status_code == 200:
+                                    status_data = status_res.json()
+                                    current_status = status_data.get('status', '').lower()
+                                    if current_status == 'completed' or current_status == 'success':
+                                        insights = status_data.get('insights', {})
+                                        if insights:
+                                            # Capture RAW RAG OUTPUT as the primary advice
+                                            rag_advice = insights.get('summary') or insights.get('verdict') or "Analysis completed but no summary provided."
+                                            
+                                            rag_category = (insights.get('type') or insights.get('category') or 'INVESTOR').upper()
+                                            
+                                            rag_intel = {
+                                                "answer": rag_advice,
+                                                "source": "Pure Llama 3.1 (RAG Engine)",
+                                                "category": rag_category,
+                                                "sentiment_score": insights.get('score', 80),
+                                                "urgency_level": insights.get('strategy', {}).get('priority', 'MEDIUM').upper(),
+                                                "strategy": insights.get('strategy', {}),
+                                                "actuals": insights.get('actuals', {}),
+                                                "signals": insights.get('breakdown', {}),
+                                                "key_signals": insights.get('key_signal'),
+                                                "verdict": insights.get('verdict'),
+                                                "full_insights": insights
+                                            }
+                                            break
+                                    elif current_status == 'failed':
+                                        break
+                                time.sleep(10)
+                except Exception as re_err:
+                    print(f"RAG Retro Error: {re_err}")
+
+                import json
+                rag_intel_json = json.dumps(rag_intel) if rag_intel else None
+
                 # Update database
                 conn = get_db_connection()
-                cur = conn.cursor()
-                cur.execute(
-                    "UPDATE leads_raw SET pitch_deck_url = %s WHERE email = %s AND (pitch_deck_url IS NULL OR pitch_deck_url = '' OR pitch_deck_url LIKE 'Attached PDF:%%')",
-                    (pitch_deck_url, sender_email)
-                )
+                cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+                
+                # Fetch lead data first for draft generation
+                cur.execute("SELECT * FROM leads_raw WHERE LOWER(email) = LOWER(%s)", (sender_email,))
+                lead_row = cur.fetchone()
+                
+                fresh_draft_body = None
+                if lead_row and rag_advice:
+                    try:
+                        from app.services.llm_services import EmailGenerator
+                        generator = EmailGenerator()
+                        lead_data_for_draft = {**dict(lead_row), "rag_advice": rag_advice}
+                        fresh_draft = generator.generate_email(lead_data_for_draft)
+                        if fresh_draft:
+                            fresh_draft_body = fresh_draft.get('body')
+                            if rag_intel: rag_intel["draft"] = fresh_draft_body
+                    except Exception as draft_err:
+                        print(f"Failed to generate retro draft: {draft_err}")
+
+                cur.execute("""
+                    UPDATE leads_raw 
+                    SET pitch_deck_url = %s,
+                        sector = COALESCE(%s, sector),
+                        rag_advice = %s,
+                        rag_intelligence = %s,
+                        email_draft = COALESCE(%s, email_draft)
+                    WHERE LOWER(email) = LOWER(%s) 
+                    AND (pitch_deck_url IS NULL OR pitch_deck_url = '' OR pitch_deck_url LIKE 'Attached PDF:%%' OR rag_advice IS NULL)
+                """, (pitch_deck_url, rag_category, rag_advice, json.dumps(rag_intel) if rag_intel else None, fresh_draft_body, sender_email))
+                
                 if cur.rowcount > 0:
                     conn.commit()
                     count += 1
                 cur.close()
                 conn.close()
                 
-        return {"success": True, "updated_deals": count}
+        return {"success": True, "updated_deals": count, "message": f"Retro-sync complete. {count} pitch decks processed and classified."}
     except Exception as e:
         print(f"Retro sync error: {e}")
         return {"success": False, "error": str(e)}

@@ -105,9 +105,47 @@ class EmailGenerator:
         return None
 
     def generate_email(self, lead: dict, sender_name: str = "the team", sender_linkedin: str = "https://www.linkedin.com/company/qvscl/"):
-        # Fixed Template (Standard/Yashika)
-        first_name = (lead.get('first_name') or lead.get('name') or "there").strip().capitalize()
+        """Generates a hyper-personalized email using RAG data if available, else falls back to standard template."""
         
+        first_name = (lead.get('first_name') or lead.get('name') or "there").strip().capitalize()
+        rag_advice = lead.get('rag_advice')
+        
+        # If we have RAG Intelligence, use LLM to craft a personalized version
+        if rag_advice and len(rag_advice) > 100:
+            prompt = f"""
+            You are a senior investment associate at QVSCL (Gurugram). 
+            Write a highly personalized outreach email to {first_name} based on the following RAG Intelligence.
+            
+            SENDER INFO:
+            Name: {sender_name}
+            Company: QVSCL
+            LinkedIn: {sender_linkedin}
+            
+            RAG INTELLIGENCE DATA:
+            {rag_advice}
+            
+            GUIDELINES:
+            1. Maintain a professional, executive tone.
+            2. Reference the specific metrics (Actuals) and sector insights from the RAG data.
+            3. Keep the email concise (3-4 short paragraphs).
+            4. Include a clear call-to-action (CTA) to schedule a meeting or share a deck.
+            5. Use HTML tags <b></b> for key metrics or business terms.
+            6. Do NOT include placeholder bracket text like [Your Name]. Use the provided sender info.
+            7. Return ONLY the email subject and body separated by "---SUBJECT_END---".
+            
+            EXAMPLE OUTPUT FORMAT:
+            Strategic Opportunity: [Topic] ---SUBJECT_END--- Hi [Name], ...
+            """
+            
+            ai_response = self._call_llm(prompt, max_tokens=2048)
+            if ai_response and "---SUBJECT_END---" in ai_response:
+                parts = ai_response.split("---SUBJECT_END---", 1)
+                return {
+                    "subject": parts[0].strip(),
+                    "body": parts[1].strip()
+                }
+
+        # FALLBACK: Standard Template (Only if RAG is unavailable)
         body = f"""Hi {first_name},
 
 I hope you're doing well.

@@ -50,10 +50,11 @@ const Inbox = () => {
         });
     };
 
-    const fetchInbox = async () => {
+    const fetchInbox = async (isMounted = { current: true }) => {
         setLoading(true);
         try {
             const { data } = await api.get('/api/gmail/inbox');
+            if (!isMounted.current) return;
             setMessages(data.messages || []);
             setConnected(data.connected !== false);
             setStats({
@@ -61,10 +62,11 @@ const Inbox = () => {
                 unread: data.messages?.filter(m => !m.is_read).length || 0
             });
         } catch (err) {
+            if (!isMounted.current) return;
             console.error('Failed to fetch inbox', err);
             setConnected(false);
         } finally {
-            setLoading(false);
+            if (isMounted.current) setLoading(false);
         }
     };
 
@@ -136,7 +138,17 @@ const Inbox = () => {
     };
 
     useEffect(() => {
-        fetchInbox();
+        let isMounted = { current: true };
+        fetchInbox(isMounted);
+        
+        const interval = setInterval(() => {
+            fetchInbox(isMounted);
+        }, 60000);
+
+        return () => {
+            isMounted.current = false;
+            clearInterval(interval);
+        };
     }, []);
 
     const handleMsgClick = (msg) => {

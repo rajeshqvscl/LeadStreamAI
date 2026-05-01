@@ -156,6 +156,11 @@ def get_leads(
     # Global Blacklist Exclusion
     query += " AND (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)"
     query += " AND email NOT IN (SELECT email FROM unsubscribe_list)"
+    
+    # Exclude ghost leads auto-created by Gmail sync:
+    # These have source=NULL and were never manually added by the user.
+    # Real user-created leads always have source set (bulk, csv_import, direct, manual, intelligence).
+    query += " AND (source IS NOT NULL AND source != 'DIRECT_DISCOVERY')"
 
     # ──────────────────────────────────────────────────────────────────────────
 

@@ -503,16 +503,51 @@ const Emails = () => {
           </table>
         </div>
 
-        {/* Pagination Foot */}
-        {pagination.total > 20 && (
-          <div className="px-6 py-4 border-t border-[#ffffff08] flex justify-between items-center text-[11px] font-bold uppercase tracking-widest text-[#64748b]">
-            <span>Showing {emails.length} of {pagination.total} drafts</span>
-            <div className="flex gap-2">
-              <button className="p-1.5 rounded bg-white/5 hover:bg-white/10 transition-colors text-white disabled:opacity-30" disabled={pagination.page === 1} onClick={() => setPagination(v => ({ ...v, page: v.page - 1 }))}><ChevronLeft className="w-4 h-4" /></button>
-              <button className="p-1.5 rounded bg-white/5 hover:bg-white/10 transition-colors text-white disabled:opacity-30" disabled={emails.length < 20} onClick={() => setPagination(v => ({ ...v, page: v.page + 1 }))}><ChevronRight className="w-4 h-4" /></button>
-            </div>
+        {/* Pagination Footer — always visible */}
+        <div className="px-6 py-4 border-t border-[#ffffff08] flex justify-between items-center">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-[#64748b]">
+            Page <span className="text-white">{pagination.page}</span> of <span className="text-white">{pagination.total || 1}</span>
+            &nbsp;&mdash;&nbsp;{emails.length} records shown
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 text-[10px] font-black text-slate-400 hover:text-white uppercase tracking-widest transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+              disabled={pagination.page === 1}
+              onClick={() => setPagination(v => ({ ...v, page: v.page - 1 }))}
+            >
+              <ChevronLeft className="w-3.5 h-3.5" /> Prev
+            </button>
+
+            {/* Page number pills */}
+            {Array.from({ length: Math.min(pagination.total || 1, 5) }, (_, i) => {
+              const pg = pagination.page <= 3
+                ? i + 1
+                : pagination.page + i - 2;
+              if (pg < 1 || pg > (pagination.total || 1)) return null;
+              return (
+                <button
+                  key={pg}
+                  onClick={() => setPagination(v => ({ ...v, page: pg }))}
+                  className={`w-8 h-8 rounded-lg text-[10px] font-black transition-all cursor-pointer border ${
+                    pg === pagination.page
+                      ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/20'
+                      : 'bg-white/5 border-white/5 text-slate-400 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  {pg}
+                </button>
+              );
+            })}
+
+            <button
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 text-[10px] font-black text-slate-400 hover:text-white uppercase tracking-widest transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+              disabled={pagination.page >= (pagination.total || 1)}
+              onClick={() => setPagination(v => ({ ...v, page: v.page + 1 }))}
+            >
+              Next <ChevronRight className="w-3.5 h-3.5" />
+            </button>
           </div>
-        )}
+        </div>
       </div>
 
       {/* Rejection Modal */}

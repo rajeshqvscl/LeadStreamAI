@@ -156,6 +156,11 @@ const Layout = () => {
           <Link to="/dashboard/metrics" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'metrics' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'metrics' ? 'text-white' : 'text-[#94a3b8]'}`}>📈</span> Reports
           </Link>
+          {user.role === 'ADMIN' && (
+            <Link to="/dashboard/admin-intelligence" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'admin-intelligence' ? 'bg-indigo-600 text-white font-semibold shadow-lg shadow-indigo-600/20' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+              <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'admin-intelligence' ? 'text-white' : 'text-[#94a3b8]'}`}>🛡️</span> Admin Center
+            </Link>
+          )}
           <Link to="/dashboard/export" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'export' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'export' ? 'text-white' : 'text-[#94a3b8]'}`}>📥</span> Export Data
           </Link>
@@ -183,7 +188,7 @@ const Layout = () => {
           <div className="bg-[#151a26] rounded-xl p-3 border border-white/5">
             <div className="flex items-center justify-between mb-2">
               <div className="text-[9px] font-bold uppercase tracking-[0.8px] text-[#64748b]">Account Status</div>
-              {user.is_approved ? (
+              {user.has_db_access ? (
                 <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
                   <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></div>
                   <span className="text-[8px] font-black text-emerald-500 uppercase tracking-tighter">Active</span>

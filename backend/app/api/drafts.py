@@ -267,7 +267,6 @@ Thanks & Regards,
 {disclaimer}
 """
     return clean_body + "\n\n" + sig_block.strip()
-    return clean_body + "\n\n" + sig_block.strip()
 
 @router.post("/generate-draft")
 @router.post("/generate-email")
@@ -365,19 +364,22 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
             body_with_sig = inject_signature(body, profile, req.lead_id)
 
         # --- NEW: Deduplicate Subject Lines ---
-        # If the template body already has a "Subject:" line, use it as the official subject
+        # If the template body has a "Subject:" line (even if not on the first line), use it as the official subject
         # and REMOVE it from the body to prevent double-subject issues.
-        if "Subject: " in body_with_sig:
-            try:
-                # Extract first line if it starts with Subject:
-                body_lines = body_with_sig.split("\n")
-                if "Subject: " in body_lines[0]:
-                    subject = body_lines[0].replace("Subject: ", "").strip()
-                    # Keep everything EXCEPT the subject line
-                    body_with_sig = "\n".join(body_lines[1:]).strip()
-            except Exception as e:
-                logger.error(f"Subject extraction error: {e}")
-                pass
+        body_lines = body_with_sig.split("\n")
+        subject_found = False
+        new_body_lines = []
+        
+        for line in body_lines:
+            if not subject_found and "Subject: " in line:
+                # Use the first 'Subject:' line we find as the official subject
+                subject = line.replace("Subject: ", "").strip()
+                subject_found = True
+            else:
+                new_body_lines.append(line)
+        
+        if subject_found:
+            body_with_sig = "\n".join(new_body_lines).strip()
         
         # RE-GENERATE html_body AFTER deduplication
         html_body = markdown_to_html(body_with_sig)
@@ -545,19 +547,22 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
 
         # --- NEW: Extract Subject from template if it exists ---
         final_subject = subject  # Default
-        final_body = body
-        if "subject:" in body.lower():
-            try:
-                body_lines = body.split("\n")
-                if "subject:" in body_lines[0].lower():
-                    # Extract the subject (skip "Subject: " part)
-                    subj_line = body_lines[0]
-                    if ":" in subj_line:
-                        final_subject = subj_line.split(":", 1)[1].strip()
-                    # Keep everything EXCEPT the subject line
-                    final_body = "\n".join(body_lines[1:]).strip()
-            except Exception as e:
-                logger.error(f"Template subject extraction error: {e}")
+        final_body_lines = []
+        subject_found = False
+        
+        body_lines = body.split("\n")
+        for line in body_lines:
+            if not subject_found and "subject:" in line.lower():
+                # Extract the subject (skip "Subject: " part)
+                if ":" in line:
+                    final_subject = line.split(":", 1)[1].strip()
+                else:
+                    final_subject = line.replace("Subject", "", 1).replace("subject", "", 1).strip()
+                subject_found = True
+            else:
+                final_body_lines.append(line)
+        
+        final_body = "\n".join(final_body_lines).strip()
 
         # Inject logged-in user's signature ONLY if the template doesn't already embed one
         profile = get_sender_profile(user_id)
@@ -911,13 +916,19 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             body = email_data.get("body", "Hello, we would love to connect.")
             draft_content = f"Subject: {subject}\n\n{body}"
         
-        # 3. Parse and Dispatch
-        subject = "Following up"
+        # 3. Parse subject ONLY from the first line — never scan the body for 'Subject:'
+        # This prevents a body that mentions 'Subject:' from overwriting the real subject.
+        subject = "Following up"  # Default fallback
         body = draft_content
-        if "Subject: " in draft_content:
-            parts = draft_content.split("\n\n", 1)
-            subject = parts[0].replace("Subject: ", "").strip()
-            body = parts[1].strip() if len(parts) > 1 else ""
+        
+        first_line = draft_content.split("\n")[0].strip()
+        if first_line.startswith("Subject:"):
+            subject = first_line[len("Subject:"):].strip()
+            # Body is everything after the first line (skip the blank separator too)
+            rest = draft_content.split("\n", 1)
+            body = rest[1].lstrip("\n").strip() if len(rest) > 1 else ""
+        else:
+            body = draft_content.strip()
 
         # Real Dispatch — Gmail API if connected, else Resend/SMTP
         uid = normalize_user_id(user_id)
