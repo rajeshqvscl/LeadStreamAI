@@ -196,10 +196,10 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             conn_new = get_db_connection()
             cur_new = conn_new.cursor()
             cur_new.execute("""
-                INSERT INTO leads_raw (email, first_name, last_name, user_id, is_responded, email_status, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, FALSE, 'REPLIED', NOW(), NOW())
+                INSERT INTO leads_raw (email, first_name, last_name, user_id, is_responded, email_status, remarks, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, TRUE, 'REPLIED', %s, NOW(), NOW())
                 RETURNING id
-            """, (sender_email, f_name, l_name, user_id))
+            """, (sender_email, f_name, l_name, user_id, body))
             conn_new.commit()
             lead_id = cur_new.fetchone()['id']
             cur_new.close()
@@ -249,9 +249,9 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             retries = Retry(total=3, backoff_factor=1, status_forcelist=[502, 503, 504])
             s.mount('https://', HTTPAdapter(max_retries=retries))
             
-            # 0. Wake-Up Check
+            # 0. Wake-Up Check (Increased to 60s for Render cold starts)
             try:
-                s.get(RAG_URL, timeout=10, verify=False)
+                s.get(RAG_URL, timeout=60, verify=False)
             except:
                 pass
 
@@ -325,11 +325,12 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             print(f"Warning: RAG error: {rag_err}")
 
         # Step 2: Update Lead Status (Strictly Scoped to User)
-        # We only show 'Reverts' that are actually interesting (positive intents)
-        positive_intents = ["INTERESTED", "MEETING_REQUESTED", "NEEDS_MORE_INFO"]
+        # We show 'Reverts' for all valid human responses including "NOT INTERESTED"
+        all_intents = ["INTERESTED", "MEETING_REQUESTED", "NEEDS_MORE_INFO", "NOT_INTERESTED"]
         final_status = 'REPLIED'
-        # Crucial Fix: Only set is_responded=TRUE for actionable human replies
-        should_show_in_intel = intent in positive_intents
+        
+        # Crucial Fix: Set is_responded=TRUE for any valid identified intent
+        should_show_in_intel = intent in all_intents
         
         if intent == 'NOT_INTERESTED':
             final_status = 'CLOSED'
@@ -348,11 +349,12 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 sector = COALESCE(%s, sector),
                 sentiment_score = %s,
                 urgency_level = %s,
+                remarks = %s,
                 updated_at = NOW(),
                 followup_status = 'STOPPED'
             WHERE LOWER(email) = LOWER(%s) AND user_id = %s
             RETURNING id, first_name, last_name, user_id
-        """, (should_show_in_intel, final_status, intent, deal_size, pitch_deck_url, rag_advice, rag_intel_json, rag_category, ai_data.get("sentiment_score"), ai_data.get("urgency_level"), sender_email, user_id))
+        """, (should_show_in_intel, final_status, intent, deal_size, pitch_deck_url, rag_advice, rag_intel_json, rag_category, ai_data.get("sentiment_score"), ai_data.get("urgency_level"), body, sender_email, user_id))
 
         
         lead = cur.fetchone()
@@ -440,7 +442,7 @@ def get_inbound_deals(
         # Total Bypass: If a meeting exists, it must show up. Otherwise, show replied leads.
         print(f"DEBUG: Fetching inbound deals for uid: {uid} (Original X-User-Id: {user_id})")
         if user_id == "admin":
-            count_query = "SELECT COUNT(*) FROM leads_raw WHERE meeting_time IS NOT NULL OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED'))"
+            count_query = "SELECT COUNT(*) FROM leads_raw WHERE meeting_time IS NOT NULL OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED'))"
             cur.execute(count_query)
             count_result = cur.fetchone()
             total = count_result['count'] if count_result else 0
@@ -448,13 +450,13 @@ def get_inbound_deals(
             query = """
                 SELECT * FROM leads_raw 
                 WHERE meeting_time IS NOT NULL 
-                OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED'))
+                OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED'))
                 ORDER BY updated_at DESC LIMIT %s OFFSET %s
             """
             cur.execute(query, (per_page, offset))
             leads = cur.fetchall()
         else:
-            count_query = "SELECT COUNT(*) FROM leads_raw WHERE user_id = %s AND (meeting_time IS NOT NULL OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED')))"
+            count_query = "SELECT COUNT(*) FROM leads_raw WHERE user_id = %s AND (meeting_time IS NOT NULL OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED')))"
             cur.execute(count_query, (uid,))
             count_result = cur.fetchone()
             total = count_result['count'] if count_result else 0
@@ -462,7 +464,7 @@ def get_inbound_deals(
             query = """
                 SELECT * FROM leads_raw 
                 WHERE user_id = %s 
-                AND (meeting_time IS NOT NULL OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED')))
+                AND (meeting_time IS NOT NULL OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED')))
                 ORDER BY updated_at DESC LIMIT %s OFFSET %s
             """
             cur.execute(query, (uid, per_page, offset))
@@ -496,8 +498,8 @@ def force_sync_inbound(user_id: Optional[str] = Header(None, alias="X-User-Id"))
         
     try:
         # Search Inbox for messages that look like replies or deal-related
-        # Queries for: replies (Re:), forwards (Fwd:), or keywords like pitch, deck, interested
-        search_query = 'label:INBOX -from:me (subject:Re OR subject:Fwd OR "pitch deck" OR "interested" OR "intro")'
+        # Queries for: replies (Re:), forwards (Fwd:), or keywords like pitch, deck, interested, not interested, meeting
+        search_query = 'label:INBOX -from:me (subject:Re OR subject:Fwd OR "pitch" OR "deck" OR "interested" OR "intro" OR "meeting" OR "call")'
         try:
             results = service.users().messages().list(userId='me', q=search_query, maxResults=50).execute()
         except Exception as q_err:
@@ -1046,9 +1048,9 @@ def retro_sync_pdfs(request: Request, x_user_id: Optional[str] = Header(None)):
                     retries = Retry(total=3, backoff_factor=1, status_forcelist=[502, 503, 504])
                     s.mount('https://', HTTPAdapter(max_retries=retries))
                     
-                    # 0. Wake-Up Check (No verify for speed/stability)
+                    # 0. Wake-Up Check (Increased to 60s for stability)
                     try:
-                        s.get(RAG_URL, timeout=10, verify=False)
+                        s.get(RAG_URL, timeout=60, verify=False)
                     except:
                         pass
 

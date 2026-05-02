@@ -121,9 +121,9 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
             retries = Retry(total=3, backoff_factor=1, status_forcelist=[502, 503, 504])
             s.mount('https://', HTTPAdapter(max_retries=retries))
             
-            # 0. Wake-Up Check (No verify for stability)
+            # 0. Wake-Up Check (Increased to 60s for stability)
             try:
-                s.get(rag_url, timeout=10, verify=False)
+                s.get(rag_url, timeout=60, verify=False)
             except:
                 pass
 

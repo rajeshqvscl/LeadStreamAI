@@ -145,8 +145,11 @@ const InboundDeals = () => {
                   setLoading(true);
                   const user = JSON.parse(localStorage.getItem('user') || '{}');
                   const userId = user.id || 'admin';
-                  // Run both: Refresh local state and trigger backend retro-sync
-                  await api.post('/api/gmail/retro-sync-pdfs', {}, { headers: { 'X-User-Id': userId } });
+                  // Run both: Refresh local state, sync new inbox replies, and trigger backend retro-sync
+                  await Promise.all([
+                    api.post('/api/gmail/sync-inbound', {}, { headers: { 'X-User-Id': userId } }),
+                    api.post('/api/gmail/retro-sync-pdfs', {}, { headers: { 'X-User-Id': userId } })
+                  ]);
                   await fetchDeals();
                 } catch (err) {
                   console.error('Sync failed:', err);
@@ -196,12 +199,12 @@ const InboundDeals = () => {
               className="w-full bg-[#131722] border border-white/5 rounded-2xl py-5 pl-14 pr-6 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500/30 transition-all shadow-inner"
             />
           </div>
-          <div className="flex bg-[#131722] border border-white/5 p-1.5 rounded-2xl gap-1">
-            {['ALL', 'MEETING_REQUESTED', 'INTERESTED', 'NEEDS_MORE_INFO'].map((f) => (
+          <div className="flex bg-[#131722] border border-white/5 p-1.5 rounded-2xl gap-1 overflow-x-auto">
+            {['ALL', 'MEETING_REQUESTED', 'INTERESTED', 'NEEDS_MORE_INFO', 'NOT_INTERESTED'].map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
-                className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${filter === f ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}
+                className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer whitespace-nowrap ${filter === f ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}
               >
                 {f.replace(/_/g, ' ')}
               </button>
@@ -280,7 +283,7 @@ const InboundDeals = () => {
                         )}
                       </div>
                       <p className="text-slate-400 text-sm line-clamp-2 italic font-medium">
-                        "{deal.rag_advice?.substring(0, 180) || 'Analyzing communication patterns...'}"
+                        "{deal.remarks?.substring(0, 180) || deal.rag_advice?.substring(0, 180) || 'Analyzing communication patterns...'}"
                       </p>
                     </div>
 
