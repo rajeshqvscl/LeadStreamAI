@@ -176,36 +176,24 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         attachments = extract_attachments(service, msg_id, payload)
         pdf_attachment = next((att for att in attachments if att['filename'].lower().endswith('.pdf')), None)
 
-        # --- NEW: SELECTIVE ANALYSIS ---
-        # Only perform heavy RAG/Intelligence if this email belongs to an existing lead in our outreach pipeline
+        # --- STRICT OUTREACH-ONLY FILTER ---
+        # ONLY process replies from leads we actually emailed through this platform.
+        # Skip all random inbox emails (marketing, newsletters, unknown senders, etc.)
         conn_check = get_db_connection()
         cur_check = conn_check.cursor()
-        cur_check.execute("SELECT id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND user_id = %s", (sender_email, user_id))
+        cur_check.execute(
+            "SELECT id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND user_id = %s AND email_status IN ('SENT', 'REPLIED', 'CLOSED', 'SCHEDULED')",
+            (sender_email, user_id)
+        )
         lead_exists = cur_check.fetchone()
         cur_check.close()
         conn_check.close()
         
         if not lead_exists:
-            print(f"DEBUG: Auto-creating new lead for {sender_email}")
-            # Extract name from "From" header (e.g. "John Doe <john@site.com>")
-            full_name = sender.split('<')[0].strip() if '<' in sender else sender_email.split('@')[0]
-            name_parts = full_name.split(' ', 1)
-            f_name = name_parts[0]
-            l_name = name_parts[1] if len(name_parts) > 1 else ""
-            
-            conn_new = get_db_connection()
-            cur_new = conn_new.cursor()
-            cur_new.execute("""
-                INSERT INTO leads_raw (email, first_name, last_name, user_id, is_responded, email_status, remarks, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, TRUE, 'REPLIED', %s, NOW(), NOW())
-                RETURNING id
-            """, (sender_email, f_name, l_name, user_id, body))
-            conn_new.commit()
-            lead_id = cur_new.fetchone()['id']
-            cur_new.close()
-            conn_new.close()
-        else:
-            lead_id = lead_exists['id']
+            print(f"DEBUG: Skipping {sender_email} — not a lead we contacted through this platform.")
+            return  # Hard stop — don't process random inbox mail
+        
+        lead_id = lead_exists['id']
             
         # Step 1: AI Intent Classification
         print(f"DEBUG: Classifying reply from {sender_email}...")
