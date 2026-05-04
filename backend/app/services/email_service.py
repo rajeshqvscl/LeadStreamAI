@@ -191,25 +191,30 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode('utf-8')
                 sent = service.users().messages().send(userId='me', body={'raw': raw_message}).execute()
                 logger.info(f"✅ Gmail API dispatch successful to {to_email} with {len(attachments)} attachments — Message ID: {sent.get('id')}")
-                return True
+                return True, "Success"
+            else:
+                return False, "Gmail service not initialized. Ensure your Google account is linked with correct permissions."
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
-            logger.error(f"❌ Gmail API dispatch failed for User {user_id} to {to_email}: {str(e)}\n{error_details}")
-            # If it's a specific Google API error, it often has more info
+            error_content = ""
             if hasattr(e, 'content'):
-                logger.error(f"Google API Error Content: {e.content.decode() if hasattr(e.content, 'decode') else e.content}")
+                error_content = e.content.decode() if hasattr(e.content, 'decode') else str(e.content)
+            
+            error_msg = f"Gmail API Error: {str(e)} {error_content}"
+            logger.error(f"❌ Gmail API dispatch failed for User {user_id} to {to_email}: {error_msg}\n{error_details}")
+            return False, error_msg
 
     # 2. Fallback to SMTP/Resend logic
     if user_id and not is_system_email:
         logger.error(f"Gmail API dispatch failed for User {user_id}. ABORTING FALLBACK to system SMTP for personalized outreach.")
-        return False
+        return False, "Gmail API dispatch failed. Personalized outreach requires a working Google connection."
 
     provider = os.getenv("EMAIL_PROVIDER", "resend").lower()
     
     if not from_email:
         logger.error(f"ABORTING DISPATCH: No sender email provided for outreach to {to_email}.")
-        return False
+        return False, "Sender email missing."
 
     final_from_email = from_email
     final_from_name = from_name or "LeadStream Outreach"
@@ -238,7 +243,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
             
             if not resend_key:
                 logger.error("RESEND_API_KEY is missing from environment.")
-                return False
+                return False, "Resend API key missing."
             
             # Safe debug: only show prefix to verify key identity
             key_prefix = resend_key[:6] if resend_key else "NONE"
@@ -294,12 +299,13 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
             sent = resend.Emails.send(params)
             sent_id = getattr(sent, "id", str(sent))
             logger.info(f"Email sent successfully via Resend. ID: {sent_id}")
-            return True
+            return True, "Success"
         except Exception as e:
             logger.error(f"Resend dispatch failed: {str(e)}")
-            return False
+            return False, str(e)
     else:
-        return send_smtp_fallback(to_email, subject, final_html, final_from_email, final_from_name, reply_to=from_email)
+        success = send_smtp_fallback(to_email, subject, final_html, final_from_email, final_from_name, reply_to=from_email)
+        return success, "SMTP dispatch completed" if success else "SMTP dispatch failed"
 
 def check_scheduled_emails():
     """

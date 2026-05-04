@@ -943,7 +943,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         except:
             pass
         
-        success = send_email(
+        success, error_msg = send_email(
             to_email=email,
             subject=subject,
             html_content=markdown_to_html(body),
@@ -997,7 +997,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             cur.close()
             conn.close()
             from fastapi import HTTPException
-            raise HTTPException(status_code=400, detail="Outreach dispatch failed. Please verify your Resend configuration and sender email in Profile.")
+            raise HTTPException(status_code=400, detail=f"Outreach dispatch failed: {error_msg}")
     except HTTPException:
         raise
     except Exception as e:
@@ -1236,7 +1236,7 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
 
             # Real Dispatch
             uid_val = normalize_user_id(user_id)
-            success = send_email(
+            success, error_msg = send_email(
                 to_email=lead['email'],
                 subject=subject,
                 html_content=markdown_to_html(body),
@@ -1320,7 +1320,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
                 subject = parts[0].replace("Subject: ", "").strip()
                 body = parts[1].strip() if len(parts) > 1 else ""
 
-            success = send_email(
+            success, error_msg = send_email(
                 to_email=lead['email'],
                 subject=subject,
                 html_content=markdown_to_html(body),
@@ -1351,7 +1351,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
                 results.append({"id": lead['id'], "email": lead['email'], "status": "sent"})
             else:
                 failed_count += 1
-                results.append({"id": lead['id'], "email": lead['email'], "status": "failed", "error": "Gmail API dispatch failed. Ensure your Google account is correctly linked and has necessary permissions."})
+                results.append({"id": lead['id'], "email": lead['email'], "status": "failed", "error": error_msg})
         except Exception as e:
             logger.error(f"Bulk send error for lead {lead['id']}: {str(e)}")
             failed_count += 1
@@ -1568,7 +1568,7 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
 
                 # Real Dispatch
                 uid_val = normalize_user_id(user_id)
-                success = send_email(
+                success, error_msg = send_email(
                     to_email=lead['email'],
                     subject=subject,
                     html_content=markdown_to_html(body),
