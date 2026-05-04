@@ -171,9 +171,15 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 
                 # Use MIMEMultipart('mixed') to handle both HTML and attachments
                 msg = MIMEMultipart('mixed')
-                msg['to'] = to_email
-                msg['from'] = f"{from_name} <{from_email}>" if from_name and from_email else from_email
-                msg['subject'] = subject
+                
+                # Sanitize headers to prevent "folded header contains newline" errors
+                clean_to = to_email.replace('\n', ', ').replace('\r', '').strip()
+                clean_subject = subject.replace('\n', ' ').replace('\r', '').strip()
+                clean_from = (f"{from_name} <{from_email}>" if from_name and from_email else from_email).replace('\n', ' ').replace('\r', '').strip()
+
+                msg['to'] = clean_to
+                msg['from'] = clean_from
+                msg['subject'] = clean_subject
                 
                 # Attach the HTML body using an 'alternative' container
                 msg_body = MIMEMultipart('alternative')

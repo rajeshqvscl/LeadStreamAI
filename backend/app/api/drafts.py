@@ -961,11 +961,11 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             draft_row = cur.fetchone()
             gmail_draft_id = draft_row['gmail_draft_id'] if draft_row else None
 
+            # 4. Update Status and Initialize Follow-up Sequence
             cur.execute("""
                 UPDATE leads_raw 
-                SET email_draft = %s, 
-                    email_status = 'SENT', 
-                    email_approved_by = %s, 
+                SET email_status = 'SENT', 
+                    email_approved_by = %s,
                     updated_at = NOW(),
                     last_outreach_at = NOW(),
                     followup_status = 'ACTIVE',
@@ -973,17 +973,15 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
                     is_responded = FALSE,
                     gmail_draft_id = NULL
                 WHERE id = %s
-            """, (draft_content, sender_name, draft_id))
+            """, (sender_name, draft_id))
             conn.commit()
 
             # --- Delete Gmail Draft from real Gmail ---
             if gmail_draft_id:
                 try:
-                    from app.services.google_service import get_gmail_service
-                    service = get_gmail_service(int(uid))
-                    if service:
-                        service.users().drafts().delete(userId='me', id=gmail_draft_id).execute()
-                        logger.info(f"🗑️  Deleted Gmail draft {gmail_draft_id} for Lead {draft_id} after send")
+                    from app.services.google_service import delete_gmail_draft
+                    delete_gmail_draft(int(uid), gmail_draft_id)
+                    logger.info(f"🗑️  Deleted Gmail draft {gmail_draft_id} for Lead {draft_id} after send")
                 except Exception as ge:
                     logger.warning(f"⚠️  Failed to delete Gmail draft after send (non-blocking): {ge}")
 
@@ -1301,7 +1299,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
 
     # 2. Fetch the requested leads
     cur.execute(
-        "SELECT id, email, email_draft FROM leads_raw WHERE id = ANY(%s)",
+        "SELECT id, email, email_draft, gmail_draft_id FROM leads_raw WHERE id = ANY(%s)",
         (req.lead_ids,)
     )
     leads_to_send = cur.fetchall()
@@ -1347,6 +1345,15 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
                 conn.commit()
                 from app.models.lead import add_activity_log
                 add_activity_log(lead['id'], "EMAIL_SENT", f"Email dispatched via Gmail API from {sender_email} — Appears in Gmail Sent folder", sender_name)
+                
+                # If there was a linked Gmail draft, delete it now
+                if lead.get('gmail_draft_id'):
+                    try:
+                        from app.services.google_service import delete_gmail_draft
+                        delete_gmail_draft(int(uid), lead['gmail_draft_id'])
+                    except Exception as de:
+                        logger.error(f"Failed to delete draft {lead['gmail_draft_id']}: {de}")
+
                 sent_count += 1
                 results.append({"id": lead['id'], "email": lead['email'], "status": "sent"})
             else:

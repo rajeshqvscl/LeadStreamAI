@@ -478,6 +478,21 @@ def send_gmail_draft(user_id: int, draft_id: str):
         print(f"Error sending Gmail draft {draft_id}: {e}")
         return None
 
+def delete_gmail_draft(user_id: int, draft_id: str):
+    """Deletes an existing Gmail draft."""
+    service = get_gmail_service(user_id)
+    if not service: return False
+    
+    try:
+        service.users().drafts().delete(
+            userId='me', 
+            id=draft_id
+        ).execute()
+        return True
+    except Exception as e:
+        print(f"Error deleting Gmail draft {draft_id}: {e}")
+        return False
+
 def create_calendar_event(user_id: int, lead_email: str, summary: str, description: str, start_time: datetime.datetime, duration_minutes: int = 30):
     """Creates a Google Calendar event with a Google Meet link."""
     import uuid
