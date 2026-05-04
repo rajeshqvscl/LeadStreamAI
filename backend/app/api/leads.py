@@ -736,6 +736,25 @@ def bulk_delete(req: List[int]):
         cur.close()
         conn.close()
     return {"message": "Leads rejected and deleted"}
+
+@router.delete("/leads/{lead_id}")
+def delete_lead(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        uid = normalize_user_id(user_id)
+        if str(user_id).lower() == 'admin':
+            cur.execute("DELETE FROM leads_raw WHERE id = %s", (lead_id,))
+        else:
+            cur.execute("DELETE FROM leads_raw WHERE id = %s AND user_id = %s", (lead_id, uid))
+        conn.commit()
+        return {"message": "Lead deleted successfully"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
 @router.post("/leads/bulk-import")
 def bulk_import(
     leads: List[dict],

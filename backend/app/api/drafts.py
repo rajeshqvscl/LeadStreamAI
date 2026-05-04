@@ -1351,7 +1351,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
                 results.append({"id": lead['id'], "email": lead['email'], "status": "sent"})
             else:
                 failed_count += 1
-                results.append({"id": lead['id'], "email": lead['email'], "status": "failed"})
+                results.append({"id": lead['id'], "email": lead['email'], "status": "failed", "error": "Gmail API dispatch failed. Ensure your Google account is correctly linked and has necessary permissions."})
         except Exception as e:
             logger.error(f"Bulk send error for lead {lead['id']}: {str(e)}")
             failed_count += 1

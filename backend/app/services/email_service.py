@@ -193,7 +193,12 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 logger.info(f"✅ Gmail API dispatch successful to {to_email} with {len(attachments)} attachments — Message ID: {sent.get('id')}")
                 return True
         except Exception as e:
-            logger.error(f"Gmail API dispatch failed, falling back: {str(e)}")
+            import traceback
+            error_details = traceback.format_exc()
+            logger.error(f"❌ Gmail API dispatch failed for User {user_id} to {to_email}: {str(e)}\n{error_details}")
+            # If it's a specific Google API error, it often has more info
+            if hasattr(e, 'content'):
+                logger.error(f"Google API Error Content: {e.content.decode() if hasattr(e.content, 'decode') else e.content}")
 
     # 2. Fallback to SMTP/Resend logic
     if user_id and not is_system_email:

@@ -262,10 +262,18 @@ def create_tables():
         id SERIAL PRIMARY KEY,
         row_data JSONB NOT NULL,
         user_id INTEGER,
+        _is_generated BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
     );
     """)
+
+    # Ensure _is_generated column exists for existing tables
+    try:
+        cur.execute("ALTER TABLE company_registry ADD COLUMN IF NOT EXISTS _is_generated BOOLEAN DEFAULT FALSE;")
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
 
     # Prompts Table
     cur.execute("""

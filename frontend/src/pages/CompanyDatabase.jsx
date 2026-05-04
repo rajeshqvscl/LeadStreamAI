@@ -346,7 +346,7 @@ const CompanyDatabase = () => {
   };
 
   const headers = companies.length > 0
-    ? Object.keys(companies[0]).filter(h => h !== 'id')
+    ? Object.keys(companies[0]).filter(h => h !== 'id' && h !== '_is_generated')
     : ["Name", "Company", "Status", "Sector", "Email", "Note"];
 
   const renderEditDrawer = () => {
@@ -516,6 +516,26 @@ const CompanyDatabase = () => {
       {/* Dynamic Filter Bar */}
       {showFilters && companies.length > 0 && (
         <div className="mb-8 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 p-6 bg-[#131722]/40 border border-white/5 rounded-3xl animate-in slide-in-from-top-4 duration-300">
+          {/* Status Filter */}
+          <div className="space-y-2">
+            <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Status</label>
+            <div className="relative group/select">
+              <select
+                className="w-full appearance-none bg-[#0d1117] border border-white/5 rounded-xl px-4 py-2.5 text-[11px] text-white focus:outline-none focus:border-blue-500/30 transition-all cursor-pointer"
+                value={columnFilters['generated'] || ''}
+                onChange={(e) => {
+                  setColumnFilters(prev => ({ ...prev, generated: e.target.value }));
+                  setCurrentPage(1);
+                }}
+              >
+                <option value="">All Status</option>
+                <option value="false">New</option>
+                <option value="true">Generated</option>
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-600 pointer-events-none group-hover/select:text-slate-400 transition-colors" />
+            </div>
+          </div>
+
           {headers.map(header => {
             const uniqueValues = getUniqueValues(header);
             return (
@@ -601,6 +621,9 @@ const CompanyDatabase = () => {
                     </div>
                   </th>
                 ))}
+                <th className="px-6 py-6 text-[10px] font-black text-slate-500 uppercase tracking-[3px] min-w-[120px] text-center">
+                  Status
+                </th>
                 <th className="px-6 py-6 text-[10px] font-black text-slate-500 uppercase tracking-[3px] min-w-[180px] text-center">
                   Outreach Control
                 </th>
@@ -627,6 +650,17 @@ const CompanyDatabase = () => {
                       />
                     </td>
                   ))}
+                  <td className="px-6 py-4 text-center">
+                    {company._is_generated ? (
+                      <span className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-[9px] font-black text-emerald-500 uppercase tracking-wider">
+                        Generated
+                      </span>
+                    ) : (
+                      <span className="px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded-full text-[9px] font-black text-blue-500 uppercase tracking-wider">
+                        New
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-2">
                     <div className="flex items-center justify-center gap-2">
                       <button

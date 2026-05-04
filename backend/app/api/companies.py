@@ -59,8 +59,15 @@ def list_companies(
             filter_map = json.loads(filters)
             for key, value in filter_map.items():
                 if value:
-                    base_where += f" AND (row_data->>'{key}' ILIKE %s)"
-                    params.append(f"%{value}%")
+                    if key == "generated":
+                        # Handle BOOLEAN filter for _is_generated
+                        if str(value).lower() == "true":
+                            base_where += " AND _is_generated = TRUE"
+                        elif str(value).lower() == "false":
+                            base_where += " AND _is_generated = FALSE"
+                    else:
+                        base_where += f" AND (row_data->>'{key}' ILIKE %s)"
+                        params.append(f"%{value}%")
         except:
             pass # Ignore malformed filters
 
@@ -73,7 +80,7 @@ def list_companies(
         # Fetch with pagination
         fetch_params = params + [limit, offset]
         fetch_query = f"""
-            SELECT id, row_data 
+            SELECT id, row_data, _is_generated 
             FROM company_registry 
             {base_where} 
             ORDER BY id ASC 
@@ -87,7 +94,7 @@ def list_companies(
             data = r['row_data']
             if isinstance(data, str):
                 data = json.loads(data)
-            companies.append({ "id": r['id'], **data })
+            companies.append({ "id": r['id'], "_is_generated": r["_is_generated"], **data })
 
         return {
             "companies": companies,
@@ -272,8 +279,8 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
         gmail_draft_id = res.get("gmail_draft_id")
         email_content = f"Subject: {subject}\n\n{body}"
 
-        # Remove from company registry
-        cur.execute("DELETE FROM company_registry WHERE id = %s AND user_id = %s", (row_id, uid))
+        # Mark as generated in company registry
+        cur.execute("UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = %s AND user_id = %s", (row_id, uid))
         conn.commit()
 
         return {"success": True, "lead_id": lead_id, "message": "Draft generated and moved to Lead Pipeline."}
@@ -311,8 +318,8 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
             WHERE id = %s
         """, (email_content, gmail_draft_id, lead_id))
 
-        # Remove from company registry - it's now in the lead pipeline
-        cur.execute("DELETE FROM company_registry WHERE id = %s AND user_id = %s", (row_id, uid))
+        # Mark as generated in company registry - it's now in the lead pipeline
+        cur.execute("UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = %s AND user_id = %s", (row_id, uid))
         conn.commit()
 
         # Log activity

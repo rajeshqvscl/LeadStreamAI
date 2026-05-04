@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Eye, Edit3, Loader2, Send, ChevronLeft, ChevronRight, X, Archive, CheckCircle2, Sparkles, History, User, Globe, Calendar } from 'lucide-react';
+import { Eye, Edit3, Loader2, Send, ChevronLeft, ChevronRight, X, Archive, CheckCircle2, Sparkles, History, User, Globe, Calendar, Trash2 } from 'lucide-react';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import api from '../services/api';
@@ -102,12 +102,14 @@ const Emails = () => {
     setBulkSendResult(null);
     try {
       const res = await api.post('/api/send-selected-batch', { lead_ids: selectedIds });
-      const { sent_count, failed_count } = res.data;
-      setBulkSendResult({ sent: sent_count, failed: failed_count, total: selectedIds.length });
+      const { sent_count, failed_count, results } = res.data;
+      setBulkSendResult({ sent: sent_count, failed: failed_count, total: selectedIds.length, results: results });
       // Remove sent leads from the queue list
-      setEmails(prev => prev.filter(e => !selectedIds.includes(e.id)));
-      setSelectedIds([]);
-      setTimeout(() => { setBulkSendResult(null); setIsBulkSending(false); }, 3500);
+      fetchEmails();
+      // Don't auto-close if there are failures, let the user see the report
+      if (failed_count === 0) {
+        setTimeout(() => { setBulkSendResult(null); setIsBulkSending(false); }, 3500);
+      }
     } catch (err) {
       setIsBulkSending(false);
       setBulkSendResult(null);
@@ -143,6 +145,35 @@ const Emails = () => {
       fetchEmails();
     } catch {
       showNotification('error', 'Rejection failed');
+    }
+  };
+  
+  const handleDelete = async (id) => {
+    if (!window.confirm("Permanently delete this lead and its draft? This action is non-reversible.")) return;
+    try {
+      await api.delete(`/api/leads/${id}`);
+      showNotification('success', 'Lead permanently deleted');
+      setEmails(prev => prev.filter(e => e.id !== id));
+      setSelectedIds(prev => prev.filter(i => i !== id));
+    } catch {
+      showNotification('error', 'Deletion failed');
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    if (!window.confirm(`Permanently delete all ${selectedIds.length} selected leads? This action is non-reversible.`)) return;
+    
+    setIsBatchSending(true);
+    try {
+      await api.post('/api/leads/bulk-delete', selectedIds);
+      showNotification('success', `${selectedIds.length} leads deleted`);
+      setEmails(prev => prev.filter(e => !selectedIds.includes(e.id)));
+      setSelectedIds([]);
+    } catch {
+      showNotification('error', 'Bulk deletion failed');
+    } finally {
+      setIsBatchSending(false);
     }
   };
 
@@ -495,6 +526,14 @@ const Emails = () => {
                       >
                         <Send className="w-3.5 h-3.5" />
                       </button>
+
+                      <button 
+                        onClick={() => handleDelete(email.id)} 
+                        className="p-2 rounded bg-red-500/10 hover:bg-red-500/20 text-red-500 transition-all cursor-pointer" 
+                        title="Delete Lead & Draft"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -682,9 +721,16 @@ const Emails = () => {
               </button>
               <button 
                 onClick={() => handleBulkAction('REJECTED')}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer border border-red-500/20"
+                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-white text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer border border-red-500/20"
               >
                 Reject
+              </button>
+              <button 
+                onClick={handleBulkDelete}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer border border-red-400/30 shadow-lg shadow-red-500/20"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Delete
               </button>
               <button 
                 onClick={() => setSelectedIds([])}
@@ -736,12 +782,28 @@ const Emails = () => {
                     <span className="text-xl font-black text-emerald-400">{bulkSendResult.sent}</span>
                   </div>
                   {bulkSendResult.failed > 0 && (
-                    <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-red-500/10 border border-red-500/20">
-                      <span className="text-[11px] font-black text-red-400 uppercase tracking-widest">❌ Failed</span>
-                      <span className="text-xl font-black text-red-400">{bulkSendResult.failed}</span>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-red-500/10 border border-red-500/20">
+                        <span className="text-[11px] font-black text-red-400 uppercase tracking-widest">❌ Failed</span>
+                        <span className="text-xl font-black text-red-400">{bulkSendResult.failed}</span>
+                      </div>
+                      <div className="max-h-32 overflow-y-auto custom-scrollbar space-y-1 pr-2">
+                        {bulkSendResult.results?.filter(r => r.status === 'failed').map((r, idx) => (
+                          <div key={idx} className="text-left p-2 bg-red-500/5 rounded-lg border border-red-500/10">
+                            <div className="text-[10px] font-black text-red-400 uppercase tracking-tighter truncate">{r.email}</div>
+                            <div className="text-[9px] text-red-300/60 leading-tight mt-0.5">{r.error || 'Unknown error'}</div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                   <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest pt-1">Check your Gmail Sent folder to verify</p>
+                  <button 
+                    onClick={() => { setBulkSendResult(null); setIsBulkSending(false); }}
+                    className="w-full py-3 bg-white/5 hover:bg-white/10 text-slate-400 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border border-white/5"
+                  >
+                    Close Report
+                  </button>
                 </div>
               </>
             )}
