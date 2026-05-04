@@ -65,8 +65,7 @@ def get_user_credentials(user_id: int) -> Optional[Credentials]:
             refresh_token=user['google_refresh_token'],
             token_uri="https://oauth2.googleapis.com/token",
             client_id=os.getenv("GOOGLE_CLIENT_ID"),
-            client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
-            scopes=SCOPES # Explicitly request our full scope set during refresh
+            client_secret=os.getenv("GOOGLE_CLIENT_SECRET")
         )
         
         # Check if expired and refresh if necessary

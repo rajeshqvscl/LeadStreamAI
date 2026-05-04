@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Eye, Edit3, Loader2, Send, ChevronLeft, ChevronRight, X, Archive, CheckCircle2, Sparkles, History, User, Globe, Calendar, Trash2 } from 'lucide-react';
+import { Eye, Edit3, Loader2, Send, ChevronLeft, ChevronRight, X, Archive, CheckCircle2, Sparkles, History, User, Globe, Calendar, Trash2, AlertCircle } from 'lucide-react';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import api from '../services/api';
@@ -776,7 +776,35 @@ const Emails = () => {
                   <h3 className="text-2xl font-black text-white tracking-tight">Batch Complete! 🎉</h3>
                   <p className="text-slate-500 text-[12px] font-bold uppercase tracking-[3px]">Emails sent via your Gmail account</p>
                 </div>
-                <div className="w-full space-y-3">
+                <div className="w-full space-y-4">
+                  {bulkSendResult.failed > 0 && bulkSendResult.results?.some(r => 
+                    r.status === 'failed' && 
+                    (r.error?.toLowerCase().includes('invalid_scope') || 
+                     r.error?.toLowerCase().includes('invalid_grant') || 
+                     r.error?.toLowerCase().includes('reconnect') ||
+                     r.error?.toLowerCase().includes('not connected'))
+                  ) && (
+                    <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl">
+                      <div className="flex items-start gap-3 text-left">
+                        <div className="p-2 bg-blue-500/20 rounded-lg shrink-0">
+                          <AlertCircle className="w-4 h-4 text-blue-400" />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[11px] font-black text-blue-400 uppercase tracking-widest">Connection Required</p>
+                          <p className="text-[10px] text-slate-300 leading-relaxed">
+                            Your Google session has expired or permissions are missing. Please disconnect and reconnect your account in Settings.
+                          </p>
+                          <button 
+                            onClick={() => navigate('/settings')}
+                            className="flex items-center gap-2 text-[10px] font-black text-blue-400 hover:text-white uppercase tracking-widest mt-2 transition-colors cursor-pointer group"
+                          >
+                            <span>Go to Settings</span>
+                            <ChevronRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
                     <span className="text-[11px] font-black text-emerald-400 uppercase tracking-widest">✅ Sent Successfully</span>
                     <span className="text-xl font-black text-emerald-400">{bulkSendResult.sent}</span>
