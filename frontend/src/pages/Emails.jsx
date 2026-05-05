@@ -73,24 +73,26 @@ const Emails = () => {
   }, [pagination.page, filterStatus, filterRegion, filterGeo, filterCompany]);
 
   const handleApprove = async (id) => {
+    const taskId = `approve-${id}`;
+    window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+      detail: { id: taskId, title: 'Dispatching Email', subtitle: 'Processing Gmail dispatch...', progress: 10, status: 'RUNNING' } 
+    }));
+
     try {
       setSendingId(id);
-      setApprovingId(id);
-      setApproveStep(0);
       await api.post(`/api/approve-email/${id}`, { approved_by: 'admin' });
-      setApproveStep(1);
-      // Remove instantly from list for snappy UX
+      
+      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+        detail: { id: taskId, title: 'Email Dispatched', subtitle: 'Removed from queue', progress: 100, status: 'COMPLETED' } 
+      }));
+      
       setEmails(prev => prev.filter(e => e.id !== id));
-      // Keep success popup visible for 1.8s then close
-      setTimeout(() => {
-        setApprovingId(null);
-        setApproveStep(0);
-        showNotification('success', '✅ Email dispatched & Gmail draft deleted');
-      }, 1800);
+      showNotification('success', '✅ Email dispatched');
     } catch (err) {
-      setApprovingId(null);
-      setApproveStep(0);
-      showNotification('error', err?.response?.data?.detail || 'Approval failed. Check Gmail connection.');
+      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+        detail: { id: taskId, title: 'Dispatch Failed', subtitle: 'Error in Gmail connection', progress: 0, status: 'FAILED' } 
+      }));
+      showNotification('error', err?.response?.data?.detail || 'Approval failed');
     } finally {
       setSendingId(null);
     }
@@ -98,22 +100,26 @@ const Emails = () => {
 
   const handleBulkSend = async () => {
     if (selectedIds.length === 0) return;
-    setIsBulkSending(true);
-    setBulkSendResult(null);
+    const taskId = `bulk-send-${Date.now()}`;
+    window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+      detail: { id: taskId, title: `Sending ${selectedIds.length} Emails`, subtitle: 'Initializing batch...', progress: 5, status: 'RUNNING' } 
+    }));
+
     try {
       const res = await api.post('/api/send-selected-batch', { lead_ids: selectedIds });
-      const { sent_count, failed_count, results } = res.data;
-      setBulkSendResult({ sent: sent_count, failed: failed_count, total: selectedIds.length, results: results });
-      // Remove sent leads from the queue list
+      const { sent_count, failed_count } = res.data;
+      
+      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+        detail: { id: taskId, title: 'Batch Dispatched', subtitle: `Sent: ${sent_count} | Failed: ${failed_count}`, progress: 100, status: 'COMPLETED' } 
+      }));
+      
       fetchEmails();
-      // Don't auto-close if there are failures, let the user see the report
-      if (failed_count === 0) {
-        setTimeout(() => { setBulkSendResult(null); setIsBulkSending(false); }, 3500);
-      }
+      setSelectedIds([]);
     } catch (err) {
-      setIsBulkSending(false);
-      setBulkSendResult(null);
-      showNotification('error', err?.response?.data?.detail || 'Bulk send failed. Check Gmail connection.');
+      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+        detail: { id: taskId, title: 'Batch Failed', subtitle: 'Check Gmail link', progress: 0, status: 'FAILED' } 
+      }));
+      showNotification('error', 'Bulk send failed');
     }
   };
 
@@ -202,30 +208,43 @@ const Emails = () => {
 
   const handleGenerateWithTemplate = async () => {
     if (selectedIds.length === 0) return;
+    const taskId = `gen-${Date.now()}`;
     setShowTemplatePicker(false);
-    setIsTemplateGenerating(true);
+    
+    window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+      detail: { id: taskId, title: 'AI Generation', subtitle: `Processing ${selectedIds.length} drafts...`, progress: 10, status: 'RUNNING' } 
+    }));
+
     const leadIds = selectedIds;
     try {
       if (selectedTemplate === 'ai') {
         await api.post('/api/generate-bulk-domain-drafts', { lead_ids: leadIds });
-        showNotification('success', `AI drafts generated for ${leadIds.length} lead(s).`);
+        window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+          detail: { id: taskId, title: 'Generation Complete', subtitle: `Generated ${leadIds.length} drafts`, progress: 100, status: 'COMPLETED' } 
+        }));
       } else {
-        // Generate for each lead sequentially using the chosen template
         let ok = 0;
         for (const lid of leadIds) {
           try {
             await api.post('/api/generate-draft-from-template', { lead_id: lid, template_name: selectedTemplate });
             ok++;
+            const prog = Math.round((ok / leadIds.length) * 100);
+            window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+              detail: { id: taskId, title: 'Applying Template', subtitle: `${ok}/${leadIds.length} leads...`, progress: prog, status: 'RUNNING' } 
+            }));
           } catch {}
         }
-        showNotification('success', `Template "${selectedTemplate}" applied to ${ok} lead(s).`);
+        window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+          detail: { id: taskId, title: 'Template Applied', subtitle: `Successfully applied to ${ok} leads`, progress: 100, status: 'COMPLETED' } 
+        }));
       }
       setSelectedIds([]);
       fetchEmails();
     } catch (err) {
-      showNotification('error', 'Draft generation failed: ' + (err.response?.data?.error || err.message));
-    } finally {
-      setIsTemplateGenerating(false);
+      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+        detail: { id: taskId, title: 'Generation Failed', subtitle: 'Error in AI matrix', progress: 0, status: 'FAILED' } 
+      }));
+      showNotification('error', 'Draft generation failed');
     }
   };
 
@@ -281,15 +300,22 @@ const Emails = () => {
 
   const sendApprovedBatch = async () => {
     if (!window.confirm('Send all approved emails now?')) return;
-    setIsBatchSending(true);
+    const taskId = `batch-approved-${Date.now()}`;
+    window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+      detail: { id: taskId, title: 'Approved Batch Dispatch', subtitle: 'Contacting Gmail API...', progress: 20, status: 'RUNNING' } 
+    }));
+
     try {
       const response = await api.post('/api/send-approved-batch');
-      showNotification('success', response.data.message || 'Batch dispatched successfully');
+      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+        detail: { id: taskId, title: 'Batch Completed', subtitle: response.data.message || 'Dispatch successful', progress: 100, status: 'COMPLETED' } 
+      }));
       fetchEmails();
     } catch {
+      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+        detail: { id: taskId, title: 'Batch Failed', subtitle: 'Connection error', progress: 0, status: 'FAILED' } 
+      }));
       showNotification('error', 'Batch send failed');
-    } finally {
-      setIsBatchSending(false);
     }
   };
 
@@ -744,176 +770,7 @@ const Emails = () => {
         </div>
       )}
 
-      {/* Bulk Send Progress Popup */}
-      {isBulkSending && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/80 backdrop-blur-2xl animate-in fade-in duration-300">
-          <div className="w-full max-w-md bg-[#0b0f1a] border border-white/10 rounded-[40px] p-12 shadow-[0_0_100px_rgba(0,0,0,0.8)] flex flex-col items-center gap-8 text-center animate-in zoom-in-95 duration-500">
-            {!bulkSendResult ? (
-              <>
-                <div className="relative">
-                  <div className="w-24 h-24 rounded-full bg-emerald-500/10 flex items-center justify-center">
-                    <Send className="w-10 h-10 text-emerald-400 animate-pulse" />
-                  </div>
-                  <div className="absolute inset-0 rounded-full border-2 border-emerald-500/30 animate-ping" />
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-2xl font-black text-white tracking-tight">Dispatching {selectedIds.length} Emails</h3>
-                  <p className="text-slate-500 text-[12px] font-bold uppercase tracking-[3px]">Sending via your Gmail account...</p>
-                </div>
-                <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-emerald-500 to-blue-500 rounded-full animate-pulse" style={{ width: '60%' }} />
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="relative">
-                  <div className="w-24 h-24 rounded-full bg-emerald-500/10 flex items-center justify-center">
-                    <CheckCircle2 className="w-10 h-10 text-emerald-400" />
-                  </div>
-                  <div className="absolute inset-0 rounded-full border-2 border-emerald-500/30 animate-ping" />
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-2xl font-black text-white tracking-tight">Batch Complete! 🎉</h3>
-                  <p className="text-slate-500 text-[12px] font-bold uppercase tracking-[3px]">Emails sent via your Gmail account</p>
-                </div>
-                <div className="w-full space-y-4">
-                  {bulkSendResult.failed > 0 && bulkSendResult.results?.some(r => 
-                    r.status === 'failed' && 
-                    (r.error?.toLowerCase().includes('invalid_scope') || 
-                     r.error?.toLowerCase().includes('invalid_grant') || 
-                     r.error?.toLowerCase().includes('reconnect') ||
-                     r.error?.toLowerCase().includes('not connected'))
-                  ) && (
-                    <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl">
-                      <div className="flex items-start gap-3 text-left">
-                        <div className="p-2 bg-blue-500/20 rounded-lg shrink-0">
-                          <AlertCircle className="w-4 h-4 text-blue-400" />
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-[11px] font-black text-blue-400 uppercase tracking-widest">Connection Required</p>
-                          <p className="text-[10px] text-slate-300 leading-relaxed">
-                            Your Google session has expired or permissions are missing. Please disconnect and reconnect your account in Settings.
-                          </p>
-                          <button 
-                            onClick={() => navigate('/settings')}
-                            className="flex items-center gap-2 text-[10px] font-black text-blue-400 hover:text-white uppercase tracking-widest mt-2 transition-colors cursor-pointer group"
-                          >
-                            <span>Go to Settings</span>
-                            <ChevronRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
-                    <span className="text-[11px] font-black text-emerald-400 uppercase tracking-widest">✅ Sent Successfully</span>
-                    <span className="text-xl font-black text-emerald-400">{bulkSendResult.sent}</span>
-                  </div>
-                  {bulkSendResult.failed > 0 && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-red-500/10 border border-red-500/20">
-                        <span className="text-[11px] font-black text-red-400 uppercase tracking-widest">❌ Failed</span>
-                        <span className="text-xl font-black text-red-400">{bulkSendResult.failed}</span>
-                      </div>
-                      <div className="max-h-32 overflow-y-auto custom-scrollbar space-y-1 pr-2">
-                        {bulkSendResult.results?.filter(r => r.status === 'failed').map((r, idx) => (
-                          <div key={idx} className="text-left p-2 bg-red-500/5 rounded-lg border border-red-500/10">
-                            <div className="text-[10px] font-black text-red-400 uppercase tracking-tighter truncate">{r.email}</div>
-                            <div className="text-[9px] text-red-300/60 leading-tight mt-0.5">{r.error || 'Unknown error'}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest pt-1">Check your Gmail Sent folder to verify</p>
-                  <button 
-                    onClick={() => { setBulkSendResult(null); setIsBulkSending(false); }}
-                    className="w-full py-3 bg-white/5 hover:bg-white/10 text-slate-400 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border border-white/5"
-                  >
-                    Close Report
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
 
-      {/* ✨ Approve & Send Loading Popup */}
-      {approvingId && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/80 backdrop-blur-2xl animate-in fade-in duration-300">
-          <div className="w-full max-w-md bg-[#0b0f1a] border border-white/10 rounded-[40px] p-12 shadow-[0_0_100px_rgba(0,0,0,0.8)] flex flex-col items-center gap-8 text-center animate-in zoom-in-95 duration-500">
-            
-            {approveStep === 0 ? (
-              <>
-                {/* Sending Animation */}
-                <div className="relative">
-                  <div className="w-24 h-24 rounded-full bg-blue-500/10 flex items-center justify-center">
-                    <Send className="w-10 h-10 text-blue-400 animate-pulse" />
-                  </div>
-                  <div className="absolute inset-0 rounded-full border-2 border-blue-500/30 animate-ping" />
-                  <div className="absolute inset-[-8px] rounded-full border border-blue-500/10 animate-ping" style={{ animationDelay: '0.3s' }} />
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-2xl font-black text-white tracking-tight">Dispatching Outreach</h3>
-                  <p className="text-slate-500 text-[12px] font-bold uppercase tracking-[3px]">Sending email & deleting draft</p>
-                </div>
-                <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-blue-500 to-violet-500 rounded-full animate-pulse" style={{ width: '70%' }} />
-                </div>
-                <div className="flex flex-col gap-3 w-full">
-                  {[
-                    { label: 'Sending via Gmail API', done: true },
-                    { label: 'Deleting Gmail Draft', done: false },
-                    { label: 'Updating Review Queue', done: false },
-                  ].map((step, i) => (
-                    <div key={i} className="flex items-center gap-3 text-left">
-                      <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
-                        step.done ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-slate-600'
-                      }`}>
-                        {step.done ? <CheckCircle2 className="w-3 h-3" /> : <Loader2 className="w-3 h-3 animate-spin" />}
-                      </div>
-                      <span className={`text-[11px] font-bold uppercase tracking-widest ${
-                        step.done ? 'text-emerald-400' : 'text-slate-500'
-                      }`}>{step.label}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <>
-                {/* Success State */}
-                <div className="relative">
-                  <div className="w-24 h-24 rounded-full bg-emerald-500/10 flex items-center justify-center">
-                    <CheckCircle2 className="w-10 h-10 text-emerald-400" />
-                  </div>
-                  <div className="absolute inset-0 rounded-full border-2 border-emerald-500/30 animate-ping" />
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-2xl font-black text-white tracking-tight">Email Sent! 🎉</h3>
-                  <p className="text-slate-500 text-[12px] font-bold uppercase tracking-[3px]">Draft removed from Gmail & queue</p>
-                </div>
-                <div className="flex flex-col gap-3 w-full">
-                  {[
-                    { label: 'Email Dispatched', done: true },
-                    { label: 'Gmail Draft Deleted', done: true },
-                    { label: 'Review Queue Updated', done: true },
-                  ].map((step, i) => (
-                    <div key={i} className="flex items-center gap-3 text-left">
-                      <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 bg-emerald-500/20 text-emerald-400">
-                        <CheckCircle2 className="w-3 h-3" />
-                      </div>
-                      <span className="text-[11px] font-bold uppercase tracking-widest text-emerald-400">{step.label}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Template Selection Modal */}
       {showTemplatePicker && (
         <div className="fixed inset-0 z-[4000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className="w-full max-w-xl bg-[#0d1117] border border-blue-500/20 rounded-[32px] overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">

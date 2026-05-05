@@ -19,7 +19,6 @@ load_dotenv(dotenv_path=env_path, override=True)
 
 # --- OAuth Environment Fixes (Local Testing) ---
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
-os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
 
 router = APIRouter()
 
@@ -299,6 +298,7 @@ def google_link(request: Request, user_id: str = Header(..., alias="X-User-Id"))
     
     # Generate the authorization URL. 
     # This generates flow.code_verifier internally.
+    # Force a fresh grant to clear any accidental "Metadata-only" selections
     authorization_url, _ = flow.authorization_url(
         access_type='offline',
         prompt='consent select_account',
@@ -306,7 +306,6 @@ def google_link(request: Request, user_id: str = Header(..., alias="X-User-Id"))
     )
     
     # Bundle user_id and code_verifier into a tiny state string
-    # 'u' = user_id, 'v' = code_verifier
     state_payload = json.dumps({"u": user_id, "v": flow.code_verifier})
     state_str = base64.urlsafe_b64encode(state_payload.encode()).decode()
     
@@ -390,9 +389,12 @@ def google_callback(request: Request, code: str, state: str):
         conn.commit()
         
         # Scope Validation: Check if we actually got the required permission
-        has_full_scope = any('mail.google.com' in s for s in (creds.scopes or []))
+        received_scopes = creds.scopes or []
+        print(f"DEBUG: Scopes received from Google for user {user_id}: {received_scopes}")
+        
+        has_full_scope = any('gmail.readonly' in s or 'mail.google.com' in s for s in received_scopes)
         if not has_full_scope:
-            print(f"WARNING: User {user_id} linked account without full mail scope. Scopes received: {creds.scopes}")
+            print(f"WARNING: User {user_id} linked account without read scope. Scopes received: {received_scopes}")
             # Redirect to a specialized error page
             frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
             return RedirectResponse(url=f"{frontend_url}/dashboard?error=permissions_denied")

@@ -11,7 +11,6 @@ from app.database import get_db_connection
 
 # Scopes required for the application
 SCOPES = [
-    'https://mail.google.com/',
     'https://www.googleapis.com/auth/gmail.readonly',
     'https://www.googleapis.com/auth/gmail.send',
     'https://www.googleapis.com/auth/gmail.modify',
@@ -65,7 +64,8 @@ def get_user_credentials(user_id: int) -> Optional[Credentials]:
             refresh_token=user['google_refresh_token'],
             token_uri="https://oauth2.googleapis.com/token",
             client_id=os.getenv("GOOGLE_CLIENT_ID"),
-            client_secret=os.getenv("GOOGLE_CLIENT_SECRET")
+            client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+            scopes=SCOPES
         )
         
         # Check if expired and refresh if necessary
@@ -143,53 +143,45 @@ def register_gmail_watch(user_id: int):
 def extract_message_body(payload: Dict[str, Any]) -> str:
     """
     Recursively extracts the body text from a Gmail message payload.
-    Prioritizes text/plain, then text/html.
+    Handles base64 padding and prioritizes plain text or HTML.
     """
     import base64
     
-    parts = payload.get('parts', [])
-    
-    # If no parts, check the main body field (for simple messages)
-    if not parts:
-        data = payload.get('body', {}).get('data', '')
-        if data:
-            return base64.urlsafe_b64decode(data).decode('utf-8', errors='replace')
-        return ""
-
-    plain_text = ""
-    html_text = ""
-    
-    def walk_parts(all_parts):
-        nonlocal plain_text, html_text
-        for part in all_parts:
-            mime_type = part.get('mimeType')
-            data = part.get('body', {}).get('data', '')
-            
-            if mime_type == 'text/plain' and not plain_text and data:
-                plain_text = base64.urlsafe_b64decode(data).decode('utf-8', errors='replace')
-            elif mime_type == 'text/html' and not html_text and data:
-                html_text = base64.urlsafe_b64decode(data).decode('utf-8', errors='replace')
-            
-            # Recurse if there are sub-parts
-            if 'parts' in part:
-                walk_parts(part['parts'])
-
-    walk_parts(parts)
-    result = plain_text or html_text or ""
-    
-    # Final aggressive fallback: if result is still empty, look for any part with data
-    if not result:
-        def find_any_data(p_list):
-            for p in p_list:
-                d = p.get('body', {}).get('data', '')
-                if d: return base64.urlsafe_b64decode(d).decode('utf-8', errors='replace')
-                if 'parts' in p:
-                    res = find_any_data(p['parts'])
-                    if res: return res
+    def get_data(body):
+        data = body.get('data', '')
+        if not data: return ""
+        try:
+            # Standard padding fix: ensure length is a multiple of 4
+            data = data.replace('-', '+').replace('_', '/')
+            data += '=' * (-len(data) % 4)
+            return base64.b64decode(data).decode('utf-8', errors='replace')
+        except Exception as e:
+            print(f"Base64 decode error: {e}")
             return ""
-        result = find_any_data(parts)
-        
-    return result
+
+    parts = payload.get('parts', [])
+    if not parts:
+        return get_data(payload.get('body', {}))
+
+    plain = ""
+    html = ""
+
+    def walk(p_list):
+        nonlocal plain, html
+        for p in p_list:
+            mtype = p.get('mimeType')
+            content = get_data(p.get('body', {}))
+            
+            if mtype == 'text/plain' and not plain:
+                plain = content
+            elif mtype == 'text/html' and not html:
+                html = content
+            
+            if 'parts' in p:
+                walk(p['parts'])
+
+    walk(parts)
+    return plain or html or ""
 
 def extract_attachments(service, message_id: str, payload: dict) -> list:
     """
@@ -363,7 +355,23 @@ def get_gmail_message(user_id: int, message_id: str):
             msg = service.users().messages().get(userId='me', id=message_id, format='full').execute()
             payload = msg.get('payload', {})
             headers = payload.get('headers', [])
-            body = extract_message_body(payload) or msg.get('snippet', '')
+            body = extract_message_body(payload)
+            
+            # If body is still empty, try to get 'raw' data as a nuclear backup
+            if not body:
+                raw_msg = service.users().messages().get(userId='me', id=message_id, format='raw').execute()
+                import base64
+                import email
+                raw_data = base64.urlsafe_b64decode(raw_msg['raw']).decode('utf-8', errors='replace')
+                msg_obj = email.message_from_string(raw_data)
+                if msg_obj.is_multipart():
+                    for part in msg_obj.walk():
+                        if part.get_content_type() == 'text/plain':
+                            body = part.get_payload(decode=True).decode('utf-8', errors='replace')
+                            break
+                else:
+                    body = msg_obj.get_payload(decode=True).decode('utf-8', errors='replace')
+
             return {
                 'id': message_id,
                 'subject': next((h['value'] for h in headers if h['name'].lower() == 'subject'), "No Subject"),
@@ -371,34 +379,44 @@ def get_gmail_message(user_id: int, message_id: str):
                 'to': next((h['value'] for h in headers if h['name'].lower() == 'to'), "No Recipient"),
                 'date': next((h['value'] for h in headers if h['name'].lower() == 'date'), ""),
                 'snippet': msg.get('snippet', ''),
-                'body': body if body else " (Empty Message Body) ",
+                'body': body if body else msg.get('snippet', ' (Empty Message Body) '),
                 'is_restricted': False
             }
         except Exception as full_e:
-            error_str = str(full_e).lower()
-            # Catch 403 Forbidden, Metadata restrictions, and Insufficient Permissions
-            is_restricted = "metadata scope" in error_str or "insufficient permission" in error_str or "403" in error_str
-            print(f"DEBUG: Gmail content access failed for {message_id}: {full_e} (Restricted: {is_restricted})")
+            print(f"CRITICAL: Full message fetch failed for {message_id}: {full_e}")
             
-            # Fallback to metadata for headers and snippet so the UI doesn't completely crash
+            # Try to at least get RAW data if FULL failed (sometimes scopes allow raw but not full)
             try:
-                meta = service.users().messages().get(userId='me', id=message_id, format='metadata').execute()
-                headers = meta.get('payload', {}).get('headers', [])
-                snippet = meta.get('snippet', '')
-                
+                raw_msg = service.users().messages().get(userId='me', id=message_id, format='raw').execute()
+                import base64
+                raw_body = base64.urlsafe_b64decode(raw_msg['raw']).decode('utf-8', errors='replace')
                 return {
                     'id': message_id,
-                    'subject': next((h['value'] for h in headers if h['name'].lower() == 'subject'), "No Subject"),
-                    'from': next((h['value'] for h in headers if h['name'].lower() == 'from'), "Unknown Sender"),
-                    'to': next((h['value'] for h in headers if h['name'].lower() == 'to'), "No Recipient"),
-                    'date': next((h['value'] for h in headers if h['name'].lower() == 'date'), ""),
-                    'snippet': snippet,
-                    'body': f" (Security Restriction) — {snippet}" if snippet else "Full message body restricted by Google.",
-                    'is_restricted': True # Force True if we hit the catch for scope reasons
+                    'subject': "Message (Raw Recovery)",
+                    'from': "Unknown",
+                    'to': "Unknown",
+                    'date': "Recent",
+                    'snippet': "Recovered from raw format",
+                    'body': raw_body,
+                    'is_restricted': False
                 }
-            except:
-                # Total failure (likely token invalid)
-                return { 'id': message_id, 'is_restricted': True, 'body': "Error: Insufficient Google Permissions. Please reconnect your account." }
+            except Exception as raw_e:
+                # Fallback to metadata
+                try:
+                    meta = service.users().messages().get(userId='me', id=message_id, format='metadata').execute()
+                    headers = meta.get('payload', {}).get('headers', [])
+                    return {
+                        'id': message_id,
+                        'subject': next((h['value'] for h in headers if h['name'].lower() == 'subject'), "No Subject"),
+                        'from': next((h['value'] for h in headers if h['name'].lower() == 'from'), "Unknown Sender"),
+                        'to': next((h['value'] for h in headers if h['name'].lower() == 'to'), "No Recipient"),
+                        'date': next((h['value'] for h in headers if h['name'].lower() == 'date'), ""),
+                        'snippet': meta.get('snippet', ''),
+                        'body': f"Technical Error: {str(full_e)} | Raw Backup Error: {str(raw_e)}",
+                        'is_restricted': True
+                    }
+                except:
+                    return None
     except Exception as e:
         print(f"Error in get_gmail_message for {message_id}: {e}")
         return None

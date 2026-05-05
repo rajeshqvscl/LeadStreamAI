@@ -1,6 +1,9 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+import logging
+
+logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 from pathlib import Path

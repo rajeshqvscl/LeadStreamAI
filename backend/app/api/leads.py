@@ -440,6 +440,7 @@ class UpdateLeadRequest(BaseModel):
     industry: Optional[str] = None
     family_office_name: Optional[str] = None
     is_responded: Optional[bool] = None
+    cc_email: Optional[str] = None
 
 @router.patch("/leads/{lead_id}")
 def update_lead(lead_id: int, req: UpdateLeadRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
@@ -477,7 +478,8 @@ def update_lead(lead_id: int, req: UpdateLeadRequest, user_id: Optional[str] = H
         'first_name', 'last_name', 'email', 'linkedin_url', 
         'company_name', 'designation', 'phone', 'persona', 'city', 
         'country', 'remarks', 'fit_score', 'campaign_id', 
-        'family_office_name', 'industry', 'email_draft', 'is_responded'
+        'family_office_name', 'industry', 'email_draft', 'is_responded',
+        'cc_email'
     ]
 
     for field, value in update_data.items():
@@ -520,32 +522,98 @@ def mark_lead_responded(lead_id: int, user_id: Optional[str] = Header(None, alia
         return {"error": str(e)}
 
 @router.get("/followups")
-def get_followups_endpoint(user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Returns all leads currently in an active follow-up sequence."""
+def get_followups_endpoint(
+    type: Optional[str] = None,
+    user_id: Optional[str] = Header(None, alias="X-User-Id")
+):
+    """
+    Returns all leads currently in an active follow-up sequence.
+    Strictly filters by the logged-in user unless the user is an admin.
+    """
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
-        query = "SELECT * FROM leads_raw WHERE followup_status = 'ACTIVE' AND is_responded = FALSE"
+        # We fetch leads where followup is active, or they are scheduled
+        query = """
+            SELECT * FROM leads_raw 
+            WHERE (followup_status IN ('ACTIVE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED'))
+            AND COALESCE(is_responded, FALSE) = FALSE
+        """
         params = []
         
-        if user_id and user_id != "admin":
-            query += " AND user_id = %s"
-            params.append(normalize_user_id(user_id))
+        # 1. Multi-user Segregation
+        uid = normalize_user_id(user_id)
+        is_admin = (str(user_id).lower() == "admin")
+        
+        if not is_admin:
+            if uid:
+                query += " AND user_id = %s"
+                params.append(uid)
+            else:
+                # If we can't resolve the user and they aren't admin, return nothing
+                return []
             
-        query += " ORDER BY last_outreach_at DESC"
+        # 2. Lead Type Filtering (Investor vs Client)
+        if type:
+            if type.upper() == 'INVESTOR':
+                # Investors are often the default (NULL)
+                query += " AND (LOWER(lead_type) = 'investor' OR lead_type IS NULL)"
+            else:
+                query += " AND LOWER(lead_type) = LOWER(%s)"
+                params.append(type)
+            
+        query += " ORDER BY COALESCE(scheduled_at, last_outreach_at) DESC"
         cur.execute(query, tuple(params))
         rows = cur.fetchall()
         
         results = []
         for r in rows:
-            results.append(dict(r))
+            lead_dict = dict(r)
+            # Fetch latest significant activity to provide context
+            cur.execute("SELECT action, details FROM activity_log WHERE lead_id = %s ORDER BY created_at DESC LIMIT 1", (lead_dict['id'],))
+            last_act = cur.fetchone()
+            if last_act:
+                act = last_act['action'].upper()
+                det = (last_act['details'] or "").upper()
+                lead_dict['last_action_type'] = act.replace('_', ' ')
+                
+                # Infer Milestone for the UI badge
+                if 'DECK' in det or 'DECK' in act: lead_dict['last_milestone'] = 'Pitch Deck'
+                elif 'TEASER' in det or 'TEASER' in act: lead_dict['last_milestone'] = 'Teaser'
+                elif 'MEET' in det or 'MEET' in act: lead_dict['last_milestone'] = 'Meeting'
+                elif 'DATA' in det or 'ROOM' in det: lead_dict['last_milestone'] = 'Data Room'
+                else: lead_dict['last_milestone'] = 'Follow-up'
+            else:
+                lead_dict['last_milestone'] = 'Initial Outreach'
+                lead_dict['last_action_type'] = 'Outreach'
+
+            results.append(lead_dict)
             
         cur.close()
         conn.close()
         return results
     except Exception as e:
+        logger.error(f"Error fetching follow-ups: {e}")
         return {"error": str(e)}
+
+@router.get("/leads/{lead_id}/timeline")
+def get_lead_timeline(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Fetches the activity history/timeline for a specific lead."""
+    from app.models.lead import get_activity_log, get_lead_by_id
+    
+    # Check access permissions
+    lead = get_lead_by_id(lead_id)
+    if not lead:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Lead not found")
+    
+    uid = normalize_user_id(user_id)
+    if user_id and user_id != "admin" and str(lead.get('user_id')) != str(uid):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Access denied to this lead's timeline")
+        
+    return get_activity_log(lead_id)
 
 def get_user_name(user_id):
     if not user_id: return "system"
@@ -561,10 +629,35 @@ def get_user_name(user_id):
     except:
         return "user"
 
-def normalize_user_id(uid):
-    if not uid: return None
-    try: return int(uid)
-    except: return None
+def normalize_user_id(user_id):
+    """Normalizes the user ID from the header to a valid database ID."""
+    if not user_id or user_id.strip() == "" or str(user_id).lower() == "admin":
+        return None
+    
+    # If it's already a numeric ID, return it
+    if str(user_id).isdigit():
+        return int(user_id)
+        
+    # If it's a username, email, or full name (like 'sravanthi'), resolve it to an ID
+    try:
+        from app.database import get_db_connection
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id FROM users 
+            WHERE LOWER(username) = LOWER(%s) 
+            OR LOWER(email) = LOWER(%s)
+            OR LOWER(full_name) = LOWER(%s)
+        """, (user_id, user_id, user_id))
+        res = cur.fetchone()
+        cur.close()
+        conn.close()
+        if res:
+            return res[0]
+    except Exception as e:
+        logger.error(f"Error resolving user identity {user_id}: {e}")
+        
+    return None
 
 @router.get("/leads/{lead_id}/activity")
 def get_lead_activity(lead_id: int):

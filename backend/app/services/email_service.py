@@ -18,7 +18,7 @@ logger.info(f"Module initialized with env_path: {env_path}")
 # Configure Resend
 resend.api_key = os.getenv("RESEND_API_KEY")
 
-def send_smtp_fallback(to_email: str, subject: str, html_content: str, from_email: str, from_name: str, reply_to: Optional[str] = None) -> bool:
+def send_smtp_fallback(to_email: str, subject: str, html_content: str, from_email: str, from_name: str, reply_to: Optional[str] = None, cc: Optional[str] = None) -> bool:
     import smtplib
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
@@ -34,6 +34,10 @@ def send_smtp_fallback(to_email: str, subject: str, html_content: str, from_emai
         msg['From'] = sender_line
         msg['To'] = to_email
         msg['Subject'] = subject
+        
+        if cc:
+            msg['Cc'] = cc
+            
         if reply_to:
             msg['Reply-To'] = reply_to
         else:
@@ -41,12 +45,19 @@ def send_smtp_fallback(to_email: str, subject: str, html_content: str, from_emai
             
         msg.attach(MIMEText(html_content, 'html'))
 
+        # Prepare recipient list
+        recipients = [to_email]
+        if cc:
+            # Handle multiple CCs separated by commas
+            cc_list = [c.strip() for c in cc.split(',')]
+            recipients.extend(cc_list)
+
         server = smtplib.SMTP(smtp_server, smtp_port)
         server.starttls()
         server.login(smtp_user, smtp_pass)
-        server.send_message(msg)
+        server.sendmail(from_email, recipients, msg.as_string())
         server.quit()
-        logger.info(f"Email sent successfully via SMTP to {to_email} (Reply-To: {msg['Reply-To']})")
+        logger.info(f"Email sent successfully via SMTP to {to_email} (CC: {cc})")
         return True
     except Exception as e:
         logger.error(f"SMTP Dispatch Error: {str(e)}")
@@ -107,7 +118,7 @@ def format_outreach_html(text: str) -> str:
         
     return "\n".join(formatted_lines)
 
-def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None, lead_id: Optional[int] = None, is_system_email: bool = False, user_id: Optional[int] = None) -> bool:
+def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None, lead_id: Optional[int] = None, is_system_email: bool = False, user_id: Optional[int] = None, cc: Optional[str] = None) -> bool:
     """Sends an email using Gmail API (if token available) or falls back to Provider/SMTP."""
     load_dotenv(dotenv_path=env_path, override=True)
     
@@ -181,6 +192,10 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 msg['from'] = clean_from
                 msg['subject'] = clean_subject
                 
+                if cc:
+                    clean_cc = cc.replace('\n', ', ').replace('\r', '').strip()
+                    msg['Cc'] = clean_cc
+                
                 # Attach the HTML body using an 'alternative' container
                 msg_body = MIMEMultipart('alternative')
                 msg_body.attach(MIMEText(html_content, 'html'))
@@ -189,14 +204,19 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 # Attach the files
                 if attachments:
                     for attachment in attachments:
-                        file_data = base64.b64decode(attachment['content'])
-                        part = MIMEApplication(file_data, Name=attachment['filename'])
-                        part['Content-Disposition'] = f'attachment; filename="{attachment["filename"]}"'
-                        msg.attach(part)
+                        try:
+                            file_data = base64.b64decode(attachment['content'])
+                            part = MIMEApplication(file_data, Name=attachment['filename'])
+                            part['Content-Disposition'] = f'attachment; filename="{attachment["filename"]}"'
+                            msg.attach(part)
+                        except Exception as e:
+                            logger.error(f"Failed to attach file {attachment.get('filename')}: {e}")
                 
                 raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode('utf-8')
+                
+                # Gmail API send
                 sent = service.users().messages().send(userId='me', body={'raw': raw_message}).execute()
-                logger.info(f"✅ Gmail API dispatch successful to {to_email} with {len(attachments)} attachments — Message ID: {sent.get('id')}")
+                logger.info(f"✅ Gmail API dispatch successful to {to_email} (CC: {cc}) — Message ID: {sent.get('id')}")
                 return True, "Success"
             else:
                 return False, "Gmail service not initialized. Ensure your Google account is linked with correct permissions."
@@ -264,6 +284,9 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 "html": final_html,
                 "reply_to": from_email
             }
+            
+            if cc:
+                params["cc"] = cc
 
             if lead_id:
                 base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
@@ -310,7 +333,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
             logger.error(f"Resend dispatch failed: {str(e)}")
             return False, str(e)
     else:
-        success = send_smtp_fallback(to_email, subject, final_html, final_from_email, final_from_name, reply_to=from_email)
+        success = send_smtp_fallback(to_email, subject, final_html, final_from_email, final_from_name, reply_to=from_email, cc=cc)
         return success, "SMTP dispatch completed" if success else "SMTP dispatch failed"
 
 def check_scheduled_emails():

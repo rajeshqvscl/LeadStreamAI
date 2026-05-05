@@ -286,5 +286,7 @@ Looking forward to your response.
             except: pass
         return {"intent": "INTERESTED"}
 
+
+
 class LLMService(EmailGenerator):
     pass

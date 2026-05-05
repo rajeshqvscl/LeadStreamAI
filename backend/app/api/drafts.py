@@ -21,6 +21,8 @@ def normalize_user_id(user_id: Optional[str]) -> str:
         return "1"
     return str(user_id)
 
+
+
 def markdown_to_html(text):
     import re
     # 1. Strip technical markers
@@ -116,8 +118,11 @@ class DraftRequest(BaseModel):
     lead_id: int
     template_type: Optional[str] = "standard"
 
+
+
 class ApproveRequest(BaseModel):
     approved_by: Optional[str] = "admin"
+    cc: Optional[str] = None
 
 class RejectRequest(BaseModel):
     rejected_reason: Optional[str] = ""
@@ -943,6 +948,8 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         except:
             pass
         
+        cc_email = req.cc if req else None
+        
         success, error_msg = send_email(
             to_email=email,
             subject=subject,
@@ -950,7 +957,8 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             from_email=sender_email,
             from_name=sender_name,
             lead_id=draft_id,
-            user_id=int(uid)
+            user_id=int(uid),
+            cc=cc_email
         )
         
         dispatch_method = "Gmail API" if has_gmail else "Resend/SMTP"
@@ -1217,7 +1225,7 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     else:
         where_clause += " AND user_id IS NULL"
     
-    cur.execute(f"SELECT id, email, email_draft FROM leads_raw {where_clause}", params)
+    cur.execute(f"SELECT id, email, email_draft, cc_email FROM leads_raw {where_clause}", params)
     leads_to_send = cur.fetchall()
     
     sent_count = 0
@@ -1241,7 +1249,8 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
                 from_email=sender_email,
                 from_name=sender_name,
                 lead_id=lead['id'],
-                user_id=int(uid_val)
+                user_id=int(uid_val),
+                cc=lead['cc_email']
             )
 
             if success:
@@ -1299,7 +1308,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
 
     # 2. Fetch the requested leads
     cur.execute(
-        "SELECT id, email, email_draft, gmail_draft_id FROM leads_raw WHERE id = ANY(%s)",
+        "SELECT id, email, email_draft, gmail_draft_id, cc_email FROM leads_raw WHERE id = ANY(%s)",
         (req.lead_ids,)
     )
     leads_to_send = cur.fetchall()
@@ -1325,7 +1334,8 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
                 from_email=sender_email,
                 from_name=sender_name,
                 lead_id=lead['id'],
-                user_id=uid
+                user_id=uid,
+                cc=lead['cc_email']
             )
 
             if success:

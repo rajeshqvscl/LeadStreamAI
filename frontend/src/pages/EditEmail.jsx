@@ -11,6 +11,7 @@ const EditEmail = () => {
   const [draft, setDraft] = useState(null);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const [cc, setCc] = useState('lalit.h@qvscl.com');
   const [remarks, setRemarks] = useState('');
   const [aiInstruction, setAiInstruction] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -158,6 +159,7 @@ const EditEmail = () => {
       setDraft(lead);
       setSubject(sub);
       setBody(bd);
+      if (lead.cc_email) setCc(lead.cc_email);
       setRemarks(lead.remarks || '');
     } catch (err) {
       console.error('Failed to fetch draft', err);
@@ -171,50 +173,31 @@ const EditEmail = () => {
     fetchDraft();
   }, [draftId]);
 
-  const [statusModal, setStatusModal] = useState({ show: false, title: '', subtitle: '', type: 'default', progress: 0 });
+  const [isSavingTask, setIsSavingTask] = useState(false);
 
-  const ActionLoader = ({ show, title, subtitle, progress, type }) => {
-    if (!show) return null;
-    return (
-      <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#0a0f1a]/80 backdrop-blur-xl animate-in fade-in duration-300">
-        <div className="w-[380px] bg-[#131722] border border-[#ffffff10] rounded-[24px] p-8 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.5)] flex flex-col items-center text-center">
-          <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-6 ${
-            type === 'success' ? 'bg-emerald-500/10 text-emerald-500' : 
-            type === 'generating' ? 'bg-amber-500/10 text-amber-500' :
-            'bg-blue-500/10 text-blue-500'
-          }`}>
-            {type === 'generating' ? <Sparkles className="w-8 h-8 animate-pulse" /> : <Send className="w-8 h-8 animate-bounce" />}
-          </div>
-          
-          <h2 className="text-white text-[20px] font-bold tracking-tight mb-2">{title}</h2>
-          <p className="text-[#64748b] text-[10px] font-black uppercase tracking-[2px] mb-8">{subtitle}</p>
-          
-          <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-            <div 
-              className={`h-full transition-all duration-500 ease-out ${
-                type === 'generating' ? 'bg-gradient-to-r from-amber-500 to-orange-500' : 'bg-gradient-to-r from-emerald-500 to-blue-500'
-              }`}
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   const handleSave = async (silent = false) => {
-    if (!silent) setStatusModal({ show: true, title: 'Saving Changes', subtitle: 'Syncing with secure cloud...', progress: 30, type: 'default' });
+    const taskId = `save-${draftId}`;
+    if (!silent) {
+      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+        detail: { id: taskId, title: 'Saving Draft', subtitle: 'Syncing with matrix...', progress: 40, status: 'RUNNING' } 
+      }));
+    }
     setIsSaving(true);
     try {
-      if (!silent) setStatusModal(prev => ({ ...prev, progress: 70 }));
       const email_draft = `Subject: ${subject}\n\n${body}`;
-      await api.patch(`/api/leads/${draftId}`, { email_draft, remarks });
+      await api.patch(`/api/leads/${draftId}`, { email_draft, remarks, cc_email: cc });
       if (!silent) {
-        setStatusModal(prev => ({ ...prev, progress: 100, title: 'Saved Successfully', type: 'success' }));
-        setTimeout(() => setStatusModal({ show: false }), 800);
+        window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+          detail: { id: taskId, title: 'Draft Saved', subtitle: 'Sync successful', progress: 100, status: 'COMPLETED' } 
+        }));
       }
     } catch {
-      if (!silent) setStatusModal({ show: false });
+      if (!silent) {
+        window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+          detail: { id: taskId, title: 'Save Failed', subtitle: 'Network error', progress: 0, status: 'FAILED' } 
+        }));
+      }
       showNotification('error', 'Failed to save changes');
     } finally {
       setIsSaving(false);
@@ -225,30 +208,38 @@ const EditEmail = () => {
     const finalInstruction = instruction || aiInstruction;
     if (!finalInstruction) return;
 
-    setStatusModal({ show: true, title: 'AI Refinement', subtitle: 'Analyzing context & generating content...', progress: 20, type: 'generating' });
+    const taskId = `refine-${draftId}`;
+    window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+      detail: { id: taskId, title: 'AI Refinement', subtitle: 'Analyzing context...', progress: 30, status: 'RUNNING' } 
+    }));
+    
     setIsRefining(true);
     try {
-      setStatusModal(prev => ({ ...prev, progress: 60 }));
       const response = await api.post(`/api/refine-email/${draftId}`, {
         instruction: finalInstruction,
         subject,
         body
       });
       if (response.data.error) {
-        setStatusModal({ show: false });
-        showNotification('error', `AI refinement failed: ${response.data.error}`);
+        window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+          detail: { id: taskId, title: 'Refinement Failed', subtitle: response.data.error, progress: 0, status: 'FAILED' } 
+        }));
+        showNotification('error', `AI refinement failed`);
         return;
       }
 
       if (response.data.subject || response.data.body) {
-        setStatusModal(prev => ({ ...prev, progress: 100, title: 'Generation Complete' }));
+        window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+          detail: { id: taskId, title: 'Refinement Complete', subtitle: 'AI content applied', progress: 100, status: 'COMPLETED' } 
+        }));
         setSubject(response.data.subject || '');
         setBody(response.data.body || '');
         setAiInstruction('');
-        setTimeout(() => setStatusModal({ show: false }), 800);
       }
     } catch {
-      setStatusModal({ show: false });
+      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+        detail: { id: taskId, title: 'Refinement Failed', subtitle: 'AI Matrix Error', progress: 0, status: 'FAILED' } 
+      }));
       showNotification('error', 'AI refinement failed');
     } finally {
       setIsRefining(false);
@@ -256,15 +247,22 @@ const EditEmail = () => {
   };
 
   const handleApproveAndSend = async () => {
-    setStatusModal({ show: true, title: 'Dispatching Email', subtitle: 'Sending via your Gmail account...', progress: 10, type: 'default' });
+    const taskId = `send-${draftId}`;
+    window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+      detail: { id: taskId, title: 'Dispatching Email', subtitle: 'Gmail API sync...', progress: 20, status: 'RUNNING' } 
+    }));
+
     await handleSave(true);
-    setStatusModal(prev => ({ ...prev, progress: 50 }));
     try {
-      await api.post(`/api/approve-email/${draftId}`);
-      setStatusModal(prev => ({ ...prev, progress: 100, title: 'Email Dispatched', type: 'success' }));
-      setTimeout(() => navigate('/dashboard/emails'), 1200);
+      await api.post(`/api/approve-email/${draftId}`, { cc: cc });
+      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+        detail: { id: taskId, title: 'Email Sent', subtitle: 'Draft removed from queue', progress: 100, status: 'COMPLETED' } 
+      }));
+      navigate('/dashboard/emails');
     } catch {
-      setStatusModal({ show: false });
+      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+        detail: { id: taskId, title: 'Dispatch Failed', subtitle: 'Gmail sync error', progress: 0, status: 'FAILED' } 
+      }));
       showNotification('error', 'Approval failed');
     }
   };
@@ -274,17 +272,24 @@ const EditEmail = () => {
       showNotification('error', 'Please select a date and time');
       return;
     }
-    setStatusModal({ show: true, title: 'Scheduling Email', subtitle: 'Queuing for automated dispatch...', progress: 40, type: 'default' });
+    const taskId = `schedule-${draftId}`;
+    window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+      detail: { id: taskId, title: 'Scheduling Outreach', subtitle: 'Queuing in matrix...', progress: 30, status: 'RUNNING' } 
+    }));
+
     await handleSave(true);
     setIsSaving(true);
     try {
-      setStatusModal(prev => ({ ...prev, progress: 80 }));
       const isoString = new Date(scheduledAt).toISOString();
       await api.post(`/api/schedule-email/${draftId}`, { scheduled_at: isoString });
-      setStatusModal(prev => ({ ...prev, progress: 100, title: 'Successfully Scheduled', type: 'success' }));
-      setTimeout(() => navigate('/dashboard/emails'), 1200);
+      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+        detail: { id: taskId, title: 'Email Scheduled', subtitle: `At: ${isoString.split('T')[0]}`, progress: 100, status: 'COMPLETED' } 
+      }));
+      navigate('/dashboard/emails');
     } catch {
-      setStatusModal({ show: false });
+      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+        detail: { id: taskId, title: 'Schedule Failed', subtitle: 'Queue error', progress: 0, status: 'FAILED' } 
+      }));
       showNotification('error', 'Scheduling failed');
     } finally {
       setIsSaving(false);
@@ -302,7 +307,6 @@ const EditEmail = () => {
 
   return (
     <div className="animate-in fade-in duration-500 min-h-screen bg-[#0a0f1a] pb-20 p-8">
-      <ActionLoader {...statusModal} />
       {/* Header */}
       <div className="flex items-center gap-4 mb-8">
         <button onClick={() => navigate('/dashboard/emails')} className="px-3 py-1.5 flex items-center gap-1.5 rounded-md bg-[#131722] border border-[#ffffff10] text-slate-300 hover:text-white transition-colors text-[11px] font-bold cursor-pointer">
@@ -332,6 +336,17 @@ const EditEmail = () => {
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
                 placeholder="Enter email subject..."
+                className="w-full bg-[#0a0f1a] border border-[#ffffff10] rounded-md px-4 py-3 text-[13px] text-white font-medium outline-none focus:border-blue-500/50"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-medium text-slate-400">CC Recipient</label>
+              <input
+                type="text"
+                value={cc}
+                onChange={(e) => setCc(e.target.value)}
+                placeholder="Copy person (e.g., manager@qvscl.com)"
                 className="w-full bg-[#0a0f1a] border border-[#ffffff10] rounded-md px-4 py-3 text-[13px] text-white font-medium outline-none focus:border-blue-500/50"
               />
             </div>
@@ -523,6 +538,13 @@ const EditEmail = () => {
                   {subject || '(No subject specified)'}
                 </span>
               </div>
+
+              {cc && (
+                <div className="text-[13px] -mt-4">
+                  <span className="text-[#94a3b8] font-medium mr-2">CC:</span>
+                  <span className="text-slate-400 font-bold">{cc}</span>
+                </div>
+              )}
 
               <div
                 className={`text-[13px] leading-relaxed font-medium ${body ? 'text-slate-300' : 'text-slate-600 italic text-[11px]'}`}

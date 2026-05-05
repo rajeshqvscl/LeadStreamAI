@@ -3,7 +3,7 @@ from app.database import get_db_connection
 import json
 
 
-def insert_lead(first_name, last_name, email, domain, linkedin, company, source, payload, fit_score=0, persona="OTHER", phone=None, user_id=None, user_name=None):
+def insert_lead(first_name, last_name, email, domain, linkedin, company, source, payload, fit_score=0, persona="OTHER", phone=None, user_id=None, user_name=None, lead_type="Investor", intent_level="Warm", ai_score=85, system_confidence=90):
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -27,8 +27,8 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
 
     update_query = """
         INSERT INTO leads_raw
-        (first_name, last_name, email, domain, linkedin_url, company_name, source, raw_payload, fit_score, persona, phone, user_id, user_name, designation)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        (first_name, last_name, email, domain, linkedin_url, company_name, source, raw_payload, fit_score, persona, phone, user_id, user_name, designation, lead_type, intent_level, ai_score, system_confidence)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (email, COALESCE(user_id, -1)) DO UPDATE SET
             first_name = EXCLUDED.first_name,
             last_name = EXCLUDED.last_name,
@@ -43,12 +43,17 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
             user_id = EXCLUDED.user_id,
             user_name = COALESCE(EXCLUDED.user_name, leads_raw.user_name),
             designation = EXCLUDED.designation,
+            lead_type = COALESCE(leads_raw.lead_type, EXCLUDED.lead_type),
+            intent_level = COALESCE(leads_raw.intent_level, EXCLUDED.intent_level),
+            ai_score = COALESCE(leads_raw.ai_score, EXCLUDED.ai_score),
+            system_confidence = COALESCE(leads_raw.system_confidence, EXCLUDED.system_confidence),
             created_at = CURRENT_TIMESTAMP
     """
     
     cur.execute(update_query, (
         first_name, last_name, email, domain, linkedin, company, source, 
-        json.dumps(payload), fit_score, persona, phone, user_id, user_name, designation
+        json.dumps(payload), fit_score, persona, phone, user_id, user_name, designation, 
+        lead_type, intent_level, ai_score, system_confidence
     ))
 
 

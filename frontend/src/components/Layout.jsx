@@ -63,6 +63,28 @@ const Layout = () => {
   }, []);
 
   const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const [tasks, setTasks] = useState([]);
+
+  useEffect(() => {
+    const handleTask = (e) => {
+      const { id, type, title, subtitle, progress, status } = e.detail;
+      setTasks(prev => {
+        const existing = prev.find(t => t.id === id);
+        if (existing) {
+          if (status === 'COMPLETED') {
+            setTimeout(() => {
+              setTasks(current => current.filter(t => t.id !== id));
+            }, 4000);
+          }
+          return prev.map(t => t.id === id ? { ...t, progress, status, subtitle } : t);
+        }
+        return [...prev, { id, type, title, subtitle, progress, status }];
+      });
+    };
+    window.addEventListener('TASK_UPDATE', handleTask);
+    return () => window.removeEventListener('TASK_UPDATE', handleTask);
+  }, []);
+
   const getInitials = (name) => {
     if (!name) return 'AD';
     const parts = name.trim().split(/\s+/);
@@ -143,11 +165,9 @@ const Layout = () => {
             <Link to="/dashboard/meetings" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'meetings' ? 'bg-blue-600 text-white font-semibold shadow-lg shadow-blue-600/20' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
               <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'meetings' ? 'text-white' : 'text-[#94a3b8]'}`}>📅</span> Meetings
             </Link>
-            {/* 
             <Link to="/dashboard/followups" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'followups' ? 'bg-orange-600 text-white font-semibold shadow-lg shadow-orange-600/20' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
               <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'followups' ? 'text-white' : 'text-[#94a3b8]'}`}>🔄</span> Follow-ups
-            </Link> 
-            */}
+            </Link>
           </div>
         )}
 
@@ -306,6 +326,77 @@ const Layout = () => {
       <main className="ml-[240px] mt-[64px] flex-1 p-6 relative">
         <Outlet />
       </main>
+
+      {/* Right Side Task Drawer */}
+      <div className={`fixed top-[64px] right-0 bottom-0 w-[380px] bg-[#0f172a]/95 backdrop-blur-2xl border-l border-white/5 z-[2000] transition-all duration-500 shadow-[-20px_0_50px_rgba(0,0,0,0.5)] flex flex-col ${tasks.length > 0 ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
+          <div>
+            <h3 className="text-white font-black text-[14px] uppercase tracking-wider italic">System Matrix Dispatch</h3>
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Background Operations Queue</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+            <span className="text-[10px] font-black text-blue-500 uppercase">{tasks.length} Active</span>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+          {tasks.map((task) => (
+            <div key={task.id} className="relative group">
+              <div className="flex items-start gap-4 mb-3">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border transition-all ${
+                  task.status === 'COMPLETED' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 
+                  'bg-blue-500/10 border-blue-500/20 text-blue-500'
+                }`}>
+                  {task.status === 'COMPLETED' ? '✓' : '⚡'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-[12px] font-black text-white uppercase tracking-tight truncate">{task.title}</p>
+                    <span className="text-[10px] font-bold text-slate-500">{task.progress}%</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-medium truncate uppercase tracking-widest">{task.subtitle}</p>
+                </div>
+              </div>
+
+              {/* Progress Bar Container */}
+              <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden mb-2">
+                <div 
+                  className={`h-full transition-all duration-700 ease-out rounded-full ${
+                    task.status === 'COMPLETED' ? 'bg-emerald-500' : 'bg-gradient-to-r from-blue-600 to-indigo-500 shadow-[0_0_10px_rgba(37,99,235,0.4)]'
+                  }`}
+                  style={{ width: `${task.progress}%` }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                   <div className={`w-1 h-1 rounded-full ${task.status === 'COMPLETED' ? 'bg-emerald-500' : 'bg-blue-500 animate-pulse'}`} />
+                   <span className="text-[9px] font-black uppercase tracking-tighter text-slate-400">
+                    {task.status === 'COMPLETED' ? 'Dispatched' : 'In Progress'}
+                   </span>
+                </div>
+                {task.status === 'COMPLETED' && (
+                  <span className="text-[9px] font-black text-emerald-500 uppercase italic">Finalizing...</span>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {tasks.length === 0 && (
+            <div className="h-full flex flex-col items-center justify-center text-center opacity-20 py-20">
+              <div className="text-4xl mb-4">🚀</div>
+              <p className="text-[10px] font-black uppercase tracking-[3px] text-slate-500 italic">No Active Dispatches</p>
+            </div>
+          )}
+        </div>
+
+        <div className="p-6 border-t border-white/5 bg-black/20">
+           <p className="text-[9px] text-slate-600 font-bold uppercase text-center leading-relaxed">
+            Multi-threaded processing active.<br/> You can safely navigate while tasks complete.
+           </p>
+        </div>
+      </div>
     </div>
   );
 };
