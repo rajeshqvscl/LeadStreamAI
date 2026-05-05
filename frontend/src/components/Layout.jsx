@@ -64,6 +64,7 @@ const Layout = () => {
 
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const [tasks, setTasks] = useState([]);
+  const [isMinimized, setIsMinimized] = useState(false);
 
   useEffect(() => {
     const handleTask = (e) => {
@@ -78,6 +79,8 @@ const Layout = () => {
           }
           return prev.map(t => t.id === id ? { ...t, progress, status, subtitle } : t);
         }
+        // Auto-expand on new task
+        if (prev.length === 0) setIsMinimized(false);
         return [...prev, { id, type, title, subtitle, progress, status }];
       });
     };
@@ -328,17 +331,47 @@ const Layout = () => {
       </main>
 
       {/* Right Side Task Drawer */}
-      <div className={`fixed top-[64px] right-0 bottom-0 w-[380px] bg-[#0f172a]/95 backdrop-blur-2xl border-l border-white/5 z-[2000] transition-all duration-500 shadow-[-20px_0_50px_rgba(0,0,0,0.5)] flex flex-col ${tasks.length > 0 ? 'translate-x-0' : 'translate-x-full'}`}>
-        <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
-          <div>
-            <h3 className="text-white font-black text-[14px] uppercase tracking-wider italic">System Matrix Dispatch</h3>
-            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Background Operations Queue</p>
+      <div className={`fixed top-[64px] right-0 bottom-0 bg-[#0f172a]/95 backdrop-blur-2xl border-l border-white/5 z-[2000] transition-all duration-500 shadow-[-20px_0_50px_rgba(0,0,0,0.5)] flex flex-col ${tasks.length > 0 ? (isMinimized ? 'w-[70px] translate-x-0' : 'w-[380px] translate-x-0') : 'w-[380px] translate-x-full'}`}>
+        {isMinimized ? (
+          <div className="flex flex-col items-center py-6 h-full cursor-pointer hover:bg-white/[0.03] transition-colors" onClick={() => setIsMinimized(false)}>
+            <div className="flex flex-col items-center gap-6">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-500 animate-pulse">
+                <span className="text-[18px]">⚡</span>
+              </div>
+              <div className="h-px w-8 bg-white/10" />
+              <div className="[writing-mode:vertical-lr] text-[10px] font-black uppercase tracking-[3px] text-slate-500 whitespace-nowrap">
+                System Dispatch
+              </div>
+              <div className="mt-4 flex flex-col items-center gap-2">
+                <span className="text-[14px] font-black text-blue-500">{tasks.length}</span>
+                <span className="text-[8px] font-bold text-slate-600 uppercase">Active</span>
+              </div>
+            </div>
+            <div className="mt-auto mb-6 w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-slate-400 hover:text-white transition-colors">
+              <span className="text-[18px]">«</span>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
-            <span className="text-[10px] font-black text-blue-500 uppercase">{tasks.length} Active</span>
-          </div>
-        </div>
+        ) : (
+          <>
+            <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
+              <div>
+                <h3 className="text-white font-black text-[14px] uppercase tracking-wider italic">System Matrix Dispatch</h3>
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Background Operations Queue</p>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+                  <span className="text-[10px] font-black text-blue-500 uppercase">{tasks.length} Active</span>
+                </div>
+                <button 
+                  onClick={() => setIsMinimized(true)}
+                  className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-all cursor-pointer border border-white/5"
+                  title="Minimize Panel"
+                >
+                  <span className="text-[16px] leading-none">»</span>
+                </button>
+              </div>
+            </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
           {tasks.map((task) => (
@@ -396,8 +429,10 @@ const Layout = () => {
             Multi-threaded processing active.<br/> You can safely navigate while tasks complete.
            </p>
         </div>
-      </div>
-    </div>
+      </>
+    )}
+  </div>
+</div>
   );
 };
 

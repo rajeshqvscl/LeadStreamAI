@@ -194,19 +194,34 @@ const CompanyDatabase = () => {
 
   const handleBulkGenerateDrafts = async () => {
     if (selectedIds.length === 0) return;
-    setIsBulkDrafting(true);
+    const taskId = `bulk-gen-${Date.now()}`;
+    
+    window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+      detail: { id: taskId, title: 'AI Bulk Generation', subtitle: `Processing ${selectedIds.length} profiles...`, progress: 10, status: 'RUNNING' } 
+    }));
+
+    const ids = [...selectedIds];
+    setSelectedIds([]);
+    
     let success = 0;
     let failed = 0;
-    for (const id of selectedIds) {
+    for (const id of ids) {
       try {
         await api.post(`/api/companies/${id}/generate-draft`);
         success++;
+        const prog = Math.round((success / ids.length) * 100);
+        window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+          detail: { id: taskId, title: 'Bulk Intelligence Matrix', subtitle: `Integrated ${success}/${ids.length} leads...`, progress: prog, status: 'RUNNING' } 
+        }));
       } catch {
         failed++;
       }
     }
-    setIsBulkDrafting(false);
-    setSelectedIds([]);
+    
+    window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+      detail: { id: taskId, title: 'Bulk Generation Complete', subtitle: `Success: ${success} | Failed: ${failed}`, progress: 100, status: 'COMPLETED' } 
+    }));
+    
     fetchCompanies();
     if (failed === 0) {
       showNotification('success', `✓ ${success} lead${success > 1 ? 's' : ''} moved to pipeline. Drafts added to Email Queue.`);
@@ -224,24 +239,36 @@ const CompanyDatabase = () => {
     const ids = templateTarget !== null ? [templateTarget] : selectedIds;
     if (ids.length === 0) return;
     
+    const taskId = `template-gen-${Date.now()}`;
     setShowTemplatePicker(false);
-    setIsBulkDrafting(true);
-    let success = 0, failed = 0;
     
+    window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+      detail: { id: taskId, title: `Applying ${templateName}`, subtitle: `Processing ${ids.length} leads...`, progress: 10, status: 'RUNNING' } 
+    }));
+
+    if (templateTarget === null) setSelectedIds([]);
+    
+    let success = 0, failed = 0;
     for (const id of ids) {
       try {
         await api.post(`/api/companies/${id}/generate-draft`, null, {
           params: { template_name: templateName === 'ai' ? 'standard' : templateName }
         });
         success++;
+        const prog = Math.round((success / ids.length) * 100);
+        window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+          detail: { id: taskId, title: `Template Matrix: ${templateName}`, subtitle: `Mapped ${success}/${ids.length} profiles...`, progress: prog, status: 'RUNNING' } 
+        }));
       } catch (err) {
         console.error("Bulk draft failure:", err);
         failed++;
       }
     }
     
-    setIsBulkDrafting(false);
-    if (templateTarget === null) setSelectedIds([]);
+    window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+      detail: { id: taskId, title: 'Template Execution Complete', subtitle: `Applied: ${success} | Failed: ${failed}`, progress: 100, status: 'COMPLETED' } 
+    }));
+    
     fetchCompanies();
     
     if (failed === 0) {
@@ -792,61 +819,7 @@ const CompanyDatabase = () => {
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* ✨ Generation Animation (ActionLoader) */}
-      {isBulkDrafting && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#030711]/90 backdrop-blur-2xl animate-in fade-in duration-500">
-          <div className="flex flex-col items-center gap-10 max-w-md text-center p-12">
-            {/* Holographic Sparkle Animation */}
-            <div className="relative">
-              <div className="w-32 h-32 rounded-full bg-gradient-to-tr from-blue-500 to-violet-500 opacity-20 blur-2xl animate-pulse"></div>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="relative">
-                  <Sparkles className="w-16 h-16 text-blue-400 animate-bounce" />
-                  <div className="absolute inset-0 w-16 h-16 text-blue-400 animate-ping opacity-20">
-                    <Sparkles className="w-16 h-16" />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <h2 className="text-3xl font-black text-white tracking-tight animate-in slide-in-from-bottom-4">
-                Engineering <span className="bg-gradient-to-r from-blue-400 to-violet-400 bg-clip-text text-transparent">AI Excellence</span>
-              </h2>
-              <p className="text-slate-500 text-[13px] font-bold uppercase tracking-[4px] leading-relaxed">
-                Processing {templateTarget !== null ? '1' : selectedIds.length} lead profiles through intelligence matrix
-              </p>
-            </div>
-
-            {/* Progress Visualization */}
-            <div className="w-full space-y-6 pt-4">
-              <div className="w-full bg-white/5 rounded-full h-2 overflow-hidden border border-white/5 shadow-inner">
-                <div className="h-full bg-gradient-to-r from-blue-600 via-blue-400 to-violet-600 rounded-full animate-progress-fast" style={{ width: '100%' }}></div>
-              </div>
-              
-              <div className="flex flex-col gap-4 text-left">
-                {[
-                  { icon: <User className="w-3.5 h-3.5" />, text: "Mapping Personal Identity" },
-                  { icon: <Globe className="w-3.5 h-3.5" />, text: "Contextualizing Global Outreach" },
-                  { icon: <Calendar className="w-3.5 h-3.5" />, text: "Finalizing Dispatch Schedule" }
-                ].map((item, i) => (
-                  <div key={i} className={`flex items-center gap-4 transition-all duration-700 delay-[${i*300}ms] animate-in fade-in slide-in-from-left-4`}>
-                    <div className="w-8 h-8 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400">
-                      {item.icon}
-                    </div>
-                    <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">{item.text}</span>
-                    <div className="ml-auto flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]"></div>
-                      <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Active</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+        {/* Toast Notification */}
         </div>
       )}
     </div>

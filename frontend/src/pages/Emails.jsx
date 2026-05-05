@@ -105,6 +105,7 @@ const Emails = () => {
       detail: { id: taskId, title: `Sending ${selectedIds.length} Emails`, subtitle: 'Initializing batch...', progress: 5, status: 'RUNNING' } 
     }));
 
+    setSelectedIds([]);
     try {
       const res = await api.post('/api/send-selected-batch', { lead_ids: selectedIds });
       const { sent_count, failed_count } = res.data;
@@ -114,7 +115,6 @@ const Emails = () => {
       }));
       
       fetchEmails();
-      setSelectedIds([]);
     } catch (err) {
       window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
         detail: { id: taskId, title: 'Batch Failed', subtitle: 'Check Gmail link', progress: 0, status: 'FAILED' } 
@@ -193,13 +193,14 @@ const Emails = () => {
       return;
     }
 
+    const leadIds = [...selectedIds];
+    setSelectedIds([]);
     try {
       await api.post('/api/emails/bulk-action', {
-        lead_ids: selectedIds,
+        lead_ids: leadIds,
         action: action
       });
-      showNotification('success', `Successfully updated ${selectedIds.length} leads to ${action}`);
-      setSelectedIds([]);
+      showNotification('success', `Successfully updated ${leadIds.length} leads to ${action}`);
       fetchEmails();
     } catch {
       showNotification('error', 'Bulk action failed');
@@ -211,11 +212,13 @@ const Emails = () => {
     const taskId = `gen-${Date.now()}`;
     setShowTemplatePicker(false);
     
+    // Dispatch to global task sidebar
     window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
       detail: { id: taskId, title: 'AI Generation', subtitle: `Processing ${selectedIds.length} drafts...`, progress: 10, status: 'RUNNING' } 
     }));
 
-    const leadIds = selectedIds;
+    const leadIds = [...selectedIds];
+    setSelectedIds([]);
     try {
       if (selectedTemplate === 'ai') {
         await api.post('/api/generate-bulk-domain-drafts', { lead_ids: leadIds });
@@ -232,13 +235,14 @@ const Emails = () => {
             window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
               detail: { id: taskId, title: 'Applying Template', subtitle: `${ok}/${leadIds.length} leads...`, progress: prog, status: 'RUNNING' } 
             }));
-          } catch {}
+          } catch (err) {
+            console.error("Draft failed:", err);
+          }
         }
         window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
           detail: { id: taskId, title: 'Template Applied', subtitle: `Successfully applied to ${ok} leads`, progress: 100, status: 'COMPLETED' } 
         }));
       }
-      setSelectedIds([]);
       fetchEmails();
     } catch (err) {
       window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
@@ -253,14 +257,15 @@ const Emails = () => {
       showNotification('error', 'Please select a date and time');
       return;
     }
+    const leadIds = [...selectedIds];
+    setSelectedIds([]);
     try {
       const isoString = new Date(scheduledAt).toISOString();
       await api.post('/api/emails/bulk-schedule', {
-        lead_ids: selectedIds,
+        lead_ids: leadIds,
         scheduled_at: isoString
       });
-      showNotification('success', `Successfully scheduled ${selectedIds.length} emails`);
-      setSelectedIds([]);
+      showNotification('success', `Successfully scheduled ${leadIds.length} emails`);
       setShowScheduleModal(false);
       fetchEmails();
     } catch {
@@ -852,61 +857,6 @@ const Emails = () => {
                 <Sparkles className="w-4 h-4" />
                 Generate {selectedIds.length} Drafts
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ✨ Generation Animation (ActionLoader) */}
-      {isTemplateGenerating && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#030711]/90 backdrop-blur-2xl animate-in fade-in duration-500">
-          <div className="flex flex-col items-center gap-10 max-w-md text-center p-12">
-            {/* Holographic Sparkle Animation */}
-            <div className="relative">
-              <div className="w-32 h-32 rounded-full bg-gradient-to-tr from-blue-500 to-violet-500 opacity-20 blur-2xl animate-pulse"></div>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="relative">
-                  <Sparkles className="w-16 h-16 text-blue-400 animate-bounce" />
-                  <div className="absolute inset-0 w-16 h-16 text-blue-400 animate-ping opacity-20">
-                    <Sparkles className="w-16 h-16" />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <h2 className="text-3xl font-black text-white tracking-tight animate-in slide-in-from-bottom-4">
-                Engineering <span className="bg-gradient-to-r from-blue-400 to-violet-400 bg-clip-text text-transparent">AI Excellence</span>
-              </h2>
-              <p className="text-slate-500 text-[13px] font-bold uppercase tracking-[4px] leading-relaxed">
-                Applying <span className="text-blue-400 font-black">{selectedTemplate.toUpperCase()}</span> logic to {selectedIds.length} leads
-              </p>
-            </div>
-
-            {/* Progress Visualization */}
-            <div className="w-full space-y-6 pt-4">
-              <div className="w-full bg-white/5 rounded-full h-2 overflow-hidden border border-white/5 shadow-inner">
-                <div className="h-full bg-gradient-to-r from-blue-600 via-blue-400 to-violet-600 rounded-full animate-progress-fast" style={{ width: '100%' }}></div>
-              </div>
-              
-              <div className="flex flex-col gap-4 text-left">
-                {[
-                  { icon: <User className="w-3.5 h-3.5" />, text: "Mapping Personal Identity" },
-                  { icon: <Globe className="w-3.5 h-3.5" />, text: "Contextualizing Global Outreach" },
-                  { icon: <Calendar className="w-3.5 h-3.5" />, text: "Finalizing Dispatch Schedule" }
-                ].map((item, i) => (
-                  <div key={i} className={`flex items-center gap-4 transition-all duration-700 delay-[${i*300}ms] animate-in fade-in slide-in-from-left-4`}>
-                    <div className="w-8 h-8 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400">
-                      {item.icon}
-                    </div>
-                    <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">{item.text}</span>
-                    <div className="ml-auto flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]"></div>
-                      <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Active</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
             </div>
           </div>
         </div>

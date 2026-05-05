@@ -4,6 +4,7 @@ import traceback
 from typing import Optional, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
+import re
 
 from app.models.lead import get_lead_by_id
 from app.models.draft import insert_draft
@@ -16,10 +17,35 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 def normalize_user_id(user_id: Optional[str]) -> str:
-    """Normalizes the user ID from the header to a valid database ID string."""
-    if not user_id or user_id.strip() == "" or str(user_id).lower() == "admin":
+    """Normalizes the user ID from the header to a valid numeric database ID string.
+    Handles 'admin' or string usernames by resolving them to their numeric database ID.
+    """
+    if not user_id or user_id.strip() == "":
         return "1"
-    return str(user_id)
+    
+    u_str = str(user_id).strip()
+    if u_str.lower() == "admin":
+        return "1"
+    
+    if u_str.isdigit():
+        return u_str
+        
+    # If not digits, it's likely a username (e.g. "test"). Resolve to numeric ID.
+    try:
+        from app.database import get_db_connection
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM users WHERE LOWER(username) = LOWER(%s) OR LOWER(email) = LOWER(%s) LIMIT 1", (u_str, u_str))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row:
+            return str(row[0])
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error resolving user_id for '{u_str}': {e}")
+        
+    return "1" # Fallback to admin/system if resolution fails
 
 
 
@@ -28,17 +54,21 @@ def markdown_to_html(text):
     # 1. Strip technical markers
     text = text.replace("SIG_START", "").replace("SIG_END", "").replace("[[SIG_PLACEHOLDER]]", "")
     
-    # 2. Handle Links (Markdown style [Text](URL) and Specific Keywords)
-    # Apply to whole text first so it catches links in both body and signature
-    text = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #0066cc; text-decoration: underline;">\1</a>', text)
+    # 2. Handle Links (Markdown style [Text](URL))
+    # Using a more specific regex to avoid catching already-converted HTML tags
+    text = re.sub(r'(?<!href=")(?<!src=")\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', text)
     
     # 3. Smart Signature Styling (Grey & Italic)
     signature_html = ""
     sig_start_marker = "--"
+    
+    # Check if we have a signature block (either via -- or by being after the last 5 lines)
     if sig_start_marker in text:
-        parts = text.split(sig_start_marker, 1)
-        main_text = parts[0]
-        raw_sig = sig_start_marker + parts[1]
+        parts = text.split(sig_start_marker)
+        # If multiple -- exist, we treat everything after the LAST one as the signature 
+        # to avoid splitting on horizontal lines used in the body.
+        main_text = sig_start_marker.join(parts[:-1])
+        raw_sig = sig_start_marker + parts[-1]
         
         # Style the signature block line-by-line
         sig_lines = raw_sig.strip().split("\n")
@@ -46,20 +76,20 @@ def markdown_to_html(text):
         for line in sig_lines:
             line = line.strip()
             if not line:
-                formatted_sig_lines.append('<div style="height: 10px;"></div>') # Exact spacing for blank lines in sig
+                formatted_sig_lines.append('<div style="height: 8px;"></div>')
                 continue
                 
-            disclaimer_text = "Important: This message and its attachments are intended only for the addressee"
+            disclaimer_text = "Important: This message and its attachments"
             if disclaimer_text in line:
-                line = f'<span style="font-size: 10px; color: #999; font-style: normal; line-height: 1.2; display: block; margin-top: 5px;">{line}</span>'
+                line = f'<span style="font-size: 10px; color: #999; font-style: normal; line-height: 1.2; display: block; margin-top: 10px; border-top: 1px solid #eee; pt: 10px;">{line}</span>'
             else:
-                line = f'<span style="color: #666; font-style: italic; display: block; margin-bottom: 2px;">{line}</span>'
+                # Handle names in signature (bold them if they are in ***)
+                line = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong>\1</strong>', line)
+                line = f'<span style="color: #666; font-style: italic; display: block; margin-bottom: 2px; font-size: 13px;">{line}</span>'
             
-            # Link styling
-            # General keywords handled after signature processing to avoid conflicts
             formatted_sig_lines.append(line)
         
-        signature_html = '<div style="margin-top: 25px; line-height: 1.4;">' + "".join(formatted_sig_lines) + '</div>'
+        signature_html = '<div style="margin-top: 30px; border-top: 1px solid #f0f0f0; padding-top: 20px; line-height: 1.5;">' + "".join(formatted_sig_lines) + '</div>'
         text = main_text + "[[SIG_BLOCK_PLACEHOLDER]]"
 
     # 4. Handle remaining keywords if they weren't in markdown format
@@ -159,10 +189,10 @@ def bulk_email_action(req: BulkActionRequest, user_id: Optional[str] = Header(No
         
         # User restriction
         user_clause = ""
-        if user_id and user_id != "admin":
+        if user_id and user_id.lower() != "admin":
             user_clause = " AND user_id = %s"
             where_params += (user_id,)
-        elif user_id == "admin":
+        elif user_id and user_id.lower() == "admin":
             pass
         else:
             user_clause = " AND user_id IS NULL"
@@ -230,21 +260,20 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     base_url = "https://api.qvscl.com"
     unsubscribe_url = f"{base_url}/api/leads/unsubscribe/{lead_id}"
     
-    # Avoid double-injection
-    # Check for unsubscribe or common sign-offs
+    # If the body already ends with a sign-off or contains technical markers, don't inject
     body_lower = body.lower().strip()
     sign_offs = ["thanks & regards", "sincerely", "best regards", "thanks,", "regards,"]
     
-    if "unsubscribe" in body_lower or any(body_lower.endswith(s) for s in sign_offs):
+    if "sig_start" in body_lower or "unsubscribe" in body_lower or any(body_lower.endswith(s) for s in sign_offs):
         return body
 
-    # Strip any existing sign-offs
-    sign_offs = ["Sincerely", "Best regards", "Thanks & Regards", "Thanks,", "Regards,", "--"]
+    # Robustly strip existing sign-offs from the end of the body (check last few lines)
     lines = body.strip().split("\n")
     clean_body_lines = lines[:]
-    for i in range(len(lines) - 1, max(-1, len(lines) - 5), -1):
+    for i in range(len(lines) - 1, max(-1, len(lines) - 6), -1):
         line = lines[i].strip()
-        if any(line.startswith(s) for s in sign_offs):
+        if not line: continue
+        if any(line.lower().startswith(s) for s in sign_offs) or line == "--":
             clean_body_lines = lines[:i]
             break
     clean_body = "\n".join(clean_body_lines).strip()
@@ -284,9 +313,9 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
-        if user_id and user_id != "admin":
+        if user_id and user_id.lower() != "admin":
             cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (req.lead_id, user_id))
-        elif user_id == "admin":
+        elif user_id and user_id.lower() == "admin":
             cur.execute("SELECT * FROM leads_raw WHERE id = %s", (req.lead_id,))
         else:
             cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (req.lead_id,))
@@ -340,7 +369,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 body = template_body.replace("{{First Name}}", f_name).replace("{{first name}}", f_name).replace("{{first_name}}", f_name)
                 body = body.replace("{{Full Name}}", full_name).replace("{{full_name}}", full_name)
                 body = body.replace("{{Company}}", company).replace("{{company_name}}", company)
-                body = body.replace("{{Sender Name}}", sender_full_name).replace("{{Sender Title}}", sender_title).replace("{{Sender Phone}}", sender_phone).replace("{{Sender Linkedin}}", sender_linkedin)
+                body = body.replace("{{Sender Name}}", sender_full_name).replace("{{Sender Title}}", sender_title).replace("{{Sender Phone}}", sender_phone).replace("{{Sender LinkedIn}}", sender_linkedin).replace("{{Sender Linkedin}}", sender_linkedin)
                 
                 subject = f"Strategic Partnership Opportunity | QVSCL × {company}"
             else:
@@ -363,10 +392,15 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
             body = email_data.get("body")
         
         # Inject professional signature (unless custom template handled it)
-        if "SIG_START" in body:
+        if "SIG_START" in body or "SIG_END" in body:
             body_with_sig = body
         else:
-            body_with_sig = inject_signature(body, profile, req.lead_id)
+            # Check if AI already added a signature (rare but possible)
+            body_lower = body.lower()
+            if "thanks & regards" in body_lower or "best regards" in body_lower:
+                body_with_sig = body
+            else:
+                body_with_sig = inject_signature(body, profile, req.lead_id)
 
         # --- NEW: Deduplicate Subject Lines ---
         # If the template body has a "Subject:" line (even if not on the first line), use it as the official subject
@@ -484,10 +518,13 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
+        # Resolve User ID
+        uid = normalize_user_id(user_id)
+
         # Fetch lead
-        if user_id and user_id != "admin":
-            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (req.lead_id, user_id))
-        elif user_id == "admin":
+        if user_id and user_id.lower() != "admin":
+            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (req.lead_id, uid))
+        elif user_id and user_id.lower() == "admin":
             cur.execute("SELECT * FROM leads_raw WHERE id = %s", (req.lead_id,))
         else:
             cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (req.lead_id,))
@@ -522,9 +559,9 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
         profile = get_sender_profile(user_id)
         sender_full_name = profile.get('full_name') or profile.get('username') or "the team"
         sender_first_name = sender_full_name.split()[0] if sender_full_name else "Team"
-        sender_title = profile.get('job_title') or ""
-        sender_phone = profile.get('phone') or ""
-        sender_linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
+        sender_title = (profile.get('job_title') or "").strip() or "Analyst"
+        sender_phone = (profile.get('phone') or "").strip() or "8527083798"
+        sender_linkedin = (profile.get('linkedin_url') or "").strip() or "https://www.linkedin.com/company/qvscl/"
 
         # Replace all placeholders case-insensitively
         body = template_body
@@ -548,7 +585,9 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
         ]
         
         for placeholder, value in replacements:
-            body = body.replace(placeholder, str(value or ""))
+            # Use case-insensitive replacement for flexibility
+            reg = re.compile(re.escape(placeholder), re.IGNORECASE)
+            body = reg.sub(str(value or ""), body)
 
         # --- NEW: Extract Subject from template if it exists ---
         final_subject = subject  # Default
@@ -571,11 +610,16 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
 
         # Inject logged-in user's signature ONLY if the template doesn't already embed one
         profile = get_sender_profile(user_id)
-        if "SIG_START" in final_body:
-            # Template already has an embedded signature (e.g. palak_mam_Draft_1) — keep as-is
+        if "SIG_START" in final_body or "SIG_END" in final_body:
+            # Template already has an embedded signature block — keep as-is
             body_with_sig = final_body
         else:
-            body_with_sig = inject_signature(final_body, profile, req.lead_id)
+            # Prevent double signature if the template body ended with a sign-off but no marker
+            body_lower = final_body.lower().strip()
+            if "thanks & regards" in body_lower or "best regards" in body_lower or body_lower.endswith("--"):
+                body_with_sig = final_body
+            else:
+                body_with_sig = inject_signature(final_body, profile, req.lead_id)
 
         # RE-GENERATE html_body AFTER deduplication
         html_body = markdown_to_html(body_with_sig)
@@ -664,10 +708,10 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         where_clause = "WHERE email_draft IS NOT NULL"
         params = []
         
-        if user_id and user_id != "admin":
+        if user_id and user_id.lower() != "admin":
             where_clause += " AND user_id = %s"
             params.append(user_id)
-        elif user_id == "admin":
+        elif user_id and user_id.lower() == "admin":
             pass
         else:
             where_clause += " AND user_id IS NULL"
@@ -806,9 +850,9 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[s
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
-        if user_id and user_id != "admin":
+        if user_id and user_id.lower() != "admin":
             cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (draft_id, user_id))
-        elif user_id == "admin":
+        elif user_id and user_id.lower() == "admin":
             cur.execute("SELECT * FROM leads_raw WHERE id = %s", (draft_id,))
         else:
             cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (draft_id,))
@@ -1017,10 +1061,10 @@ def reject_draft(draft_id: int, req: Optional[RejectRequest] = None, user_id: Op
     conn = get_db_connection()
     cur = conn.cursor()
     
-    if user_id and user_id != "admin":
+    if user_id and user_id.lower() != "admin":
         where_clause = "WHERE id = %s AND user_id = %s"
         params = (draft_id, user_id)
-    elif user_id == "admin":
+    elif user_id and user_id.lower() == "admin":
         where_clause = "WHERE id = %s"
         params = (draft_id,)
     else:
@@ -1049,10 +1093,10 @@ def schedule_email(draft_id: int, req: ScheduleRequest, user_id: Optional[str] =
         
         user_clause = ""
         params = [req.scheduled_at, draft_id]
-        if user_id and user_id != "admin":
+        if user_id and user_id.lower() != "admin":
             user_clause = " AND user_id = %s"
             params.append(user_id)
-        elif user_id == "admin":
+        elif user_id and user_id.lower() == "admin":
             pass
         else:
             user_clause = " AND user_id IS NULL"
@@ -1083,10 +1127,10 @@ def bulk_schedule_emails(req: BulkScheduleRequest, user_id: Optional[str] = Head
         where_params = [req.scheduled_at] + list(req.lead_ids)
         
         user_clause = ""
-        if user_id and user_id != "admin":
+        if user_id and user_id.lower() != "admin":
             user_clause = " AND user_id = %s"
             where_params.append(user_id)
-        elif user_id == "admin":
+        elif user_id and user_id.lower() == "admin":
             pass
         else:
             user_clause = " AND user_id IS NULL"
@@ -1117,10 +1161,10 @@ def approve_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = H
             return {"message": "No leads provided"}
             
         format_strings = ','.join(['%s'] * len(req.lead_ids))
-        if user_id and user_id != "admin":
+        if user_id and user_id.lower() != "admin":
             where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s"
-            params = tuple(req.lead_ids) + (user_id,)
-        elif user_id == "admin":
+            params = tuple(req.lead_ids) + (uid,)
+        elif user_id and user_id.lower() == "admin":
             where_clause = f"WHERE id IN ({format_strings})"
             params = tuple(req.lead_ids)
         else:
@@ -1217,10 +1261,10 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     # 2. Get all approved leads for THIS user
     where_clause = "WHERE email_status = 'APPROVED'"
     params = []
-    if user_id and user_id != "admin":
+    if user_id and user_id.lower() != "admin":
         where_clause += " AND user_id = %s"
         params.append(user_id)
-    elif user_id == "admin":
+    elif user_id and user_id.lower() == "admin":
         pass
     else:
         where_clause += " AND user_id IS NULL"
@@ -1388,6 +1432,8 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
 @router.post("/generate-bulk-domain-drafts")
 def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     try:
+        # Resolve User ID
+        uid = normalize_user_id(user_id)
         from app.models.lead import get_lead_by_id
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -1396,10 +1442,10 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
             return {"message": "No leads provided"}
             
         format_strings = ','.join(['%s'] * len(req.lead_ids))
-        if user_id and user_id != "admin":
+        if user_id and user_id.lower() != "admin":
             where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s"
-            params = tuple(req.lead_ids) + (user_id,)
-        elif user_id == "admin":
+            params = tuple(req.lead_ids) + (uid,)
+        elif user_id and user_id.lower() == "admin":
             where_clause = f"WHERE id IN ({format_strings})"
             params = tuple(req.lead_ids)
         else:
@@ -1547,10 +1593,10 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                 sender_name = u['full_name'] or u['username']
 
         format_strings = ','.join(['%s'] * len(req.lead_ids))
-        if user_id and user_id != "admin":
+        if user_id and user_id.lower() != "admin":
             where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s"
-            params = tuple(req.lead_ids) + (user_id,)
-        elif user_id == "admin":
+            params = tuple(req.lead_ids) + (uid,)
+        elif user_id and user_id.lower() == "admin":
             where_clause = f"WHERE id IN ({format_strings})"
             params = tuple(req.lead_ids)
         else:
