@@ -248,6 +248,7 @@ const AdminDashboard = () => {
             <thead>
               <tr className="bg-white/[0.02] border-b border-white/5 sticky top-0 z-10">
                 <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Name & Company</th>
+                <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Email Address</th>
                 <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Type</th>
                 <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Intent</th>
                 <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Check Size</th>
@@ -274,6 +275,12 @@ const AdminDashboard = () => {
                         <div className="text-[14px] font-bold text-white mb-0.5 group-hover:text-indigo-400 transition-colors">{lead.first_name} {lead.last_name}</div>
                         <div className="text-[11px] font-medium text-slate-500">{lead.company_name || lead.family_office_name}</div>
                       </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-5">
+                    <div className="flex flex-col gap-1">
+                      <div className="text-[13px] font-bold text-white">{lead.email}</div>
+                      {lead.phone && <div className="text-[10px] text-slate-500 font-medium">{lead.phone}</div>}
                     </div>
                   </td>
                   <td className="px-6 py-5">
