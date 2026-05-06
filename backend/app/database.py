@@ -95,7 +95,10 @@ def create_tables():
         ("meeting_link", "TEXT"),
         ("meeting_time", "TIMESTAMP"),
         ("deal_size", "TEXT"),
-        ("pitch_deck_url", "TEXT")
+        ("pitch_deck_url", "TEXT"),
+        ("sector", "TEXT"),
+        ("industry", "TEXT"),
+        ("lead_type", "TEXT DEFAULT 'CLIENT'")
     ]
     for col_name, col_type in columns_to_add:
         try:

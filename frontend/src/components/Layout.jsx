@@ -348,7 +348,7 @@ const Layout = () => {
       </header>
 
 
-      <main className="ml-[240px] mt-[64px] flex-1 p-6 relative">
+      <main className={`ml-[240px] mt-[64px] flex-1 p-6 relative transition-all duration-500 ${tasks.length > 0 ? (isMinimized ? 'mr-[70px]' : 'mr-[380px]') : ''}`}>
         <Outlet />
       </main>
 

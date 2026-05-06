@@ -1034,6 +1034,18 @@ def bulk_import(
             country = norm_lead.get("country") or norm_lead.get("nation")
             persona = norm_lead.get("persona") or norm_lead.get("category") or "OTHER"
             phone = norm_lead.get("phone") or norm_lead.get("phonenumber") or norm_lead.get("mobile")
+            
+            # Map Sector/Industry
+            sector = (
+                norm_lead.get("sector") or 
+                norm_lead.get("industry") or 
+                norm_lead.get("sectorindustry") or
+                norm_lead.get("sectororindustry")
+            )
+
+            # Auto-infer classification using centralized utility
+            from app.utils.classification import infer_lead_classification
+            lead_type, sector = infer_lead_classification(company, designation, lead.get('remarks', ''), sector)
 
             # Data Formatting
             name_parts = name.split(" ", 1)
@@ -1047,9 +1059,10 @@ def bulk_import(
                 cur.execute("""
                     INSERT INTO leads_raw (
                         first_name, last_name, email, company_name, linkedin_url, 
-                        city, country, persona, phone, source, user_id, raw_payload, remarks, designation
+                        city, country, persona, phone, source, user_id, 
+                        raw_payload, remarks, designation, sector, lead_type
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (email, COALESCE(user_id, -1)) DO UPDATE SET
                         first_name = EXCLUDED.first_name,
                         last_name = EXCLUDED.last_name,
@@ -1063,11 +1076,13 @@ def bulk_import(
                         user_id = COALESCE(EXCLUDED.user_id, leads_raw.user_id),
                         raw_payload = EXCLUDED.raw_payload,
                         remarks = COALESCE(EXCLUDED.remarks, leads_raw.remarks),
-                        designation = COALESCE(EXCLUDED.designation, leads_raw.designation)
+                        designation = COALESCE(EXCLUDED.designation, leads_raw.designation),
+                        sector = COALESCE(EXCLUDED.sector, leads_raw.sector),
+                        lead_type = COALESCE(EXCLUDED.lead_type, leads_raw.lead_type)
                 """, (
                     f_name, l_name, email, company, linkedin, 
                     city, country, persona, phone, "csv_import", db_user_id, 
-                    json.dumps(lead), lead.get("remarks", ""), designation
+                    json.dumps(lead), lead.get("remarks", ""), designation, sector, lead_type
                 ))
                 if cur.rowcount > 0:
                     inserted += 1

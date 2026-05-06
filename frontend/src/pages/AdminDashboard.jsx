@@ -1,14 +1,19 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import api from '../services/api';
-import { 
-  Users, Target, MessageSquare, Calendar, 
-  TrendingUp, BarChart3, Search, Filter, 
-  Download, MoreHorizontal, ChevronRight, 
+import {
+  Users, Target, MessageSquare, Calendar,
+  TrendingUp, BarChart3, Search, Filter,
+  Download, MoreHorizontal, ChevronRight,
   Sparkles, ShieldCheck, Mail, ArrowUpRight,
   Clock, CheckCircle2, AlertCircle, X,
-  FileText, Briefcase, Zap, Info, DollarSign
+  FileText, Briefcase, Zap, Info, DollarSign,
+  PieChart as PieIcon, Globe, RefreshCcw, Database
 } from 'lucide-react';
+import { 
+  PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid
+} from 'recharts';
 
 const AdminDashboard = () => {
   const [leads, setLeads] = useState([]);
@@ -27,8 +32,17 @@ const AdminDashboard = () => {
     type: 'ALL',
     status: 'ALL',
     intent: 'ALL',
-    owner: 'ALL'
+    owner: 'ALL',
+    sector: 'ALL'
   });
+  const [selectedLeadIds, setSelectedLeadIds] = useState(new Set());
+  const [isBulkActionLoading, setIsBulkActionLoading] = useState(false);
+  const [notification, setNotification] = useState(null);
+
+  const showNotification = (type, message) => {
+    setNotification({ type, message });
+    setTimeout(() => setNotification(null), 5000);
+  };
 
   useEffect(() => {
     fetchData();
@@ -52,18 +66,21 @@ const AdminDashboard = () => {
 
   const filteredLeads = useMemo(() => {
     return leads.filter(l => {
-      const matchesSearch = 
-        (l.first_name?.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (l.last_name?.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (l.company_name?.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (l.email?.toLowerCase().includes(searchTerm.toLowerCase()));
-      
-      const matchesType = filters.type === 'ALL' || l.sector?.toUpperCase() === filters.type;
+      const matchesSearch = !searchTerm || [
+        l.first_name, 
+        l.last_name, 
+        l.company_name, 
+        l.email,
+        l.designation
+      ].some(val => val?.toLowerCase().includes(searchTerm.toLowerCase()));
+ 
+      const matchesType = filters.type === 'ALL' || l.lead_type?.toUpperCase() === filters.type;
+      const matchesSector = !filters.sector || filters.sector === 'ALL' || l.sector?.toUpperCase() === filters.sector?.toUpperCase();
       const matchesStatus = filters.status === 'ALL' || l.email_status === filters.status;
       const matchesIntent = filters.intent === 'ALL' || l.reply_intent === filters.intent;
       const matchesOwner = filters.owner === 'ALL' || l.owner_name === filters.owner;
-
-      return matchesSearch && matchesType && matchesStatus && matchesIntent && matchesOwner;
+ 
+      return matchesSearch && matchesType && matchesSector && matchesStatus && matchesIntent && matchesOwner;
     });
   }, [leads, searchTerm, filters]);
 
@@ -83,51 +100,55 @@ const AdminDashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0c10] p-8">
-      {/* Header Section */}
-      <div className="flex justify-between items-end mb-12">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20">
-              <ShieldCheck className="w-4 h-4 text-indigo-400" />
-            </div>
-            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em]">Control Center</span>
-          </div>
-          <h1 className="text-4xl font-black text-white uppercase tracking-tight">Admin <span className="text-indigo-500">Intelligence</span></h1>
+    <div className="flex flex-col min-h-screen bg-[#0a0c10] p-2 lg:p-4 overflow-x-hidden">
+      {notification && (
+        <div className={`fixed top-8 right-8 z-[100] flex items-center gap-3 px-6 py-4 rounded-2xl shadow-2xl animate-in slide-in-from-right-8 ${notification.type === 'success' ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border border-rose-500/20 text-rose-400'}`}>
+          {notification.type === 'success' ? <CheckCircle2 className="w-4 h-4 font-black" /> : <AlertCircle className="w-4 h-4 font-black" />}
+          <span className="font-black text-[11px] uppercase tracking-widest">{notification.message}</span>
         </div>
-        
+      )}
+      {/* Header Section */}
+      <div className="flex justify-between items-end mb-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-6 h-6 rounded-lg bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20">
+              <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
+            </div>
+            <span className="text-[9px] font-black text-indigo-400 uppercase tracking-[0.2em]">Control Center</span>
+          </div>
+          <h1 className="text-2xl font-black text-white uppercase tracking-tight">Admin <span className="text-indigo-500">Intelligence</span></h1>
+        </div>
+
         <div className="flex items-center gap-4">
-          <button 
+          <button
             onClick={() => {
               const headers = [
-                'Name', 'Email', 'Phone', 'Designation', 'Company', 'Type', 'Status', 
-                'Intent', 'Score', 'Check Size', 'Rejection Reason', 'Sector/Industry', 'LinkedIn', 'Owner', 
+                'Name', 'Email', 'Designation', 'Company', 'Type', 'Status',
+                'Intent', 'Score', 'Check Size', 'Rejection Reason', 'Sector/Industry', 'Owner',
                 'Last Interaction', 'AI Strategy', 'Analyst Report', 'Key Signals', 'Confidence %'
               ].join(',');
-              
+
               const rows = leads.map(l => {
                 const clean = (val) => `"${(val || '').toString().replace(/"/g, '""')}"`;
                 const rejectionReason = l.reply_intent === 'NOT_INTERESTED' ? (l.rag_advice?.split('.')[0] || 'No specific reason') : 'N/A';
                 return [
                   clean(`${l.first_name} ${l.last_name}`),
                   clean(l.email),
-                  clean(l.phone),
                   clean(l.designation),
                   clean(l.company_name || l.family_office_name),
-                  clean(l.sector),
+                  clean(l.lead_type),
                   clean(l.email_status),
                   clean(l.reply_intent),
                   clean(l.sentiment_score),
                   clean(l.deal_size),
                   clean(rejectionReason),
-                  clean(l.industry),
-                  clean(l.linkedin_url),
+                  clean(l.sector || 'Other'),
                   clean(l.owner_name),
                   clean(new Date(l.updated_at).toLocaleDateString()),
-                  clean(l.rag_intelligence?.strategy || ''),
-                  clean(l.rag_advice),
-                  clean(JSON.stringify(l.rag_intelligence?.signals || '')),
-                  clean(l.rag_intelligence?.confidence || '82')
+                  clean(l.rag_intelligence?.strategy || 'General Outreach'),
+                  clean(l.rag_advice || 'Analyst Review Pending'),
+                  clean(Array.isArray(l.rag_intelligence?.signals) ? l.rag_intelligence.signals.join(' | ') : (l.rag_intelligence?.signals || 'N/A')),
+                  clean(l.rag_intelligence?.confidence || 'N/A')
                 ].join(',');
               });
 
@@ -143,7 +164,64 @@ const AdminDashboard = () => {
             <Download className="w-3.5 h-3.5" /> Full Master Export
           </button>
 
-          <button 
+          <button
+            onClick={async () => {
+              try {
+                const btn = document.getElementById('ai-classify-btn');
+                const original = btn.innerHTML;
+                btn.disabled = true;
+                btn.innerHTML = '<span class="animate-pulse">🧠</span> Analyzing...';
+                
+                const res = await api.post('/api/intelligence/leads/ai-deep-classify');
+                showNotification('success', `AI successfully categorized ${res.data.updated || 0} leads!`);
+                fetchData();
+                
+                btn.disabled = false;
+                btn.innerHTML = original;
+              } catch (err) {
+                console.error('AI Refresh failed', err);
+                const btn = document.getElementById('ai-classify-btn');
+                btn.disabled = false;
+                btn.innerHTML = '❌ AI Classification Failed';
+                setTimeout(() => {
+                  btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-sparkles w-3.5 h-3.5"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path><path d="M5 3v4"></path><path d="M19 17v4"></path><path d="M3 5h4"></path><path d="M17 19h4"></path></svg> AI Deep Classify';
+                }, 3000);
+              }
+            }}
+            id="ai-classify-btn"
+            className="flex items-center gap-2 px-6 py-3 bg-violet-600/10 hover:bg-violet-600/20 text-violet-400 border border-violet-500/20 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all"
+          >
+            <Sparkles className="w-3.5 h-3.5" /> AI Deep Classify
+          </button>
+
+          <button
+            onClick={async () => {
+              try {
+                const btn = document.getElementById('refresh-sectors-btn');
+                const original = btn.innerHTML;
+                btn.disabled = true;
+                btn.innerHTML = '<span class="animate-spin">🔄</span> Processing...';
+                
+                await api.post('/api/intelligence/leads/auto-enrich-sectors');
+                showNotification('success', 'Workspace sectors re-classified successfully!');
+                fetchData();
+                
+                btn.disabled = false;
+                btn.innerHTML = original;
+              } catch (err) {
+                console.error('Refresh failed', err);
+                const btn = document.getElementById('refresh-sectors-btn');
+                btn.disabled = false;
+                btn.innerHTML = 'Sector Refresh Failed';
+              }
+            }}
+            id="refresh-sectors-btn"
+            className="flex items-center gap-2 px-6 py-3 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all"
+          >
+            <RefreshCcw className="w-3.5 h-3.5" /> Refresh All Sectors
+          </button>
+
+          <button
             onClick={() => {
               const rejections = leads.filter(l => l.reply_intent === 'NOT_INTERESTED');
               const headers = ['Name', 'Company', 'Email', 'Check Size', 'Rejection Reason', 'Full Analyst Feedback'].join(',');
@@ -173,7 +251,7 @@ const AdminDashboard = () => {
       </div>
 
       {/* Analytics Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-12">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
         {[
           { label: 'Total Leads', value: stats.total_leads, icon: Users, color: 'indigo' },
           { label: 'Interested', value: stats.interested_leads, icon: Target, color: 'emerald' },
@@ -182,12 +260,17 @@ const AdminDashboard = () => {
           { label: 'Avg Score', value: stats.avg_score, icon: BarChart3, color: 'amber' },
           { label: 'Followups', value: stats.active_followups, icon: Clock, color: 'rose' },
         ].map((stat, i) => (
-          <div key={i} className="bg-white/[0.02] border border-white/5 rounded-2xl p-6 hover:border-white/10 transition-all group">
-            <div className={`w-10 h-10 rounded-xl bg-${stat.color}-500/10 flex items-center justify-center border border-${stat.color}-500/20 mb-4 group-hover:scale-110 transition-transform`}>
-              <stat.icon className={`w-5 h-5 text-${stat.color}-400`} />
+          <div key={i} className="bg-[#111521] border border-white/5 rounded-xl p-3 hover:border-white/10 transition-all group relative overflow-hidden">
+            <div className={`absolute top-0 right-0 w-16 h-16 bg-${stat.color}-500/5 blur-2xl rounded-full -mr-8 -mt-8`} />
+            <div className="flex items-start justify-between relative z-10 mb-2">
+              <div className={`w-8 h-8 rounded-lg bg-${stat.color}-500/10 flex items-center justify-center border border-${stat.color}-500/20`}>
+                <stat.icon className={`w-4 h-4 text-${stat.color}-400`} />
+              </div>
             </div>
-            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{stat.label}</div>
-            <div className="text-2xl font-black text-white tracking-tight">{stat.value}</div>
+            <div className="relative z-10">
+              <div className="text-[18px] font-black text-white leading-tight mb-0.5">{stat.value}</div>
+              <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest leading-none">{stat.label}</div>
+            </div>
           </div>
         ))}
       </div>
@@ -196,19 +279,19 @@ const AdminDashboard = () => {
       <div className="flex flex-wrap items-center gap-4 mb-6">
         <div className="relative flex-1 min-w-[300px]">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-          <input 
-            type="text" 
+          <input
+            type="text"
             placeholder="Search across all leads, companies, and emails..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full bg-white/[0.03] border border-white/5 rounded-xl py-3 pl-12 pr-4 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/50 transition-all"
           />
         </div>
-        
+
         <div className="flex items-center gap-3">
-          <select 
+          <select
             value={filters.type}
-            onChange={(e) => setFilters({...filters, type: e.target.value})}
+            onChange={(e) => setFilters({ ...filters, type: e.target.value })}
             className="bg-white/[0.03] border border-white/5 rounded-xl py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest focus:outline-none focus:border-indigo-500/50"
           >
             <option value="ALL">All Types</option>
@@ -216,9 +299,9 @@ const AdminDashboard = () => {
             <option value="CLIENT">Clients</option>
           </select>
 
-          <select 
+          <select
             value={filters.status}
-            onChange={(e) => setFilters({...filters, status: e.target.value})}
+            onChange={(e) => setFilters({ ...filters, status: e.target.value })}
             className="bg-white/[0.03] border border-white/5 rounded-xl py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest focus:outline-none focus:border-indigo-500/50"
           >
             <option value="ALL">All Statuses</option>
@@ -229,16 +312,76 @@ const AdminDashboard = () => {
             <option value="Meeting Scheduled">Meeting Scheduled</option>
           </select>
 
-          <select 
+          <select
             value={filters.owner}
-            onChange={(e) => setFilters({...filters, owner: e.target.value})}
+            onChange={(e) => setFilters({ ...filters, owner: e.target.value })}
             className="bg-white/[0.03] border border-white/5 rounded-xl py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest focus:outline-none focus:border-indigo-500/50"
           >
             {owners.map(o => (
               <option key={o} value={o}>{o === 'ALL' ? 'All Owners' : o}</option>
             ))}
           </select>
+
+          <select
+            value={filters.sector}
+            onChange={(e) => setFilters({ ...filters, sector: e.target.value })}
+            className="bg-white/[0.03] border border-white/5 rounded-xl py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest focus:outline-none focus:border-indigo-500/50"
+          >
+            <option value="ALL">All Sectors</option>
+            {Array.from(new Set(leads.map(l => l.sector).filter(s => s && !['INVESTOR', 'CLIENT'].includes(s.toUpperCase())))).map(s => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
         </div>
+      </div>
+
+      {/* Visual Analytics Section */}
+      <div className="grid grid-cols-1 xl:grid-cols-4 gap-3 mb-6">
+        {[
+          { title: 'Lead Intent', sub: 'Pipeline State', icon: PieIcon, color: 'indigo', data: stats.intent_breakdown, type: 'pie' },
+          { title: 'Sectors', sub: 'Industry Volume', icon: Globe, color: 'purple', data: stats.sector_breakdown, type: 'bar' },
+          { title: 'Sources', sub: 'Acquisition', icon: Database, color: 'blue', data: stats.source_breakdown, type: 'pie' },
+          { title: 'Lead Type', sub: 'Investor/Client', icon: Users, color: 'emerald', data: stats.type_breakdown, type: 'pie' }
+        ].map((item, i) => (
+          <div key={i} className="bg-[#111521] border border-white/5 rounded-xl p-3 flex flex-col">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-[11px] font-black text-white uppercase tracking-wider">{item.title}</h3>
+                <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest leading-none">{item.sub}</p>
+              </div>
+              <div className={`w-6 h-6 rounded-lg bg-${item.color}-500/10 flex items-center justify-center border border-${item.color}-500/20`}>
+                <item.icon className={`w-3 h-3 text-${item.color}-400`} />
+              </div>
+            </div>
+            <div className="h-[120px]">
+              <ResponsiveContainer width="100%" height="100%">
+                {item.type === 'pie' ? (
+                  <PieChart>
+                    <Pie
+                      data={item.data || []}
+                      innerRadius={35}
+                      outerRadius={50}
+                      paddingAngle={3}
+                      dataKey="value"
+                    >
+                      {(item.data || []).map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={item.color === 'emerald' ? (entry.label === 'INVESTOR' ? '#10b981' : '#64748b') : ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'][index % 6]} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={{ backgroundColor: '#111521', border: '1px solid rgba(255,255,255,0.1)', fontSize: '9px' }} />
+                  </PieChart>
+                ) : (
+                  <BarChart data={item.data || []} layout="vertical">
+                    <XAxis type="number" hide />
+                    <YAxis dataKey="label" type="category" hide />
+                    <Tooltip cursor={{ fill: 'rgba(255,255,255,0.02)' }} contentStyle={{ backgroundColor: '#111521', border: '1px solid rgba(255,255,255,0.1)', fontSize: '9px' }} />
+                    <Bar dataKey="value" fill="#8b5cf6" radius={[0, 4, 4, 0]} barSize={8} />
+                  </BarChart>
+                )}
+              </ResponsiveContainer>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Main Database Table */}
@@ -247,26 +390,54 @@ const AdminDashboard = () => {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-white/[0.02] border-b border-white/5 sticky top-0 z-10">
-                <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Name & Company</th>
-                <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Email Address</th>
-                <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Type</th>
-                <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Intent</th>
-                <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Check Size</th>
-                <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Score</th>
-                <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Rejection / Reason</th>
-                <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Status</th>
-                <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Owner</th>
-                <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Actions</th>
+                <th className="px-3 py-5 w-12">
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 rounded border-white/10 bg-black/20 accent-indigo-500 cursor-pointer"
+                    checked={selectedLeadIds.size === filteredLeads.length && filteredLeads.length > 0}
+                    onChange={() => {
+                      if (selectedLeadIds.size === filteredLeads.length) {
+                        setSelectedLeadIds(new Set());
+                      } else {
+                        setSelectedLeadIds(new Set(filteredLeads.map(l => l.id)));
+                      }
+                    }}
+                  />
+                </th>
+                  <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Name & Company</th>
+                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Email Address</th>
+                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Type</th>
+                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Sector</th>
+                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Intent</th>
+                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Check Size</th>
+                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Score</th>
+                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Rejection / Reason</th>
+                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Status</th>
+                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Owner</th>
+                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {filteredLeads.map((lead) => (
-                <tr 
-                  key={lead.id} 
+                <tr
+                  key={lead.id}
                   onClick={() => setSelectedLead(lead)}
-                  className="hover:bg-white/[0.02] transition-colors cursor-pointer group"
+                  className={`hover:bg-white/[0.02] transition-colors cursor-pointer group ${selectedLeadIds.has(lead.id) ? 'bg-indigo-500/10' : ''}`}
                 >
-                  <td className="px-6 py-5">
+                  <td className="px-2 py-2" onClick={e => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 rounded border-white/10 bg-black/20 accent-indigo-500 cursor-pointer"
+                      checked={selectedLeadIds.has(lead.id)}
+                      onChange={(e) => {
+                        const next = new Set(selectedLeadIds);
+                        if (next.has(lead.id)) next.delete(lead.id);
+                        else next.add(lead.id);
+                        setSelectedLeadIds(next);
+                      }}
+                    />
+                  </td>
+                  <td className="px-2 py-2">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500/20 to-violet-500/10 flex items-center justify-center border border-white/10 group-hover:border-indigo-500/30 transition-all">
                         <span className="text-[14px] font-black text-indigo-400">
@@ -274,24 +445,37 @@ const AdminDashboard = () => {
                         </span>
                       </div>
                       <div>
-                        <div className="text-[14px] font-bold text-white mb-0.5 group-hover:text-indigo-400 transition-colors">{lead.first_name} {lead.last_name}</div>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <div className="text-[14px] font-bold text-white group-hover:text-indigo-400 transition-colors">{lead.first_name} {lead.last_name}</div>
+                          {lead.country === 'USA' && <span>🇺🇸</span>}
+                          {lead.country === 'UK' && <span>🇬🇧</span>}
+                          {lead.country === 'India' && <span>🇮🇳</span>}
+                          {lead.country === 'UAE' && <span>🇦🇪</span>}
+                          {lead.country === 'Singapore' && <span>🇸🇬</span>}
+                        </div>
                         <div className="text-[11px] font-medium text-slate-500">{lead.company_name || lead.family_office_name}</div>
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-5">
+                  <td className="px-2 py-2">
                     <div className="flex flex-col gap-1">
                       <div className="text-[13px] font-bold text-white">{lead.email}</div>
                       {lead.phone && <div className="text-[10px] text-slate-500 font-medium">{lead.phone}</div>}
                     </div>
                   </td>
-                  <td className="px-6 py-5">
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${lead.sector === 'INVESTOR' ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400' : 'bg-blue-500/5 border-blue-500/20 text-blue-400'}`}>
-                      {lead.sector === 'INVESTOR' ? <Target className="w-3 h-3" /> : <Briefcase className="w-3 h-3" />}
-                      {lead.sector || 'CLIENT'}
+                  <td className="px-2 py-2">
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${lead.lead_type?.toUpperCase() === 'INVESTOR' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-white/5 border-white/10 text-slate-400'}`}>
+                      {lead.lead_type?.toUpperCase() === 'INVESTOR' ? <Target className="w-3 h-3" /> : <Users className="w-3 h-3" />}
+                      {lead.lead_type || 'CLIENT'}
                     </span>
                   </td>
-                  <td className="px-6 py-5">
+                  <td className="px-2 py-2">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-indigo-500/5 border border-indigo-500/20 text-indigo-400">
+                      <Briefcase className="w-3 h-3" />
+                      {lead.sector || 'OTHER'}
+                    </span>
+                  </td>
+                  <td className="px-2 py-2">
                     {lead.reply_intent ? (
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${lead.reply_intent === 'INTERESTED' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : lead.reply_intent === 'NOT_INTERESTED' ? 'bg-rose-500/10 border-rose-500/20 text-rose-400' : 'bg-amber-500/10 border-amber-500/20 text-amber-400'}`}>
                         {lead.reply_intent}
@@ -300,23 +484,23 @@ const AdminDashboard = () => {
                       <span className="text-[10px] font-bold text-slate-700 tracking-widest uppercase italic">Awaiting reply</span>
                     )}
                   </td>
-                  <td className="px-6 py-5">
+                  <td className="px-2 py-2">
                     <div className="flex items-center gap-2">
-                       <DollarSign className="w-3.5 h-3.5 text-emerald-500" />
-                       <span className="text-[13px] font-black text-white">{lead.deal_size || '—'}</span>
+                      <DollarSign className="w-3.5 h-3.5 text-emerald-500" />
+                      <span className="text-[13px] font-black text-white">{lead.deal_size || '—'}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-5 text-center">
+                  <td className="px-3 py-5 text-center">
                     <div className={`text-[15px] font-black ${lead.sentiment_score >= 80 ? 'text-emerald-400' : lead.sentiment_score >= 50 ? 'text-amber-400' : 'text-slate-400'}`}>
                       {lead.sentiment_score || '—'}
                     </div>
                   </td>
-                  <td className="px-6 py-5">
+                  <td className="px-2 py-2">
                     {lead.reply_intent === 'NOT_INTERESTED' ? (
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-1.5 px-2 py-0.5 bg-rose-500/10 border border-rose-500/20 rounded-md w-fit">
-                           <AlertCircle className="w-2.5 h-2.5 text-rose-400" />
-                           <span className="text-[9px] font-black text-rose-400 uppercase tracking-widest">Rejected ({lead.deal_size || 'N/A'})</span>
+                          <AlertCircle className="w-2.5 h-2.5 text-rose-400" />
+                          <span className="text-[9px] font-black text-rose-400 uppercase tracking-widest">Rejected ({lead.deal_size || 'N/A'})</span>
                         </div>
                         <div className="text-[10px] font-medium text-slate-400 max-w-[200px] line-clamp-2 italic">
                           "{lead.rag_advice?.split('.')[0].substring(0, 80)}..."
@@ -326,7 +510,7 @@ const AdminDashboard = () => {
                       <span className="text-[10px] font-bold text-slate-700 uppercase tracking-widest">N/A</span>
                     )}
                   </td>
-                  <td className="px-6 py-5">
+                  <td className="px-2 py-2">
                     <div className="flex flex-col gap-1">
                       <div className="text-[11px] font-black text-white uppercase tracking-wider">{lead.email_status || 'NEW'}</div>
                       {lead.followup_status === 'ACTIVE' && (
@@ -336,7 +520,7 @@ const AdminDashboard = () => {
                       )}
                     </div>
                   </td>
-                  <td className="px-6 py-5">
+                  <td className="px-2 py-2">
                     <div className="flex items-center gap-2">
                       <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center border border-white/5">
                         <Users className="w-3 h-3 text-slate-500" />
@@ -344,22 +528,41 @@ const AdminDashboard = () => {
                       <span className="text-[11px] font-bold text-slate-400">{lead.owner_name}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-5">
+                  <td className="px-2 py-2">
                     <div className="flex items-center gap-2 text-slate-500">
                       <Clock className="w-3.5 h-3.5" />
                       <span className="text-[11px] font-medium">{new Date(lead.updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-5 text-right">
-                    <button className="p-2 hover:bg-white/5 rounded-lg transition-colors text-slate-500 hover:text-white">
-                      <MoreHorizontal className="w-4 h-4" />
-                    </button>
+                  <td className="px-3 py-5 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <button 
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          try {
+                            setNotification({ type: 'success', message: 'Triggering Deep AI Analysis...' });
+                            await api.post(`/api/intelligence/analyze-lead/${lead.id}`);
+                            fetchData();
+                            setNotification({ type: 'success', message: 'Analysis Complete! Data enriched.' });
+                          } catch (err) {
+                            setNotification({ type: 'error', message: 'Analysis failed. Check RAG connectivity.' });
+                          }
+                        }}
+                        className="p-2 hover:bg-indigo-500/10 rounded-lg transition-colors text-indigo-400" 
+                        title="Analyze Intelligence"
+                      >
+                        <Zap className="w-4 h-4" />
+                      </button>
+                      <button className="p-2 hover:bg-white/5 rounded-lg transition-colors text-slate-500 hover:text-white">
+                        <MoreHorizontal className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          
+
           {filteredLeads.length === 0 && (
             <div className="p-20 text-center">
               <Search className="w-12 h-12 text-slate-700 mx-auto mb-4" />
@@ -372,7 +575,7 @@ const AdminDashboard = () => {
       {/* Detail Side Panel */}
       {selectedLead && (
         <div className="fixed inset-0 z-50 flex justify-end">
-          <div 
+          <div
             className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
             onClick={() => setSelectedLead(null)}
           ></div>
@@ -381,19 +584,19 @@ const AdminDashboard = () => {
             <div className="p-8 border-b border-white/5 flex justify-between items-start">
               <div>
                 <div className="flex items-center gap-3 mb-4">
-                   <div className="px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-full text-[9px] font-black text-indigo-400 uppercase tracking-widest">
-                     Lead Intelligence Deep-Dive
-                   </div>
-                   <div className="px-3 py-1 bg-white/5 border border-white/10 rounded-full text-[9px] font-bold text-slate-400 uppercase tracking-widest">
-                     ID: #{selectedLead.id}
-                   </div>
+                  <div className="px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-full text-[9px] font-black text-indigo-400 uppercase tracking-widest">
+                    Lead Intelligence Deep-Dive
+                  </div>
+                  <div className="px-3 py-1 bg-white/5 border border-white/10 rounded-full text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                    ID: #{selectedLead.id}
+                  </div>
                 </div>
                 <h2 className="text-3xl font-black text-white uppercase mb-2">{selectedLead.first_name} {selectedLead.last_name}</h2>
                 <p className="text-slate-400 font-bold uppercase text-[11px] tracking-widest flex items-center gap-2">
                   <Briefcase className="w-3.5 h-3.5 text-indigo-400" /> {selectedLead.company_name}
                 </p>
               </div>
-              <button 
+              <button
                 onClick={() => setSelectedLead(null)}
                 className="p-2 hover:bg-white/5 rounded-xl transition-all text-slate-500 hover:text-white border border-transparent hover:border-white/10"
               >
@@ -456,7 +659,7 @@ const AdminDashboard = () => {
                     </span>
                   )}
                 </div>
-                
+
                 <div className="bg-white/[0.02] border border-white/5 rounded-3xl overflow-hidden shadow-inner">
                   {selectedLead.rag_advice ? (
                     <div className="relative group">
@@ -466,7 +669,7 @@ const AdminDashboard = () => {
                             const lines = section.trim().split('\n');
                             const title = lines[0].trim();
                             const content = lines.slice(1).join('\n').trim();
-                            
+
                             return (
                               <div key={idx} className="mb-6 last:mb-0 border-l-2 border-indigo-500/30 pl-6 py-1">
                                 <h4 className="text-[11px] font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-2">
@@ -525,7 +728,7 @@ const AdminDashboard = () => {
                       <p className="text-[13px] font-bold text-white">{selectedLead.owner_full_name || selectedLead.owner_name}</p>
                     </div>
                     <div className="ml-auto flex items-center gap-1.5 px-3 py-1 bg-white/5 rounded-lg border border-white/10 text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                       <ShieldCheck className="w-3 h-3" /> Workspace User
+                      <ShieldCheck className="w-3 h-3" /> Workspace User
                     </div>
                   </div>
                 </div>
@@ -534,7 +737,7 @@ const AdminDashboard = () => {
 
             {/* Panel Footer */}
             <div className="p-8 border-t border-white/5 bg-white/[0.01] flex flex-col gap-4">
-              <button 
+              <button
                 onClick={async () => {
                   if (!selectedLead?.id) return;
                   try {
@@ -542,11 +745,11 @@ const AdminDashboard = () => {
                     const originalText = btn.innerHTML;
                     btn.disabled = true;
                     btn.innerHTML = '<span class="animate-pulse">Analyzing Document... (est. 60s)</span>';
-                    
+
                     const res = await api.post(`/api/intelligence/analyze-lead/${selectedLead.id}`);
                     if (res.data.success) {
                       // Refresh the lead data in the local state
-                      const updatedLeads = leads.map(l => 
+                      const updatedLeads = leads.map(l =>
                         l.id === selectedLead.id ? { ...l, rag_advice: res.data.advice, sector: res.data.category } : l
                       );
                       setLeads(updatedLeads);
@@ -567,9 +770,9 @@ const AdminDashboard = () => {
               >
                 <Sparkles className="w-4 h-4" /> Run AI Deep-Dive (RAG)
               </button>
-              
+
               <div className="flex gap-3">
-                <button 
+                <button
                   onClick={() => window.open(`mailto:${selectedLead.email}`)}
                   className="flex-1 flex items-center justify-center gap-2 py-4 bg-white/5 hover:bg-white/10 text-white text-[11px] font-black uppercase tracking-[0.2em] rounded-2xl transition-all border border-white/10"
                 >
@@ -584,8 +787,50 @@ const AdminDashboard = () => {
         </div>
       )}
 
+      {/* Bulk Action Toolbar */}
+      {selectedLeadIds.size > 0 && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-[#0f111a] border border-indigo-500/30 rounded-2xl px-6 py-4 shadow-2xl flex items-center gap-6 animate-in slide-in-from-bottom-4">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-xs font-black">
+              {selectedLeadIds.size}
+            </div>
+            <span className="text-[11px] font-black text-white uppercase tracking-widest">Leads Selected</span>
+          </div>
+          <div className="h-6 w-px bg-white/10" />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={async () => {
+                setIsBulkActionLoading(true);
+                try {
+                  await api.post('/api/admin/leads/bulk-approve', { lead_ids: Array.from(selectedLeadIds) });
+                  showNotification('success', `Approved ${selectedLeadIds.size} leads successfully`);
+                  setSelectedLeadIds(new Set());
+                  fetchData();
+                } catch (err) {
+                  showNotification('error', 'Bulk approval failed');
+                } finally {
+                  setIsBulkActionLoading(false);
+                }
+              }}
+              disabled={isBulkActionLoading}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black uppercase tracking-widest rounded-lg transition-all flex items-center gap-2 cursor-pointer"
+            >
+              {isBulkActionLoading ? <RefreshCcw className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+              Bulk Approve
+            </button>
+            <button
+              onClick={() => setSelectedLeadIds(new Set())}
+              className="px-4 py-2 bg-white/5 hover:bg-white/10 text-slate-400 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all cursor-pointer"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Global CSS for Animations & Custom Scrollbar */}
-      <style dangerouslySetInnerHTML={{ __html: `
+      <style dangerouslySetInnerHTML={{
+        __html: `
         .animate-slide-in {
           animation: slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
         }

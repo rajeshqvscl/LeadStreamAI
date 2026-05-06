@@ -6,12 +6,130 @@ from app.services.llm_services import EmailGenerator
 import os
 import requests
 import json
+import psycopg2
+import psycopg2.extras
 from app.database import get_db_connection
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
+
+@router.post("/leads/auto-enrich-sectors")
+async def auto_enrich_sectors(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """
+    Batched classification of leads into Investors vs Clients based on sophisticated keyword analysis.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # 1. Fetch all leads that need classification or are currently unrefined
+        cur.execute("SELECT id, company_name, designation, remarks, sector, lead_type FROM leads_raw")
+        leads = cur.fetchall()
+        
+        updated_count = 0
+        for lid, company, designation, remarks, current_sector, current_type in leads:
+            from app.utils.classification import infer_lead_classification
+            new_type, new_sector = infer_lead_classification(company, designation, remarks, current_sector)
+            
+            # Update logic for Type
+            type_changed = False
+            if new_type != current_type:
+                cur.execute("UPDATE leads_raw SET lead_type = %s WHERE id = %s", (new_type, lid))
+                type_changed = True
+                
+            # Update logic for Sector
+            sector_changed = False
+            if new_sector != current_sector:
+                cur.execute("UPDATE leads_raw SET sector = %s WHERE id = %s", (new_sector, lid))
+                sector_changed = True
+                
+            if type_changed or sector_changed:
+                updated_count += 1
+                
+        conn.commit()
+        return {"success": True, "updated": updated_count}
+    except Exception as e:
+        logger.error("auto_enrich_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+@router.post("/leads/ai-deep-classify")
+async def ai_deep_classify(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """
+    Uses LLM to classify leads that keyword-matching couldn't identify.
+    Targeted specifically at 'Other' or 'NULL' sectors.
+    """
+    try:
+        llm = EmailGenerator()
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        # 1. Fetch leads labeled as 'Other' or NULL
+        cur.execute("""
+            SELECT id, company_name, designation, remarks, email_draft
+            FROM leads_raw 
+            WHERE sector = 'Other' OR sector IS NULL 
+            LIMIT 50
+        """)
+        leads = cur.fetchall()
+        
+        if not leads:
+            return {"success": True, "message": "No 'Other' leads to classify."}
+            
+        updated = 0
+        for lead in leads:
+            # Combine all available context, especially the email draft which shows the outreach focus
+            context = f"""
+            Company: {lead['company_name']}
+            Designation: {lead['designation']}
+            Remarks: {lead['remarks']}
+            Last Draft/Email Sent: {lead['email_draft'] or 'None'}
+            """
+            
+            prompt = f"""
+            Identify the Industry Sector for this lead based on the company information AND the content of the email sent/drafted.
+            
+            Context:
+            {context}
+            
+            Rules:
+            1. Look for keywords in the email content (e.g., if we mention 'defence tech', 'healthcare AI', 'SaaS platform').
+            2. Choose ONE sector from: SaaS, FinTech, AI, Defence, Manufacturing, Healthcare, EdTech, AgriTech, E-commerce, CleanTech, Logistics, PropTech, Media, Consulting.
+            3. If the email is about a specific technology (e.g., Defence), prioritize that.
+            4. Output ONLY the sector name (1-2 words). No explanation.
+            5. If truly unknown, output 'Other'.
+            """
+            
+            try:
+                new_sector = llm._call_llm(prompt, max_tokens=30)
+                if new_sector:
+                    new_sector = new_sector.strip().replace("Sector:", "").replace("*", "").strip()
+                    # Basic sanitization
+                    if len(new_sector) > 30: new_sector = new_sector[:30]
+                    
+                    if new_sector and new_sector.lower() != 'other':
+                        cur.execute("UPDATE leads_raw SET sector = %s WHERE id = %s", (new_sector, lead['id']))
+                        updated += 1
+                
+                # Add a small delay to avoid hitting rate limits (Free tier usually 5-15 RPM)
+                import time
+                time.sleep(1.5)
+            except Exception as e:
+                logger.error("ai_classify_error", lead_id=lead['id'], error=str(e))
+                continue
+                
+        conn.commit()
+        return {"success": True, "updated": updated}
+    except Exception as e:
+        logger.error("deep_classify_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals():
+            conn.close()
 
 class ChatRequest(BaseModel):
     message: str

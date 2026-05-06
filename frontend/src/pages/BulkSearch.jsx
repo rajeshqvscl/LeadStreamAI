@@ -358,7 +358,8 @@ const BulkSearch = () => {
         city: 'New York',
         country: 'USA',
         persona: 'FOUNDER',
-        phone: '+1 234 567 8900'
+        phone: '+1 234 567 8900',
+        Sector: 'FinTech'
       }
     ];
     const ws = XLSX.utils.json_to_sheet(template);
@@ -802,6 +803,7 @@ const BulkSearch = () => {
                 </th>
                 <th className="px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Lead Identity</th>
                 <th className="px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Company / Org</th>
+                <th className="px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Sector</th>
                 <th className="px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Source</th>
                 <th className="px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">Date and Time</th>
                 <th className="px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Actions</th>
@@ -845,8 +847,18 @@ const BulkSearch = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="text-[12px] font-bold text-slate-300">{lead.company_name}</div>
-                      <div className="text-[9px] font-black text-indigo-500/70 uppercase tracking-tighter">{lead.persona}</div>
+                      <div className="flex flex-col gap-1">
+                        <div className="text-[12px] font-bold text-slate-300">{lead.company_name}</div>
+                        <div className="text-[9px] font-black text-indigo-500/70 uppercase tracking-tighter">{lead.persona}</div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2">
+                        <div className="p-1 bg-amber-500/10 rounded-md border border-amber-500/20">
+                          <Tag className="w-2.5 h-2.5 text-amber-500" />
+                        </div>
+                        <span className="text-[11px] font-bold text-slate-400">{lead.sector || 'N/A'}</span>
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       {lead.source === 'csv_import' ? (
