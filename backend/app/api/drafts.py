@@ -260,22 +260,27 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     base_url = "https://api.qvscl.com"
     unsubscribe_url = f"{base_url}/api/leads/unsubscribe/{lead_id}"
     
-    # If the body already ends with a sign-off or contains technical markers, don't inject
     body_lower = body.lower().strip()
-    sign_offs = ["thanks & regards", "sincerely", "best regards", "thanks,", "regards,"]
     
-    if "sig_start" in body_lower or "unsubscribe" in body_lower or any(body_lower.endswith(s) for s in sign_offs):
+    # If the body already has our formal signature marker OR an unsubscribe link, skip parts
+    has_sig = "--" in body and ("regards" in body_lower or "sincerely" in body_lower)
+    has_unsub = "unsubscribe" in body_lower
+    
+    if has_sig and has_unsub:
         return body
 
-    # Robustly strip existing sign-offs from the end of the body (check last few lines)
+    # Clean up any trailing sign-offs from the LLM to avoid "Best regards, Best regards,"
+    sign_offs = ["thanks & regards", "sincerely", "best regards", "thanks,", "regards,", "thanks and regards"]
     lines = body.strip().split("\n")
     clean_body_lines = lines[:]
-    for i in range(len(lines) - 1, max(-1, len(lines) - 6), -1):
+    
+    for i in range(len(lines) - 1, max(-1, len(lines) - 4), -1):
         line = lines[i].strip()
         if not line: continue
-        if any(line.lower().startswith(s) for s in sign_offs) or line == "--":
+        if any(line.lower().startswith(s) for s in sign_offs):
             clean_body_lines = lines[:i]
             break
+    
     clean_body = "\n".join(clean_body_lines).strip()
 
     name = profile.get('full_name') or profile.get('username') or 'The Team'
@@ -286,21 +291,14 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     
     disclaimer = "Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."
 
-    # Construct a 100% PLAIN TEXT signature for the editor
-    # We use markdown format for the LinkedIn link so the renderer catches it
-    sig_block = f"""
-Click here to unsubscribe
-
---
-Thanks & Regards,
-{name},
-{title},
-[LinkedIn]({linkedin})
-{phone}
-
-{disclaimer}
-"""
-    return clean_body + "\n\n" + sig_block.strip()
+    # Construct the signature parts conditionally
+    unsub_part = "Click here to unsubscribe\n\n" if not has_unsub else ""
+    sig_part = f"--\nThanks & Regards,\n{name},\n{title},\n[LinkedIn]({linkedin})\n{phone}\n\n{disclaimer}" if not has_sig else ""
+    
+    if not unsub_part and not sig_part:
+        return body
+        
+    return clean_body + "\n\n" + unsub_part + sig_part
 
 @router.post("/generate-draft")
 @router.post("/generate-email")
@@ -829,7 +827,8 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
 
         return {
             "drafts": drafts,
-            "total": total
+            "total": total,
+            "pages": (total + per_page - 1) // per_page
         }
     except Exception as e:
         import traceback

@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useLocation, Outlet } from 'react-router-dom';
+import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
 
 const Layout = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const [searchQuery, setSearchQuery] = useState('');
   const searchParams = new URLSearchParams(location.search);
   const pathParts = location.pathname.split('/');
   const activePage = pathParts[2] || 'dashboard';
@@ -11,6 +13,15 @@ const Layout = () => {
   const [time, setTime] = useState('');
   const [totalLeads, setTotalLeads] = useState(0);
   const [totalCompanies, setTotalCompanies] = useState(0);
+
+  useEffect(() => {
+    const urlSearch = searchParams.get('search');
+    if (urlSearch !== null) {
+      setSearchQuery(urlSearch);
+    } else {
+      setSearchQuery('');
+    }
+  }, [location.search]);
 
   useEffect(() => {
     const updateTime = () => setTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
@@ -275,7 +286,18 @@ const Layout = () => {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 bg-[#111521] border border-[#ffffff15] rounded-lg px-3 py-[7px] w-[220px] focus-within:border-blue-500 focus-within:shadow-[0_0_0_2px_rgba(37,99,235,0.15)] transition-all">
             <span className="text-[#64748b] text-[14px]">🔍</span>
-            <input type="text" placeholder="Search leads..." className="bg-transparent border-none text-[13px] text-[#e2e8f0] w-full outline-none placeholder:text-[#64748b]" />
+            <input 
+              type="text" 
+              placeholder="Search leads..." 
+              className="bg-transparent border-none text-[13px] text-[#e2e8f0] w-full outline-none placeholder:text-[#64748b]"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && searchQuery.trim()) {
+                  navigate(`/dashboard/leads?search=${encodeURIComponent(searchQuery.trim())}`);
+                }
+              }}
+            />
           </div>
           <div className="relative">
             <div

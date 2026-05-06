@@ -175,6 +175,20 @@ const CompanyDatabase = () => {
     }
   };
 
+  const handleFetchDetails = async (id) => {
+    setProcessingId(id);
+    showNotification('success', 'Intelligence Search Initiated: Querying global metadata...');
+    try {
+      await api.post(`/api/companies/${id}/enrich`);
+      showNotification('success', 'Registry Updated: Metadata shards integrated into profile.');
+      fetchCompanies();
+    } catch (err) {
+      showNotification('error', 'Fetch Fault: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
   const handleGenerateDraft = async (id) => {
     setProcessingId(id);
     try {
@@ -365,6 +379,39 @@ const CompanyDatabase = () => {
     XLSX.writeFile(wb, `Bulk_Export_${new Date().getTime()}.xlsx`);
   };
 
+  const handleBulkEnrich = async () => {
+    if (selectedIds.length === 0) return;
+    const taskId = `bulk-enrich-${Date.now()}`;
+    
+    window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+      detail: { id: taskId, title: 'AI Global Enrichment', subtitle: `Fetching metadata for ${selectedIds.length} profiles...`, progress: 10, status: 'RUNNING' } 
+    }));
+
+    const ids = [...selectedIds];
+    setSelectedIds([]);
+    
+    let success = 0;
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        await api.post(`/api/companies/${id}/enrich`);
+        success++;
+        const prog = Math.round((success / ids.length) * 100);
+        window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+          detail: { id: taskId, title: 'Global Metadata Sync', subtitle: `Enriched ${success}/${ids.length} profiles...`, progress: prog, status: 'RUNNING' } 
+        }));
+      } catch {
+        failed++;
+      }
+    }
+    
+    window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+      detail: { id: taskId, title: 'Enrichment Matrix Complete', subtitle: `Success: ${success} | Failed: ${failed}`, progress: 100, status: 'COMPLETED' } 
+    }));
+    
+    fetchCompanies();
+  };
+
   const filteredCompanies = companies;
 
   const getUniqueValues = (column) => {
@@ -372,9 +419,30 @@ const CompanyDatabase = () => {
     return Array.from(new Set(values)).sort();
   };
 
-  const headers = companies.length > 0
-    ? Object.keys(companies[0]).filter(h => h !== 'id' && h !== '_is_generated')
-    : ["Name", "Company", "Status", "Sector", "Email", "Note"];
+  const headers = React.useMemo(() => {
+    if (companies.length === 0) return ["Name", "Company", "Status", "Sector", "Email", "Mobile", "Note"];
+    
+    // Collect all unique keys from the first 20 companies to ensure we don't miss enriched columns
+    const allKeys = new Set();
+    companies.slice(0, 20).forEach(c => {
+      Object.keys(c).forEach(key => {
+        if (key !== 'id' && key !== '_is_generated' && !key.startsWith('_')) {
+          allKeys.add(key);
+        }
+      });
+    });
+    
+    // Convert to array and ensure a stable order (alphabetical or fixed priority)
+    const priority = ["Company Name", "Name", "Person Name", "Email", "Mobile", "LinkedIn Profile", "Designation"];
+    return Array.from(allKeys).sort((a, b) => {
+      const aIdx = priority.indexOf(a);
+      const bIdx = priority.indexOf(b);
+      if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+      if (aIdx !== -1) return -1;
+      if (bIdx !== -1) return 1;
+      return a.localeCompare(b);
+    });
+  }, [companies]);
 
   const renderEditDrawer = () => {
     if (!isDrawerOpen || !selectedCompany) return null;

@@ -269,7 +269,9 @@ const AdminDashboard = () => {
                   <td className="px-6 py-5">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500/20 to-violet-500/10 flex items-center justify-center border border-white/10 group-hover:border-indigo-500/30 transition-all">
-                        <span className="text-[14px] font-black text-indigo-400">{lead.first_name?.[0]}{lead.last_name?.[0]}</span>
+                        <span className="text-[14px] font-black text-indigo-400">
+                          {lead.first_name?.[0]}{lead.last_name?.[0] || lead.first_name?.[1] || ''}
+                        </span>
                       </div>
                       <div>
                         <div className="text-[14px] font-bold text-white mb-0.5 group-hover:text-indigo-400 transition-colors">{lead.first_name} {lead.last_name}</div>
@@ -441,21 +443,52 @@ const AdminDashboard = () => {
                 </div>
               </div>
 
-              {/* RAG Insights */}
+              {/* Strategic Analysis */}
               <div className="mb-12">
-                <div className="flex items-center gap-3 mb-6">
-                  <BarChart3 className="w-5 h-5 text-indigo-400" />
-                  <h3 className="text-[12px] font-black text-white uppercase tracking-[0.2em]">Strategic Analysis</h3>
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-3">
+                    <BarChart3 className="w-5 h-5 text-indigo-400" />
+                    <h3 className="text-[12px] font-black text-white uppercase tracking-[0.2em]">Strategic Intelligence</h3>
+                  </div>
+                  {selectedLead.rag_advice && (
+                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest bg-white/5 px-2 py-1 rounded-md border border-white/10">
+                      RAG Analysis Complete
+                    </span>
+                  )}
                 </div>
-                <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-8">
+                
+                <div className="bg-white/[0.02] border border-white/5 rounded-3xl overflow-hidden shadow-inner">
                   {selectedLead.rag_advice ? (
-                    <div className="prose prose-invert max-w-none text-sm text-slate-400 leading-relaxed">
-                      {selectedLead.rag_advice}
+                    <div className="relative group">
+                      <div className="p-8 max-h-[350px] overflow-y-auto custom-scrollbar">
+                        <div className="prose prose-invert prose-sm max-w-none text-slate-400 leading-relaxed space-y-4">
+                          {selectedLead.rag_advice.split('###').filter(s => s.trim()).map((section, idx) => {
+                            const lines = section.trim().split('\n');
+                            const title = lines[0].trim();
+                            const content = lines.slice(1).join('\n').trim();
+                            
+                            return (
+                              <div key={idx} className="mb-6 last:mb-0 border-l-2 border-indigo-500/30 pl-6 py-1">
+                                <h4 className="text-[11px] font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 shadow-[0_0_5px_rgba(99,102,241,0.5)]" />
+                                  {title}
+                                </h4>
+                                <div className="text-[13px] font-medium leading-relaxed text-slate-400 whitespace-pre-wrap">
+                                  {content}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-[#0d0f16] to-transparent pointer-events-none group-hover:opacity-0 transition-opacity" />
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center py-10 opacity-50">
-                      <Clock className="w-10 h-10 mb-4" />
-                      <p className="text-[10px] font-bold uppercase tracking-widest">No strategic analysis available yet</p>
+                    <div className="flex flex-col items-center py-16 opacity-30">
+                      <div className="w-16 h-16 rounded-full border-2 border-dashed border-white/10 flex items-center justify-center mb-6">
+                        <Clock className="w-8 h-8" />
+                      </div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.3em]">Processing Analysis...</p>
                     </div>
                   )}
                 </div>

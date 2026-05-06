@@ -113,29 +113,25 @@ def list_companies(
 
 @router.post("/companies/import")
 def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Clears the current registry and imports a new batch of spreadsheet data using fast batch insertion."""
+    """Imports a batch of data, automatically enriching missing fields."""
     uid = normalize_user_id(user_id)
     conn = get_db_connection()
     cur = conn.cursor()
     
-    start_time = time.time()
+    # --- AUTOMATION: Enrich rows before insertion ---
+    processed_rows = process_and_enrich_rows(rows)
+    
     try:
-        # Clear existing data for a fresh import
         cur.execute("DELETE FROM company_registry WHERE user_id = %s", (uid,))
-        
-        # Fast Batch Insert
-        if rows:
-            data_to_insert = [(json.dumps(row), uid) for row in rows]
+        if processed_rows:
+            data_to_insert = [(json.dumps(row), uid) for row in processed_rows]
             execute_values(
                 cur,
                 "INSERT INTO company_registry (row_data, user_id) VALUES %s",
                 data_to_insert
             )
-        
         conn.commit()
-        end_time = time.time()
-        print(f"Imported {len(rows)} companies in {end_time - start_time:.2f} seconds.")
-        return {"success": True, "count": len(rows)}
+        return {"success": True, "count": len(processed_rows)}
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
@@ -183,6 +179,83 @@ def request_db_access(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Submits access request (Legacy - keeping for route compatibility if needed)."""
     return {"message": "Access restriction removed. You have full system clearance."}
 
+def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Cleans and auto-enriches a list of rows, ensuring critical columns exist and are named correctly."""
+    results = []
+    
+    # First pass: Identify types of unnamed columns by scanning values in ALL rows
+    unnamed_types = {} 
+    
+    for row in rows:
+        for idx, (k, v) in enumerate(row.items()):
+            k_str = str(k).strip()
+            # If header is missing, empty, or generic
+            if not k or k_str == "" or k_str.lower() in ["none", "null", "field_"]:
+                s_val = str(v).strip().lower()
+                if "@" in s_val and "." in s_val and len(s_val) > 5 and idx not in unnamed_types:
+                    unnamed_types[idx] = "Email"
+                elif any(c.isdigit() for c in s_val) and len(s_val) > 7 and idx not in unnamed_types:
+                    unnamed_types[idx] = "Mobile"
+
+    for i, row in enumerate(rows):
+        clean_row = {}
+        # Ensure these core keys ALWAYS exist in the result object
+        clean_row["Email"] = ""
+        clean_row["Mobile"] = ""
+        
+        for idx, (k, v) in enumerate(row.items()):
+            k_str = str(k).strip()
+            target_key = k_str
+            
+            # Use detected name if original is missing/generic
+            if not k or k_str == "" or k_str.lower() in ["none", "null"] or "field" in k_str.lower():
+                target_key = unnamed_types.get(idx, f"Field_{idx}")
+            
+            val = str(v).strip() if v else ""
+            
+            # Map common variations to standard keys
+            tk_low = target_key.lower().replace(" ", "").replace("_", "")
+            if tk_low in ["email", "emailaddress", "workemail", "mail"]:
+                clean_row["Email"] = val
+            elif tk_low in ["mobile", "phone", "contact", "contactnumber", "phonenumber", "tel"]:
+                clean_row["Mobile"] = val
+            else:
+                # Keep original key but avoid empty ones
+                final_key = target_key if target_key else f"Column_{idx}"
+                clean_row[final_key] = val
+        
+        # Double check: if Email/Mobile are still empty but we found them in unnamed columns
+        # this acts as a safety net
+        if not clean_row["Email"]:
+            for k, v in clean_row.items():
+                if "@" in str(v) and "." in str(v) and k not in ["Company Name", "Person Name"]:
+                    clean_row["Email"] = str(v)
+                    break
+        
+        if not any(v for k, v in clean_row.items() if k not in ["id", "_is_generated", "Email", "Mobile"]): 
+            continue
+        
+        # Trigger AI enrichment for missing critical data (Limit to first 30)
+        has_email = "@" in clean_row.get("Email", "")
+        has_phone = any(c.isdigit() for c in clean_row.get("Mobile", "")) and len(clean_row.get("Mobile", "")) > 7
+            
+        if (not has_email or not has_phone) and i < 30:
+            try:
+                enriched = enrich_row_data_internal(clean_row)
+                # Update but don't overwrite if we already have it
+                for ek, ev in enriched.items():
+                    # Map AI keys to our standard keys
+                    if ek == "email" and not clean_row["Email"]: clean_row["Email"] = ev
+                    elif ek == "phone" and not clean_row["Mobile"]: clean_row["Mobile"] = ev
+                    elif ek == "linkedin_url" and not clean_row.get("LinkedIn Profile"): clean_row["LinkedIn Profile"] = ev
+                    elif ek == "designation" and not clean_row.get("Designation"): clean_row["Designation"] = ev
+                    elif ek == "industry" and not clean_row.get("Industry"): clean_row["Industry"] = ev
+            except:
+                pass
+        
+        results.append(clean_row)
+    return results
+
 @router.post("/companies/import-gsheet")
 def import_companies_gsheet(req: Dict[str, str], user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Syncs a public Google Sheet into the company registry."""
@@ -206,15 +279,94 @@ def import_companies_gsheet(req: Dict[str, str], user_id: Optional[str] = Header
         if resp.status_code != 200:
             raise HTTPException(status_code=400, detail="Sheet is private or not found.")
         
-        reader = csv.DictReader(io.StringIO(resp.text))
-        rows = [dict(row) for row in reader]
-        print(f"Parsed {len(rows)} rows from GSheet.")
+        # CLEANUP: Remove leading empty lines or garbage before the actual headers
+        lines = resp.text.splitlines()
+        header_index = 0
         
-        # Reuse existing import logic
+        # Key headers we expect to find in a valid sheet
+        keywords = ['email', 'name', 'company', 'linkedin', 'person', 'investor', 'contact', 'designation', 'note', 'sector']
+        
+        for i, line in enumerate(lines):
+            # Count how many of our keywords are in this line
+            lower_line = line.lower()
+            matches = sum(1 for kw in keywords if kw in lower_line)
+            
+            # If a line has at least 2 matching keywords, it's likely our header row
+            if matches >= 2:
+                header_index = i
+                break
+            
+            # Fallback: if it's the first line with any significant content
+            if line.strip() and not line.strip().startswith(",,,") and header_index == 0:
+                header_index = i
+        
+        cleaned_csv = "\n".join(lines[header_index:])
+        reader = csv.reader(io.StringIO(cleaned_csv))
+        
+        # Extract headers and handle rows
+        header_row = next(reader, [])
+        rows = []
+        for row_data in reader:
+            # Create a dict with numeric indices as keys to be safe
+            row_dict = {}
+            for idx, val in enumerate(row_data):
+                key = header_row[idx] if idx < len(header_row) and header_row[idx].strip() else f"Field_{idx}"
+                row_dict[key] = val
+            rows.append(row_dict)
+        
+        # This will call the enriched import_companies
         return import_companies(rows, user_id)
     except Exception as e:
         print(f"GSheet import error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+def enrich_row_data_internal(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Helper to enrich a single row's data using AI."""
+    try:
+        company_name = data.get("Company Name") or data.get("company") or data.get("Company") or data.get("name")
+        if not company_name: return data
+        
+        prompt = f"""
+        Find professional contact details for: "{company_name}".
+        Person: "{data.get('Person Name') or data.get('person') or ''}"
+        Return ONLY valid JSON: {{"domain":"", "linkedin_url":"", "email":"", "designation":"", "industry":"", "phone":""}}
+        """
+        from app.services.llm_services import LLMService
+        llm = LLMService()
+        ai_response = llm.generate_response(prompt)
+        
+        json_str = ai_response.strip()
+        if "```json" in json_str: json_str = json_str.split("```json")[1].split("```")[0].strip()
+        elif "```" in json_str: json_str = json_str.split("```")[1].split("```")[0].strip()
+        
+        enrichment = json.loads(json_str)
+        field_map = {
+            "email": ["Email", "Email Address", "Work Email"],
+            "linkedin_url": ["LinkedIn Profile", "LinkedIn", "LinkedIn URL"],
+            "designation": ["Designation", "Role", "Job Title", "Title"],
+            "domain": ["Domain", "Website"],
+            "industry": ["Industry", "Sector"],
+            "phone": ["Mobile", "Phone", "Contact Number", "Phone Number"]
+        }
+        
+        for ai_key, ui_candidates in field_map.items():
+            ai_val = enrichment.get(ai_key)
+            if not ai_val: continue
+            
+            # Check for existing value
+            exists = False
+            target_key = ui_candidates[0]
+            for cand in ui_candidates:
+                for k in data.keys():
+                    if k.lower().replace(" ","") == cand.lower().replace(" ",""):
+                        if data.get(k): exists = True
+                        target_key = k
+                        break
+            if not exists: data[target_key] = ai_val
+            
+        return data
+    except:
+        return data
 
 @router.post("/companies/{row_id}/generate-draft")
 def generate_company_draft(row_id: int, template_name: Optional[str] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
@@ -237,21 +389,44 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
         # Normalize keys for mapping
         norm = {str(k).lower().replace(" ", "").replace("-", "").replace("_", ""): v for k, v in data.items() if v}
         
-        email = norm.get("email") or norm.get("emailaddress") or norm.get("workemail")
+        # 1. Smart Email Detection
+        email = (
+            norm.get("email") or norm.get("emailaddress") or 
+            norm.get("workemail") or norm.get("primaryemail")
+        )
+        
+        # Fallback: scan all values for @ if no explicit email header
         if not email:
-            raise HTTPException(status_code=400, detail="Company record is missing an email address.")
+            for k, v in data.items():
+                val = str(v).strip()
+                if "@" in val and "." in val and len(val) > 5 and " " not in val:
+                    email = val
+                    break
+                    
+        if not email:
+            raise HTTPException(status_code=400, detail="Profile is missing a valid email address. Use 'Fetch Details' (Globe Icon) to find it first.")
             
+        # 2. Smart Name Detection
         name = (
             norm.get("teammember") or norm.get("name") or norm.get("fullname") or 
             norm.get("leadname") or norm.get("contactname") or norm.get("contact") or
-            norm.get("investor") or norm.get("person") or
+            norm.get("investor") or norm.get("person") or norm.get("personname") or
             f"{norm.get('firstname', '')} {norm.get('lastname', '')}".strip()
         )
+        
         if not name or name.strip() == "":
+            # Try to guess from email prefix
             email_prefix = email.split('@')[0]
             name = email_prefix.replace(".", " ").replace("_", " ").replace("-", " ").title()
             
-        company = norm.get("companyname") or norm.get("company") or norm.get("investorname") or norm.get("org") or norm.get("firm") or norm.get("account")
+        # 3. Smart Company Detection
+        company = (
+            norm.get("companyname") or norm.get("company") or 
+            norm.get("investorname") or norm.get("org") or 
+            norm.get("firm") or norm.get("account") or norm.get("organization")
+        )
+        if not company:
+            company = "Independent"
         
         parts = name.split(" ", 1)
         f_name = parts[0]
@@ -267,7 +442,10 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
 
         cur.execute("SELECT id FROM leads_raw WHERE email = %s AND user_id = %s ORDER BY created_at DESC LIMIT 1", (email, uid))
         lead_row = cur.fetchone()
-        lead_id = lead_row[0]
+        if not lead_row:
+             raise HTTPException(status_code=500, detail="Lead synchronization fault: Record failed to propagate to pipeline.")
+        
+        lead_id = lead_row['id'] if isinstance(lead_row, dict) else lead_row[0]
         
         # --- NEW: Reuse universal generator logic ---
         from app.api.drafts import generate_email_internal, DraftRequest
@@ -390,6 +568,119 @@ def send_company_email(row_id: int, user_id: Optional[str] = Header(None, alias=
 
     except Exception as e:
         conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+@router.post("/companies/{row_id}/enrich")
+def enrich_company_data(row_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Uses AI to fetch missing details (LinkedIn, Domain, etc.) for a company record."""
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    uid = normalize_user_id(user_id)
+    
+    try:
+        cur.execute("SELECT row_data FROM company_registry WHERE id = %s AND user_id = %s", (row_id, uid))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Company record not found")
+            
+        data = row['row_data']
+        if isinstance(data, str):
+            data = json.loads(data)
+            
+        # Get company name
+        company_name = data.get("Company Name") or data.get("company") or data.get("Company") or data.get("name")
+        if not company_name:
+             raise HTTPException(status_code=400, detail="No company name found to search for.")
+
+        # Use AI to find LinkedIn/Domain/etc.
+        prompt = f"""
+        Find the following professional contact details for the company: "{company_name}".
+        Target Person: "{data.get('Person Name') or data.get('person') or ''}"
+        
+        Required Details (JSON format):
+        - domain: (e.g. apple.com)
+        - linkedin_url: (official LinkedIn profile URL for the company or person)
+        - email: (likely professional email address)
+        - designation: (the person's role in the company)
+        - industry: (e.g. Healthcare, Technology, Finance)
+        
+        Return ONLY valid JSON.
+        """
+        
+        from app.services.llm_services import LLMService
+        llm = LLMService()
+        ai_response = llm.generate_response(prompt)
+        
+        # Parse AI response
+        try:
+            json_str = ai_response.strip()
+            if "```json" in json_str:
+                json_str = json_str.split("```json")[1].split("```")[0].strip()
+            elif "```" in json_str:
+                json_str = json_str.split("```")[1].split("```")[0].strip()
+            
+            enrichment = json.loads(json_str)
+            
+            # Update data with enriched fields using case-insensitive fuzzy matching
+            updated = False
+            
+            # Helper to find existing key in data (case-insensitive)
+            def find_key(search_key):
+                search_key_norm = search_key.lower().replace(" ", "").replace("_", "")
+                for k in data.keys():
+                    if k.lower().replace(" ", "").replace("_", "") == search_key_norm:
+                        return k
+                return None
+
+            # Mapping of AI keys to likely UI keys
+            field_map = {
+                "email": ["Email", "Email Address", "Work Email"],
+                "linkedin_url": ["LinkedIn Profile", "LinkedIn", "LinkedIn URL"],
+                "designation": ["Designation", "Role", "Job Title", "Title"],
+                "domain": ["Domain", "Website", "Official Website"],
+                "industry": ["Industry", "Sector"]
+            }
+            
+            for ai_key, ui_candidates in field_map.items():
+                ai_val = enrichment.get(ai_key)
+                if not ai_val: continue
+                
+                # Check if we already have a value for any candidate key
+                existing_key = None
+                has_value = False
+                for cand in ui_candidates:
+                    k = find_key(cand)
+                    if k:
+                        existing_key = k
+                        if data.get(k):
+                            has_value = True
+                            break
+                
+                # If no value, update it
+                if not has_value:
+                    target_key = existing_key or ui_candidates[0]
+                    data[target_key] = ai_val
+                    updated = True
+            
+            if updated:
+                cur.execute(
+                    "UPDATE company_registry SET row_data = %s, updated_at = NOW() WHERE id = %s",
+                    (json.dumps(data), row_id)
+                )
+                conn.commit()
+                return {"success": True, "enriched": enrichment}
+            else:
+                return {"success": True, "message": "Metadata already synchronized."}
+                
+        except Exception as parse_err:
+            print(f"AI Parse Error: {parse_err} | Response: {ai_response}")
+            raise HTTPException(status_code=500, detail="AI returned malformed data.")
+
+    except Exception as e:
+        print(f"Enrichment Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()

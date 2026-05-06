@@ -81,12 +81,10 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
             raise HTTPException(status_code=404, detail="Lead not found")
             
         pitch_deck_url = lead.get('pitch_deck_url')
-        if not pitch_deck_url:
-            raise HTTPException(status_code=400, detail="No pitch deck found for this lead. Please upload or sync first.")
 
         # Download the file if it's a local static path
         file_data = None
-        if pitch_deck_url.startswith("http"):
+        if pitch_deck_url and pitch_deck_url.startswith("http"):
             try:
                 if "static/pitch_decks" in pitch_deck_url:
                     rel_path = pitch_deck_url.split("static/")[1]
@@ -102,16 +100,13 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
             except Exception as e:
                 logger.warning(f"Download failed: {e}")
         
-        if not file_data:
-            raise HTTPException(status_code=400, detail="Could not retrieve pitch deck file for analysis.")
-
         # --- STRICT RAG ONLY (STABLE SESSION) ---
         rag_url = "https://rag-sys-gz59.onrender.com"
         rag_category = lead.get('sector')
         rag_advice = None
         rag_intel = None
 
-        logger.info(f"Attempting Pure RAG analysis (Llama 3.1) for lead {lead_id}...")
+        logger.info(f"Attempting Deep Analysis for lead {lead_id}...")
         
         try:
             from requests.adapters import HTTPAdapter
@@ -121,58 +116,85 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
             retries = Retry(total=3, backoff_factor=1, status_forcelist=[502, 503, 504])
             s.mount('https://', HTTPAdapter(max_retries=retries))
             
-            # 0. Wake-Up Check (Increased to 60s for stability)
+            # 0. Wake-Up Check
             try:
                 s.get(rag_url, timeout=60, verify=False)
             except:
                 pass
 
-            # 1. RAG Processing
-            files = {'file': (f"lead_{lead_id}.pdf", file_data)}
-            process_res = s.post(f"{rag_url}/process", files=files, timeout=300, verify=False)
-            
-            if process_res.status_code == 200:
-                rag_data = process_res.json()
-                rag_category = rag_data.get('category') or rag_data.get('type')
-                rag_item_id = rag_data.get('id')
+            if file_data:
+                # 1. RAG Processing (PDF)
+                files = {'file': (f"lead_{lead_id}.pdf", file_data)}
+                process_res = s.post(f"{rag_url}/process", files=files, timeout=300, verify=False)
                 
-                if rag_item_id:
-                    # 2. Polling loop
-                    import time
-                    max_polls = 30
-                    for poll in range(max_polls):
-                        logger.info(f"Polling RAG status for ID {rag_item_id} (Attempt {poll+1}/30)...")
-                        status_res = s.get(f"{rag_url}/status/{rag_item_id}", timeout=60, verify=False)
-                        if status_res.status_code == 200:
-                            status_data = status_res.json()
-                            current_status = status_data.get('status', '').lower()
-                            
-                            if current_status == 'completed' or current_status == 'success':
-                                insights = status_data.get('insights', {})
-                                if insights:
-                                    # Capture RAW RAG OUTPUT as the primary advice
-                                    rag_advice = insights.get('summary') or insights.get('verdict') or "Analysis completed but no summary provided."
-                                    
-                                    rag_category = (insights.get('type') or insights.get('category') or 'INVESTOR').upper()
-                                    
-                                    rag_intel = {
-                                        "answer": rag_advice,
-                                        "source": "Pure Llama 3.1 (RAG Engine)",
-                                        "category": rag_category,
-                                        "sentiment_score": insights.get('score', 80),
-                                        "urgency_level": insights.get('strategy', {}).get('priority', 'MEDIUM').upper(),
-                                        "strategy": insights.get('strategy', {}),
-                                        "actuals": insights.get('actuals', {}),
-                                        "signals": insights.get('breakdown', {}),
-                                        "key_signals": insights.get('key_signal'),
-                                        "verdict": insights.get('verdict'),
-                                        "full_insights": insights
-                                    }
-                                    logger.info(f"Native RAG Insights extracted successfully for lead {lead_id}")
+                if process_res.status_code == 200:
+                    rag_data = process_res.json()
+                    rag_category = rag_data.get('category') or rag_data.get('type')
+                    rag_item_id = rag_data.get('id')
+                    
+                    if rag_item_id:
+                        # 2. Polling loop
+                        import time
+                        max_polls = 30
+                        for poll in range(max_polls):
+                            logger.info(f"Polling RAG status for ID {rag_item_id} (Attempt {poll+1}/30)...")
+                            status_res = s.get(f"{rag_url}/status/{rag_item_id}", timeout=60, verify=False)
+                            if status_res.status_code == 200:
+                                status_data = status_res.json()
+                                current_status = status_data.get('status', '').lower()
+                                
+                                if current_status == 'completed' or current_status == 'success':
+                                    insights = status_data.get('insights', {})
+                                    if insights:
+                                        # Use structured format
+                                        rag_advice = f"### RAG VERDICT\n{insights.get('verdict', 'N/A')}\n\n"
+                                        rag_advice += f"### SUMMARY\n{insights.get('summary', 'N/A')}\n\n"
+                                        
+                                        if insights.get('actuals'):
+                                            rag_advice += "### ACTUALS & METRICS\n"
+                                            for k, v in insights.get('actuals', {}).items():
+                                                rag_advice += f"- {k.replace('_', ' ').title()}: {v}\n"
+                                            rag_advice += "\n"
+                                            
+                                        if insights.get('strategy'):
+                                            rag_advice += "### STRATEGY RECOMMENDATION\n"
+                                            strat = insights.get('strategy', {})
+                                            rag_advice += f"- Priority: {strat.get('priority', 'MEDIUM')}\n"
+                                            rag_advice += f"- Approach: {strat.get('approach', 'N/A')}\n\n"
+
+                                        rag_category = (insights.get('type') or insights.get('category') or 'INVESTOR').upper()
+                                        
+                                        rag_intel = {
+                                            "answer": rag_advice,
+                                            "source": "Pure Llama 3.1 (RAG Engine)",
+                                            "category": rag_category,
+                                            "sentiment_score": insights.get('score', 80),
+                                            "urgency_level": insights.get('strategy', {}).get('priority', 'MEDIUM').upper(),
+                                            "strategy": insights.get('strategy', {}),
+                                            "actuals": insights.get('actuals', {}),
+                                            "signals": insights.get('breakdown', {}),
+                                            "key_signals": insights.get('key_signal'),
+                                            "verdict": insights.get('verdict'),
+                                            "full_insights": insights
+                                        }
+                                        break
+                                elif current_status == 'failed':
                                     break
-                            elif current_status == 'failed':
-                                break
-                        time.sleep(10)
+                            time.sleep(10)
+            else:
+                # 1. RAG Processing (Text Fallback)
+                import io
+                lead_text = f"Lead Persona: {lead.get('persona')}\nCompany: {lead.get('company_name')}\nBody: {lead.get('remarks') or ''}"
+                files = {'file': (f"lead_{lead_id}.txt", io.StringIO(lead_text).getvalue())}
+                s.post(f"{rag_url}/ingest", files=files, timeout=60, verify=False)
+                
+                query_msg = f"Provide a strategic intelligence analysis for this lead. Persona: {lead.get('persona')}. Company: {lead.get('company_name')}. Context: {lead.get('remarks')[:500]}"
+                query_res = s.post(f"{rag_url}/ask", params={"question": query_msg}, timeout=120, verify=False)
+                if query_res.status_code == 200:
+                    rag_data = query_res.json()
+                    rag_advice = f"### TEXT ANALYSIS SUMMARY\n{rag_data.get('answer') or rag_data.get('response')}"
+                    rag_intel = rag_data
+                    rag_intel["answer"] = rag_advice
             
             if not rag_advice:
                 raise Exception("RAG Engine timeout or analysis failure.")

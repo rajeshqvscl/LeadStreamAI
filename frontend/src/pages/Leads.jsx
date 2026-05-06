@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Rocket, Search, ChevronDown, CheckCircle, Mail, User, Linkedin,
   Loader2, Sparkles, Tag, Plus, ChevronRight, X, AlertTriangle, AlertCircle,
@@ -11,6 +11,7 @@ import api from '../services/api';
 
 const Leads = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [leads, setLeads] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, total_pages: 1, total: 0 });
@@ -151,6 +152,14 @@ const Leads = () => {
   useEffect(() => {
     fetchLeads();
   }, [pagination.page, filters]);
+
+  useEffect(() => {
+    const urlSearch = searchParams.get('search');
+    if (urlSearch !== null && urlSearch !== filters.search) {
+      setFilters(prev => ({ ...prev, search: urlSearch }));
+      setPagination(prev => ({ ...prev, page: 1 }));
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     api.get('/api/custom-draft-templates').then(r => setCustomTemplates(r.data || [])).catch(() => {});
@@ -797,7 +806,11 @@ const Leads = () => {
 
         <div className="flex items-center gap-2 px-4 flex-1 justify-end border-r-0 text-right">
           <button
-            onClick={() => setFilters({ search: '', title: '', company: '', persona: '', status: '', country: '', city: '', source: '', show_drafted: false, show_unsubscribed: false })}
+            onClick={() => {
+              setFilters({ search: '', title: '', company: '', persona: '', status: '', country: '', city: '', source: '', show_drafted: false, show_unsubscribed: false });
+              setPagination(prev => ({ ...prev, page: 1 }));
+              navigate('/dashboard/leads');
+            }}
             className="flex items-center px-4 py-1.5 bg-[#ffffff05] hover:bg-[#ffffff0a] rounded-lg border border-[#ffffff08] transition-colors text-[10px] font-extrabold text-slate-300 ml-auto"
           >
             Reset

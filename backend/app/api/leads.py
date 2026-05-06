@@ -970,25 +970,50 @@ def bulk_import(
                 pass
 
         for lead in leads:
-            # Normalize keys to catch variations like "E- Mail", "First Name", "Investor Name"
-            norm_lead = {str(k).lower().replace(" ", "").replace("-", ""): str(v).strip() for k, v in lead.items() if v}
+            # Normalize keys: lower, strip, remove non-alphanumeric (mostly)
+            norm_lead = {}
+            for k, v in lead.items():
+                if k is None or str(k).strip() == "":
+                    k_norm = "empty_header"
+                else:
+                    k_norm = "".join(filter(str.isalnum, str(k).lower()))
+                
+                if v and str(v).strip():
+                    norm_lead[k_norm] = str(v).strip()
 
-            # Flexible Mapping for Name
-            name = (
-                norm_lead.get("name") or norm_lead.get("fullname") or 
-                norm_lead.get("leadname") or norm_lead.get("investorname") or
-                f"{norm_lead.get('firstname', '')} {norm_lead.get('lastname', '')}".strip()
-            )
-            
             # Flexible Mapping for Email
             email = (
                 norm_lead.get("email") or norm_lead.get("emailaddress") or 
                 norm_lead.get("workemail")
             )
+            
+            # Smart Fallback: If no email header was found, check all values for an @ symbol
+            if not email:
+                for k, v in lead.items():
+                    val = str(v).strip()
+                    if "@" in val and "." in val and len(val) > 5 and " " not in val:
+                        email = val
+                        break
 
-            if not email or not name:
+            # Flexible Mapping for Name
+            name = (
+                norm_lead.get("name") or norm_lead.get("fullname") or 
+                norm_lead.get("leadname") or norm_lead.get("investorname") or
+                norm_lead.get("personname") or norm_lead.get("contactname") or
+                norm_lead.get("person") or
+                f"{norm_lead.get('firstname', '')} {norm_lead.get('lastname', '')}".strip()
+            )
+            
+            # Final fallback for name if we found an email but no name
+            if email and not name:
+                name = email.split('@')[0].replace('.', ' ').replace('_', ' ').title()
+
+            if not email:
                 errors += 1
                 continue
+            
+            if not name:
+                name = f"Lead {email.split('@')[0]}"
 
             # Flexible Mapping for other fields
             company = (
@@ -998,6 +1023,7 @@ def bulk_import(
             )
             linkedin = (
                 norm_lead.get("linkedinurl") or norm_lead.get("linkedin") or 
+                norm_lead.get("linkedinprofile") or
                 norm_lead.get("profileurl") or norm_lead.get("url")
             )
             designation = (
@@ -1123,21 +1149,29 @@ def import_from_gsheet(
         content_type = resp.headers.get("Content-Type", "")
         
         if resp.status_code == 200 and "csv" in content_type.lower():
-            reader = csv.DictReader(io.StringIO(resp.text))
+            # CLEANUP: Remove leading empty lines or garbage before the actual headers
+            lines = resp.text.splitlines()
+            header_index = 0
             
-            # Use our generous backend bulk-import logic!
-            return bulk_import([dict(row) for row in reader], user_id)
+            # Key headers we expect to find in a valid lead sheet
+            keywords = ['email', 'name', 'company', 'linkedin', 'person', 'investor', 'contact', 'designation']
             
-        else:
-            raise HTTPException(status_code=400, detail="Sheet is fully private or not found. Please make sure 'Anyone with the link can view'.")
+            for i, line in enumerate(lines):
+                # Count how many of our keywords are in this line
+                lower_line = line.lower()
+                matches = sum(1 for kw in keywords if kw in lower_line)
+                
+                # If a line has at least 2 matching keywords, it's likely our header row
+                if matches >= 2:
+                    header_index = i
+                    break
+                
+                # Fallback: if it's the first line with any significant content
+                if line.strip() and not line.strip().startswith(",,,") and header_index == 0:
+                    header_index = i
             
-    except Exception as e:
-        if isinstance(e, HTTPException):
-            raise
-        raise HTTPException(status_code=500, detail=str(e))
-        
-        if resp.status_code == 200 and "csv" in content_type.lower():
-            reader = csv.DictReader(io.StringIO(resp.text))
+            cleaned_csv = "\n".join(lines[header_index:])
+            reader = csv.DictReader(io.StringIO(cleaned_csv))
             
             # Use our generous backend bulk-import logic!
             return bulk_import([dict(row) for row in reader], user_id)
