@@ -231,6 +231,39 @@ def normalize_lead(lead):
             }
     return {}
 
+# Honorific/title prefixes that should never be used alone as a greeting name
+_HONORIFICS = {"dr", "mr", "mrs", "ms", "miss", "prof", "sir", "madam", "rev", "capt", "col", "gen", "lt", "maj", "cmdr", "adm", "sgt", "cpl", "pvt", "hm", "er", "ca", "cs", "adv", "md", "phd"}
+
+def clean_first_name(lead: dict) -> str:
+    """
+    Returns a greeting-safe FIRST name only for the lead.
+    - Strips leading honorifics like 'Dr.', 'Mr.', 'Prof.' from first_name.
+    - Falls back to last_name if first_name is ONLY an honorific (e.g. stored as 'Dr.').
+    - Returns only the FIRST WORD so full names stored in first_name (e.g. 'Raajiv singhal')
+      become just 'Raajiv'.
+    - Falls back to 'there' if no usable name is found.
+    """
+    raw_first = (lead.get("first_name") or lead.get("name") or "").strip()
+    raw_last  = (lead.get("last_name") or "").strip()
+
+    # Strip trailing dot from honorific prefix check
+    normalized = raw_first.rstrip(".").lower()
+
+    if normalized in _HONORIFICS:
+        # first_name is just a title — use first word of last_name if available
+        if raw_last:
+            return raw_last.strip().split()[0].capitalize()
+        return "there"
+
+    # Strip a leading honorific word (e.g. "Dr. Ashish Kumar" → ["Ashish", "Kumar"])
+    parts = raw_first.split()
+    if len(parts) > 1 and parts[0].rstrip(".").lower() in _HONORIFICS:
+        parts = parts[1:]
+
+    # Always return only the FIRST word (capitalize it)
+    return parts[0].capitalize() if parts else (raw_last.split()[0].capitalize() if raw_last else "there")
+
+
 def get_sender_profile(user_id: Optional[str]) -> dict:
     """Fetches the full sender profile for signature construction, using ID or falling back to defaults."""
     uid = normalize_user_id(user_id)
@@ -329,15 +362,42 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         profile = get_sender_profile(user_id)
         generator = EmailGenerator()
         
-        #         # Select template
+        # Select template
         if req.template_type == 'palak':
-            email_data = generator.generate_palak_email(
-                lead, 
-                sender_name=profile.get('full_name') or profile.get('username'),
-                sender_linkedin=profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
-            )
-            subject = email_data.get("subject", "Following up")
-            body = email_data.get("body", "")
+            # Load Palak's template from DB for deterministic name replacement
+            # (avoids AI generating "Dear Dr.," without a full name)
+            conn_p = get_db_connection()
+            cur_p = conn_p.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cur_p.execute("SELECT content FROM prompts WHERE name = 'palak_mam_Draft_1' AND is_active = TRUE")
+            palak_row = cur_p.fetchone()
+            cur_p.close()
+            conn_p.close()
+
+            f_name = clean_first_name(lead)  # strips Dr./Mr./Mrs. etc.
+            l_name = (lead.get("last_name") or "").strip()
+            full_name = f"{f_name} {l_name}".strip()
+            company = (lead.get("company_name") or lead.get("family_office_name") or "your organization").strip()
+            sender_full_name = profile.get('full_name') or profile.get('username') or "the team"
+            sender_title = profile.get('job_title') or ""
+            sender_phone = profile.get('phone') or ""
+            sender_linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
+
+            if palak_row:
+                template_body = palak_row["content"]
+                body = template_body.replace("{{First Name}}", f_name).replace("{{first name}}", f_name).replace("{{first_name}}", f_name)
+                body = body.replace("{{Full Name}}", full_name).replace("{{full_name}}", full_name)
+                body = body.replace("{{Company Name}}", company).replace("{{Company}}", company).replace("{{company_name}}", company)
+                body = body.replace("{{Sender Name}}", sender_full_name).replace("{{Sender Title}}", sender_title).replace("{{Sender Phone}}", sender_phone).replace("{{Sender LinkedIn}}", sender_linkedin).replace("{{Sender Linkedin}}", sender_linkedin)
+                subject = f"Strategic Investment/Partnership Opportunity | QVSCL × {company}"
+            else:
+                # Fallback to AI only if DB template is missing
+                email_data = generator.generate_palak_email(
+                    lead,
+                    sender_name=sender_full_name,
+                    sender_linkedin=sender_linkedin
+                )
+                subject = email_data.get("subject", "Following up")
+                body = email_data.get("body", "")
         elif req.template_type != 'standard':
             # Check if it's a custom template name from DB
             conn_t = get_db_connection()
@@ -350,25 +410,24 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
             if row_t:
                 # FIXED replacement (No AI)
                 template_body = row_t["content"]
-                f_name = (lead.get("first_name") or lead.get("name") or "there").strip().capitalize()
-                
+                f_name = clean_first_name(lead)  # strips Dr./Mr./Mrs. etc.
+
                 # Resolving Lead fields
                 l_name = (lead.get("last_name") or "").strip()
                 full_name = f"{f_name} {l_name}".strip()
                 company = (lead.get("company_name") or lead.get("family_office_name") or "your organization").strip()
-                
+
                 # Resolving Sender fields
                 sender_full_name = profile.get('full_name') or profile.get('username') or "the team"
                 sender_title = profile.get('job_title') or ""
                 sender_phone = profile.get('phone') or ""
-                
                 sender_linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
-                
+
                 body = template_body.replace("{{First Name}}", f_name).replace("{{first name}}", f_name).replace("{{first_name}}", f_name)
                 body = body.replace("{{Full Name}}", full_name).replace("{{full_name}}", full_name)
-                body = body.replace("{{Company}}", company).replace("{{company_name}}", company)
+                body = body.replace("{{Company Name}}", company).replace("{{Company}}", company).replace("{{company_name}}", company)
                 body = body.replace("{{Sender Name}}", sender_full_name).replace("{{Sender Title}}", sender_title).replace("{{Sender Phone}}", sender_phone).replace("{{Sender LinkedIn}}", sender_linkedin).replace("{{Sender Linkedin}}", sender_linkedin)
-                
+
                 subject = f"Strategic Partnership Opportunity | QVSCL × {company}"
             else:
                 # Fallback to standard fixed
@@ -544,7 +603,7 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
         template_body = tpl_row["content"]
 
         # Resolve lead fields
-        first_name = (lead.get("first_name") or "").strip() or "there"
+        first_name = clean_first_name(lead)  # strips Dr./Mr./Mrs. etc.
         last_name  = (lead.get("last_name") or "").strip()
         full_name  = f"{first_name} {last_name}".strip()
         company    = (lead.get("company_name") or lead.get("family_office_name") or "your organization").strip()
