@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  History, Mail, CheckCircle, Clock, AlertCircle,
+  History, Mail, CheckCircle, Clock, AlertCircle, X,
   ChevronRight, ArrowRight, Loader2, Search,
   Zap, Calendar, User, Linkedin, ExternalLink, Rocket
 } from 'lucide-react';
@@ -13,6 +13,8 @@ const Followups = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [notification, setNotification] = useState(null);
+  const [selectedLead, setSelectedLead] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     fetchFollowups();
@@ -36,15 +38,38 @@ const Followups = () => {
       await api.post(`/api/leads/${leadId}/respond`);
       showNotification('success', 'Lead marked as responded. Sequence stopped.');
       setFollowups(prev => prev.filter(f => f.id !== leadId));
+      if (selectedLead?.id === leadId) setIsModalOpen(false);
     } catch (err) {
       console.error('Failed to mark as responded:', err);
       showNotification('error', 'Failed to update lead status');
     }
   };
 
+  const handleApproveFollowup = async (leadId) => {
+    try {
+      await api.post(`/api/leads/${leadId}/approve-followup`);
+      showNotification('success', 'Follow-up approved and sent successfully!');
+      fetchFollowups();
+      setIsModalOpen(false);
+    } catch (err) {
+      console.error('Failed to approve follow-up:', err);
+      showNotification('error', 'Failed to send follow-up. Check Gmail connection.');
+    }
+  };
+
   const showNotification = (type, message) => {
     setNotification({ type, message });
     setTimeout(() => setNotification(null), 5000);
+  };
+
+  const getStageLabel = (stage, leadType) => {
+    const typeStr = String(leadType || '').toUpperCase();
+    const isInvestor = !typeStr || (!typeStr.includes('CLIENT') && !typeStr.includes('CUSTOMER'));
+    switch (stage) {
+      case 0: return isInvestor ? 'Day 7 Follow-up' : 'Day 2 Follow-up';
+      case 1: return isInvestor ? 'Day 17 Follow-up' : 'Day 4 Follow-up';
+      default: return 'Sequence Completed';
+    }
   };
 
   const filteredFollowups = followups.filter(f =>
@@ -63,13 +88,22 @@ const Followups = () => {
     }
   };
 
-  const getStageLabel = (stage) => {
-    switch (stage) {
-      case 0: return 'Initial Sent';
-      case 1: return 'Day 2 Follow-up';
-      case 2: return 'Day 5 Follow-up';
-      case 3: return 'Day 10 Follow-up';
-      default: return 'Completed';
+  const openLeadDetails = async (lead) => {
+    setSelectedLead(lead);
+    setIsModalOpen(true);
+    
+    // If no draft exists, or just to get the freshest version
+    try {
+      const res = await api.get(`/api/leads/${lead.id}/followup-preview`);
+      if (res.data && res.data.full_html) {
+        // Update the selected lead with the fetched draft
+        setSelectedLead(prev => ({
+          ...prev,
+          followup_draft: res.data.full_html
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to fetch follow-up preview:', err);
     }
   };
 
@@ -84,7 +118,7 @@ const Followups = () => {
             </div>
             <div>
               <h1 className="text-xl font-black text-white leading-tight tracking-tight uppercase">Outreach Sequences</h1>
-              <p className="text-[11px] text-slate-500 font-bold uppercase tracking-[2px] mt-0.5">Automated Follow-up Management</p>
+              <p className="text-[11px] text-slate-500 font-bold uppercase tracking-[2px] mt-0.5">Manual Approval Required</p>
             </div>
           </div>
 
@@ -109,13 +143,11 @@ const Followups = () => {
         {/* Sequence Overview Bar */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
           {[
-
-            { label: 'Active Sequences', value: followups.length, icon: Zap, color: 'text-indigo-400', bg: 'bg-indigo-400/10' },
-            { label: 'Day 2 Nudges', value: followups.filter(f => f.followup_stage === 0).length, icon: Clock, color: 'text-blue-400', bg: 'bg-blue-400/10' },
-            { label: 'Day 5 Nudges', value: followups.filter(f => f.followup_stage === 1).length, icon: Calendar, color: 'text-amber-400', bg: 'bg-amber-400/10' },
-            { label: 'Day 10 Nudges', value: followups.filter(f => f.followup_stage === 2).length, icon: History, color: 'text-emerald-400', bg: 'bg-emerald-400/10' }
+            { label: 'Pending Approval', value: followups.filter(f => f.followup_status === 'PENDING_APPROVAL').length, icon: Zap, color: 'text-amber-400', bg: 'bg-amber-400/10' },
+            { label: 'Active Sequences', value: followups.filter(f => f.followup_status === 'ACTIVE').length, icon: Clock, color: 'text-blue-400', bg: 'bg-blue-400/10' },
+            { label: 'Total Leads', value: followups.length, icon: User, color: 'text-indigo-400', bg: 'bg-indigo-400/10' },
+            { label: 'Avg Frequency', value: 'Manual', icon: Calendar, color: 'text-emerald-400', bg: 'bg-emerald-400/10' }
           ].map((stat, i) => (
-
             <div key={i} className="bg-[#0f172a] border border-white/[0.05] rounded-2xl p-6 flex items-center justify-between group hover:border-indigo-500/20 transition-all duration-500">
               <div className="space-y-1">
                 <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</p>
@@ -149,72 +181,67 @@ const Followups = () => {
             {filteredFollowups.map((lead) => (
               <div
                 key={lead.id}
-                className="bg-[#0f172a] border border-white/[0.05] rounded-2xl p-6 transition-all duration-300 hover:bg-[#131722] hover:border-indigo-500/20 group"
+                onClick={() => openLeadDetails(lead)}
+                className="bg-[#0f172a] border border-white/[0.05] rounded-2xl p-6 transition-all duration-300 hover:bg-[#131722] hover:border-indigo-500/20 group cursor-pointer"
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-6">
-                    {/* User Avatar */}
-                    <div className="w-16 h-16 rounded-2xl bg-[#1a2235] flex items-center justify-center border border-white/[0.05] flex-shrink-0 group-hover:border-indigo-500/30 transition-colors">
-                      <User className="w-8 h-8 text-slate-400" />
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-3">
-                        <h3 className="text-base font-black text-white group-hover:text-indigo-400 transition-colors">
-                          {lead.first_name} {lead.last_name}
-                        </h3>
-                        <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-md border ${getStageColor(lead.followup_stage)}`}>
-                          {getStageLabel(lead.followup_stage)}
-                        </span>
+                <div className="flex flex-col gap-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-6">
+                      {/* User Avatar */}
+                      <div className="w-16 h-16 rounded-2xl bg-[#1a2235] flex items-center justify-center border border-white/[0.05] flex-shrink-0 group-hover:border-indigo-500/30 transition-colors">
+                        <User className="w-8 h-8 text-slate-400" />
                       </div>
-                      <div className="flex items-center gap-4 text-[12px] font-bold text-slate-400">
-                        <span className="flex items-center gap-1.5 opacity-60">
-                          <Rocket className="w-3.5 h-3.5" />
-                          {lead.company_name}
-                        </span>
-                        <span className="w-1 h-1 rounded-full bg-slate-700" />
-                        <span className="flex items-center gap-1.5 opacity-60">
-                          <Calendar className="w-3.5 h-3.5" />
-                          Last Outreach: {new Date(lead.last_outreach_at).toLocaleDateString()}
-                        </span>
+
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-3">
+                          <h3 className="text-base font-black text-white group-hover:text-indigo-400 transition-colors">
+                            {lead.first_name} {lead.last_name}
+                          </h3>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-md border ${getStageColor(lead.followup_stage)}`}>
+                              {getStageLabel(lead.followup_stage, lead.lead_type || lead.sector)}
+                            </span>
+                            <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${(!String(lead.lead_type || lead.sector || '').toUpperCase().includes('CLIENT') && !String(lead.lead_type || lead.sector || '').toUpperCase().includes('CUSTOMER')) ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20'}`}>
+                              {(!String(lead.lead_type || lead.sector || '').toUpperCase().includes('CLIENT') && !String(lead.lead_type || lead.sector || '').toUpperCase().includes('CUSTOMER')) ? 'Investor' : 'Client'}
+                            </span>
+                          </div>
+                          {lead.followup_status === 'PENDING_APPROVAL' && (
+                            <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20 animate-pulse">
+                              Pending Approval
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-4 text-[12px] font-bold text-slate-400">
+                          <span className="flex items-center gap-1.5 opacity-60">
+                            <Rocket className="w-3.5 h-3.5" />
+                            {lead.company_name}
+                          </span>
+                          <span className="w-1 h-1 rounded-full bg-slate-700" />
+                          <span className="flex items-center gap-1.5 opacity-60">
+                            <Calendar className="w-3.5 h-3.5" />
+                            Last Outreach: {new Date(lead.last_outreach_at).toLocaleDateString()}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-3 px-6 h-14 border-x border-white/[0.05]">
-                    <div className="space-y-1">
-                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">Next Step</p>
-                      <p className="text-[12px] font-black text-white italic">
-                        {lead.followup_stage === 0 ? "Automatic Day 2 Nudge" : lead.followup_stage === 1 ? "Automatic Day 5 Nudge" : "Final Day 10 Nudge"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => navigate(`/leads/edit/${lead.id}`)}
-                      className="p-3 bg-[#1a2235] text-slate-400 rounded-xl border border-white/[0.05] hover:text-white hover:border-white/20 transition-all shadow-sm"
-                      title="View Thread"
-                    >
-                      <Mail className="w-4 h-4" />
-                    </button>
-                    {lead.linkedin_url && (
-                      <a
-                        href={lead.linkedin_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="p-3 bg-[#1a2235] text-blue-400/60 rounded-xl border border-white/[0.05] hover:text-blue-400 hover:border-blue-500/30 transition-all shadow-sm"
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openLeadDetails(lead); }}
+                        className="p-3 bg-[#1a2235] text-slate-400 rounded-xl border border-white/[0.05] hover:text-white hover:border-white/20 transition-all shadow-sm cursor-pointer"
+                        title="View Follow-up Details"
                       >
-                        <Linkedin className="w-4 h-4" />
-                      </a>
-                    )}
-                    <button
-                      onClick={() => handleMarkResponded(lead.id)}
-                      className="flex items-center gap-2 px-6 py-3 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-xl text-[12px] font-black uppercase tracking-wider hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/20 transition-all"
-                    >
-                      <CheckCircle className="w-4 h-4" />
-                      Mark Responded
-                    </button>
+                        <Mail className="w-4 h-4" />
+                      </button>
+                      
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleApproveFollowup(lead.id); }}
+                        className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-xl text-[11px] font-black uppercase tracking-[0.15em] hover:bg-indigo-500 hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-indigo-600/20 cursor-pointer"
+                      >
+                        <Zap className="w-3.5 h-3.5" />
+                        Approve & Send
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -222,6 +249,92 @@ const Followups = () => {
           </div>
         )}
       </div>
+
+      {/* Lead Detail & Draft Modal */}
+      {isModalOpen && selectedLead && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center px-4 sm:px-6">
+          <div className="absolute inset-0 bg-black/90 backdrop-blur-md" onClick={() => setIsModalOpen(false)} />
+          <div className="relative bg-[#0f172a] border border-white/10 rounded-[2.5rem] w-full max-w-3xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] animate-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="p-10 border-b border-white/5 bg-gradient-to-b from-indigo-500/[0.03] to-transparent relative">
+              <div className="flex items-center gap-6">
+                <div className="w-20 h-20 rounded-3xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 shadow-2xl shadow-indigo-500/10">
+                  <User className="w-10 h-10 text-indigo-400" />
+                </div>
+                <div>
+                  <h2 className="text-3xl font-black text-white tracking-tight">{selectedLead.first_name} {selectedLead.last_name}</h2>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
+                    <p className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em]">{selectedLead.company_name || 'Active Prospect'}</p>
+                  </div>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsModalOpen(false)} 
+                className="absolute top-10 right-10 p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] text-slate-500 hover:text-white transition-all cursor-pointer border border-white/[0.05]"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-8 space-y-8 max-h-[70vh] overflow-y-auto custom-scrollbar">
+              {/* Draft Section */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Mail className="w-4 h-4 text-indigo-400" />
+                    <span className="text-[11px] font-black text-white uppercase tracking-widest">Follow-up Draft</span>
+                  </div>
+                  <span className={`text-[10px] font-black uppercase px-2 py-1 rounded border ${getStageColor(selectedLead.followup_stage)}`}>
+                    {getStageLabel(selectedLead.followup_stage, selectedLead.lead_type)}
+                  </span>
+                </div>
+                
+                <div className="bg-slate-950/40 rounded-[2.5rem] p-12 border border-white/[0.03] shadow-inner relative overflow-hidden group">
+                  <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-500/40" />
+                  <div 
+                    className="prose prose-invert prose-sm max-w-none text-slate-300 leading-relaxed font-medium text-[15px]"
+                    dangerouslySetInnerHTML={{ 
+                      __html: selectedLead.followup_draft || '<p class="animate-pulse italic text-slate-500">Drafting personalized follow-up...</p>' 
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Lead Details Grid */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+                  <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Email</p>
+                  <p className="text-[13px] font-bold text-slate-300 truncate">{selectedLead.email}</p>
+                </div>
+                <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+                  <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Last Contacted</p>
+                  <p className="text-[13px] font-bold text-slate-300">{new Date(selectedLead.last_outreach_at).toLocaleDateString()}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-8 bg-[#131722]/50 border-t border-white/5 flex items-center justify-end gap-4">
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="px-6 py-3 text-[11px] font-black text-slate-400 uppercase tracking-wider hover:text-white transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+              
+              <button
+                onClick={() => handleApproveFollowup(selectedLead.id)}
+                className="flex items-center gap-2 px-8 py-3 bg-indigo-600 text-white rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-indigo-500 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer shadow-lg shadow-indigo-600/20"
+              >
+                <Zap className="w-4 h-4" />
+                Approve & Send
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Notification Toast */}
       {notification && (

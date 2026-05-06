@@ -30,7 +30,7 @@ def generate_followup_preview(lead_id: int, user_id: int):
 
         llm = LLMService()
         lead_name = f"{lead.get('first_name') or ''} {lead.get('last_name') or ''}".strip() or "there"
-        original_content = lead.get('email_draft') or "our previous outreach"
+        original_content = lead.get('last_outreach_body') or lead.get('email_draft') or "our previous outreach"
         
         ai_body = llm.generate_followup(lead_name, original_content, next_stage)
         
@@ -56,58 +56,92 @@ def generate_followup_preview(lead_id: int, user_id: int):
 
 def process_outreach_sequences():
     """
-    Background worker function that finds leads due for follow-ups 
-    (Day 2, Day 5, and Day 10) and sends automated emails.
+    Background worker that identifies leads due for follow-ups.
+    Client: Stage 1 (Day 2), Stage 2 (Day 4)
+    Investor: Stage 1 (Day 7), Stage 2 (Day 17)
+    
+    Instead of auto-sending, it generates a draft and marks it for approval.
     """
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
-        # 1. Find leads in 'ACTIVE' status, not responded
+        # 1. Find leads in 'ACTIVE' or 'STOPPED' (if we want to restart) status
+        # strictly those that have not responded.
         cur.execute("""
             SELECT l.*, u.id as sender_id, u.email as sender_email, u.full_name as sender_name
             FROM leads_raw l
             JOIN users u ON l.user_id = u.id
-            WHERE l.followup_status = 'ACTIVE' 
-            AND l.is_responded = FALSE
-            AND l.last_outreach_at <= NOW() - INTERVAL '2 days'
+            WHERE (l.followup_status = 'ACTIVE' OR l.followup_status IS NULL)
+            AND l.email_status = 'SENT'
+            AND COALESCE(l.is_responded, FALSE) = FALSE
+            AND l.followup_stage < 2
+            AND (l.followup_draft IS NULL OR l.followup_approved = TRUE)
             ORDER BY l.last_outreach_at ASC
         """)
         
-        leads_due = cur.fetchall()
-        if not leads_due:
+        leads = cur.fetchall()
+        if not leads:
             cur.close()
             conn.close()
             return
 
-        logger.info(f"Background Scan: {len(leads_due)} leads due across multiple users.")
         llm = LLMService()
         
-        for lead in leads_due:
+        for lead in leads:
             lead_id = lead['id']
             stage = lead['followup_stage'] or 0
             last_sent = lead['last_outreach_at']
-            now = datetime.now()
+            if not last_sent: continue
             
+            # Determine Lead Type (Client vs Investor)
+            is_investor = True
+            lead_type_raw = str(lead.get('lead_type') or lead.get('sector') or lead.get('persona') or '').upper()
+            if 'CLIENT' in lead_type_raw or 'CUSTOMER' in lead_type_raw:
+                is_investor = False
+
+            now = datetime.now()
             days_since_last = (now - last_sent).days
             
-            should_send = False
+            should_draft = False
             next_stage = stage + 1
             
-            if stage == 0 and days_since_last >= 2:
-                should_send = True
-            elif stage == 1 and days_since_last >= 3:
-                should_send = True
-            elif stage == 2 and days_since_last >= 5:
-                should_send = True
-                
-            if not should_send or stage >= 3:
-                continue
-
-            # NOTE: In Manual Approval mode, we don't AUTO-SEND. 
-            # We just log it so it shows up in the Dashboard.
-            logger.info(f"Lead {lead_id} ({lead['email']}) is due for Stage {next_stage} follow-up. Waiting for manual approval.")
+            # Custom Logic requested by User
+            if is_investor:
+                # Investor: Day 7, Day 17
+                if stage == 0 and days_since_last >= 7:
+                    should_draft = True
+                elif stage == 1 and days_since_last >= 10: # 7 + 10 = 17
+                    should_draft = True
+            else:
+                # Client: Day 2, Day 4
+                if stage == 0 and days_since_last >= 2:
+                    should_draft = True
+                elif stage == 1 and days_since_last >= 2: # 2 + 2 = 4
+                    should_draft = True
             
+            if should_draft:
+                logger.info(f"Generating Stage {next_stage} follow-up draft for lead {lead_id} ({lead['email']})")
+                
+                lead_name = f"{lead.get('first_name') or ''} {lead.get('last_name') or ''}".strip() or "there"
+                original_content = lead.get('last_outreach_body') or lead.get('email_draft') or "our previous outreach"
+                
+                ai_body = llm.generate_followup(lead_name, original_content, next_stage)
+                
+                # Inject Signature
+                profile = get_sender_profile(str(lead['sender_id']))
+                full_body = inject_signature(ai_body, profile, lead_id)
+                
+                cur.execute("""
+                    UPDATE leads_raw 
+                    SET followup_draft = %s,
+                        followup_status = 'PENDING_APPROVAL',
+                        followup_approved = FALSE,
+                        updated_at = NOW()
+                    WHERE id = %s
+                """, (full_body, lead_id))
+                conn.commit()
+                
         cur.close()
         conn.close()
     except Exception as e:

@@ -597,6 +597,104 @@ def get_followups_endpoint(
         logger.error(f"Error fetching follow-ups: {e}")
         return {"error": str(e)}
 
+@router.post("/leads/{lead_id}/approve-followup")
+def approve_followup(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Approves and sends a pending follow-up draft."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        uid = normalize_user_id(user_id)
+        is_admin = (str(user_id).lower() == 'admin')
+        
+        # Verify access
+        if is_admin:
+            cur.execute("SELECT * FROM leads_raw WHERE id = %s", (lead_id,))
+        else:
+            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (lead_id, uid))
+            
+        lead = cur.fetchone()
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found.")
+            
+        draft_content = lead['followup_draft']
+        
+        # If draft is missing, generate it on the fly
+        if not draft_content:
+            from app.services.llm_services import LLMService
+            from app.api.drafts import get_sender_profile, inject_signature
+            
+            llm = LLMService()
+            lead_name = f"{lead.get('first_name') or ''} {lead.get('last_name') or ''}".strip() or "there"
+            original_content = lead.get('last_outreach_body') or lead.get('email_draft') or "our previous outreach"
+            stage = (lead['followup_stage'] or 0) + 1
+            
+            ai_body = llm.generate_followup(lead_name, original_content, stage)
+            profile = get_sender_profile(user_id)
+            draft_content = inject_signature(ai_body, profile, lead_id)
+            
+            # Save it for reference
+            cur.execute("UPDATE leads_raw SET followup_draft = %s WHERE id = %s", (draft_content, lead_id))
+            conn.commit()
+
+        # Send Email
+        from app.services.email_service import send_email
+        # Parse subject/body from draft if needed, or use a default
+        subject = "Following up"
+        body = draft_content
+        
+        if "Subject: " in body:
+            parts = body.split("\n\n", 1)
+            subject = parts[0].replace("Subject: ", "").strip()
+            body = parts[1] if len(parts) > 1 else body
+            
+        success = send_email(
+            to_email=lead['email'],
+            subject=subject,
+            html_content=body,
+            user_id=uid
+        )
+        
+        if success:
+            next_stage = (lead['followup_stage'] or 0) + 1
+            cur.execute("""
+                UPDATE leads_raw 
+                SET followup_status = 'ACTIVE',
+                    followup_approved = TRUE,
+                    followup_stage = %s,
+                    last_outreach_at = NOW(),
+                    last_outreach_body = %s,
+                    updated_at = NOW()
+                WHERE id = %s
+            """, (next_stage, draft_content, lead_id))
+            
+            from app.models.lead import add_activity_log
+            add_activity_log(lead_id, "FOLLOWUP_SENT", f"Stage {next_stage} follow-up sent after manual approval", get_user_name(user_id))
+            conn.commit()
+            return {"success": True, "message": f"Stage {next_stage} follow-up sent successfully."}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to send email via Gmail service.")
+            
+    except Exception as e:
+        logger.error(f"Approval failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+@router.get("/leads/{lead_id}/followup-preview")
+def get_followup_preview(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Generates or retrieves a preview of the next follow-up draft using the LOGGED-IN user's signature."""
+    from app.services.followup_service import generate_followup_preview
+    from app.api.drafts import normalize_user_id
+    
+    # We want the signature of the person CLICKING the button (the logged-in user)
+    # Not necessarily the original owner of the lead.
+    uid_str = normalize_user_id(user_id)
+    uid = int(uid_str) if uid_str.isdigit() else 1
+
+    return generate_followup_preview(lead_id, uid)
+
 @router.get("/leads/{lead_id}/timeline")
 def get_lead_timeline(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Fetches the activity history/timeline for a specific lead."""
