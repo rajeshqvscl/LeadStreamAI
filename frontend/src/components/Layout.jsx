@@ -195,6 +195,11 @@ const Layout = () => {
               <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'admin-intelligence' ? 'text-white' : 'text-[#94a3b8]'}`}>🛡️</span> Admin Center
             </Link>
           )}
+          {user.role === 'ADMIN' && (
+            <Link to="/dashboard/admin-audit-logs" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'admin-audit-logs' ? 'bg-rose-600 text-white font-semibold shadow-lg shadow-rose-600/20' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
+              <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'admin-audit-logs' ? 'text-white' : 'text-[#94a3b8]'}`}>📋</span> Audit Logs
+            </Link>
+          )}
           <Link to="/dashboard/export" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'export' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'export' ? 'text-white' : 'text-[#94a3b8]'}`}>📥</span> Export Data
           </Link>
