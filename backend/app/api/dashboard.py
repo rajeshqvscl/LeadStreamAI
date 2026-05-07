@@ -134,6 +134,7 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         "daily_limit": 100,
         "open_rate": open_rate,
         "click_rate": click_rate,
+        "unique_opens": unique_opens,
         "unique_clicks": unique_clicks,
         "engagement_rate": engagement_rate,
         "bounce_rate": bounce_rate,

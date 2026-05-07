@@ -104,6 +104,10 @@ def get_global_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'Meeting Scheduled' OR meeting_time IS NOT NULL")
         meetings = cur.fetchone()[0]
         
+        # Active Flows (leads with active outreach sequences)
+        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE followup_status = 'ACTIVE' OR campaign_id IS NOT NULL")
+        active_flows = cur.fetchone()[0]
+        
         # Avg Score (Sentiment)
         cur.execute("SELECT AVG(sentiment_score) FROM leads_raw WHERE sentiment_score IS NOT NULL")
         avg_score = cur.fetchone()[0] or 0
@@ -111,6 +115,38 @@ def get_global_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         # Active Followups
         cur.execute("SELECT COUNT(*) FROM leads_raw WHERE followup_status = 'ACTIVE'")
         active_followups = cur.fetchone()[0]
+        
+        # Engaged Leads (replied or interested)
+        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE reply_intent IN ('INTERESTED', 'MEETING_SCHEDULED')")
+        engaged = cur.fetchone()[0]
+        
+        # System Reach (leads with emails sent)
+        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status IS NOT NULL")
+        system_reach = cur.fetchone()[0]
+        
+        # Open Rate (using email_status - SENT means delivered)
+        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'OPENED'")
+        opened = cur.fetchone()[0]
+        
+        # Click Rate (leads who clicked)
+        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'CLICKED'")
+        clicked = cur.fetchone()[0]
+        
+        # Bounce Rate (invalid emails)
+        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'BOUNCED'")
+        bounced = cur.fetchone()[0]
+        
+        # Opt-outs
+        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE reply_intent = 'NOT_INTERESTED'")
+        opt_outs = cur.fetchone()[0]
+        
+        # Open Rate %
+        open_rate = round((opened / system_reach * 100), 1) if system_reach > 0 else 0
+        click_rate = round((clicked / system_reach * 100), 1) if system_reach > 0 else 0
+        bounce_rate = round((bounced / system_reach * 100), 1) if system_reach > 0 else 0
+        
+        # Conversion Rate
+        conversion_rate = round((engaged / total_leads * 100), 1) if total_leads > 0 else 0
 
         # Intent Breakdown
         cur.execute("""
@@ -147,30 +183,36 @@ def get_global_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
                 SELECT id, company_name, designation, raw_payload->>'remarks' as remarks, sector, lead_type 
                 FROM leads_raw 
                 WHERE UPPER(COALESCE(sector, '')) IN ('INVESTOR', 'CLIENT', 'OTHER', '')
+                LIMIT 50
             """)
             to_fix = cur.fetchall()
             
             if to_fix:
                 from app.utils.classification import infer_lead_classification
                 for row in to_fix:
-                    new_type, new_sector = infer_lead_classification(
-                        row['company_name'], 
-                        row['designation'], 
-                        row['remarks'] or '', 
-                        None # Pass None to force re-inference
-                    )
-                    if new_sector.upper() in ['INVESTOR', 'CLIENT']:
-                        new_sector = 'Other'
-                    
-                    cur.execute("""
-                        UPDATE leads_raw 
-                        SET lead_type = %s, sector = %s 
-                        WHERE id = %s
-                    """, (new_type, new_sector, row['id']))
-            conn.commit()
+                    try:
+                        new_type, new_sector = infer_lead_classification(
+                            row['company_name'], 
+                            row['designation'], 
+                            row['remarks'] or '', 
+                            None # Pass None to force re-inference
+                        )
+                        if new_sector.upper() in ['INVESTOR', 'CLIENT']:
+                            new_sector = 'Other'
+                        
+                        cur.execute("""
+                            UPDATE leads_raw 
+                            SET lead_type = %s, sector = %s, updated_at = NOW()
+                            WHERE id = %s
+                        """, (new_type, new_sector, row['id']))
+                        conn.commit()
+                    except Exception as row_err:
+                        logger.warning("row_update_skipped", error=str(row_err))
+                        continue
         except Exception as e:
             logger.warning("stats_cleanup_skipped", error=str(e))
-            conn.rollback()
+            if conn:
+                conn.rollback()
         
         cur.execute("""
             SELECT COALESCE(sector, 'Other') as label, COUNT(*) as value
@@ -195,9 +237,16 @@ def get_global_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
             "total_leads": total_leads,
             "interested_leads": interested,
             "meetings_scheduled": meetings,
-            "conversion_rate": round((interested / total_leads * 100), 1) if total_leads > 0 else 0,
+            "conversion_rate": conversion_rate,
             "avg_score": round(float(avg_score), 1),
             "active_followups": active_followups,
+            "active_flows": active_flows,
+            "engaged_leads": engaged,
+            "system_reach": system_reach,
+            "open_rate": open_rate,
+            "click_rate": click_rate,
+            "bounce_rate": bounce_rate,
+            "opt_outs": opt_outs,
             "intent_breakdown": intent_breakdown,
             "owner_breakdown": owner_breakdown,
             "type_breakdown": type_breakdown,

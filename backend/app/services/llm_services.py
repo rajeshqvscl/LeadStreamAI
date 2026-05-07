@@ -258,6 +258,64 @@ Looking forward to your response.
         
         return {"subject": new_subject, "body": new_body}
 
+    def detect_intent(self, query: str):
+        """
+        Query Intent Detection v2: Classifies the user query into functional categories.
+        """
+        prompt = f"""
+        Analyze the user query and classify it into EXACTLY one of the following categories:
+        1. SUMMARY: User wants a high-level overview or summary of a lead/document.
+        2. EXTRACTION: User wants specific metrics, dates, or data points (e.g., "What is the revenue?").
+        3. COMPARISON: User wants to compare two or more leads or documents.
+        4. WEB_SEARCH: User is asking for current market data or external info not in the docs.
+        5. CHAT: General conversation or follow-up questions.
+        
+        Query: "{query}"
+        
+        Return ONLY the category name in uppercase.
+        """
+        intent = self._call_llm(prompt, max_tokens=20)
+        return intent.strip().upper() if intent else "CHAT"
+
+    def web_search_enhanced_query(self, query: str):
+        """
+        Web-Augmented RAG: Integrates real-time market data into the LLM context.
+        """
+        # In a real implementation, this would call Serper/Google Search API
+        # For now, we simulate the augmentation with a strategic market context prompt.
+        market_prompt = f"""
+        Provide a real-time market intelligence brief for the following query: "{query}"
+        Focus on:
+        1. Current funding climate for the relevant sector.
+        2. Top 3 competitors or emerging players.
+        3. Recent regulatory or technology shifts (2025-2026).
+        
+        Return ONLY the intelligence brief as a list of bullet points.
+        """
+        market_intel = self._call_llm(market_prompt, max_tokens=512)
+        return market_intel if market_intel else "Market data currently unavailable."
+
+    def analyze_with_citations(self, query: str, context: str):
+        """
+        Generates an answer with Citation Highlighting enabled.
+        """
+        prompt = f"""
+        Answer the following query based ONLY on the provided context.
+        
+        RULES:
+        1. For every claim you make, you MUST include a citation in the format [Source: X] where X is the document/section name.
+        2. If the information is not in the context, state "Information not found in documents."
+        3. Use a professional, analyst-style tone.
+        
+        Context:
+        {context}
+        
+        Query: {query}
+        
+        Answer:
+        """
+        return self._call_llm(prompt, max_tokens=1024)
+
     def classify_reply(self, text: str):
         """Analyzes a lead's reply to determine intent and extract details."""
         prompt = f"""

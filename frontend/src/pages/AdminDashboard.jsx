@@ -8,7 +8,7 @@ import {
   Sparkles, ShieldCheck, Mail, ArrowUpRight,
   Clock, CheckCircle2, AlertCircle, X, AlertTriangle,
   FileText, Briefcase, Zap, Info, DollarSign,
-  PieChart as PieIcon, Globe, RefreshCcw, Database
+  PieChart as PieIcon, Globe, RefreshCcw, Database, Terminal
 } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
@@ -30,6 +30,8 @@ const AdminDashboard = () => {
   const [selectedLead, setSelectedLead] = useState(null);
   const [timelineData, setTimelineData] = useState(null);
   const [isTimelineLoading, setIsTimelineLoading] = useState(false);
+  const [ragStats, setRagStats] = useState(null);
+  const [isRagLoading, setIsRagLoading] = useState(false);
 
   useEffect(() => {
     if (selectedLead?.id) {
@@ -78,10 +80,16 @@ const AdminDashboard = () => {
       ]);
       setLeads(leadsRes.data || []);
       setStats(statsRes.data || {});
+      
+      // Fetch RAG Debug Stats
+      setIsRagLoading(true);
+      const debugRes = await api.get('/api/intelligence/admin/rag-debug');
+      setRagStats(debugRes.data);
     } catch (err) {
       console.error('Failed to fetch admin data', err);
     } finally {
       setLoading(false);
+      setIsRagLoading(false);
     }
   };
 
@@ -275,11 +283,11 @@ const AdminDashboard = () => {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
         {[
           { label: 'Total Leads', value: stats.total_leads, icon: Users, color: 'indigo' },
-          { label: 'Interested', value: stats.interested_leads, icon: Target, color: 'emerald' },
+          { label: 'Engaged', value: stats.engaged_leads, icon: Target, color: 'emerald' },
+          { label: 'Followups', value: stats.active_followups, icon: Clock, color: 'rose' },
+          { label: 'Active Flows', value: stats.active_flows, icon: Zap, color: 'amber' },
           { label: 'Meetings', value: stats.meetings_scheduled, icon: Calendar, color: 'blue' },
           { label: 'Conv. Rate', value: `${stats.conversion_rate}%`, icon: TrendingUp, color: 'violet' },
-          { label: 'Avg Score', value: stats.avg_score, icon: BarChart3, color: 'amber' },
-          { label: 'Followups', value: stats.active_followups, icon: Clock, color: 'rose' },
         ].map((stat, i) => (
           <div key={i} className="bg-[#111521] border border-white/5 rounded-xl p-3 hover:border-white/10 transition-all group relative overflow-hidden">
             <div className={`absolute top-0 right-0 w-16 h-16 bg-${stat.color}-500/5 blur-2xl rounded-full -mr-8 -mt-8`} />
@@ -405,6 +413,47 @@ const AdminDashboard = () => {
         ))}
       </div>
 
+      {/* RAG DEBUG PANEL (NEW FEATURE) */}
+      {ragStats && (
+        <div className="bg-[#111521]/80 backdrop-blur-xl border border-indigo-500/20 rounded-2xl p-6 mb-6 flex flex-wrap items-center justify-between gap-6 shadow-[0_0_50px_rgba(79,70,229,0.05)]">
+            <div className="flex items-center gap-4">
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center border ${ragStats.status === 'ONLINE' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'}`}>
+                    <Terminal className="w-6 h-6" />
+                </div>
+                <div>
+                    <h3 className="text-white text-[13px] font-black uppercase tracking-widest flex items-center gap-2">
+                        RAG Engine Status
+                        <div className={`w-2 h-2 rounded-full animate-pulse ${ragStats.status === 'ONLINE' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                    </h3>
+                    <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest">{ragStats.engine}</p>
+                </div>
+            </div>
+
+            <div className="flex items-center gap-12">
+                <div className="text-center">
+                    <div className="text-xl font-black text-white">{ragStats.latency_ms}ms</div>
+                    <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Latency</div>
+                </div>
+                <div className="text-center">
+                    <div className="text-xl font-black text-white">{ragStats.analyzed_leads}</div>
+                    <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Analyzed</div>
+                </div>
+                <div className="text-center">
+                    <div className="text-xl font-black text-white">{ragStats.reports_generated}</div>
+                    <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Reports</div>
+                </div>
+            </div>
+
+            <div className="flex gap-2">
+                {(ragStats.active_tasks || []).map((task, i) => (
+                    <span key={i} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[8px] font-black text-slate-400 uppercase tracking-widest">
+                        {task}
+                    </span>
+                ))}
+            </div>
+        </div>
+      )}
+
       {/* Main Database Table */}
       <div className="bg-[#0f111a] border border-white/5 rounded-[32px] overflow-hidden shadow-2xl relative">
         <div className="overflow-x-auto">
@@ -429,9 +478,10 @@ const AdminDashboard = () => {
                 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Email Address</th>
                 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Type</th>
                 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Sector</th>
-                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Intent</th>
-                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Check Size</th>
-                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Score</th>
+<th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Intent</th>
+                  <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">RAG Analysis</th>
+                  <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Check Size</th>
+                  <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Score</th>
                 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Rejection / Reason</th>
                 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Status</th>
                 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Owner</th>
@@ -519,14 +569,26 @@ const AdminDashboard = () => {
                     )}
                   </td>
                   <td className="px-2 py-2">
+                    {lead.rag_intelligence?.verdict ? (
+                      <div className="flex flex-col gap-1">
+                        <span className={`text-[9px] font-black uppercase tracking-widest ${lead.rag_intelligence.verdict === 'POSITIVE' ? 'text-emerald-400' : lead.rag_intelligence.verdict === 'STRONG' ? 'text-blue-400' : 'text-amber-400'}`}>
+                          {lead.rag_intelligence.verdict}
+                        </span>
+                        <span className="text-[10px] font-medium text-indigo-400">{lead.rag_intelligence.category || '—'}</span>
+                      </div>
+                    ) : (
+                      <span className="text-[10px] font-bold text-slate-700 uppercase tracking-widest italic">—</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2">
                     <div className="flex items-center gap-2">
                       <DollarSign className="w-3.5 h-3.5 text-emerald-500" />
                       <span className="text-[13px] font-black text-white">{lead.deal_size || '—'}</span>
                     </div>
                   </td>
                   <td className="px-3 py-5 text-center">
-                    <div className={`text-[15px] font-black ${lead.sentiment_score >= 80 ? 'text-emerald-400' : lead.sentiment_score >= 50 ? 'text-amber-400' : 'text-slate-400'}`}>
-                      {lead.sentiment_score || '—'}
+                    <div className={`text-[15px] font-black ${(lead.rag_intelligence?.sentiment_score || lead.sentiment_score) >= 80 ? 'text-emerald-400' : (lead.rag_intelligence?.sentiment_score || lead.sentiment_score) >= 50 ? 'text-amber-400' : 'text-slate-400'}`}>
+                      {lead.rag_intelligence?.sentiment_score || lead.sentiment_score || '—'}
                     </div>
                   </td>
                   <td className="px-2 py-2">
@@ -832,10 +894,15 @@ const AdminDashboard = () => {
                     if (res.data.success) {
                       // Refresh the lead data in the local state
                       const updatedLeads = leads.map(l =>
-                        l.id === selectedLead.id ? { ...l, rag_advice: res.data.advice, sector: res.data.category } : l
+                        l.id === selectedLead.id ? { 
+                          ...l, 
+                          rag_advice: res.data.advice, 
+                          sector: res.data.category,
+                          rag_intelligence: res.data.rag_intel 
+                        } : l
                       );
                       setLeads(updatedLeads);
-                      setSelectedLead({ ...selectedLead, rag_advice: res.data.advice, sector: res.data.category });
+                      setSelectedLead({ ...selectedLead, rag_advice: res.data.advice, sector: res.data.category, rag_intelligence: res.data.rag_intel });
                     }
                     btn.disabled = false;
                     btn.innerHTML = originalText;

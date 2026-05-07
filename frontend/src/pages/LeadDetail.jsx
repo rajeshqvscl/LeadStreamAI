@@ -4,8 +4,10 @@ import {
   ChevronLeft, Linkedin, Trash2, UserMinus,
   Mail, History, CheckCircle2, XCircle, AlertCircle,
   Loader2, ExternalLink, Sparkles, Save, Phone,
-  MapPin, Building2, User, Check, ChevronDown
+  MapPin, Building2, User, Check, ChevronDown,
+  ShieldAlert, FileText, Zap, Brain
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import api from '../services/api';
 
 const COMPANY_OPTIONS = [
@@ -611,6 +613,49 @@ const LeadDetail = () => {
               </form>
             </div>
           </div>
+
+          {/* AGENT INTELLIGENCE: CONTRADICTIONS & DEEP REPORT */}
+          {lead?.rag_intelligence && (
+            <div className="space-y-6">
+              {/* Contradictions Alert */}
+              {lead.rag_intelligence.contradictions && lead.rag_intelligence.contradictions.length > 0 && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-[16px] p-6 animate-pulse">
+                  <div className="flex items-center gap-3 mb-4 text-red-400">
+                    <ShieldAlert className="w-5 h-5" />
+                    <h3 className="text-[13px] font-black uppercase tracking-widest">Contradictions Detected</h3>
+                  </div>
+                  <div className="space-y-2">
+                    {lead.rag_intelligence.contradictions.map((c, i) => (
+                      <div key={i} className="text-[11px] font-bold text-red-200 bg-red-500/5 p-3 rounded-lg border border-red-500/10">
+                        ⚠️ {c}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Deep Report Viewer */}
+              {lead.rag_intelligence.deep_report && (
+                <div className="bg-[#131722] border border-[#ffffff08] rounded-[16px] overflow-hidden">
+                  <div className="px-6 py-5 flex items-center justify-between border-b border-[#ffffff08] bg-indigo-500/5">
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-indigo-400" />
+                      <h3 className="text-[13px] font-bold text-white tracking-wide uppercase tracking-[0.2em]">Autonomous Investment Report</h3>
+                    </div>
+                    <span className="text-[9px] font-black text-indigo-500 bg-indigo-500/10 px-2 py-1 rounded">AGENT GENERATED</span>
+                  </div>
+                  <div className="p-8 prose prose-invert max-w-none 
+                    prose-h1:text-[18px] prose-h1:font-black prose-h1:uppercase prose-h1:text-white prose-h1:mb-6
+                    prose-h2:text-[14px] prose-h2:font-black prose-h2:uppercase prose-h2:text-indigo-400 prose-h2:mt-8
+                    prose-p:text-[13px] prose-p:text-slate-300 prose-p:leading-relaxed
+                    prose-li:text-[13px] prose-li:text-slate-400
+                  ">
+                    <ReactMarkdown>{lead.rag_intelligence.deep_report}</ReactMarkdown>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* AI Deal Story Section */}
           <div className="bg-[#131722] border border-[#ffffff08] rounded-[16px] overflow-hidden">

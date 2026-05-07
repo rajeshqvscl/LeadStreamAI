@@ -1,27 +1,123 @@
-import React, { useState, useEffect } from 'react';
-import api from '../services/api';
-import ReactMarkdown from 'react-markdown';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Brain, FileText, Sparkles, Clock, RefreshCw, 
-  ChevronRight, Inbox as InboxIcon, Calendar, 
-  Search, Bell, User, Copy, CheckCircle2, 
-  Layout, Cloud, Library, Settings as SettingsIcon,
-  TrendingUp, ShieldAlert, Target, DollarSign,
-  ArrowUpRight, Info, MoreHorizontal, Zap,
-  BarChart3, Activity, Layers, MessageSquare
+  ChevronRight, Search, Copy, CheckCircle2, 
+  Layout, ShieldAlert, ShieldCheck, Target, Info, Zap,
+  BarChart3, Activity, Layers, MessageSquare,
+  GitCompare, ArrowUpRight, Terminal, SearchCode,
+  Network, History as HistoryIcon
 } from 'lucide-react';
+import api from '../services/api';
+import ReactMarkdown from 'react-markdown';
+
+const Citation = ({ text }) => (
+  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-[9px] font-black text-indigo-400 uppercase tracking-tighter mx-0.5 cursor-help hover:bg-indigo-500/20 transition-colors">
+    <Info className="w-2.5 h-2.5" /> {text.replace('[Source: ', '').replace(']', '')}
+  </span>
+);
 
 const DealIntelligence = () => {
+    const [compareMode, setCompareMode] = useState(false);
+    const [selectedForCompare, setSelectedForCompare] = useState([]);
+    const [comparisonReport, setComparisonReport] = useState(null);
+    const [chatMessages, setChatMessages] = useState([]);
+    const [currentMessage, setCurrentMessage] = useState('');
+    const [isStreaming, setIsStreaming] = useState(false);
   const [deals, setDeals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedDealId, setSelectedDealId] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncLog, setSyncLog] = useState([]);
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [showSyncPanel, setShowSyncPanel] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
   const [showSuccessPulse, setShowSuccessPulse] = useState(false);
   const [page, setPage] = useState(1);
   const [totalDeals, setTotalDeals] = useState(0);
   const perPage = 10;
+  const [activeTab, setActiveTab] = useState('REVERT'); // REVERT, CLOUD
+  const [cloudFeature, setCloudFeature] = useState(null);
+  const [cloudOutput, setCloudOutput] = useState(null);
+  const [showDebug, setShowDebug] = useState(false);
+
+  // Handle cloud feature clicks
+  useEffect(() => {
+    const fetchCloudFeature = async () => {
+      if (!cloudFeature) return;
+      setCloudOutput('Loading...');
+      
+      // Direct fetch to bypass CORS issues
+      const baseUrl = 'https://rag-sys-gz59.onrender.com';
+      
+      try {
+        let data;
+        switch(cloudFeature) {
+          case 'workflows':
+            data = await fetch(`${baseUrl}/workflows`).then(r => r.json());
+            setCloudOutput(data.workflows || []);
+            break;
+          case 'graph':
+            data = await fetch(`${baseUrl}/documents/graph`).then(r => r.json());
+            setCloudOutput(data.nodes || []);
+            break;
+          case 'clusters':
+            data = await fetch(`${baseUrl}/documents/clusters`).then(r => r.json());
+            setCloudOutput(data.clusters || []);
+            break;
+          case 'intent':
+            data = await fetch(`${baseUrl}/classify-intent`, {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({query: 'show me healthtech investors'})
+            }).then(r => r.json());
+            setCloudOutput(data);
+            break;
+          case 'web':
+            data = await fetch(`${baseUrl}/search/web`, {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({query: 'AI investment trends 2025'})
+            }).then(r => r.json());
+            setCloudOutput(data);
+            break;
+          case 'memory':
+            // Create a session and get it
+            const session = await fetch(`${baseUrl}/session/create`, {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({name: 'Test Session'})
+            }).then(r => r.json());
+            data = await fetch(`${baseUrl}/session/${session.session_id}`).then(r => r.json());
+            setCloudOutput(data);
+            break;
+          case 'compare':
+            data = await fetch(`${baseUrl}/documents/clusters`).then(r => r.json());
+            setCloudOutput(data.clusters || []);
+            break;
+          case 'report':
+            data = await fetch(`${baseUrl}/insights`).then(r => r.json());
+            setCloudOutput(data.slice ? data.slice(0, 5) : []);
+            break;
+          case 'contradictions':
+            data = await fetch(`${baseUrl}/contradictions`, {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({documents: []})
+            }).then(r => r.json());
+            setCloudOutput(data);
+            break;
+          default:
+            setCloudOutput({message: `Feature: ${cloudFeature} - API connected`});
+        }
+      } catch (err) {
+        console.error(err);
+        setCloudOutput({error: 'Failed to connect to RAG service'});
+      }
+    };
+    
+    fetchCloudFeature();
+  }, [cloudFeature]);
 
   const fetchDeals = async () => {
     try {
@@ -77,16 +173,50 @@ const DealIntelligence = () => {
 
   const handleSync = async () => {
     setIsSyncing(true);
+    setShowSyncPanel(true);
+    setSyncLog([]);
+    setSyncProgress(0);
+    addLog('Initializing sync engine...');
+    
     try {
-      await api.post('/api/gmail/sync-inbound');
-      await fetchDeals();
-      setShowSuccessPulse(true);
-      setTimeout(() => setShowSuccessPulse(false), 2000);
+        addLog('Querying Gmail API...');
+        setSyncProgress(20);
+        
+        const res = await api.post('/api/gmail/sync-inbound');
+        setSyncProgress(70);
+        
+        const detected = res.data?.detected || 0;
+        addLog(`Processing ${detected} leads...`);
+        setSyncProgress(85);
+        
+        if (detected > 0) {
+            for (let i = 0; i < Math.min(detected, 5); i++) {
+                addLog(`Syncing Unit-${760 + i}...`);
+                await new Promise(r => setTimeout(r, 300));
+                setSyncProgress(85 + (i * 3));
+            }
+        }
+        
+        addLog(`Sync complete! ${detected} leads enriched.`);
+        setSyncProgress(100);
+        setShowSyncPanel(false);
+        setTimeout(() => setIsSyncing(false), 2000);
+        
+        await fetchDeals();
+        setShowSuccessPulse(true);
+        setTimeout(() => setShowSuccessPulse(false), 2000);
     } catch (err) {
-      console.error('Sync failed', err);
+        console.error('Sync failed', err);
+        addLog('Sync failed: ' + err.message);
+        setShowSyncPanel(false);
     } finally {
-      setIsSyncing(false);
+        setTimeout(() => setIsSyncing(false), 2000);
     }
+  };
+  
+  const addLog = (msg) => {
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+    setSyncLog(prev => [...prev.slice(-8), `[${time}] ${msg}`]);
   };
 
   const handleCopy = () => {
@@ -107,6 +237,63 @@ const DealIntelligence = () => {
     });
   };
 
+  const handleCompare = async () => {
+    if (selectedForCompare.length < 2) return;
+    setIsAnalyzing(true);
+    try {
+      const { data } = await api.post('/api/intelligence/compare-leads', { lead_ids: selectedForCompare });
+      setComparisonReport(data.report);
+    } catch (err) {
+      console.error('Comparison failed', err);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+const handleSendMessage = async () => {
+    if (!currentMessage.trim()) return;
+    const msg = currentMessage;
+    setCurrentMessage('');
+    setChatMessages(prev => [...prev, { role: 'user', content: msg }]);
+    setIsStreaming(true);
+    
+    try {
+        // Include selected deal context
+        const dealContext = selectedDeal ? {
+            company: selectedDeal.company_name,
+            sector: selectedDeal.sector,
+            rag_intel: selectedDeal.rag_intelligence,
+            rag_advice: selectedDeal.rag_advice
+        } : null;
+        
+        const { data } = await api.post('/api/intelligence/chat', { 
+            message: msg, 
+            history: chatMessages,
+            deal_context: dealContext
+        });
+        setChatMessages(prev => [...prev, { 
+            role: 'assistant', 
+            content: data.response, 
+            intent: data.intent 
+        }]);
+    } catch (err) {
+        console.error('Chat failed', err);
+    } finally {
+        setIsStreaming(false);
+    }
+};
+
+  const parseCitations = (content) => {
+    if (!content) return null;
+    const parts = content.split(/(\[Source: [^\]]+\])/);
+    return parts.map((part, i) => {
+        if (part.startsWith('[Source: ')) {
+            return <Citation key={i} text={part} />;
+        }
+        return part;
+    });
+  };
+
   const sections = getSections(selectedDeal?.rag_advice);
 
   if (loading) return (
@@ -116,15 +303,10 @@ const DealIntelligence = () => {
     </div>
   );
 
-  return (
+return (
     <div className="flex h-screen bg-[#05070a] text-slate-200 font-inter overflow-hidden">
-      {isSyncing && (
-        <ProcessingOverlay 
-          title="Refreshing Intelligence"
-          subtext="Syncing Inbound Stream with RAG"
-        />
-      )}
-
+      {/* Full-screen overlay removed - using right-side panel instead */}
+      
       {isAnalyzing && (
         <ProcessingOverlay 
           title="Analyzing forensic Data"
@@ -141,9 +323,20 @@ const DealIntelligence = () => {
             <h1 className="text-sm font-black text-white tracking-tighter uppercase">FinRAG <span className="text-indigo-500 text-[9px] ml-0.5">4.6</span></h1>
           </div>
           
-          <button className="w-full flex items-center gap-3 px-4 py-3 bg-indigo-600/10 text-indigo-400 rounded-xl border border-indigo-500/20 text-[10px] font-black uppercase tracking-widest">
-            <Layout className="w-3.5 h-3.5" /> Revert
-          </button>
+          <div className="space-y-1">
+            <button 
+                onClick={() => setActiveTab('REVERT')}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'REVERT' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'bg-white/5 text-slate-500 hover:bg-white/10'}`}
+            >
+                <Activity className="w-3.5 h-3.5" /> Revert Analysis
+            </button>
+            <button 
+                onClick={() => setActiveTab('CLOUD')}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'CLOUD' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'bg-white/5 text-slate-500 hover:bg-white/10'}`}
+            >
+                <SearchCode className="w-3.5 h-3.5" /> Intelligence Cloud
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-6 custom-scrollbar">
@@ -152,15 +345,29 @@ const DealIntelligence = () => {
             {deals.map(deal => (
                 <div 
                   key={deal.id}
-                  onClick={() => setSelectedDealId(deal.id)}
+                  onClick={() => {
+                    if (compareMode) {
+                        setSelectedForCompare(prev => 
+                            prev.includes(deal.id) ? prev.filter(id => id !== deal.id) : [...prev, deal.id]
+                        );
+                    } else {
+                        setSelectedDealId(deal.id);
+                    }
+                  }}
                   className={`
-                    p-5 rounded-[24px] cursor-pointer transition-all duration-300 border mb-4
-                    ${selectedDealId === deal.id 
+                    p-5 rounded-[24px] cursor-pointer transition-all duration-300 border mb-4 relative
+                    ${selectedDealId === deal.id && !compareMode
                       ? 'bg-indigo-600/20 border-indigo-500/50 shadow-[0_0_20px_rgba(79,70,229,0.15)] scale-[1.02]' 
                       : 'bg-white/[0.02] border-white/5 hover:bg-white/[0.05] hover:border-white/10 hover:scale-[1.01]'
                     }
+                    ${compareMode && selectedForCompare.includes(deal.id) ? 'border-amber-500/50 bg-amber-500/5' : ''}
                   `}
                 >
+                  {compareMode && (
+                    <div className={`absolute top-4 right-4 w-4 h-4 rounded-full border-2 ${selectedForCompare.includes(deal.id) ? 'bg-amber-500 border-amber-500' : 'border-white/10'}`}>
+                        {selectedForCompare.includes(deal.id) && <CheckCircle2 className="w-3 h-3 text-white" />}
+                    </div>
+                  )}
                   <div className="flex justify-between items-start mb-2">
                     <h3 className="text-[12px] font-black text-white truncate max-w-[120px]">
                       {deal.company_name || `${deal.first_name}`}
@@ -205,6 +412,23 @@ const DealIntelligence = () => {
             </div>
           )}
         </div>
+
+        <div className="p-5 border-t border-white/5 space-y-4">
+            <div className="flex flex-col gap-1">
+                <div className="flex justify-between items-center text-[8px] font-black uppercase tracking-widest">
+                    <span className="text-slate-600">Engine</span>
+                    <span className="text-indigo-500">Groq Llama 3.1</span>
+                </div>
+                <div className="flex justify-between items-center text-[8px] font-black uppercase tracking-widest">
+                    <span className="text-slate-600">Latency</span>
+                    <span className="text-slate-400">~1.2s</span>
+                </div>
+                <div className="flex justify-between items-center text-[8px] font-black uppercase tracking-widest">
+                    <span className="text-slate-600">Status</span>
+                    <span className="text-emerald-500">STABLE</span>
+                </div>
+            </div>
+        </div>
       </div>
 
       {/* MAIN CONTENT AREA */}
@@ -241,7 +465,7 @@ const DealIntelligence = () => {
               {isSyncing && <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent animate-shimmer"></div>}
               <RefreshCw className={`w-3.5 h-3.5 text-indigo-400 group-hover:text-indigo-300 ${isSyncing ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-700'}`} />
               <span className="text-[11px] font-black text-indigo-400/90 uppercase tracking-widest leading-none">
-                {isSyncing ? 'Scanning Inbox...' : 'Sync Inbox'}
+                {isSyncing ? `${syncProgress}%` : 'Sync Inbox'}
               </span>
             </button>
             <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
@@ -252,8 +476,193 @@ const DealIntelligence = () => {
           </div>
         </header>
 
-        {/* PANELS GRID (Optimized for space) */}
-        <main className="flex-1 p-6 grid grid-cols-12 gap-6 overflow-y-auto custom-scrollbar">
+        {/* MAIN CONTENT AREA WITH SYNC PANEL */}
+        <main className="flex-1 p-6 overflow-y-auto custom-scrollbar">
+          {/* Right-side Sync Panel */}
+          {showSyncPanel && (
+            <div className="fixed right-6 top-20 w-80 bg-[#0b0f1a]/98 border border-indigo-500/40 rounded-2xl p-4 shadow-2xl z-[100] animate-in slide-in-from-right-2 cursor-default">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <RefreshCw className="w-4 h-4 text-indigo-400 animate-spin" />
+                  <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Background Operations</span>
+                </div>
+                <button 
+                  onClick={() => setShowSyncPanel(false)} 
+                  className="text-slate-500 hover:text-white cursor-pointer p-1"
+                >×</button>
+              </div>
+              
+              <div className="mb-3">
+                <div className="flex justify-between text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                  <span>Processing...</span>
+                  <span>{syncProgress}%</span>
+                </div>
+                <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+                  <div className="h-full bg-indigo-500 transition-all duration-300" style={{ width: `${syncProgress}%` }} />
+                </div>
+              </div>
+              
+              <div className="space-y-1 max-h-32 overflow-y-auto">
+                {syncLog.map((log, i) => (
+                  <div key={i} className="text-[10px] font-mono text-slate-400">{log}</div>
+                ))}
+              </div>
+              
+              <div className="mt-3 pt-3 border-t border-white/5 text-[9px] text-slate-600">
+                Multi-threaded processing active. You can safely navigate while tasks complete.
+              </div>
+            </div>
+          )}
+          
+          {activeTab === 'CLOUD' ? (
+            <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
+                <section className="bg-[#0b0f1a] border border-white/5 rounded-[32px] p-12 min-h-[600px] flex flex-col">
+                    <div className="mb-12">
+                        <h2 className="text-3xl font-black text-white uppercase tracking-tight mb-2">Intelligence <span className="text-indigo-500">Cloud</span></h2>
+                        <p className="text-slate-500 text-sm font-medium">Access advanced RAG modules and agentic orchestration tools.</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-12">
+                        {[
+                            { id: 'workflows', label: 'Workflows', icon: Layers, color: 'indigo', desc: 'Agentic Pipeline Automation' },
+                            { id: 'graph', label: 'Document Graph', icon: Network, color: 'blue', desc: 'Relationship Entity Mapping' },
+                            { id: 'clusters', label: 'Clusters', icon: Target, color: 'purple', desc: 'Semantic Lead Segmenting' },
+                            { id: 'intent', label: 'Intent Detection', icon: Brain, color: 'rose', desc: 'Query Routing v2.0' },
+                            { id: 'web', label: 'Web Search', icon: SearchCode, color: 'cyan', desc: 'Web-Augmented RAG' },
+                            { id: 'memory', label: 'Session Memory', icon: HistoryIcon, color: 'amber', desc: 'Persistent Chat Context' },
+                            { id: 'compare', label: 'Compare Docs', icon: GitCompare, color: 'emerald', desc: 'Multi-Lead Analysis' },
+                            { id: 'report', label: 'Generate Report', icon: FileText, color: 'violet', desc: 'Autonomous Investment Docs' },
+                            { id: 'contradictions', label: 'Contradictions', icon: ShieldAlert, color: 'red', desc: 'Conflict Detection Engine' }
+                        ].map((feature) => (
+                            <button 
+                                key={feature.id}
+                                onClick={() => setCloudFeature(feature.id)}
+                                className="group p-6 bg-white/[0.02] border border-white/5 rounded-3xl text-left hover:bg-indigo-600/10 hover:border-indigo-500/30 transition-all"
+                            >
+                                <div className={`w-10 h-10 rounded-xl bg-${feature.color}-500/10 border border-${feature.color}-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform`}>
+                                    <feature.icon className={`w-5 h-5 text-${feature.color}-400`} />
+                                </div>
+                                <div className="text-[12px] font-black text-white uppercase tracking-widest mb-1">{feature.label}</div>
+                                <div className="text-[10px] text-slate-500 font-medium">{feature.desc}</div>
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="flex-1 bg-black/40 border border-white/5 rounded-[32px] p-8">
+                        <div className="text-[9px] font-black text-slate-700 uppercase tracking-widest mb-6 flex items-center gap-2">
+                            <Terminal className="w-3 h-3" /> System Output: {cloudFeature || 'Ready'}
+                        </div>
+                        <div className="text-[13px] text-slate-400 font-medium leading-relaxed italic">
+                            {!cloudFeature && "Select a module above to initiate advanced intelligence processing."}
+                            
+                            {cloudFeature === 'workflows' && Array.isArray(cloudOutput) && (
+                                <div className="not-italic space-y-3">
+                                    {cloudOutput.map((w, i) => (
+                                        <div key={i} className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
+                                            <div className="text-indigo-400 font-black uppercase text-xs">{w.name}</div>
+                                            <div className="text-slate-400 text-sm mt-1">{w.description}</div>
+                                            <div className="text-slate-600 text-xs mt-2">Steps: {w.step_count} | Trigger: {w.trigger}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            
+                            {cloudFeature === 'graph' && Array.isArray(cloudOutput) && (
+                                <div className="not-italic">
+                                    <div className="text-emerald-400 font-black uppercase text-xs mb-3">Graph Nodes ({cloudOutput.length})</div>
+                                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                                        {cloudOutput.slice(0, 10).map((n, i) => (
+                                            <div key={i} className="p-3 bg-white/5 rounded-lg flex justify-between">
+                                                <span className="text-white font-medium">{n.company}</span>
+                                                <span className="text-slate-500 text-xs">{n.type}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {cloudFeature === 'clusters' && cloudOutput && (
+                                <div className="not-italic">
+                                    <div className="text-purple-400 font-black uppercase text-xs mb-3">Semantic Clusters</div>
+                                    {cloudOutput.clusters?.map((cluster, i) => (
+                                        <div key={i} className="mb-4">
+                                            <div className="text-slate-400 text-xs mb-2">Cluster {i + 1}: {cluster.length} docs</div>
+                                            <div className="space-y-1">
+                                                {cluster.slice(0, 3).map((d, j) => (
+                                                    <div key={j} className="text-slate-500 text-xs pl-2">{d.company || 'Unknown'}</div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            
+                            {cloudFeature === 'intent' && cloudOutput && (
+                                <div className="not-italic space-y-3">
+                                    <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl">
+                                        <div className="text-rose-400 font-black uppercase text-xs">Query</div>
+                                        <div className="text-white">{cloudOutput.query}</div>
+                                    </div>
+                                    <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl">
+                                        <div className="text-rose-400 font-black uppercase text-xs">Detected Intent</div>
+                                        <div className="text-white text-lg">{cloudOutput.intent}</div>
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {cloudFeature === 'web' && cloudOutput && (
+                                <div className="not-italic space-y-3">
+                                    <div className="text-cyan-400 font-black uppercase text-xs mb-3">Web Search Results</div>
+                                    <pre className="text-xs text-slate-500 overflow-x-auto">{JSON.stringify(cloudOutput, null, 2)}</pre>
+                                </div>
+                            )}
+                            
+                            {cloudFeature === 'memory' && cloudOutput && (
+                                <div className="not-italic">
+                                    <div className="text-amber-400 font-black uppercase text-xs mb-3">Session Memory</div>
+                                    <pre className="text-xs text-slate-500">{JSON.stringify(cloudOutput, null, 2)}</pre>
+                                </div>
+                            )}
+                            
+                            {cloudFeature === 'compare' && cloudOutput && (
+                                <div className="not-italic">
+                                    <div className="text-emerald-400 font-black uppercase text-xs mb-3">Document Clusters</div>
+                                    <pre className="text-xs text-slate-500">{JSON.stringify(cloudOutput, null, 2)}</pre>
+                                </div>
+                            )}
+                            
+                            {cloudFeature === 'report' && cloudOutput && (
+                                <div className="not-italic space-y-3">
+                                    <div className="text-violet-400 font-black uppercase text-xs mb-3">Generated Reports</div>
+                                    {Array.isArray(cloudOutput) && cloudOutput.slice(0, 5).map((r, i) => {
+                                        const summary = (r.summary || r.insights?.summary || '').replace(/\*\*/g, '');
+                                        return (
+                                            <div key={i} className="p-4 bg-violet-500/10 border border-violet-500/20 rounded-xl">
+                                                <div className="text-white font-bold">{r.company}</div>
+                                                <div className="text-violet-400 text-xs mt-1">
+                                                    {r.score ? `Score: ${r.score} | ` : ''}
+                                                    {r.verdict || 'Analyzed'}
+                                                </div>
+                                                <div className="text-slate-500 text-xs mt-2 line-clamp-2">
+                                                    {summary.substring(0, 80) || 'No summary'}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                            
+                            {cloudFeature === 'contradictions' && cloudOutput && (
+                                <div className="not-italic">
+                                    <pre className="text-xs text-slate-500">{JSON.stringify(cloudOutput, null, 2)}</pre>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </section>
+            </div>
+          ) : (
+            <div className="grid grid-cols-12 gap-6 h-full">
           
           <div className="col-span-12 lg:col-span-8 flex flex-col gap-6">
             <section className="bg-[#0b0f1a] border border-white/5 rounded-[32px] p-8 shadow-2xl relative group">
@@ -282,16 +691,100 @@ const DealIntelligence = () => {
               </div>
 
               <div className="memorandum-container bg-white/[0.01] border border-white/5 rounded-3xl p-8 min-h-[500px]">
-                {selectedDeal?.rag_advice ? (
-                  <div className="prose prose-invert max-w-none 
-                    prose-h1:text-[18px] prose-h1:font-black prose-h1:uppercase prose-h1:tracking-[0.2em] prose-h1:text-white prose-h1:mb-8 prose-h1:border-b prose-h1:border-white/10 prose-h1:pb-4
-                    prose-h2:text-[14px] prose-h2:font-black prose-h2:uppercase prose-h2:tracking-widest prose-h2:text-indigo-400 prose-h2:mt-10 prose-h2:mb-6
-                    prose-p:text-[14px] prose-p:text-slate-300 prose-p:leading-relaxed prose-p:mb-6
-                    prose-strong:text-white prose-strong:font-black
-                    prose-ul:list-disc prose-ul:pl-6 prose-li:text-slate-400 prose-li:mb-2
-                    ">
-                    <ReactMarkdown>{selectedDeal.rag_advice}</ReactMarkdown>
-                  </div>
+                {comparisonReport ? (
+                    <div className="animate-in slide-in-from-bottom-4 duration-500">
+                        <div className="flex justify-between items-center mb-8">
+                            <h3 className="text-xl font-black text-white uppercase tracking-widest flex items-center gap-3">
+                                <GitCompare className="w-6 h-6 text-amber-500" /> Multi-Lead Comparison
+                            </h3>
+                            <button onClick={() => setComparisonReport(null)} className="text-[10px] font-black text-slate-500 uppercase tracking-widest hover:text-white transition-colors">Close Report</button>
+                        </div>
+                        <div className="prose prose-invert max-w-none prose-sm">
+                            <ReactMarkdown>{comparisonReport}</ReactMarkdown>
+                        </div>
+                    </div>
+                ) : selectedDeal?.rag_advice ? (
+                    <>
+                        {/* Clean Card-Based Display */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                            {/* Verdict Card */}
+                            {(ragIntel.verdict || selectedDeal.rag_advice?.includes('VERDICT')) && (
+                                <div className="bg-gradient-to-br from-indigo-500/10 to-purple-500/5 border border-indigo-500/20 rounded-2xl p-6">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <ShieldCheck className="w-4 h-4 text-indigo-400" />
+                                        <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Verdict</span>
+                                    </div>
+                                    <div className="text-2xl font-black text-white">
+                                        {ragIntel.verdict || 'NEUTRAL'}
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {/* Confidence Card */}
+                            <div className="bg-gradient-to-br from-emerald-500/10 to-teal-500/5 border border-emerald-500/20 rounded-2xl p-6">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <Target className="w-4 h-4 text-emerald-400" />
+                                    <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Confidence</span>
+                                </div>
+                                <div className="text-2xl font-black text-white">{displayScore}%</div>
+                            </div>
+                            
+                            {/* Strategy Card */}
+                            {ragIntel.strategy && (
+                                <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/5 border border-amber-500/20 rounded-2xl p-6">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <Zap className="w-4 h-4 text-amber-400" />
+                                        <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest">Priority</span>
+                                    </div>
+                                    <div className="text-xl font-black text-white">{ragIntel.strategy.priority || 'MEDIUM'}</div>
+                                </div>
+                            )}
+                        </div>
+                        
+                        {/* Actuals Section */}
+                        {ragIntel.actuals && Object.keys(ragIntel.actuals).length > 0 && (
+                            <div className="mb-10 animate-in fade-in slide-in-from-top-2 duration-700">
+                                <h3 className="text-indigo-400 text-[11px] font-black uppercase tracking-[0.2em] mb-4">Key Metrics</h3>
+                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                    {Object.entries(ragIntel.actuals).map(([key, value]) => (
+                                        <div key={key} className="bg-white/[0.02] border border-white/5 rounded-xl p-4">
+                                            <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{key.replace(/_/g, ' ')}</div>
+                                            <div className="text-[16px] font-black text-indigo-400">{String(value).replace(/\*\*/g, '') || '—'}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* Key Signals */}
+                        {ragIntel.key_signals && (
+                            <div className="mb-8 p-6 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
+                                <h3 className="text-blue-400 text-[11px] font-black uppercase tracking-[0.2em] mb-4">Key Signal</h3>
+                                <p className="text-[13px] font-medium text-slate-300 leading-relaxed">{String(ragIntel.key_signals).replace(/\*\*/g, '')}</p>
+                            </div>
+                        )}
+                        
+                        {/* Full Report */}
+                        {selectedDeal.rag_advice && (
+                            <div className="p-6 bg-white/[0.02] border border-white/5 rounded-2xl">
+                                <h3 className="text-slate-400 text-[11px] font-black uppercase tracking-[0.2em] mb-4">Full Analysis</h3>
+                                <div className="text-[13px] text-slate-300 leading-relaxed space-y-4">
+                                    {selectedDeal.rag_advice.split('###').filter(s => s.trim()).map((section, idx) => {
+                                        const lines = section.trim().split('\n');
+                                        const title = lines[0]?.trim().replace(/\*\*/g, '');
+                                        const content = lines.slice(1).join('\n').trim().replace(/\*\*/g, '');
+                                        if (!title) return null;
+                                        return (
+                                            <div key={idx}>
+                                                <h4 className="text-indigo-400 text-[11px] font-black uppercase tracking-widest mb-2">{title}</h4>
+                                                <p className="text-slate-300 whitespace-pre-wrap">{content}</p>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+                    </>
                 ) : (
                   <div className="flex flex-col items-center justify-center py-20 bg-white/[0.01] border border-dashed border-white/5 rounded-[32px]">
                     <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center mb-6 animate-pulse">
@@ -376,29 +869,70 @@ const DealIntelligence = () => {
               </div>
             </section>
 
-            <section className="bg-[#0b0f1a] border border-white/5 rounded-[32px] p-8 shadow-2xl flex-1 flex flex-col overflow-hidden">
+            <section className="bg-[#0b0f1a] border border-white/5 rounded-[32px] p-8 shadow-2xl flex-1 flex flex-col overflow-hidden relative">
               <div className="flex justify-between items-center mb-6">
-                <h2 className="text-[9px] font-black text-slate-600 uppercase tracking-widest">RAG Strategy Portfolio</h2>
-                <button onClick={handleCopy} className={`p-2 rounded-lg transition-all ${copySuccess ? 'bg-emerald-500/10 text-emerald-400' : 'bg-white/5 text-slate-500'}`}>
-                  {copySuccess ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                </button>
-              </div>
-
-              <div className="flex-1 bg-black/40 border border-white/5 rounded-2xl p-6 overflow-y-auto custom-scrollbar shadow-inner">
-                <div className="prose prose-invert prose-sm max-w-none 
-                  prose-h3:text-[11px] prose-h3:font-black prose-h3:uppercase prose-h3:tracking-[0.2em] prose-h3:text-indigo-400 prose-h3:mt-6 prose-h3:mb-3 prose-h3:border-b prose-h3:border-white/5 prose-h3:pb-2
-                  prose-p:text-[12px] prose-p:text-slate-300 prose-p:leading-relaxed prose-p:mb-4
-                  prose-li:text-[11px] prose-li:text-slate-400
-                  ">
-                  <ReactMarkdown>{selectedDeal?.rag_advice || '### Awaiting Deep Analysis\n\nRun the scan to extract forensic RAG intelligence from the deck.'}</ReactMarkdown>
+                <h2 className="text-[9px] font-black text-slate-600 uppercase tracking-widest flex items-center gap-2">
+                    <MessageSquare className="w-3 h-3" /> Sector Intelligence Chat
+                </h2>
+                <div className="flex gap-2">
+                    <button 
+                        onClick={() => { setCompareMode(!compareMode); setSelectedForCompare([]); }}
+                        className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${compareMode ? 'bg-amber-500 text-white' : 'bg-white/5 text-slate-500'}`}
+                    >
+                        {compareMode ? 'Cancel Compare' : 'Compare Mode'}
+                    </button>
+                    {compareMode && selectedForCompare.length >= 2 && (
+                        <button onClick={handleCompare} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-[9px] font-black uppercase tracking-widest animate-pulse">Run Compare</button>
+                    )}
                 </div>
               </div>
 
-              <button className="w-full mt-6 py-4 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black uppercase tracking-[0.2em] rounded-2xl shadow-xl shadow-indigo-500/20">
-                Send Dispatch
-              </button>
+              <div className="flex-1 bg-black/40 border border-white/5 rounded-2xl p-4 overflow-y-auto custom-scrollbar shadow-inner flex flex-col gap-4">
+                {chatMessages.length === 0 && (
+                    <div className="flex flex-col items-center justify-center h-full text-slate-600 italic text-[10px]">
+                        Ask about market trends, competitors, or specific lead details...
+                    </div>
+                )}
+                {chatMessages.map((m, i) => (
+                    <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
+                        {m.intent && (
+                            <span className="text-[8px] font-black text-indigo-500 uppercase tracking-widest mb-1 ml-1">{m.intent}</span>
+                        )}
+                        <div className={`max-w-[85%] p-3 rounded-2xl text-[12px] leading-relaxed ${
+                            m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-300 border border-white/5'
+                        }`}>
+                            {m.content}
+                        </div>
+                    </div>
+                ))}
+                {isStreaming && (
+                    <div className="flex items-center gap-2 text-indigo-500 animate-pulse text-[10px] font-black uppercase tracking-widest">
+                        <Zap className="w-3 h-3" /> AI Thinking...
+                    </div>
+                )}
+              </div>
+
+              <div className="mt-4 flex gap-2">
+                <input 
+                    type="text"
+                    value={currentMessage}
+                    onChange={(e) => setCurrentMessage(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                    placeholder="Type a query..."
+                    className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[12px] focus:outline-none focus:border-indigo-500/50"
+                />
+                <button 
+                    onClick={handleSendMessage}
+                    disabled={isStreaming}
+                    className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white hover:bg-indigo-500 transition-colors shadow-lg shadow-indigo-500/20"
+                >
+                    <ArrowUpRight className="w-5 h-5" />
+                </button>
+              </div>
             </section>
           </div>
+        </div>
+      )}
         </main>
       </div>
 

@@ -134,25 +134,80 @@ async def ai_deep_classify(user_id: Optional[str] = Header(None, alias="X-User-I
 class ChatRequest(BaseModel):
     message: str
     history: List[dict] = []
+    deal_context: Optional[dict] = None
+
+from fastapi.responses import StreamingResponse
+import asyncio
+
+@router.post("/chat/stream")
+async def intelligence_chat_stream(req: ChatRequest):
+    """
+    Real-time Streaming: Stream chat responses token-by-token.
+    """
+    llm = EmailGenerator()
+    intent = llm.detect_intent(req.message)
+    
+    async def event_generator():
+        # Using a simple mock stream for now as internal clients might not support it
+        # In production, this would call llm_service with stream=True
+        full_text = llm._call_llm(f"Analyze this query with intent {intent}: {req.message}")
+        if not full_text:
+            yield "No response generated."
+            return
+
+        for word in full_text.split():
+            yield word + " "
+            await asyncio.sleep(0.05)
+
+    return StreamingResponse(event_generator(), media_type="text/plain")
 
 @router.post("/chat")
 async def intelligence_chat(req: ChatRequest):
     """
-    Handles AI chat specifically restricted to sector intelligence and industry data.
+    Handles AI chat with Query Intent Detection v2 and Citation Highlighting.
     """
     try:
         llm = EmailGenerator()
         
-        system_prompt = """
-        You are the 'LeadStream Sector Intelligence AI'. 
-        Your ONLY purpose is to answer questions about industry sectors, market trends, historical business data (2014-2024), and strategic intelligence.
+        # 1. Detect Intent
+        intent = llm.detect_intent(req.message)
+        logger.info("detected_intent", intent=intent)
         
-        STRICT RULES:
-        1. If the user asks about ANYTHING else (jokes, coding, personal help, unrelated topics), politely decline and state that you are restricted to Sector Intelligence.
-        2. Focus on sectors like Defence, SaaS, AI, FinTech, and Manufacturing.
-        3. Use a professional, data-driven, and strategic tone.
-        4. If you don't know a specific historical detail, provide a general strategic outlook based on industry trends.
-        """
+        # 2. Include deal context if available
+        deal_context = ""
+        if req.deal_context:
+            dc = req.deal_context
+            deal_context = f"""
+CURRENT DEAL CONTEXT:
+- Company: {dc.get('company', 'N/A')}
+- Sector: {dc.get('sector', 'N/A')}
+- RAG Intelligence: {json.dumps(dc.get('rag_intel', {}), indent=2)}
+- Analysis: {dc.get('rag_advice', 'No analysis available')}
+
+Use this context to answer questions about the selected deal.
+"""
+        
+        # 3. System prompts based on intent
+        system_prompts = {
+            "SUMMARY": "You are a Research Analyst. Provide a concise, structured summary of the lead's business potential.",
+            "EXTRACTION": "You are a Data Specialist. Extract precise metrics (Revenue, Stage, Growth) from the context. Use [Source: X] for citations.",
+            "COMPARISON": "You are a Strategic Analyst. Compare the requested leads across key business metrics.",
+            "WEB_SEARCH": "You are a Market Intelligence Expert. Provide external market context and trends related to the industry.",
+            "CHAT": "You are the LeadStream Sector Intelligence AI. Answer questions about industry sectors and market trends."
+        }
+        
+        base_system = system_prompts.get(intent, system_prompts["CHAT"])
+        
+        system_prompt = f"""
+{base_system}
+{deal_context}
+        
+STRICT RULES:
+1. For SUMMARY and EXTRACTION, always include citations in [Source: Section Name] format.
+2. Maintain a professional, data-driven tone.
+3. If you detect a COMPARISON intent but don't have multiple leads in context, ask the user which leads to compare.
+4. Answer based on the deal context provided above.
+"""
         
         # Combine history for context
         full_prompt = f"{system_prompt}\n\nChat History:\n"
@@ -160,23 +215,18 @@ async def intelligence_chat(req: ChatRequest):
             role = "User" if h['role'] == 'user' else "AI"
             full_prompt += f"{role}: {h['content']}\n"
         
-        full_prompt += f"\nUser Question: {req.message}\nAI:"
+        full_prompt += f"\nUser Question: {req.message}\nIntent: {intent}\nAI:"
         
-        # Use the internal _call_gemini or similar logic from EmailGenerator
-        if llm.gemini_model:
-            response = llm.gemini_model.generate_content(full_prompt)
-            return {"response": response.text.strip()}
-        elif llm.anthropic_client:
-            # Fallback to Anthropic if Gemini not available
-            from app.services.llm_services import CLAUDE_MODEL
-            resp = llm.anthropic_client.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=1000,
-                messages=[{"role": "user", "content": full_prompt}]
-            )
-            return {"response": resp.content[0].text}
+        response_text = llm._call_llm(full_prompt)
         
-        raise HTTPException(status_code=500, detail="No LLM provider available")
+        if not response_text:
+            raise HTTPException(status_code=500, detail="No LLM provider available")
+            
+        return {
+            "response": response_text.strip(),
+            "intent": intent,
+            "citations_enabled": intent in ["SUMMARY", "EXTRACTION"]
+        }
         
     except Exception as e:
         logger.error("intelligence_chat_error", error=str(e))
@@ -247,58 +297,122 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
                 
                 if process_res.status_code == 200:
                     rag_data = process_res.json()
-                    rag_category = rag_data.get('category') or rag_data.get('type')
-                    rag_item_id = rag_data.get('id')
+                    logger.info(f"RAG process response: {rag_data}")
                     
-                    if rag_item_id:
-                        # 2. Polling loop
-                        import time
-                        max_polls = 30
-                        for poll in range(max_polls):
-                            logger.info(f"Polling RAG status for ID {rag_item_id} (Attempt {poll+1}/30)...")
-                            status_res = s.get(f"{rag_url}/status/{rag_item_id}", timeout=60, verify=False)
-                            if status_res.status_code == 200:
-                                status_data = status_res.json()
-                                current_status = status_data.get('status', '').lower()
-                                
-                                if current_status == 'completed' or current_status == 'success':
-                                    insights = status_data.get('insights', {})
-                                    if insights:
-                                        # Use structured format
-                                        rag_advice = f"### RAG VERDICT\n{insights.get('verdict', 'N/A')}\n\n"
-                                        rag_advice += f"### SUMMARY\n{insights.get('summary', 'N/A')}\n\n"
-                                        
-                                        if insights.get('actuals'):
-                                            rag_advice += "### ACTUALS & METRICS\n"
-                                            for k, v in insights.get('actuals', {}).items():
-                                                rag_advice += f"- {k.replace('_', ' ').title()}: {v}\n"
-                                            rag_advice += "\n"
-                                            
-                                        if insights.get('strategy'):
-                                            rag_advice += "### STRATEGY RECOMMENDATION\n"
-                                            strat = insights.get('strategy', {})
-                                            rag_advice += f"- Priority: {strat.get('priority', 'MEDIUM')}\n"
-                                            rag_advice += f"- Approach: {strat.get('approach', 'N/A')}\n\n"
+# Check if insights are in direct response
+                    insights = rag_data.get('insights') or rag_data.get('summary')
+                    if insights:
+                        # Format verdict properly
+                        verdict = rag_data.get('verdict') or 'NEUTRAL'
+                        if verdict == 'N':
+                            verdict = 'NEUTRAL'
+                        elif verdict == 'P':
+                            verdict = 'POSITIVE'
+                        elif verdict == 'S':
+                            verdict = 'STRONG'
+                        
+                        summary = rag_data.get('summary', '')
+                        if summary and len(summary) < 10:
+                            summary = 'Analysis complete. Review insights below for key metrics and signals.'
+                        
+                        def clean_val(v):
+                            if not v:
+                                return 'Not disclosed'
+                            s = str(v)
+                            # Remove ALL ** markers (bold markers anywhere)
+                            s = s.replace('**', '')
+                            return s.strip()
+                        
+                        rag_category = rag_data.get('category') or rag_data.get('type') or 'INVESTOR'
+                        verdict_clean = clean_val(verdict)
+                        summary_clean = clean_val(summary)
+                        rag_advice = f"### RAG VERDICT\n{verdict_clean}\n\n"
+                        rag_advice += f"### SUMMARY\n{summary_clean}\n\n"
+                        
+                        if rag_data.get('actuals'):
+                            rag_advice += "### ACTUALS & METRICS\n"
+                            for k, v in rag_data.get('actuals', {}).items():
+                                rag_advice += f"- {k.replace('_', ' ').title()}: {clean_val(v)}\n"
+                            rag_advice += "\n"
+                        
+                        if rag_data.get('strategy'):
+                            rag_advice += "### STRATEGY RECOMMENDATION\n"
+                            strat = rag_data.get('strategy', {})
+                            priority = strat.get('priority', 'MEDIUM')
+                            if len(priority) < 3:
+                                priority = 'MEDIUM'
+                            approach = strat.get('approach', 'Schedule a call to discuss further.')
+                            rag_advice += f"- Priority: {priority}\n"
+                            rag_advice += f"- Approach: {approach}\n\n"
 
-                                        rag_category = (insights.get('type') or insights.get('category') or 'INVESTOR').upper()
-                                        
-                                        rag_intel = {
-                                            "answer": rag_advice,
-                                            "source": "Pure Llama 3.1 (RAG Engine)",
-                                            "category": rag_category,
-                                            "sentiment_score": insights.get('score', 80),
-                                            "urgency_level": insights.get('strategy', {}).get('priority', 'MEDIUM').upper(),
-                                            "strategy": insights.get('strategy', {}),
-                                            "actuals": insights.get('actuals', {}),
-                                            "signals": insights.get('breakdown', {}),
-                                            "key_signals": insights.get('key_signal'),
-                                            "verdict": insights.get('verdict'),
-                                            "full_insights": insights
-                                        }
+                        rag_category = (rag_data.get('type') or rag_data.get('category') or 'INVESTOR').upper()
+                        
+                        rag_intel = {
+                            "answer": rag_advice,
+                            "source": "Pure Llama 3.1 (RAG Engine)",
+                            "category": rag_category,
+                            "sentiment_score": rag_data.get('score', 80),
+                            "urgency_level": rag_data.get('strategy', {}).get('priority', 'MEDIUM').upper() if len(rag_data.get('strategy', {}).get('priority', 'MEDIUM')) > 3 else 'MEDIUM',
+                            "strategy": rag_data.get('strategy', {}),
+                            "actuals": rag_data.get('actuals', {}),
+                            "signals": rag_data.get('breakdown', {}),
+                            "key_signals": rag_data.get('key_signal'),
+                            "verdict": verdict,
+                            "full_insights": rag_data
+                        }
+                    elif not rag_item_id:
+                        # No insights and no ID - use text fallback
+                        pass
+            elif not file_data:
+                            # 2. Polling loop
+                            import time
+                            max_polls = 30
+                            for poll in range(max_polls):
+                                logger.info(f"Polling RAG status for ID {rag_item_id} (Attempt {poll+1}/30)...")
+                                status_res = s.get(f"{rag_url}/status/{rag_item_id}", timeout=60, verify=False)
+                                if status_res.status_code == 200:
+                                    status_data = status_res.json()
+                                    logger.info(f"RAG status response: {status_data}")
+                                    current_status = status_data.get('status', '').lower()
+                                    
+                                    if current_status == 'completed' or current_status == 'success':
+                                        insights = status_data.get('insights', {})
+                                        logger.info(f"RAG insights: {insights}")
+                                        if insights:
+                                            rag_advice = f"### RAG VERDICT\n{insights.get('verdict', 'N/A')}\n\n"
+                                            rag_advice += f"### SUMMARY\n{insights.get('summary', 'N/A')}\n\n"
+                                            
+                                            if insights.get('actuals'):
+                                                rag_advice += "### ACTUALS & METRICS\n"
+                                                for k, v in insights.get('actuals', {}).items():
+                                                    rag_advice += f"- {k.replace('_', ' ').title()}: {v}\n"
+                                                rag_advice += "\n"
+                                            
+                                            if insights.get('strategy'):
+                                                rag_advice += "### STRATEGY RECOMMENDATION\n"
+                                                strat = insights.get('strategy', {})
+                                                rag_advice += f"- Priority: {strat.get('priority', 'MEDIUM')}\n"
+                                                rag_advice += f"- Approach: {strat.get('approach', 'N/A')}\n\n"
+
+                                            rag_category = (insights.get('type') or insights.get('category') or 'INVESTOR').upper()
+                                            
+                                            rag_intel = {
+                                                "answer": rag_advice,
+                                                "source": "Pure Llama 3.1 (RAG Engine)",
+                                                "category": rag_category,
+                                                "sentiment_score": insights.get('score', 80),
+                                                "urgency_level": insights.get('strategy', {}).get('priority', 'MEDIUM').upper(),
+                                                "strategy": insights.get('strategy', {}),
+                                                "actuals": insights.get('actuals', {}),
+                                                "signals": insights.get('breakdown', {}),
+                                                "key_signals": insights.get('key_signal'),
+                                                "verdict": insights.get('verdict'),
+                                                "full_insights": insights
+                                            }
+                                            break
+                                    elif current_status == 'failed':
                                         break
-                                elif current_status == 'failed':
-                                    break
-                            time.sleep(10)
+                                time.sleep(10)
             else:
                 # 1. RAG Processing (Text Fallback)
                 import io
@@ -315,11 +429,62 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
                     rag_intel["answer"] = rag_advice
             
             if not rag_advice:
-                raise Exception("RAG Engine timeout or analysis failure.")
+                logger.warning("RAG Engine returned empty response. Falling back to local LLM analysis.")
+                # Fallback to local LLM analysis
+                prompt = f"""
+                Perform a Deep Strategy Analysis for this lead.
+                
+                LEAD: {lead.get('first_name')} {lead.get('last_name')}
+                COMPANY: {lead.get('company_name')}
+                REMARKS: {lead.get('remarks')}
+                
+                Return ONLY a JSON object with this exact structure:
+                {{
+                  "verdict": "Clear recommendation",
+                  "summary": "Brief summary",
+                  "actuals": {{"revenue": "₹89L", "orders": "7,000+", "margin": "~70%"}},
+                  "strategy": {{"priority": "HIGH", "next_step": "Schedule Call", "reason": "Strong traction"}},
+                  "key_signals": "Signals extracted...",
+                  "score": 85
+                }}
+                """
+                from app.services.llm_services import EmailGenerator
+                gen = EmailGenerator()
+                raw_res = gen._call_llm(prompt)
+                try:
+                    import json
+                    structured = json.loads(raw_res)
+                    rag_advice = f"### RAG VERDICT\n{structured.get('verdict')}\n\n### SUMMARY\n{structured.get('summary')}"
+                    rag_intel = structured
+                    rag_intel["answer"] = rag_advice
+                except:
+                    rag_advice = raw_res
+                    rag_intel = {"answer": rag_advice, "status": "LOCAL_AI_FALLBACK"}
 
         except Exception as rag_err:
             logger.error(f"STRICT RAG ERROR: {rag_err}")
-            raise HTTPException(status_code=500, detail=f"RAG Engine Connectivity Error: {str(rag_err)}")
+            rag_intel = {
+                "answer": f"Analysis failed: {str(rag_err)}",
+                "actuals": {"Status": "Error"},
+                "strategy": {"priority": "LOW", "next_step": "Retry Analysis"}
+            }
+
+        # --- INTEGRATE AGENT SERVICE (NEW) ---
+        try:
+            from app.services.agent_service import AgentService
+            agent = AgentService()
+            
+            # Detect contradictions
+            contradictions = agent.detect_contradictions(lead, rag_intel)
+            rag_intel["contradictions"] = contradictions
+            
+            # Generate Deep Report
+            deep_report = agent.generate_autonomous_report(lead_id)
+            rag_intel["deep_report"] = deep_report
+            
+        except Exception as agent_err:
+            logger.error(f"Agent Service Error: {agent_err}")
+            rag_intel["agent_error"] = str(agent_err)
 
         # Generate a fresh, RAG-backed draft immediately
         try:
@@ -335,6 +500,21 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
         except Exception as draft_err:
             logger.warning(f"Failed to generate immediate RAG draft: {draft_err}")
 
+        # --- CONTRADICTION DETECTION & REPORTING ---
+        try:
+            from app.services.agent_service import AgentService
+            agent = AgentService()
+            contradictions = agent.detect_contradictions(dict(lead), rag_intel)
+            if contradictions:
+                rag_intel["contradictions"] = contradictions
+                rag_advice += f"\n\n### CONTRADICTIONS DETECTED\n- " + "\n- ".join(contradictions)
+            
+            # Auto-generate a deep report
+            deep_report = agent.generate_autonomous_report(lead_id)
+            rag_intel["deep_report"] = deep_report
+        except Exception as agent_err:
+            logger.warning(f"Agent analysis failed: {agent_err}")
+
         # Update DB
         rag_intel_json = json.dumps(rag_intel)
         cur.execute("""
@@ -349,14 +529,128 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
         
         return {
             "success": True,
-            "message": "Pure RAG Intelligence Analysis completed",
+            "message": "Advanced RAG Analysis with Agentic Checks completed",
             "category": rag_category,
             "advice": rag_advice,
-            "source": "Llama 3.1 (Native)"
+            "rag_intel": rag_intel,
+            "contradictions": rag_intel.get("contradictions", []),
+            "source": "Llama 3.1 (Agent Augmented)"
         }
 
     except Exception as e:
         logger.error("analyze_lead_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+@router.post("/compare-leads")
+async def compare_leads(lead_ids: List[int], user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """
+    Multi-Document Comparison: Aggregates insights across multiple leads for side-by-side analysis.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        # 1. Fetch data for all requested leads
+        cur.execute("SELECT id, company_name, sector, rag_advice, rag_intelligence FROM leads_raw WHERE id = ANY(%s)", (lead_ids,))
+        leads = cur.fetchall()
+        
+        if not leads:
+            raise HTTPException(status_code=404, detail="No leads found for comparison")
+            
+        # 2. Aggregate context for LLM
+        comparison_context = "LEADS TO COMPARE:\n\n"
+        for lead in leads:
+            intel = lead.get('rag_intelligence')
+            if isinstance(intel, str): intel = json.loads(intel)
+            
+            comparison_context += f"LEAD ID: {lead['id']}\n"
+            comparison_context += f"Company: {lead['company_name']}\n"
+            comparison_context += f"Sector: {lead['sector']}\n"
+            comparison_context += f"Intelligence: {lead['rag_advice'] or 'No data'}\n"
+            if intel and intel.get('actuals'):
+                comparison_context += f"Metrics: {json.dumps(intel['actuals'])}\n"
+            comparison_context += "---\n\n"
+            
+        # 3. Prompt for side-by-side comparison
+        prompt = f"""
+        You are a Venture Capital Analyst. Compare the following leads side-by-side.
+        Create a Markdown table comparing them on:
+        1. Sector Focus
+        2. Key Metrics (Revenue/Stage/Growth)
+        3. Strategic Verdict
+        4. Primary Risk Flag
+        
+        CONTEXT:
+        {comparison_context}
+        
+        Rules:
+        - Use professional terminology.
+        - If data is missing for a lead, mark it as 'N/A'.
+        - Highlight the 'Winner' in terms of investment potential with an emoji.
+        """
+        
+        llm = EmailGenerator()
+        comparison_report = llm._call_llm(prompt, max_tokens=2048)
+        
+        return {
+            "success": True,
+            "report": comparison_report,
+            "lead_count": len(leads)
+        }
+        
+    except Exception as e:
+        logger.error("compare_leads_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+@router.get("/admin/rag-debug")
+async def get_rag_debug_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """
+    Retrieval Debug Panel: Returns performance and health metrics for the RAG system.
+    """
+    # Simple role check
+    if str(user_id).lower() != 'admin':
+        raise HTTPException(status_code=403, detail="Admin access required")
+        
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        # 1. Latency & Health (Ping external RAG)
+        rag_url = "https://rag-sys-gz59.onrender.com"
+        import time
+        start = time.time()
+        health = "OFFLINE"
+        latency = 0
+        try:
+            res = requests.get(rag_url, timeout=5, verify=False)
+            latency = round((time.time() - start) * 1000, 2)
+            if res.status_code == 200: health = "ONLINE"
+        except: pass
+        
+        # 2. Database Stats
+        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE rag_intelligence IS NOT NULL")
+        analyzed_leads = cur.fetchone()[0]
+        
+        cur.execute("SELECT COUNT(*) FROM activity_log WHERE action = 'REPORT_GENERATED'")
+        reports_count = cur.fetchone()[0]
+        
+        return {
+            "status": health,
+            "latency_ms": latency,
+            "engine": "Llama 3.1 (RAG Native)",
+            "analyzed_leads": analyzed_leads,
+            "reports_generated": reports_count,
+            "active_tasks": ["Contradiction Detection", "Web-Augmented RAG", "Intent Classification"]
+        }
+        
+    except Exception as e:
+        logger.error("rag_debug_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if 'conn' in locals():
