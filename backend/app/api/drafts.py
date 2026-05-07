@@ -321,10 +321,26 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     
     disclaimer = "Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."
 
-    unsub_part = "Click here to unsubscribe\n\n" if "unsubscribe" not in body_lower else ""
-    sig_part = f"--\nThanks & Regards,\n{name},\n{title},\n[LinkedIn]({linkedin})\n{phone}\n\n{disclaimer}"
+    # Active unsubscribe link
+    unsub_link = f"https://qvscl.com/unsubscribe?lead_id={lead_id}"
     
-    return body_text + "\n\n" + unsub_part + sig_part
+    # Standardized signature in grey
+    sig_html = f"""
+<br><br>
+<div style="color: #666666; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.5;">
+    <a href="{unsub_link}" style="color: #666666; text-decoration: underline;">Click here to unsubscribe</a><br><br>
+    --<br>
+    <i>Thanks & Regards,</i><br>
+    <i><strong>{name}</strong></i><br>
+    <i>{title}</i><br>
+    <i><a href="{linkedin}" style="color: #0077b5; text-decoration: none;">LinkedIn</a></i><br>
+    <i>{phone}</i><br><br>
+    <div style="font-size: 10px; color: #999999; line-height: 1.2;">
+        {disclaimer}
+    </div>
+</div>
+"""
+    return body_text + sig_html
 
 @router.post("/generate-draft")
 @router.post("/generate-email")

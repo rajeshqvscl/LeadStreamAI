@@ -56,6 +56,9 @@ class BulkLabelRequest(BaseModel):
 class LabelRemoveRequest(BaseModel):
     label: str
 
+class BulkApproveFollowupsRequest(BaseModel):
+    lead_ids: List[int]
+
 @router.get("/leads")
 def get_leads(
     page: int = 1,
@@ -623,14 +626,11 @@ def approve_followup(lead_id: int, user_id: Optional[str] = Header(None, alias="
         # If draft exists but belongs to someone else (or no sig), re-inject
         body_text = lead['followup_draft'] or ""
         
-        # If draft is missing, generate it
+        # If draft is missing, generate it via template
         if not body_text:
-            from app.services.llm_services import LLMService
-            llm = LLMService()
-            lead_name = f"{lead.get('first_name') or ''} {lead.get('last_name') or ''}".strip() or "there"
-            original_content = lead.get('last_outreach_body') or lead.get('email_draft') or "our previous outreach"
+            from app.services.followup_service import get_template_followup
             stage = (lead['followup_stage'] or 0) + 1
-            body_text = llm.generate_followup(lead_name, original_content, stage)
+            body_text = get_template_followup(lead, stage)
 
         # RE-INJECT SIGNATURE of the CURRENT user
         # This ensures if Sravanthi approves a draft Yashika generated, Sravanthi's signature is used.
@@ -680,6 +680,20 @@ def approve_followup(lead_id: int, user_id: Optional[str] = Header(None, alias="
     finally:
         cur.close()
         conn.close()
+
+@router.post("/leads/bulk-approve-followups")
+def bulk_approve_followups(req: BulkApproveFollowupsRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Approves and sends follow-up emails for multiple leads in a batch."""
+    results = {"success": [], "failed": []}
+    for lead_id in req.lead_ids:
+        try:
+            # Call existing single approval logic
+            approve_followup(lead_id, user_id)
+            results["success"].append(lead_id)
+        except Exception as e:
+            logger.error(f"Bulk approval failed for lead {lead_id}: {e}")
+            results["failed"].append({"id": lead_id, "error": str(e)})
+    return results
 
 @router.get("/leads/{lead_id}/followup-preview")
 def get_followup_preview(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
