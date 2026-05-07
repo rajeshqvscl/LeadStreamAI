@@ -361,3 +361,72 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
     finally:
         if 'conn' in locals():
             conn.close()
+
+@router.get("/leads/{lead_id}/ai-timeline")
+async def get_lead_ai_timeline(lead_id: int):
+    """
+    Summarizes the journey of a lead from ingestion to current state using LLM.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        # 1. Fetch Lead basic info
+        cur.execute("SELECT first_name, last_name, company_name, created_at, remarks, sector, lead_type FROM leads_raw WHERE id = %s", (lead_id,))
+        lead = cur.fetchone()
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+            
+        # 2. Fetch Activity Logs
+        cur.execute("SELECT action, details, created_at FROM activity_log WHERE lead_id = %s ORDER BY created_at ASC", (lead_id,))
+        logs = cur.fetchall()
+        
+        # 3. Format context for LLM
+        timeline_events = [f"- {lead['created_at'].strftime('%Y-%m-%d')}: Lead Ingested (Source: {lead['company_name']})"]
+        if lead['remarks']:
+            timeline_events.append(f"- Initial Remarks: {lead['remarks']}")
+            
+        for log in logs:
+            timeline_events.append(f"- {log['created_at'].strftime('%Y-%m-%d')}: {log['action']} ({log['details'] or 'No details'})")
+            
+        context = "\n".join(timeline_events)
+        
+        # 4. Prompt for AI Story
+        prompt = f"""
+        Summarize the business journey of this lead based on the activity logs below. 
+        Output EXACTLY 3 bullet points. Each point should start with a relevant emoji.
+        Focus on the narrative (how it started, what happened, and where it is now).
+        
+        Logs:
+        {context}
+        
+        Rules:
+        - Professional but engaging tone.
+        - Maximum 20 words per bullet point.
+        - Output ONLY the 3 bullet points.
+        """
+        
+        llm = EmailGenerator()
+        summary = "AI summary generation failed."
+        try:
+            summary = llm._call_llm(prompt, max_tokens=200)
+            if summary:
+                summary = summary.strip()
+        except Exception as e:
+            logger.error("timeline_ai_error", error=str(e))
+            
+        return {
+            "success": True,
+            "lead_id": lead_id,
+            "ai_summary": summary,
+            "full_timeline": [
+                {"date": lead['created_at'].strftime('%b %d, %Y'), "action": "Ingested", "details": f"Lead added for {lead['company_name']}"}
+            ] + [{"date": l['created_at'].strftime('%b %d, %Y'), "action": l['action'], "details": l['details']} for l in logs]
+        }
+        
+    except Exception as e:
+        logger.error("get_timeline_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals():
+            conn.close()

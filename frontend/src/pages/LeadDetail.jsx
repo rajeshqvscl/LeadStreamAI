@@ -159,6 +159,9 @@ const LeadDetail = () => {
   const [error, setError] = useState(null);
   const [familyOffices, setFamilyOffices] = useState([]);
 
+  const [timelineData, setTimelineData] = useState(null);
+  const [isTimelineLoading, setIsTimelineLoading] = useState(false);
+
   // Form state - synced dynamically from lead data
   const [form, setForm] = useState({});
   const [isDirty, setIsDirty] = useState(false);
@@ -256,7 +259,23 @@ const LeadDetail = () => {
     }
   };
 
-  useEffect(() => { fetchData(); }, [leadId]);
+  const fetchTimeline = async () => {
+    if (!leadId) return;
+    setIsTimelineLoading(true);
+    try {
+      const res = await api.get(`/api/intelligence/leads/${leadId}/ai-timeline`);
+      setTimelineData(res.data);
+    } catch (err) {
+      console.error('Timeline fetch failed', err);
+    } finally {
+      setIsTimelineLoading(false);
+    }
+  };
+
+  useEffect(() => { 
+    fetchData();
+    fetchTimeline();
+  }, [leadId]);
 
   useEffect(() => {
     api.get('/api/custom-draft-templates').then(r => setCustomTemplates(r.data || [])).catch(() => {});
@@ -590,6 +609,55 @@ const LeadDetail = () => {
                 </div>
 
               </form>
+            </div>
+          </div>
+
+          {/* AI Deal Story Section */}
+          <div className="bg-[#131722] border border-[#ffffff08] rounded-[16px] overflow-hidden">
+            <div className="px-6 py-5 flex items-center gap-2 border-b border-[#ffffff08]">
+              <Sparkles className="w-5 h-5 text-indigo-400" />
+              <h3 className="text-[13px] font-bold text-white tracking-wide uppercase tracking-[0.2em]">AI Deal Story</h3>
+            </div>
+            <div className="p-6">
+              {isTimelineLoading ? (
+                <div className="space-y-3 animate-pulse">
+                  <div className="h-3 w-3/4 bg-white/5 rounded" />
+                  <div className="h-3 w-1/2 bg-white/5 rounded" />
+                  <div className="h-3 w-2/3 bg-white/5 rounded" />
+                </div>
+              ) : timelineData?.ai_summary ? (
+                <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-2xl p-6 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 blur-[60px] rounded-full -mr-16 -mt-16 group-hover:bg-indigo-500/10 transition-all" />
+                  <div className="relative z-10 space-y-4">
+                    {timelineData.ai_summary.split('\n').map((line, i) => (
+                      <div key={i} className="text-[13px] font-bold text-indigo-100 leading-relaxed">
+                        {line}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-6 text-center italic text-slate-500 text-xs">
+                  No story highlights available yet.
+                </div>
+              )}
+
+              {/* Event Timeline Visualization */}
+              {timelineData?.full_timeline && (
+                <div className="mt-8 ml-4 space-y-6 relative">
+                  <div className="absolute left-[-17px] top-2 bottom-2 w-px bg-white/5" />
+                  {timelineData.full_timeline.map((event, i) => (
+                    <div key={i} className="relative pl-6">
+                      <div className="absolute left-[-21px] top-1.5 w-2 h-2 rounded-full bg-indigo-500 border-2 border-[#131722]" />
+                      <div className="flex justify-between items-start mb-1">
+                        <p className="text-[11px] font-black text-white uppercase tracking-wider">{event.action}</p>
+                        <span className="text-[9px] font-bold text-slate-500">{event.date}</span>
+                      </div>
+                      <p className="text-[12px] text-slate-400 font-medium leading-relaxed">{event.details}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

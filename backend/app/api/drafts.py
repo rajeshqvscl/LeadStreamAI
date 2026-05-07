@@ -159,9 +159,11 @@ class RejectRequest(BaseModel):
 
 class BulkDraftRequest(BaseModel):
     lead_ids: List[int]
+    cc: Optional[str] = None
 
 class BulkSendRequest(BaseModel):
     lead_ids: List[int]
+    cc: Optional[str] = None
 
 class BulkActionRequest(BaseModel):
     lead_ids: List[int]
@@ -290,31 +292,26 @@ def get_sender_profile(user_id: Optional[str]) -> dict:
 
 def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     """Appends a premium standardized signature and mandatory unsubscribe link."""
-    base_url = "https://api.qvscl.com"
-    unsubscribe_url = f"{base_url}/api/leads/unsubscribe/{lead_id}"
+    body_text = body.strip()
+    body_lower = body_text.lower()
     
-    body_lower = body.lower().strip()
-    
-    # If the body already has our formal signature marker OR an unsubscribe link, skip parts
-    has_sig = "--" in body and ("regards" in body_lower or "sincerely" in body_lower)
-    has_unsub = "unsubscribe" in body_lower
-    
-    if has_sig and has_unsub:
-        return body
+    # 1. Strip existing signature to allow replacement by the current logged-in user
+    # Look for the formal separator "--"
+    if "--" in body_text:
+        # Check if what follows -- looks like a signature (regards, sincerely, etc.)
+        parts = body_text.rsplit("--", 1)
+        after_sep = parts[1].lower()
+        if any(x in after_sep for x in ["regards", "sincerely", "thanks", "analyst"]):
+            body_text = parts[0].strip()
+            body_lower = body_text.lower()
 
-    # Clean up any trailing sign-offs from the LLM to avoid "Best regards, Best regards,"
+    # 2. Strip any trailing sign-offs to prevent duplication
     sign_offs = ["thanks & regards", "sincerely", "best regards", "thanks,", "regards,", "thanks and regards"]
-    lines = body.strip().split("\n")
-    clean_body_lines = lines[:]
-    
-    for i in range(len(lines) - 1, max(-1, len(lines) - 4), -1):
-        line = lines[i].strip()
-        if not line: continue
-        if any(line.lower().startswith(s) for s in sign_offs):
-            clean_body_lines = lines[:i]
+    for s in sign_offs:
+        if body_lower.endswith(s):
+            body_text = body_text[:-(len(s))].strip()
+            body_lower = body_text.lower()
             break
-    
-    clean_body = "\n".join(clean_body_lines).strip()
 
     name = profile.get('full_name') or profile.get('username') or 'The Team'
     name = " ".join([p.capitalize() for p in name.split()])
@@ -324,14 +321,10 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     
     disclaimer = "Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."
 
-    # Construct the signature parts conditionally
-    unsub_part = "Click here to unsubscribe\n\n" if not has_unsub else ""
-    sig_part = f"--\nThanks & Regards,\n{name},\n{title},\n[LinkedIn]({linkedin})\n{phone}\n\n{disclaimer}" if not has_sig else ""
+    unsub_part = "Click here to unsubscribe\n\n" if "unsubscribe" not in body_lower else ""
+    sig_part = f"--\nThanks & Regards,\n{name},\n{title},\n[LinkedIn]({linkedin})\n{phone}\n\n{disclaimer}"
     
-    if not unsub_part and not sig_part:
-        return body
-        
-    return clean_body + "\n\n" + unsub_part + sig_part
+    return body_text + "\n\n" + unsub_part + sig_part
 
 @router.post("/generate-draft")
 @router.post("/generate-email")
@@ -991,7 +984,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         current_uid = normalize_user_id(user_id)
         
         if user_id:
-            cur.execute("SELECT email, full_name, username, google_id FROM users WHERE id = %s", (current_uid,))
+            cur.execute("SELECT email, full_name, username, google_id, job_title, phone, linkedin_url FROM users WHERE id = %s", (current_uid,))
             u = cur.fetchone()
             if u:
                 sender_email = u['email']
@@ -1002,7 +995,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
                     raise HTTPException(status_code=400, detail="Gmail Not Connected. Please go to Settings and link your Google account to send emails from your own address.")
 
         # 2. Fetch/Prepare Draft
-        cur.execute("SELECT first_name, last_name, email, email_draft FROM leads_raw WHERE id = %s", (draft_id,))
+        cur.execute("SELECT first_name, last_name, email, email_draft, cc_email FROM leads_raw WHERE id = %s", (draft_id,))
         lead = cur.fetchone()
         if not lead:
             from fastapi import HTTPException
@@ -1010,6 +1003,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
 
         draft_content = lead.get('email_draft')
         email = lead.get('email')
+        stored_cc = lead.get('cc_email')
         
         if not email:
             from fastapi import HTTPException
@@ -1050,7 +1044,24 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         except:
             pass
         
-        cc_email = req.cc if req else None
+        cc_email = req.cc if (req and req.cc) else stored_cc
+        
+        # --- NEW: Re-inject Signature of the CURRENT logged-in user ---
+        # This ensures if Yashika approves a draft generated by Admin, her signature is used.
+        profile = {
+            "full_name": sender_name,
+            "job_title": "Analyst", # Default if not found
+            "phone": "8527083798", # Default if not found
+            "linkedin_url": "https://www.linkedin.com/company/qvscl/"
+        }
+        
+        # Try to get more details from profile
+        if u:
+            profile["job_title"] = u.get('job_title') or profile["job_title"]
+            profile["phone"] = u.get('phone') or profile["phone"]
+            profile["linkedin_url"] = u.get('linkedin_url') or profile["linkedin_url"]
+            
+        body = inject_signature(body, profile, draft_id)
         
         success, error_msg = send_email(
             to_email=email,
@@ -1278,9 +1289,11 @@ def approve_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = H
                     WHEN email_draft IS NULL THEN REPLACE(%s, '{{first_name}}', COALESCE(NULLIF(first_name, ''), 'there'))
                     ELSE email_draft 
                 END,
-                email_status = 'APPROVED', updated_at = NOW() 
+                email_status = 'APPROVED', 
+                cc_email = COALESCE(%s, cc_email),
+                updated_at = NOW() 
                 WHERE id IN ({id_format})
-            """, (email_content, *group_ids))
+            """, (email_content, req.cc, *group_ids))
             
             # Log one activity per group/domain
             add_activity_log(None, "BULK_DOMAIN_APPROVE", f"Approved drafts for domain/group {key} ({len(group_ids)} leads)", "admin")
@@ -1383,6 +1396,7 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
 
 class BulkSendRequest(BaseModel):
     lead_ids: list
+    cc: Optional[str] = None
 
 @router.post("/send-selected-batch")
 def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
@@ -1603,10 +1617,11 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
                     UPDATE leads_raw 
                     SET email_draft = %s, 
                         email_status = 'PENDING_APPROVAL', 
+                        cc_email = COALESCE(%s, cc_email),
                         updated_at = NOW(),
                         gmail_draft_id = %s
                     WHERE id = %s
-                """, (resolved_content, gmail_draft_id, lead_item['id']))
+                """, (resolved_content, req.cc, gmail_draft_id, lead_item['id']))
                 
                 total_leads_updated += 1
             
@@ -1641,27 +1656,32 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
             return {"message": "No leads provided"}
             
         # 1. Fetch User Data
-        sender_email = None
-        sender_name = "the team"
-        if user_id:
-            cur.execute("SELECT email, full_name, username FROM users WHERE id = %s", (user_id,))
-            u = cur.fetchone()
-            if u:
-                sender_email = u['email']
-                sender_name = u['full_name'] or u['username']
+        uid = normalize_user_id(user_id)
+        cur.execute("SELECT email, full_name, username, job_title, phone, linkedin_url FROM users WHERE id = %s", (uid,))
+        u = cur.fetchone()
+        
+        sender_email = u['email'] if u else None
+        sender_name = (u['full_name'] or u['username']) if u else "the team"
+        
+        profile = {
+            "full_name": sender_name,
+            "job_title": (u['job_title'] if u else None) or "Analyst",
+            "phone": (u['phone'] if u else None) or "8527083798",
+            "linkedin_url": (u['linkedin_url'] if u else None) or "https://www.linkedin.com/company/qvscl/"
+        }
 
         format_strings = ','.join(['%s'] * len(req.lead_ids))
-        if user_id and user_id.lower() != "admin":
-            where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s"
-            params = tuple(req.lead_ids) + (uid,)
-        elif user_id and user_id.lower() == "admin":
+        if str(user_id).lower() == "admin":
             where_clause = f"WHERE id IN ({format_strings})"
             params = tuple(req.lead_ids)
+        elif uid:
+            where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s"
+            params = tuple(req.lead_ids) + (uid,)
         else:
             where_clause = f"WHERE id IN ({format_strings}) AND user_id IS NULL"
             params = tuple(req.lead_ids)
 
-        cur.execute(f"SELECT id, first_name, email, email_draft, domain, company_name FROM leads_raw {where_clause}", params)
+        cur.execute(f"SELECT id, first_name, email, email_draft, domain, company_name, cc_email FROM leads_raw {where_clause}", params)
         leads = cur.fetchall()
         
         sent_count = 0
@@ -1686,17 +1706,20 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                     parts = email_content.split("\n\n", 1)
                     subject = parts[0].replace("Subject: ", "").strip()
                     body = parts[1].strip() if len(parts) > 1 else ""
+                
+                # RE-INJECT Signature of the CURRENT user
+                final_body = inject_signature(body, profile, lead['id'])
 
                 # Real Dispatch
-                uid_val = normalize_user_id(user_id)
                 success, error_msg = send_email(
                     to_email=lead['email'],
                     subject=subject,
-                    html_content=markdown_to_html(body),
+                    html_content=markdown_to_html(final_body),
                     from_email=sender_email,
                     from_name=sender_name,
                     lead_id=lead['id'],
-                    user_id=int(uid_val)
+                    user_id=int(uid),
+                    cc=req.cc or lead['cc_email']
                 )
 
                 if success:

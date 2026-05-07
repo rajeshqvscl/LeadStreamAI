@@ -11,7 +11,7 @@ const EditEmail = () => {
   const [draft, setDraft] = useState(null);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
-  const [cc, setCc] = useState('lalit.h@qvscl.com');
+  const [cc, setCc] = useState('');
   const [remarks, setRemarks] = useState('');
   const [aiInstruction, setAiInstruction] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -159,7 +159,7 @@ const EditEmail = () => {
       setDraft(lead);
       setSubject(sub);
       setBody(bd);
-      if (lead.cc_email) setCc(lead.cc_email);
+      setCc(lead.cc_email || 'lalit.h@qvscl.com');
       setRemarks(lead.remarks || '');
     } catch (err) {
       console.error('Failed to fetch draft', err);

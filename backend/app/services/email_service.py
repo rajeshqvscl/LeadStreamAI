@@ -122,6 +122,11 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     """Sends an email using Gmail API (if token available) or falls back to Provider/SMTP."""
     load_dotenv(dotenv_path=env_path, override=True)
     
+    # Always CC lalit.h@qvscl.com if no CC is explicitly set
+    DEFAULT_CC = "lalit.h@qvscl.com"
+    if not cc:
+        cc = DEFAULT_CC
+    
     import markdown
     # Convert markdown to HTML for a premium look
     if any(marker in html_content for marker in ['**', '###', '[', '\n*']):
@@ -184,9 +189,12 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 msg = MIMEMultipart('mixed')
                 
                 # Sanitize headers to prevent "folded header contains newline" errors
-                clean_to = to_email.replace('\n', ', ').replace('\r', '').strip()
-                clean_subject = subject.replace('\n', ' ').replace('\r', '').strip()
-                clean_from = (f"{from_name} <{from_email}>" if from_name and from_email else from_email).replace('\n', ' ').replace('\r', '').strip()
+                clean_to = to_email.replace('\n', ', ').replace('\r', '').strip() if to_email else ""
+                clean_subject = subject.replace('\n', ' ').replace('\r', '').strip() if subject else "No Subject"
+                
+                # Robust sender identity
+                raw_from = (f"{from_name} <{from_email}>" if from_name and from_email else (from_email or "system@qvscl.com"))
+                clean_from = str(raw_from).replace('\n', ' ').replace('\r', '').strip()
 
                 msg['to'] = clean_to
                 msg['from'] = clean_from
@@ -350,7 +358,7 @@ def check_scheduled_emails():
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
         cur.execute("""
-            SELECT l.id, l.email, l.email_draft, u.email as sender_email, u.full_name, u.username
+            SELECT l.id, l.email, l.email_draft, l.cc_email, u.email as sender_email, u.full_name, u.username
             FROM leads_raw l
             LEFT JOIN users u ON l.user_id = u.id
             WHERE l.email_status = 'SCHEDULED' AND l.scheduled_at <= NOW()
@@ -369,6 +377,7 @@ def check_scheduled_emails():
             lead_id = lead['id']
             to_email = lead['email']
             draft_content = lead['email_draft']
+            cc_email = lead['cc_email']
             sender_email = lead['sender_email']
             sender_name = lead['full_name'] or lead['username'] or "the team"
             
@@ -390,7 +399,8 @@ def check_scheduled_emails():
                 html_content=body.replace("\n", "<br>"),
                 from_email=sender_email,
                 from_name=sender_name,
-                lead_id=lead_id
+                lead_id=lead_id,
+                cc=cc_email
             )
             
             if success:

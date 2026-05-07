@@ -352,6 +352,7 @@ const BulkSearch = () => {
       {
         Name: 'John Doe',
         email: 'john@example.com',
+        cc: 'manager@example.com',
         company_name: 'Acme Corp',
         linkedin_url: 'https://linkedin.com/in/johndoe',
         Designation: 'Founder & CEO',

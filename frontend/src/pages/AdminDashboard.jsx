@@ -6,7 +6,7 @@ import {
   TrendingUp, BarChart3, Search, Filter,
   Download, MoreHorizontal, ChevronRight,
   Sparkles, ShieldCheck, Mail, ArrowUpRight,
-  Clock, CheckCircle2, AlertCircle, X,
+  Clock, CheckCircle2, AlertCircle, X, AlertTriangle,
   FileText, Briefcase, Zap, Info, DollarSign,
   PieChart as PieIcon, Globe, RefreshCcw, Database
 } from 'lucide-react';
@@ -28,6 +28,27 @@ const AdminDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedLead, setSelectedLead] = useState(null);
+  const [timelineData, setTimelineData] = useState(null);
+  const [isTimelineLoading, setIsTimelineLoading] = useState(false);
+
+  useEffect(() => {
+    if (selectedLead?.id) {
+      const fetchTimeline = async () => {
+        setIsTimelineLoading(true);
+        try {
+          const res = await api.get(`/api/intelligence/leads/${selectedLead.id}/ai-timeline`);
+          setTimelineData(res.data);
+        } catch (err) {
+          console.error('Timeline fetch failed', err);
+        } finally {
+          setIsTimelineLoading(false);
+        }
+      };
+      fetchTimeline();
+    } else {
+      setTimelineData(null);
+    }
+  }, [selectedLead?.id]);
   const [filters, setFilters] = useState({
     type: 'ALL',
     status: 'ALL',
@@ -447,6 +468,19 @@ const AdminDashboard = () => {
                       <div>
                         <div className="flex items-center gap-2 mb-0.5">
                           <div className="text-[14px] font-bold text-white group-hover:text-indigo-400 transition-colors">{lead.first_name} {lead.last_name}</div>
+                          {(() => {
+                            const sevenDays = 7 * 24 * 60 * 60 * 1000;
+                            const isStalled = (Date.now() - new Date(lead.updated_at).getTime()) > sevenDays;
+                            const isFinal = ['Meeting Scheduled', 'REJECTED', 'NOT_INTERESTED'].includes(lead.email_status) || ['MEETING_SCHEDULED', 'NOT_INTERESTED'].includes(lead.reply_intent);
+                            if (isStalled && !isFinal) {
+                              return (
+                                <div className="flex items-center gap-1 px-1.5 py-0.5 bg-rose-500/20 border border-rose-500/30 rounded text-[9px] font-black text-rose-400 animate-pulse">
+                                  <AlertTriangle className="w-2.5 h-2.5" /> STALLED
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                           {lead.country === 'USA' && <span>🇺🇸</span>}
                           {lead.country === 'UK' && <span>🇬🇧</span>}
                           {lead.country === 'India' && <span>🇮🇳</span>}
@@ -695,6 +729,54 @@ const AdminDashboard = () => {
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* AI Deal Story Section */}
+              <div className="mb-12">
+                <div className="flex items-center gap-3 mb-4">
+                  <Sparkles className="w-5 h-5 text-indigo-400" />
+                  <h3 className="text-[12px] font-black text-white uppercase tracking-[0.2em]">AI Deal Story</h3>
+                </div>
+
+                {isTimelineLoading ? (
+                  <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-2xl p-6 animate-pulse">
+                    <div className="h-3 w-3/4 bg-white/10 rounded mb-3" />
+                    <div className="h-3 w-1/2 bg-white/10 rounded mb-3" />
+                    <div className="h-3 w-2/3 bg-white/10 rounded" />
+                  </div>
+                ) : timelineData?.ai_summary ? (
+                  <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-2xl p-6 shadow-xl shadow-indigo-500/5 relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 blur-[60px] rounded-full -mr-16 -mt-16 group-hover:bg-indigo-500/20 transition-all" />
+                    <div className="relative z-10 space-y-3">
+                      {timelineData.ai_summary.split('\n').map((line, i) => (
+                        <div key={i} className="text-[13px] font-bold text-indigo-100 leading-relaxed">
+                          {line}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-6 text-center italic text-slate-500 text-xs">
+                    No story highlights available yet.
+                  </div>
+                )}
+                
+                {/* Event Timeline Visualization */}
+                {timelineData?.full_timeline && (
+                  <div className="mt-8 ml-4 space-y-6 relative">
+                    <div className="absolute left-[-17px] top-2 bottom-2 w-px bg-white/10" />
+                    {timelineData.full_timeline.map((event, i) => (
+                      <div key={i} className="relative pl-6">
+                        <div className="absolute left-[-21px] top-1.5 w-2 h-2 rounded-full bg-indigo-500 border-2 border-[#0d0f16]" />
+                        <div className="flex justify-between items-start mb-1">
+                          <p className="text-[11px] font-black text-white uppercase tracking-wider">{event.action}</p>
+                          <span className="text-[9px] font-bold text-slate-500">{event.date}</span>
+                        </div>
+                        <p className="text-[12px] text-slate-400 font-medium leading-relaxed">{event.details}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Thread History */}

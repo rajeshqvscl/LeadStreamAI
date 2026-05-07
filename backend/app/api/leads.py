@@ -617,42 +617,41 @@ def approve_followup(lead_id: int, user_id: Optional[str] = Header(None, alias="
         if not lead:
             raise HTTPException(status_code=404, detail="Lead not found.")
             
-        draft_content = lead['followup_draft']
+        from app.api.drafts import get_sender_profile, inject_signature
+        profile = get_sender_profile(user_id)
         
-        # If draft is missing, generate it on the fly
-        if not draft_content:
+        # If draft exists but belongs to someone else (or no sig), re-inject
+        body_text = lead['followup_draft'] or ""
+        
+        # If draft is missing, generate it
+        if not body_text:
             from app.services.llm_services import LLMService
-            from app.api.drafts import get_sender_profile, inject_signature
-            
             llm = LLMService()
             lead_name = f"{lead.get('first_name') or ''} {lead.get('last_name') or ''}".strip() or "there"
             original_content = lead.get('last_outreach_body') or lead.get('email_draft') or "our previous outreach"
             stage = (lead['followup_stage'] or 0) + 1
-            
-            ai_body = llm.generate_followup(lead_name, original_content, stage)
-            profile = get_sender_profile(user_id)
-            draft_content = inject_signature(ai_body, profile, lead_id)
-            
-            # Save it for reference
-            cur.execute("UPDATE leads_raw SET followup_draft = %s WHERE id = %s", (draft_content, lead_id))
-            conn.commit()
+            body_text = llm.generate_followup(lead_name, original_content, stage)
 
-        # Send Email
-        from app.services.email_service import send_email
-        # Parse subject/body from draft if needed, or use a default
+        # RE-INJECT SIGNATURE of the CURRENT user
+        # This ensures if Sravanthi approves a draft Yashika generated, Sravanthi's signature is used.
+        final_body = inject_signature(body_text, profile, lead_id)
+        
+        # Parse subject/body from draft if needed
         subject = "Following up"
-        body = draft_content
+        body = final_body
         
         if "Subject: " in body:
             parts = body.split("\n\n", 1)
             subject = parts[0].replace("Subject: ", "").strip()
             body = parts[1] if len(parts) > 1 else body
             
+        from app.services.email_service import send_email
         success = send_email(
             to_email=lead['email'],
             subject=subject,
             html_content=body,
-            user_id=uid
+            user_id=uid,
+            cc=lead.get('cc_email')
         )
         
         if success:
@@ -666,7 +665,7 @@ def approve_followup(lead_id: int, user_id: Optional[str] = Header(None, alias="
                     last_outreach_body = %s,
                     updated_at = NOW()
                 WHERE id = %s
-            """, (next_stage, draft_content, lead_id))
+            """, (next_stage, final_body, lead_id))
             
             from app.models.lead import add_activity_log
             add_activity_log(lead_id, "FOLLOWUP_SENT", f"Stage {next_stage} follow-up sent after manual approval", get_user_name(user_id))
@@ -1035,6 +1034,8 @@ def bulk_import(
             persona = norm_lead.get("persona") or norm_lead.get("category") or "OTHER"
             phone = norm_lead.get("phone") or norm_lead.get("phonenumber") or norm_lead.get("mobile")
             
+            cc_email = norm_lead.get("ccemail") or norm_lead.get("cc") or norm_lead.get("carboncopy")
+            
             # Map Sector/Industry
             sector = (
                 norm_lead.get("sector") or 
@@ -1060,9 +1061,9 @@ def bulk_import(
                     INSERT INTO leads_raw (
                         first_name, last_name, email, company_name, linkedin_url, 
                         city, country, persona, phone, source, user_id, 
-                        raw_payload, remarks, designation, sector, lead_type
+                        raw_payload, remarks, designation, sector, lead_type, cc_email
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (email, COALESCE(user_id, -1)) DO UPDATE SET
                         first_name = EXCLUDED.first_name,
                         last_name = EXCLUDED.last_name,
@@ -1078,11 +1079,12 @@ def bulk_import(
                         remarks = COALESCE(EXCLUDED.remarks, leads_raw.remarks),
                         designation = COALESCE(EXCLUDED.designation, leads_raw.designation),
                         sector = COALESCE(EXCLUDED.sector, leads_raw.sector),
-                        lead_type = COALESCE(EXCLUDED.lead_type, leads_raw.lead_type)
+                        lead_type = COALESCE(EXCLUDED.lead_type, leads_raw.lead_type),
+                        cc_email = COALESCE(EXCLUDED.cc_email, leads_raw.cc_email)
                 """, (
                     f_name, l_name, email, company, linkedin, 
                     city, country, persona, phone, "csv_import", db_user_id, 
-                    json.dumps(lead), lead.get("remarks", ""), designation, sector, lead_type
+                    json.dumps(lead), lead.get("remarks", ""), designation, sector, lead_type, cc_email
                 ))
                 if cur.rowcount > 0:
                     inserted += 1
