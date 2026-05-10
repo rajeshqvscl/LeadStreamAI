@@ -32,6 +32,8 @@ const AdminDashboard = () => {
   const [isTimelineLoading, setIsTimelineLoading] = useState(false);
   const [ragStats, setRagStats] = useState(null);
   const [isRagLoading, setIsRagLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState({ total: 0, pages: 1, limit: 50 });
 
   useEffect(() => {
     if (selectedLead?.id) {
@@ -68,17 +70,24 @@ const AdminDashboard = () => {
   };
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    fetchData(currentPage);
+  }, [currentPage]);
 
-  const fetchData = async () => {
+  const fetchData = async (page = 1) => {
     try {
       setLoading(true);
       const [leadsRes, statsRes] = await Promise.all([
-        api.get('/api/admin/leads/all'),
+        api.get(`/api/admin/leads/all?page=${page}&limit=50`),
         api.get('/api/admin/stats/global')
       ]);
-      setLeads(leadsRes.data || []);
+      
+      if (leadsRes.data.leads) {
+        setLeads(leadsRes.data.leads);
+        setPagination(leadsRes.data.pagination);
+      } else {
+        setLeads(leadsRes.data || []);
+      }
+      
       setStats(statsRes.data || {});
       
       // Fetch RAG Debug Stats
@@ -456,6 +465,14 @@ const AdminDashboard = () => {
 
       {/* Main Database Table */}
       <div className="bg-[#0f111a] border border-white/5 rounded-[32px] overflow-hidden shadow-2xl relative">
+        {loading && leads.length > 0 && (
+          <div className="absolute inset-0 z-[20] bg-black/20 backdrop-blur-[2px] flex items-center justify-center">
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-8 h-8 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
+              <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Updating...</span>
+            </div>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -663,6 +680,46 @@ const AdminDashboard = () => {
             <div className="p-20 text-center">
               <Search className="w-12 h-12 text-slate-700 mx-auto mb-4" />
               <div className="text-slate-500 font-bold uppercase tracking-widest">No matching leads found across the workspace</div>
+            </div>
+          )}
+
+          {/* Pagination Controls */}
+          {pagination.pages > 1 && (
+            <div className="flex items-center justify-between p-6 border-t border-white/5 bg-[#0d0f16]/50">
+              <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                Showing <span className="text-white">{((currentPage - 1) * pagination.limit) + 1}</span> to <span className="text-white">{Math.min(currentPage * pagination.limit, pagination.total)}</span> of <span className="text-white">{pagination.total}</span> leads
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1 || loading}
+                  className="px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black text-slate-400 uppercase tracking-widest hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                >
+                  Previous
+                </button>
+                <div className="flex items-center gap-1">
+                  {[...Array(Math.min(5, pagination.pages))].map((_, i) => {
+                    const pageNum = i + 1;
+                    return (
+                      <button
+                        key={pageNum}
+                        onClick={() => setCurrentPage(pageNum)}
+                        disabled={loading}
+                        className={`w-8 h-8 rounded-lg text-[10px] font-black transition-all cursor-pointer ${currentPage === pageNum ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 hover:bg-white/5 hover:text-white disabled:opacity-50'}`}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(pagination.pages, prev + 1))}
+                  disabled={currentPage === pagination.pages || loading}
+                  className="px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black text-slate-400 uppercase tracking-widest hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                >
+                  Next
+                </button>
+              </div>
             </div>
           )}
         </div>

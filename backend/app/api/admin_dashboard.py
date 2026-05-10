@@ -43,10 +43,13 @@ def normalize_user_id(uid):
     except: return uid
 
 @router.get("/leads/all")
-def get_all_leads_admin(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_all_leads_admin(
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    page: int = 1,
+    limit: int = 50
+):
     """
-    Returns ALL leads from ALL users in the database.
-    Only accessible by 'admin' role.
+    Returns paginated leads for the admin dashboard.
     """
     # Simple role check (In a real app, this would check a 'role' column in users table)
     # For now, we use the 'admin' convention or user_id=1 as admin.
@@ -63,18 +66,35 @@ def get_all_leads_admin(user_id: Optional[str] = Header(None, alias="X-User-Id")
              if user_id != 'admin':
                 raise HTTPException(status_code=403, detail="Admin access required")
 
+        offset = (page - 1) * limit
 
-        # 2. Fetch all leads with owner names
+        # 2. Fetch leads with only needed columns (reduce memory)
         query = """
-            SELECT l.*, u.username as owner_name, u.full_name as owner_full_name
+            SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.company_name, l.designation, 
+                   l.sector, l.lead_type, l.reply_intent, l.sentiment_score, l.deal_size,
+                   l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
+                   u.username as owner_name
             FROM leads_raw l
             LEFT JOIN users u ON l.user_id = u.id
             ORDER BY l.updated_at DESC
+            LIMIT %s OFFSET %s
         """
-        cur.execute(query)
+        cur.execute(query, (limit, offset))
         leads = cur.fetchall()
         
-        return [dict(l) for l in leads]
+        # Get total count for pagination UI
+        cur.execute("SELECT COUNT(*) FROM leads_raw")
+        total_count = cur.fetchone()[0]
+        
+        return {
+            "leads": [dict(l) for l in leads],
+            "pagination": {
+                "total": total_count,
+                "page": page,
+                "limit": limit,
+                "pages": (total_count + limit - 1) // limit
+            }
+        }
         
     except Exception as e:
         logger.error("admin_all_leads_error", error=str(e))
@@ -183,7 +203,7 @@ def get_global_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
                 SELECT id, company_name, designation, raw_payload->>'remarks' as remarks, sector, lead_type 
                 FROM leads_raw 
                 WHERE UPPER(COALESCE(sector, '')) IN ('INVESTOR', 'CLIENT', 'OTHER', '')
-                LIMIT 50
+                LIMIT 20
             """)
             to_fix = cur.fetchall()
             
