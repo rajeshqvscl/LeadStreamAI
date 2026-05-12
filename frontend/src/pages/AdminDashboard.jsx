@@ -63,21 +63,35 @@ const AdminDashboard = () => {
   const [selectedLeadIds, setSelectedLeadIds] = useState(new Set());
   const [isBulkActionLoading, setIsBulkActionLoading] = useState(false);
   const [notification, setNotification] = useState(null);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Debounce Search Term
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm), 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
     setTimeout(() => setNotification(null), 5000);
   };
 
-  useEffect(() => {
-    fetchData(currentPage);
-  }, [currentPage]);
+  const stripHtml = (html) => {
+    if (!html) return "";
+    return html.replace(/<[^>]*>?/gm, '');
+  };
 
-  const fetchData = async (page = 1) => {
+  const fetchData = async (page = 1, silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
+      const params = new URLSearchParams({
+        page: page,
+        limit: 50,
+        ...filters,
+        search: debouncedSearch || ''
+      });
       const [leadsRes, statsRes] = await Promise.all([
-        api.get(`/api/admin/leads/all?page=${page}&limit=50`),
+        api.get(`/api/admin/leads/all?${params.toString()}`),
         api.get('/api/admin/stats/global')
       ]);
       
@@ -91,7 +105,7 @@ const AdminDashboard = () => {
       setStats(statsRes.data || {});
       
       // Fetch RAG Debug Stats
-      setIsRagLoading(true);
+      if (!silent) setIsRagLoading(true);
       const debugRes = await api.get('/api/intelligence/admin/rag-debug');
       setRagStats(debugRes.data);
     } catch (err) {
@@ -102,25 +116,25 @@ const AdminDashboard = () => {
     }
   };
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters, debouncedSearch]);
+
+  useEffect(() => {
+    fetchData(currentPage);
+
+    // Auto-refresh interval
+    const pollId = setInterval(() => {
+      fetchData(currentPage, true);
+    }, 20000);
+
+    return () => clearInterval(pollId);
+  }, [currentPage, filters, debouncedSearch]);
+
   const filteredLeads = useMemo(() => {
-    return leads.filter(l => {
-      const matchesSearch = !searchTerm || [
-        l.first_name, 
-        l.last_name, 
-        l.company_name, 
-        l.email,
-        l.designation
-      ].some(val => val?.toLowerCase().includes(searchTerm.toLowerCase()));
- 
-      const matchesType = filters.type === 'ALL' || l.lead_type?.toUpperCase() === filters.type;
-      const matchesSector = !filters.sector || filters.sector === 'ALL' || l.sector?.toUpperCase() === filters.sector?.toUpperCase();
-      const matchesStatus = filters.status === 'ALL' || l.email_status === filters.status;
-      const matchesIntent = filters.intent === 'ALL' || l.reply_intent === filters.intent;
-      const matchesOwner = filters.owner === 'ALL' || l.owner_name === filters.owner;
- 
-      return matchesSearch && matchesType && matchesSector && matchesStatus && matchesIntent && matchesOwner;
-    });
-  }, [leads, searchTerm, filters]);
+    // Backend now handles filtering, so we just return the leads state
+    return leads;
+  }, [leads]);
 
   const owners = useMemo(() => {
     return ['ALL', ...new Set(leads.map(l => l.owner_name).filter(Boolean))];
@@ -491,7 +505,8 @@ const AdminDashboard = () => {
                     }}
                   />
                 </th>
-                  <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Name & Company</th>
+                  <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Name</th>
+                  <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Company</th>
                 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Email Address</th>
                 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Type</th>
                 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Sector</th>
@@ -532,9 +547,9 @@ const AdminDashboard = () => {
                           {lead.first_name?.[0]}{lead.last_name?.[0] || lead.first_name?.[1] || ''}
                         </span>
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <div className="text-[14px] font-bold text-white group-hover:text-indigo-400 transition-colors">{lead.first_name} {lead.last_name}</div>
+                      <div className="flex flex-col gap-0.5">
+                        <div className="text-[14px] font-bold text-white group-hover:text-indigo-400 transition-colors truncate max-w-[150px]">{lead.first_name} {lead.last_name}</div>
+                        <div className="flex items-center gap-2">
                           {(() => {
                             const sevenDays = 7 * 24 * 60 * 60 * 1000;
                             const isStalled = (Date.now() - new Date(lead.updated_at).getTime()) > sevenDays;
@@ -554,8 +569,12 @@ const AdminDashboard = () => {
                           {lead.country === 'UAE' && <span>🇦🇪</span>}
                           {lead.country === 'Singapore' && <span>🇸🇬</span>}
                         </div>
-                        <div className="text-[11px] font-medium text-slate-500">{lead.company_name || lead.family_office_name}</div>
                       </div>
+                    </div>
+                  </td>
+                  <td className="px-2 py-2">
+                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-tighter truncate max-w-[150px]">
+                      {lead.company_name || lead.family_office_name || '—'}
                     </div>
                   </td>
                   <td className="px-2 py-2">
@@ -565,10 +584,20 @@ const AdminDashboard = () => {
                     </div>
                   </td>
                   <td className="px-2 py-2">
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${lead.lead_type?.toUpperCase() === 'INVESTOR' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-white/5 border-white/10 text-slate-400'}`}>
-                      {lead.lead_type?.toUpperCase() === 'INVESTOR' ? <Target className="w-3 h-3" /> : <Users className="w-3 h-3" />}
-                      {lead.lead_type || 'CLIENT'}
-                    </span>
+                    {(() => {
+                      const name = (lead.owner_name || '').toLowerCase();
+                      const isInvestorTeam = name.includes('yashika') || name.includes('kajal') || name.includes('ayush');
+                      const isClientTeam = name.includes('palak');
+                      const derivedType = isInvestorTeam ? 'INVESTOR' : isClientTeam ? 'CLIENT' : (lead.lead_type || 'CLIENT');
+                      const isInvestor = derivedType.toUpperCase() === 'INVESTOR';
+                      
+                      return (
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${isInvestor ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-white/5 border-white/10 text-slate-400'}`}>
+                          {isInvestor ? <Target className="w-3 h-3" /> : <Users className="w-3 h-3" />}
+                          {derivedType}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className="px-2 py-2">
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-indigo-500/5 border border-indigo-500/20 text-indigo-400">
@@ -616,7 +645,7 @@ const AdminDashboard = () => {
                           <span className="text-[9px] font-black text-rose-400 uppercase tracking-widest">Rejected ({lead.deal_size || 'N/A'})</span>
                         </div>
                         <div className="text-[10px] font-medium text-slate-400 max-w-[200px] line-clamp-2 italic">
-                          "{lead.rag_advice?.split('.')[0].substring(0, 80)}..."
+                          "{stripHtml(lead.rag_advice).split('.')[0].substring(0, 80)}..."
                         </div>
                       </div>
                     ) : (
@@ -642,9 +671,14 @@ const AdminDashboard = () => {
                     </div>
                   </td>
                   <td className="px-2 py-2">
-                    <div className="flex items-center gap-2 text-slate-500">
-                      <Clock className="w-3.5 h-3.5" />
-                      <span className="text-[11px] font-medium">{new Date(lead.updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</span>
+                    <div className="flex flex-col items-end gap-0.5 text-slate-500">
+                      <div className="flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-slate-600" />
+                        <span className="text-[11px] font-black text-slate-400 uppercase">{new Date(lead.updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</span>
+                      </div>
+                      <span className="text-[9px] font-bold text-slate-600 tracking-tighter">
+                        {new Date(lead.updated_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                      </span>
                     </div>
                   </td>
                   <td className="px-3 py-5 text-right">
@@ -727,14 +761,14 @@ const AdminDashboard = () => {
 
       {/* Detail Side Panel */}
       {selectedLead && (
-        <div className="fixed inset-0 z-50 flex justify-end">
+        <div className="fixed inset-0 z-[1000] flex justify-end">
           <div
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity"
             onClick={() => setSelectedLead(null)}
           ></div>
-          <div className="relative w-full max-w-2xl bg-[#0d0f16] h-full shadow-2xl border-l border-white/5 flex flex-col animate-slide-in">
+          <div className="relative w-full max-w-2xl bg-[#0d0f16] h-full shadow-2xl border-l border-white/5 flex flex-col animate-slide-in overflow-hidden">
             {/* Panel Header */}
-            <div className="p-8 border-b border-white/5 flex justify-between items-start">
+            <div className="sticky top-0 z-20 bg-[#0d0f16]/90 backdrop-blur-xl p-8 border-b border-white/5 flex justify-between items-start">
               <div>
                 <div className="flex items-center gap-3 mb-4">
                   <div className="px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-full text-[9px] font-black text-indigo-400 uppercase tracking-widest">
@@ -751,7 +785,7 @@ const AdminDashboard = () => {
               </div>
               <button
                 onClick={() => setSelectedLead(null)}
-                className="p-2 hover:bg-white/5 rounded-xl transition-all text-slate-500 hover:text-white border border-transparent hover:border-white/10"
+                className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl transition-all text-slate-400 hover:text-white border border-white/5"
               >
                 <X className="w-6 h-6" />
               </button>

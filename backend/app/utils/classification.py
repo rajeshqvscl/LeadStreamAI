@@ -1,9 +1,17 @@
 # app/utils/classification.py
 
-def infer_lead_classification(company_name, designation, remarks, current_sector=None):
+def infer_lead_classification(company_name, designation, remarks, current_sector=None, owner_name=None):
     """
-    Unified logic to determine lead_type and sector based on keywords.
+    Unified logic to determine lead_type and sector based on keywords and owner assignments.
     """
+    # 0. Owner-based Priority (High Priority Rule)
+    if owner_name:
+        o_name = owner_name.lower()
+        if any(x in o_name for x in ['yashika', 'kajal', 'ayush']):
+            return "INVESTOR", (current_sector or "Investor - General")
+        if 'palak' in o_name:
+            return "CLIENT", (current_sector or "Other")
+
     text = f"{company_name or ''} {designation or ''} {remarks or ''}".lower()
     
     # 1. Determine Type - More specific investor types

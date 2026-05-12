@@ -24,28 +24,33 @@ async def auto_enrich_sectors(user_id: Optional[str] = Header(None, alias="X-Use
         conn = get_db_connection()
         cur = conn.cursor()
         
-        # 1. Fetch all leads that need classification or are currently unrefined
-        cur.execute("SELECT id, company_name, designation, remarks, sector, lead_type FROM leads_raw")
+        # 1. Fetch all leads that need classification or are currently unrefined, with owner name
+        cur.execute("""
+            SELECT l.id, l.company_name, l.designation, l.remarks, l.sector, l.lead_type, u.username 
+            FROM leads_raw l
+            LEFT JOIN users u ON l.user_id = u.id
+        """)
         leads = cur.fetchall()
         
         updated_count = 0
-        for lid, company, designation, remarks, current_sector, current_type in leads:
+        for lid, company, designation, remarks, current_sector, current_type, owner_name in leads:
             from app.utils.classification import infer_lead_classification
-            new_type, new_sector = infer_lead_classification(company, designation, remarks, current_sector)
+            new_type, new_sector = infer_lead_classification(company, designation, remarks, current_sector, owner_name)
             
-            # Update logic for Type
-            type_changed = False
+            updates = []
+            params = []
+            
             if new_type != current_type:
-                cur.execute("UPDATE leads_raw SET lead_type = %s WHERE id = %s", (new_type, lid))
-                type_changed = True
+                updates.append("lead_type = %s")
+                params.append(new_type)
                 
-            # Update logic for Sector
-            sector_changed = False
             if new_sector != current_sector:
-                cur.execute("UPDATE leads_raw SET sector = %s WHERE id = %s", (new_sector, lid))
-                sector_changed = True
+                updates.append("sector = %s")
+                params.append(new_sector)
                 
-            if type_changed or sector_changed:
+            if updates:
+                params.append(lid)
+                cur.execute(f"UPDATE leads_raw SET {', '.join(updates)}, updated_at = NOW() WHERE id = %s", tuple(params))
                 updated_count += 1
                 
         conn.commit()
@@ -299,7 +304,7 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
                     rag_data = process_res.json()
                     logger.info(f"RAG process response: {rag_data}")
                     
-# Check if insights are in direct response
+                    # Check if insights are in direct response
                     insights = rag_data.get('insights') or rag_data.get('summary')
                     if insights:
                         # Format verdict properly
@@ -360,59 +365,6 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
                             "verdict": verdict,
                             "full_insights": rag_data
                         }
-                    elif not rag_item_id:
-                        # No insights and no ID - use text fallback
-                        pass
-            elif not file_data:
-                            # 2. Polling loop
-                            import time
-                            max_polls = 30
-                            for poll in range(max_polls):
-                                logger.info(f"Polling RAG status for ID {rag_item_id} (Attempt {poll+1}/30)...")
-                                status_res = s.get(f"{rag_url}/status/{rag_item_id}", timeout=60, verify=False)
-                                if status_res.status_code == 200:
-                                    status_data = status_res.json()
-                                    logger.info(f"RAG status response: {status_data}")
-                                    current_status = status_data.get('status', '').lower()
-                                    
-                                    if current_status == 'completed' or current_status == 'success':
-                                        insights = status_data.get('insights', {})
-                                        logger.info(f"RAG insights: {insights}")
-                                        if insights:
-                                            rag_advice = f"### RAG VERDICT\n{insights.get('verdict', 'N/A')}\n\n"
-                                            rag_advice += f"### SUMMARY\n{insights.get('summary', 'N/A')}\n\n"
-                                            
-                                            if insights.get('actuals'):
-                                                rag_advice += "### ACTUALS & METRICS\n"
-                                                for k, v in insights.get('actuals', {}).items():
-                                                    rag_advice += f"- {k.replace('_', ' ').title()}: {v}\n"
-                                                rag_advice += "\n"
-                                            
-                                            if insights.get('strategy'):
-                                                rag_advice += "### STRATEGY RECOMMENDATION\n"
-                                                strat = insights.get('strategy', {})
-                                                rag_advice += f"- Priority: {strat.get('priority', 'MEDIUM')}\n"
-                                                rag_advice += f"- Approach: {strat.get('approach', 'N/A')}\n\n"
-
-                                            rag_category = (insights.get('type') or insights.get('category') or 'INVESTOR').upper()
-                                            
-                                            rag_intel = {
-                                                "answer": rag_advice,
-                                                "source": "Pure Llama 3.1 (RAG Engine)",
-                                                "category": rag_category,
-                                                "sentiment_score": insights.get('score', 80),
-                                                "urgency_level": insights.get('strategy', {}).get('priority', 'MEDIUM').upper(),
-                                                "strategy": insights.get('strategy', {}),
-                                                "actuals": insights.get('actuals', {}),
-                                                "signals": insights.get('breakdown', {}),
-                                                "key_signals": insights.get('key_signal'),
-                                                "verdict": insights.get('verdict'),
-                                                "full_insights": insights
-                                            }
-                                            break
-                                    elif current_status == 'failed':
-                                        break
-                                time.sleep(10)
             else:
                 # 1. RAG Processing (Text Fallback)
                 import io
@@ -440,19 +392,18 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
                 
                 Return ONLY a JSON object with this exact structure:
                 {{
-                  "verdict": "Clear recommendation",
-                  "summary": "Brief summary",
-                  "actuals": {{"revenue": "₹89L", "orders": "7,000+", "margin": "~70%"}},
-                  "strategy": {{"priority": "HIGH", "next_step": "Schedule Call", "reason": "Strong traction"}},
-                  "key_signals": "Signals extracted...",
-                  "score": 85
+                  "verdict": "Detailed recommendation based on context",
+                  "summary": "Summary of business potential",
+                  "actuals": {{"revenue": "Extracted value or 'Not disclosed'", "orders": "Extracted value or 'Not disclosed'", "margin": "Extracted value or 'Not disclosed'"}},
+                  "strategy": {{"priority": "HIGH/MEDIUM/LOW", "next_step": "Specific action", "reason": "Rationale"}},
+                  "key_signals": "Specific business signals",
+                  "score": 0-100
                 }}
                 """
                 from app.services.llm_services import EmailGenerator
                 gen = EmailGenerator()
                 raw_res = gen._call_llm(prompt)
                 try:
-                    import json
                     structured = json.loads(raw_res)
                     rag_advice = f"### RAG VERDICT\n{structured.get('verdict')}\n\n### SUMMARY\n{structured.get('summary')}"
                     rag_intel = structured
@@ -469,16 +420,18 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
                 "strategy": {"priority": "LOW", "next_step": "Retry Analysis"}
             }
 
-        # --- INTEGRATE AGENT SERVICE (NEW) ---
+        # --- INTEGRATE AGENT SERVICE (ENHANCED) ---
         try:
             from app.services.agent_service import AgentService
             agent = AgentService()
             
-            # Detect contradictions
-            contradictions = agent.detect_contradictions(lead, rag_intel)
-            rag_intel["contradictions"] = contradictions
+            # 1. Detect contradictions between DB and RAG
+            contradictions = agent.detect_contradictions(dict(lead), rag_intel)
+            if contradictions:
+                rag_intel["contradictions"] = contradictions
+                rag_advice += f"\n\n### CONTRADICTIONS DETECTED\n- " + "\n- ".join(contradictions)
             
-            # Generate Deep Report
+            # 2. Generate Deep Autonomous Report
             deep_report = agent.generate_autonomous_report(lead_id)
             rag_intel["deep_report"] = deep_report
             
@@ -486,7 +439,7 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
             logger.error(f"Agent Service Error: {agent_err}")
             rag_intel["agent_error"] = str(agent_err)
 
-        # Generate a fresh, RAG-backed draft immediately
+        # 3. Generate a fresh, RAG-backed draft immediately
         try:
             from app.services.llm_services import EmailGenerator
             generator = EmailGenerator()
@@ -499,21 +452,6 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
                 rag_intel["subject"] = fresh_draft.get('subject')
         except Exception as draft_err:
             logger.warning(f"Failed to generate immediate RAG draft: {draft_err}")
-
-        # --- CONTRADICTION DETECTION & REPORTING ---
-        try:
-            from app.services.agent_service import AgentService
-            agent = AgentService()
-            contradictions = agent.detect_contradictions(dict(lead), rag_intel)
-            if contradictions:
-                rag_intel["contradictions"] = contradictions
-                rag_advice += f"\n\n### CONTRADICTIONS DETECTED\n- " + "\n- ".join(contradictions)
-            
-            # Auto-generate a deep report
-            deep_report = agent.generate_autonomous_report(lead_id)
-            rag_intel["deep_report"] = deep_report
-        except Exception as agent_err:
-            logger.warning(f"Agent analysis failed: {agent_err}")
 
         # Update DB
         rag_intel_json = json.dumps(rag_intel)

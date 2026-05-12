@@ -5,10 +5,14 @@ import {
   Layout, ShieldAlert, ShieldCheck, Target, Info, Zap,
   BarChart3, Activity, Layers, MessageSquare,
   GitCompare, ArrowUpRight, Terminal, SearchCode,
-  Network, History as HistoryIcon
+  Network, History as HistoryIcon, TrendingUp, Building2
 } from 'lucide-react';
 import api from '../services/api';
 import ReactMarkdown from 'react-markdown';
+import {
+  ResponsiveContainer, AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie,
+  XAxis, YAxis, CartesianGrid, Tooltip, Cell, Legend
+} from 'recharts';
 
 const Citation = ({ text }) => (
   <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-[9px] font-black text-indigo-400 uppercase tracking-tighter mx-0.5 cursor-help hover:bg-indigo-500/20 transition-colors">
@@ -40,6 +44,34 @@ const DealIntelligence = () => {
   const [cloudFeature, setCloudFeature] = useState(null);
   const [cloudOutput, setCloudOutput] = useState(null);
   const [showDebug, setShowDebug] = useState(false);
+  const [pdfFilter, setPdfFilter] = useState('with_pdf'); // 'with_pdf' or 'all'
+  const [pitchMode, setPitchMode] = useState('general');
+  const [demoDataLoaded, setDemoDataLoaded] = useState(false);
+  const [chartType, setChartType] = useState('bar');
+  const [chartMetric, setChartMetric] = useState('revenue');
+  const [darkMode, setDarkMode] = useState(true);
+
+  const pitchBranding = {
+    general: { title: 'INBOUND REVERT PROCESSOR', button: 'Analyze Pitch Deck', agentTitle: 'AGENT INTELLIGENCE' },
+    investor: { title: 'DUE DILIGENCE ANALYZER', button: 'Launch Investment Analyst', agentTitle: 'INVESTMENT SIGNALS' },
+    enterprise: { title: 'DECISION INTELLIGENCE ENGINE', button: 'Launch Due Diligence', agentTitle: 'ENTERPRISE INSIGHTS' },
+    technical: { title: 'RESEARCH INTELLIGENCE PIPELINE', button: 'Run Multi-Agent', agentTitle: 'AGENT ORCHESTRATION' }
+  };
+
+  const demoFinancialData = {
+    years: ['FY21', 'FY22', 'FY23', 'FY24', 'FY25', 'FY26'],
+    revenue: [2.5, 4.2, 7.8, 12.5, 18.2, 25.0],
+    growth: [45, 68, 86, 60, 46, 37],
+    orders: [12000, 18500, 32000, 58000, 85000, 120000]
+  };
+
+  // Filter deals based on PDF presence
+  const filteredDeals = deals.filter(deal => {
+    if (pdfFilter !== 'with_pdf') return true;
+    const ragIntel = deal.rag_intelligence || {};
+    const hasPdf = deal.pitch_deck_url || ragIntel.filename;
+    return hasPdf;
+  });
 
   // Handle cloud feature clicks
   useEffect(() => {
@@ -107,6 +139,46 @@ const DealIntelligence = () => {
             }).then(r => r.json());
             setCloudOutput(data);
             break;
+          case 'hybrid':
+            data = await fetch(`${baseUrl}/search/hybrid`, {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({query: 'investment trends 2025'})
+            }).then(r => r.json());
+            setCloudOutput(data);
+            break;
+          case 'pitch':
+            data = await fetch(`${baseUrl}/pitch/config?mode=general`).then(r => r.json());
+            setCloudOutput(data);
+            break;
+          case 'deck_types':
+            data = await fetch(`${baseUrl}/analysis/deck-types`).then(r => r.json());
+            setCloudOutput(data);
+            break;
+          case 'tables':
+            data = await fetch(`${baseUrl}/documents/tables`).then(r => r.json());
+            setCloudOutput(data);
+            break;
+          case 'quick_compare':
+            data = await fetch(`${baseUrl}/documents/available`).then(r => r.json());
+            setCloudOutput(data);
+            break;
+          case 'investors':
+            data = await fetch(`${baseUrl}/investors`).then(r => r.json());
+            setCloudOutput(data);
+            break;
+          case 'clients':
+            data = await fetch(`${baseUrl}/clients`).then(r => r.json());
+            setCloudOutput(data);
+            break;
+          case 'library':
+            data = await fetch(`${baseUrl}/library`).then(r => r.json());
+            setCloudOutput(data);
+            break;
+          case 'automation':
+            data = await fetch(`${baseUrl}/automation/daily`, { method: 'POST' }).then(r => r.json());
+            setCloudOutput({status: 'Automation triggered', result: data});
+            break;
           default:
             setCloudOutput({message: `Feature: ${cloudFeature} - API connected`});
         }
@@ -142,6 +214,7 @@ const DealIntelligence = () => {
 
   const selectedDeal = deals.find(d => d.id === selectedDealId);
   const ragIntel = selectedDeal?.rag_intelligence || {};
+  const hasPdf = selectedDeal?.pitch_deck_url;
   
   // LOGIC FIX: Ensure we find the score anywhere it might be hiding
   const displayScore = ragIntel.sentiment_score || ragIntel.score || selectedDeal?.sentiment_score || 0;
@@ -340,9 +413,25 @@ return (
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-6 custom-scrollbar">
-          <div className="text-[8px] font-black text-slate-700 uppercase tracking-widest mb-4 px-1">Inbound Stream</div>
+          <div className="flex items-center justify-between mb-4 px-1">
+            <div className="text-[8px] font-black text-slate-700 uppercase tracking-widest">Inbound Stream</div>
+            <div className="flex items-center gap-2 bg-[#0d1117] rounded-lg p-1 border border-white/5">
+              <button
+                onClick={() => setPdfFilter('with_pdf')}
+                className={`px-3 py-1.5 rounded-md text-[9px] font-black uppercase tracking-widest transition-all ${pdfFilter === 'with_pdf' ? 'bg-emerald-600 text-white' : 'text-slate-500 hover:text-white'}`}
+              >
+                With PDF
+              </button>
+              <button
+                onClick={() => setPdfFilter('all')}
+                className={`px-3 py-1.5 rounded-md text-[9px] font-black uppercase tracking-widest transition-all ${pdfFilter === 'all' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-white'}`}
+              >
+                All
+              </button>
+            </div>
+          </div>
           <div className="space-y-2">
-            {deals.map(deal => (
+            {filteredDeals.map(deal => (
                 <div 
                   key={deal.id}
                   onClick={() => {
@@ -374,8 +463,17 @@ return (
                     </h3>
                     <span className="text-[9px] font-black text-slate-500 uppercase">{deal.updated_at ? new Date(deal.updated_at).toLocaleDateString() : ''}</span>
                   </div>
-                  <p className="text-[10px] text-slate-500 truncate mb-3">{deal.email}</p>
-                  
+<p className="text-[10px] text-slate-500 truncate mb-2">{deal.email}</p>
+                  {(deal.pitch_deck_url || deal.rag_intelligence?.filename) && (
+                    <div className="flex items-center gap-2 mb-3 max-w-full">
+                      <span className="flex items-center gap-1 px-2 py-1 rounded bg-emerald-500/10 border border-emerald-500/20 text-[8px] font-black text-emerald-400 uppercase truncate max-w-full overflow-hidden">
+                        <FileText className="w-2.5 h-2.5 shrink-0" />
+                        <span className="truncate">
+                          {deal.rag_intelligence?.filename || deal.pitch_deck_url?.split('/').pop()?.split('?')[0] || 'PDF'}
+                        </span>
+                      </span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2">
                     <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${
                       deal.reply_intent === 'MEETING_REQUESTED' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
@@ -389,8 +487,18 @@ return (
             ))}
           </div>
 
+          {/* No Results Message */}
+          {filteredDeals.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <FileText className="w-12 h-12 text-slate-700 mb-4" />
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                {pdfFilter === 'with_pdf' ? 'No deals with PDF attachments' : 'No deals found'}
+              </p>
+            </div>
+          )}
+
           {/* Pagination Controls */}
-          {totalDeals > perPage && (
+          {filteredDeals.length > 0 && totalDeals > perPage && (
             <div className="mt-6 flex items-center justify-between px-2 py-4 border-t border-white/5">
               <button 
                 onClick={() => setPage(p => Math.max(1, p - 1))}
@@ -472,6 +580,25 @@ return (
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse"></div>
               <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Stable</span>
             </div>
+            <div className="flex items-center gap-2 px-3 py-1 bg-white/5 border border-white/10 rounded-xl">
+              <select 
+                value={pitchMode}
+                onChange={(e) => setPitchMode(e.target.value)}
+                className="bg-transparent text-white text-[10px] font-bold focus:outline-none cursor-pointer"
+              >
+                <option value="general" className="bg-[#0b0f1a]">📊 General</option>
+                <option value="investor" className="bg-[#0b0f1a]">💰 Investor</option>
+                <option value="enterprise" className="bg-[#0b0f1a]">🏢 Enterprise</option>
+                <option value="technical" className="bg-[#0b0f1a]">⚙️ Technical</option>
+              </select>
+            </div>
+            <button 
+              onClick={() => setDarkMode(!darkMode)}
+              className="p-2 rounded-lg hover:bg-white/5 transition-colors"
+              title="Toggle Dark Mode"
+            >
+              {darkMode ? <span className="text-slate-400">☀️</span> : <span className="text-slate-400">🌙</span>}
+            </button>
             <div className="w-8 h-8 rounded-xl bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center text-[10px] font-black text-indigo-400">AA</div>
           </div>
         </header>
@@ -522,17 +649,24 @@ return (
                         <p className="text-slate-500 text-sm font-medium">Access advanced RAG modules and agentic orchestration tools.</p>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-12">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                         {[
-                            { id: 'workflows', label: 'Workflows', icon: Layers, color: 'indigo', desc: 'Agentic Pipeline Automation' },
-                            { id: 'graph', label: 'Document Graph', icon: Network, color: 'blue', desc: 'Relationship Entity Mapping' },
-                            { id: 'clusters', label: 'Clusters', icon: Target, color: 'purple', desc: 'Semantic Lead Segmenting' },
-                            { id: 'intent', label: 'Intent Detection', icon: Brain, color: 'rose', desc: 'Query Routing v2.0' },
-                            { id: 'web', label: 'Web Search', icon: SearchCode, color: 'cyan', desc: 'Web-Augmented RAG' },
-                            { id: 'memory', label: 'Session Memory', icon: HistoryIcon, color: 'amber', desc: 'Persistent Chat Context' },
-                            { id: 'compare', label: 'Compare Docs', icon: GitCompare, color: 'emerald', desc: 'Multi-Lead Analysis' },
-                            { id: 'report', label: 'Generate Report', icon: FileText, color: 'violet', desc: 'Autonomous Investment Docs' },
-                            { id: 'contradictions', label: 'Contradictions', icon: ShieldAlert, color: 'red', desc: 'Conflict Detection Engine' }
+                            { id: 'workflows', label: 'Workflows', icon: Layers, color: 'indigo', desc: 'Agentic Pipeline' },
+                            { id: 'graph', label: 'Document Graph', icon: Network, color: 'blue', desc: 'Entity Mapping' },
+                            { id: 'clusters', label: 'Clusters', icon: Target, color: 'purple', desc: 'Lead Segments' },
+                            { id: 'intent', label: 'Intent', icon: Brain, color: 'rose', desc: 'Query Routing' },
+                            { id: 'web', label: 'Web Search', icon: SearchCode, color: 'cyan', desc: 'Web RAG' },
+                            { id: 'memory', label: 'Memory', icon: HistoryIcon, color: 'amber', desc: 'Chat Context' },
+                            { id: 'compare', label: 'Compare', icon: GitCompare, color: 'emerald', desc: 'Multi-Lead' },
+                            { id: 'report', label: 'Reports', icon: FileText, color: 'violet', desc: 'Investment Docs' },
+                            { id: 'contradictions', label: 'Contra', icon: ShieldAlert, color: 'red', desc: 'Conflict Check' },
+                            { id: 'hybrid', label: 'Hybrid', icon: Search, color: 'orange', desc: 'Local + Web' },
+                            { id: 'pitch', label: 'Pitch', icon: TrendingUp, color: 'lime', desc: 'Positioning' },
+                            { id: 'tables', label: 'Tables', icon: Layout, color: 'rose', desc: 'PDF Extract' },
+                            { id: 'investors', label: 'Investors', icon: Network, color: 'violet', desc: 'Investor DB' },
+                            { id: 'clients', label: 'Clients', icon: Building2, color: 'fuchsia', desc: 'Client DB' },
+                            { id: 'library', label: 'Library', icon: FileText, color: 'cyan', desc: 'Doc Library' },
+                            { id: 'automation', label: 'Automation', icon: Zap, color: 'amber', desc: 'Daily Pipeline' }
                         ].map((feature) => (
                             <button 
                                 key={feature.id}
@@ -657,6 +791,108 @@ return (
                                     <pre className="text-xs text-slate-500">{JSON.stringify(cloudOutput, null, 2)}</pre>
                                 </div>
                             )}
+                            
+                            {cloudFeature === 'hybrid' && cloudOutput && (
+                                <div className="not-italic space-y-3">
+                                    <div className="text-orange-400 font-black uppercase text-xs mb-3">Hybrid Search Results</div>
+                                    <pre className="text-xs text-slate-500 overflow-x-auto">{JSON.stringify(cloudOutput, null, 2)}</pre>
+                                </div>
+                            )}
+                            
+                            {cloudFeature === 'pitch' && cloudOutput && (
+                                <div className="not-italic space-y-3">
+                                    <div className="text-lime-400 font-black uppercase text-xs mb-3">Pitch Configuration</div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        {cloudOutput.positioning && (
+                                            <div className="p-3 bg-lime-500/10 border border-lime-500/20 rounded-xl">
+                                                <div className="text-lime-400 text-xs font-black uppercase">Positioning</div>
+                                                <div className="text-white text-sm mt-1">{JSON.stringify(cloudOutput.positioning).substring(0, 50)}</div>
+                                            </div>
+                                        )}
+                                        {cloudOutput.trust && (
+                                            <div className="p-3 bg-lime-500/10 border border-lime-500/20 rounded-xl">
+                                                <div className="text-lime-400 text-xs font-black uppercase">Trust Layer</div>
+                                                <div className="text-white text-sm mt-1">Trust metrics configured</div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {cloudFeature === 'deck_types' && cloudOutput && (
+                                <div className="not-italic space-y-3">
+                                    <div className="text-sky-400 font-black uppercase text-xs mb-3">Pitch Deck Types</div>
+                                    <pre className="text-xs text-slate-500">{JSON.stringify(cloudOutput, null, 2)}</pre>
+                                </div>
+                            )}
+                            
+                            {cloudFeature === 'tables' && cloudOutput && (
+                                <div className="not-italic space-y-3">
+                                    <div className="text-rose-400 font-black uppercase text-xs mb-3">Extracted Tables</div>
+                                    {cloudOutput.tables?.length > 0 ? (
+                                        cloudOutput.tables.slice(0, 5).map((t, i) => (
+                                            <div key={i} className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl">
+                                                <div className="text-white font-medium">Table {i + 1}</div>
+                                                <div className="text-rose-400 text-xs mt-1">{t.rows?.length || 0} rows</div>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="text-slate-500 text-sm">No tables found</div>
+                                    )}
+                                </div>
+                            )}
+                            
+                            {cloudFeature === 'quick_compare' && cloudOutput && (
+                                <div className="not-italic space-y-3">
+                                    <div className="text-teal-400 font-black uppercase text-xs mb-3">Available Documents</div>
+                                    <pre className="text-xs text-slate-500">{JSON.stringify(cloudOutput, null, 2)}</pre>
+                                </div>
+                            )}
+                            
+                            {cloudFeature === 'investors' && cloudOutput && (
+                                <div className="not-italic space-y-3">
+                                    <div className="text-violet-400 font-black uppercase text-xs mb-3">Investor Database</div>
+                                    {Array.isArray(cloudOutput) ? cloudOutput.slice(0, 10).map((inv, i) => (
+                                        <div key={i} className="p-3 bg-violet-500/10 border border-violet-500/20 rounded-xl">
+                                            <div className="text-white font-medium">{inv.name || inv.company_name}</div>
+                                            <div className="text-violet-400 text-xs mt-1">{inv.type || inv.category}</div>
+                                        </div>
+                                    )) : (
+                                        <pre className="text-xs text-slate-500">{JSON.stringify(cloudOutput, null, 2)}</pre>
+                                    )}
+                                </div>
+                            )}
+                            
+                            {cloudFeature === 'clients' && cloudOutput && (
+                                <div className="not-italic space-y-3">
+                                    <div className="text-fuchsia-400 font-black uppercase text-xs mb-3">Client Database</div>
+                                    {Array.isArray(cloudOutput) ? cloudOutput.slice(0, 10).map((c, i) => (
+                                        <div key={i} className="p-3 bg-fuchsia-500/10 border border-fuchsia-500/20 rounded-xl">
+                                            <div className="text-white font-medium">{c.name || c.company_name}</div>
+                                            <div className="text-fuchsia-400 text-xs mt-1">{c.sector}</div>
+                                        </div>
+                                    )) : (
+                                        <pre className="text-xs text-slate-500">{JSON.stringify(cloudOutput, null, 2)}</pre>
+                                    )}
+                                </div>
+                            )}
+                            
+                            {cloudFeature === 'library' && cloudOutput && (
+                                <div className="not-italic space-y-3">
+                                    <div className="text-cyan-400 font-black uppercase text-xs mb-3">Document Library</div>
+                                    <pre className="text-xs text-slate-500">{JSON.stringify(cloudOutput, null, 2)}</pre>
+                                </div>
+                            )}
+                            
+                            {cloudFeature === 'automation' && cloudOutput && (
+                                <div className="not-italic space-y-3">
+                                    <div className="text-amber-400 font-black uppercase text-xs mb-3">Daily Automation</div>
+                                    <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+                                        <div className="text-white font-medium">{cloudOutput.status || 'Completed'}</div>
+                                        <div className="text-amber-400 text-xs mt-1">{JSON.stringify(cloudOutput.result || cloudOutput).substring(0, 100)}</div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </section>
@@ -671,19 +907,173 @@ return (
                 <div className="w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                   <FileText className="w-6 h-6 text-indigo-500" />
                 </div>
-                <div className="text-[11px] font-bold text-white mb-6 text-center truncate max-w-xs">
-                  {selectedDeal?.pitch_deck_url?.split('/').pop() || 'Awaiting Document...'}
+                <div className="text-[11px] font-bold text-white mb-6 text-center truncate max-w-full px-4">
+                  {selectedDeal?.pitch_deck_url ? (
+                    <span className="flex items-center justify-center gap-2 truncate">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                      <span className="truncate">{selectedDeal.pitch_deck_url?.split('/').pop()?.split('?')[0] || 'PDF Attached'}</span>
+                    </span>
+                  ) : (
+                    'Awaiting Document...'
+                  )}
                 </div>
                 <button 
                   onClick={handleAnalyze}
                   disabled={isAnalyzing || !selectedDeal}
                   className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all disabled:opacity-50"
                 >
-                  {isAnalyzing ? 'Processing...' : 'Analyze Pitch Deck'}
+                  {isAnalyzing ? 'Processing...' : pitchBranding[pitchMode]?.button || 'Analyze Pitch Deck'}
+                </button>
+                <button 
+                  onClick={() => { setDemoDataLoaded(true); }}
+                  className="mt-4 px-4 py-2 text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-white transition-colors border border-dashed border-slate-700 rounded-lg hover:border-slate-500"
+                >
+                  📊 Load Demo Data
                 </button>
               </div>
             </section>
 
+            {/* FINANCIAL VISUALIZATIONS */}
+            {(demoDataLoaded || (hasPdf && selectedDeal?.rag_advice)) && (
+            <section className="bg-[#0b0f1a] border border-white/5 rounded-[32px] p-6 shadow-2xl">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em]">📈 FINANCIAL VISUALIZATIONS</h2>
+                <TrendingUp className="w-4 h-4 text-slate-600" />
+              </div>
+              
+              {/* Chart Type Selector */}
+              <div className="flex flex-wrap gap-2 mb-4">
+                {['bar', 'line', 'pie', 'area'].map(type => (
+                  <button
+                    key={type}
+                    onClick={() => setChartType(type)}
+                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${chartType === type ? 'bg-violet-600 text-white' : 'bg-white/5 text-slate-500 hover:text-white'}`}
+                  >
+                    {type === 'bar' ? '📊 Bar' : type === 'line' ? '📈 Line' : type === 'pie' ? '🥧 Pie' : '📉 Area'}
+                  </button>
+                ))}
+              </div>
+              
+              {/* Metric Toggle */}
+              <div className="flex gap-2 mb-4">
+                {[
+                  { id: 'revenue', label: 'Revenue', color: '#3b82f6' },
+                  { id: 'growth', label: 'Growth %', color: '#10b981' },
+                  { id: 'orders', label: 'Orders', color: '#f59e0b' }
+                ].map(m => (
+                  <button
+                    key={m.id}
+                    onClick={() => setChartMetric(m.id)}
+                    className="px-4 py-2 rounded-lg text-[10px] font-black uppercase"
+                    style={{ background: chartMetric === m.id ? m.color : '#1e293b', color: chartMetric === m.id ? 'white' : '#94a3b8', border: chartMetric === m.id ? 'none' : '1px solid #334155' }}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              
+              {/* Chart Display - Recharts Integration */}
+              <div className="h-72 bg-white/[0.02] border border-white/5 rounded-2xl p-6 relative overflow-hidden">
+                <ResponsiveContainer width="100%" height="100%">
+                  {chartType === 'bar' ? (
+                    <BarChart data={demoDataLoaded ? demoFinancialData.years.map((y, i) => ({
+                      name: y,
+                      value: demoFinancialData[chartMetric][i]
+                    })) : [10, 25, 45, 70].map((v, i) => ({ name: `FY${21+i}`, value: v }))}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff0a" vertical={false} />
+                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
+                      <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
+                      <Tooltip 
+                        contentStyle={{backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px'}}
+                        itemStyle={{color: '#fff', fontSize: '12px'}}
+                      />
+                      <Bar 
+                        dataKey="value" 
+                        fill={chartMetric === 'revenue' ? '#3b82f6' : chartMetric === 'growth' ? '#10b981' : '#f59e0b'} 
+                        radius={[6, 6, 0, 0]}
+                        barSize={32}
+                      />
+                    </BarChart>
+                  ) : chartType === 'line' ? (
+                    <LineChart data={demoDataLoaded ? demoFinancialData.years.map((y, i) => ({
+                      name: y,
+                      value: demoFinancialData[chartMetric][i]
+                    })) : [10, 25, 45, 70].map((v, i) => ({ name: `FY${21+i}`, value: v }))}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff0a" vertical={false} />
+                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
+                      <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
+                      <Tooltip 
+                        contentStyle={{backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px'}}
+                      />
+                      <Line 
+                        type="monotone" 
+                        dataKey="value" 
+                        stroke={chartMetric === 'revenue' ? '#3b82f6' : chartMetric === 'growth' ? '#10b981' : '#f59e0b'} 
+                        strokeWidth={3}
+                        dot={{ r: 4, fill: '#fff' }}
+                      />
+                    </LineChart>
+                  ) : chartType === 'area' ? (
+                    <AreaChart data={demoDataLoaded ? demoFinancialData.years.map((y, i) => ({
+                      name: y,
+                      value: demoFinancialData[chartMetric][i]
+                    })) : [10, 25, 45, 70].map((v, i) => ({ name: `FY${21+i}`, value: v }))}>
+                      <defs>
+                        <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={chartMetric === 'revenue' ? '#3b82f6' : chartMetric === 'growth' ? '#10b981' : '#f59e0b'} stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor={chartMetric === 'revenue' ? '#3b82f6' : chartMetric === 'growth' ? '#10b981' : '#f59e0b'} stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff0a" vertical={false} />
+                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
+                      <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
+                      <Tooltip contentStyle={{backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px'}} />
+                      <Area 
+                        type="monotone" 
+                        dataKey="value" 
+                        stroke={chartMetric === 'revenue' ? '#3b82f6' : chartMetric === 'growth' ? '#10b981' : '#f59e0b'} 
+                        fillOpacity={1} 
+                        fill="url(#colorValue)" 
+                        strokeWidth={2}
+                      />
+                    </AreaChart>
+                  ) : (
+                    <PieChart>
+                      <Pie
+                        data={demoDataLoaded ? demoFinancialData.years.map((y, i) => ({
+                          name: y,
+                          value: demoFinancialData[chartMetric][i]
+                        })) : [10, 25, 45, 70].map((v, i) => ({ name: `FY${21+i}`, value: v }))}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={80}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        {(demoDataLoaded ? demoFinancialData.years : [0,1,2,3]).map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'][index % 6]} />
+                        ))}
+                      </Pie>
+                      <Tooltip contentStyle={{backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px'}} />
+                      <Legend verticalAlign="bottom" height={36}/>
+                    </PieChart>
+                  )}
+                </ResponsiveContainer>
+              </div>
+              
+              {demoDataLoaded && (
+                <div className="mt-4 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+                  <div className="text-[10px] font-black text-emerald-400 uppercase mb-2">✓ Demo Financial Analysis</div>
+                  <div className="text-[11px] text-slate-400">
+                    FY21: ₹2.5Cr → FY26: ₹25Cr (10x growth) | 6-Year CAGR: 58% | Current Growth: 37%
+                  </div>
+                </div>
+              )}
+            </section>
+            )}
+
+            {hasPdf ? (
             <section className="bg-[#0b0f1a] border border-white/5 rounded-[32px] p-8 shadow-2xl flex-1 min-h-[400px]">
               <div className="flex justify-between items-center mb-8">
                 <h2 className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em]">Deep-Dive Analysis</h2>
@@ -706,37 +1096,37 @@ return (
                 ) : selectedDeal?.rag_advice ? (
                     <>
                         {/* Clean Card-Based Display */}
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                             {/* Verdict Card */}
                             {(ragIntel.verdict || selectedDeal.rag_advice?.includes('VERDICT')) && (
-                                <div className="bg-gradient-to-br from-indigo-500/10 to-purple-500/5 border border-indigo-500/20 rounded-2xl p-6">
+                                <div className="bg-gradient-to-br from-indigo-500/10 to-purple-500/5 border border-indigo-500/20 rounded-2xl p-6 flex flex-col min-h-[160px]">
                                     <div className="flex items-center gap-2 mb-4">
                                         <ShieldCheck className="w-4 h-4 text-indigo-400" />
                                         <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Verdict</span>
                                     </div>
-                                    <div className="text-2xl font-black text-white">
+                                    <div className="text-xl font-black text-white leading-tight break-words flex-1 flex items-center">
                                         {ragIntel.verdict || 'NEUTRAL'}
                                     </div>
                                 </div>
                             )}
                             
                             {/* Confidence Card */}
-                            <div className="bg-gradient-to-br from-emerald-500/10 to-teal-500/5 border border-emerald-500/20 rounded-2xl p-6">
+                            <div className="bg-gradient-to-br from-emerald-500/10 to-teal-500/5 border border-emerald-500/20 rounded-2xl p-6 flex flex-col min-h-[160px]">
                                 <div className="flex items-center gap-2 mb-4">
                                     <Target className="w-4 h-4 text-emerald-400" />
                                     <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Confidence</span>
                                 </div>
-                                <div className="text-2xl font-black text-white">{displayScore}%</div>
+                                <div className="text-3xl font-black text-white flex-1 flex items-center">{displayScore}%</div>
                             </div>
                             
-                            {/* Strategy Card */}
+                            {/* Priority Card */}
                             {ragIntel.strategy && (
-                                <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/5 border border-amber-500/20 rounded-2xl p-6">
+                                <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/5 border border-amber-500/20 rounded-2xl p-6 flex flex-col min-h-[160px]">
                                     <div className="flex items-center gap-2 mb-4">
                                         <Zap className="w-4 h-4 text-amber-400" />
                                         <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest">Priority</span>
                                     </div>
-                                    <div className="text-xl font-black text-white">{ragIntel.strategy.priority || 'MEDIUM'}</div>
+                                    <div className="text-3xl font-black text-white flex-1 flex items-center">{ragIntel.strategy.priority || 'MEDIUM'}</div>
                                 </div>
                             )}
                         </div>
@@ -758,9 +1148,9 @@ return (
                         
                         {/* Key Signals */}
                         {ragIntel.key_signals && (
-                            <div className="mb-8 p-6 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
-                                <h3 className="text-blue-400 text-[11px] font-black uppercase tracking-[0.2em] mb-4">Key Signal</h3>
-                                <p className="text-[13px] font-medium text-slate-300 leading-relaxed">{String(ragIntel.key_signals).replace(/\*\*/g, '')}</p>
+                            <div className="mb-8 p-8 bg-gradient-to-r from-blue-600/10 to-transparent border border-blue-500/20 rounded-3xl">
+                                <h3 className="text-blue-400 text-[11px] font-black uppercase tracking-[0.3em] mb-4">Key Strategic Signal</h3>
+                                <p className="text-[14px] font-medium text-slate-200 leading-relaxed drop-shadow-sm">{String(ragIntel.key_signals).replace(/\*\*/g, '')}</p>
                             </div>
                         )}
                         
@@ -819,30 +1209,139 @@ return (
                 )}
               </div>
             </section>
+          ) : (
+            <div className="flex-1 flex items-center justify-center min-h-[400px]">
+              <div className="text-center">
+                <FileText className="w-16 h-16 text-slate-700 mx-auto mb-4" />
+                <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest">No PDF Attached</p>
+                <p className="text-[9px] text-slate-600 mt-2">This deal has no incoming PDF document</p>
+              </div>
+            </div>
+          )}
           </div>
 
           <div className="col-span-12 lg:col-span-4 flex flex-col gap-6">
             <section className="bg-[#0b0f1a] border border-white/5 rounded-[32px] p-8 shadow-2xl flex flex-col gap-8">
               <div className="flex justify-between items-center">
-                <h2 className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em]">Agent Intelligence</h2>
+                <h2 className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em]">{pitchBranding[pitchMode]?.agentTitle || 'AGENT INTELLIGENCE'}</h2>
+                <Brain className="w-4 h-4 text-indigo-500" />
               </div>
 
               <div className="space-y-6">
-                <div>
-                  <label className="text-[9px] font-black text-slate-700 uppercase tracking-widest mb-3 block">Intent</label>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[12px] font-black text-white uppercase">{ragIntel.category || selectedDeal?.reply_intent || 'PENDING'}</span>
-                    <span className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-black uppercase tracking-widest rounded-md">INTERESTED</span>
-                  </div>
+                {/* Intent */}
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-black text-slate-500 uppercase">INTENT</span>
+                  <span className={`px-2 py-1 rounded-md text-[9px] font-black uppercase ${selectedDeal?.reply_intent === 'INTERESTED' ? 'bg-emerald-500/20 text-emerald-400' : selectedDeal?.reply_intent === 'MEETING_REQUESTED' ? 'bg-amber-500/20 text-amber-400' : 'bg-indigo-500/20 text-indigo-400'}`}>
+                    {ragIntel.category || selectedDeal?.reply_intent || 'NEUTRAL'}
+                  </span>
                 </div>
 
-                <div>
-                  <label className="text-[9px] font-black text-slate-700 uppercase tracking-widest mb-3 block">Strategy</label>
-                  <div className="text-[13px] font-black text-indigo-400 mb-1 leading-tight uppercase">{ragIntel.strategy?.next_step || 'Awaiting Deployment...'}</div>
-                  <div className="text-[10px] font-medium text-slate-500 leading-relaxed italic border-l border-white/10 pl-3">
-                    {ragIntel.strategy?.reason || 'Analysis required to generate strategy.'}
+                {/* Strategy */}
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-black text-slate-500 uppercase">STRATEGY</span>
+                  <span className="text-[11px] font-bold text-cyan-400">{ragIntel.strategy?.next_step || 'N/A'}</span>
+                </div>
+
+                {/* Score */}
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-black text-slate-500 uppercase">SCORE</span>
+                  <span className="text-[18px] font-black text-white">{displayScore || 'N/A'}</span>
+                </div>
+
+                {/* Deal Status */}
+                <div className="flex justify-between items-center pt-4 border-t border-white/5">
+                  <span className="text-[10px] font-black text-slate-500 uppercase">DEAL STATUS</span>
+                  <span className="text-[10px] font-black text-amber-400 uppercase">{selectedDeal?.email_status || 'IN REVIEW'}</span>
+                </div>
+
+                {/* Key Signal */}
+                {ragIntel.key_signals && (
+                  <div className="p-3 bg-cyan-500/10 border border-cyan-500/20 rounded-xl">
+                    <span className="text-[9px] font-black text-cyan-400 uppercase tracking-widest">KEY INVESTMENT SIGNAL</span>
+                    <p className="text-[11px] text-slate-300 mt-2 leading-relaxed">{String(ragIntel.key_signals).substring(0, 100)}</p>
+                  </div>
+                )}
+
+                {/* Confidence */}
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-black text-slate-500 uppercase">SYSTEM CONFIDENCE</span>
+                  <span className="text-[10px] font-black text-emerald-400">{Math.floor(Number(displayScore) || 75)}%</span>
+                </div>
+
+                {/* Visual Dashboard - RAG Features */}
+                {(hasPdf || !selectedDeal?.pitch_deck_url) && (
+                <div className="mt-6 pt-6 border-t border-white/5">
+                  <h3 className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-4 flex items-center gap-2">
+                    <BarChart3 className="w-3 h-3" /> Visual Intelligence
+                  </h3>
+                  
+                  {/* RAG System Stats */}
+                  <div className="grid grid-cols-2 gap-3 mb-6">
+                    <button 
+                      onClick={async () => { setCloudFeature('insights'); }}
+                      className="p-3 bg-gradient-to-br from-indigo-500/10 to-purple-500/5 border border-indigo-500/20 rounded-xl hover:border-indigo-500/40 transition-all text-left group"
+                    >
+                      <div className="text-[8px] font-black text-indigo-400 uppercase tracking-[0.2em] mb-1">Insights</div>
+                      <div className="text-[11px] font-black text-white group-hover:text-indigo-300 transition-colors">View All</div>
+                    </button>
+                    <button 
+                      onClick={async () => { setCloudFeature('clusters'); }}
+                      className="p-3 bg-gradient-to-br from-emerald-500/10 to-teal-500/5 border border-emerald-500/20 rounded-xl hover:border-emerald-500/40 transition-all text-left group"
+                    >
+                      <div className="text-[8px] font-black text-emerald-400 uppercase tracking-[0.2em] mb-1">Clusters</div>
+                      <div className="text-[11px] font-black text-white group-hover:text-emerald-300 transition-colors">View Map</div>
+                    </button>
+                    <button 
+                      onClick={async () => { setCloudFeature('graph'); }}
+                      className="p-3 bg-gradient-to-br from-amber-500/10 to-orange-500/5 border border-amber-500/20 rounded-xl hover:border-amber-500/40 transition-all text-left group"
+                    >
+                      <div className="text-[8px] font-black text-amber-400 uppercase tracking-[0.2em] mb-1">Graph</div>
+                      <div className="text-[11px] font-black text-white group-hover:text-amber-300 transition-colors">Network</div>
+                    </button>
+                    <button 
+                      onClick={async () => { setCloudFeature('compare'); }}
+                      className="p-3 bg-gradient-to-br from-rose-500/10 to-pink-500/5 border border-rose-500/20 rounded-xl hover:border-rose-500/40 transition-all text-left group"
+                    >
+                      <div className="text-[8px] font-black text-rose-400 uppercase tracking-[0.2em] mb-1">Compare</div>
+                      <div className="text-[11px] font-black text-white group-hover:text-rose-300 transition-colors">Analysis</div>
+                    </button>
+                  </div>
+
+                  {/* Quick Actions */}
+                  <div className="space-y-2">
+                    <button 
+                      onClick={async () => {
+                        try {
+                          const res = await fetch('https://rag-sys-gz59.onrender.com/documents/tables').then(r => r.json());
+                          setCloudFeature('tables');
+                          setCloudOutput(res);
+                          setActiveTab('CLOUD');
+                        } catch(e) { console.error('Failed to fetch tables'); }
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[9px] font-black text-slate-400 uppercase tracking-widest transition-all"
+                    >
+                      <Layers className="w-3 h-3" /> Extract Tables
+                    </button>
+                    <button 
+                      onClick={async () => {
+                        try {
+                          const res = await fetch('https://rag-sys-gz59.onrender.com/ask', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({question: 'Summarize this deal briefly'})
+                          }).then(r => r.json());
+                          setCloudFeature('summary');
+                          setCloudOutput(res);
+                          setActiveTab('CLOUD');
+                        } catch(e) { console.error('Failed'); }
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[9px] font-black text-slate-400 uppercase tracking-widest transition-all"
+                    >
+                      <Sparkles className="w-3 h-3" /> Quick Summary
+                    </button>
                   </div>
                 </div>
+                )}
 
                 <div className="border-t border-white/5 pt-6">
                   <label className="text-[9px] font-black text-slate-700 uppercase tracking-widest mb-2 block">Score</label>
@@ -853,10 +1352,10 @@ return (
                 </div>
               </div>
 
-              <div className="p-6 bg-white/[0.02] border border-white/5 rounded-2xl">
-                <div className="flex justify-between items-center mb-4">
-                  <span className="text-[9px] font-black text-amber-500/80 uppercase tracking-widest">Status</span>
-                  <span className="text-[9px] font-black text-slate-700 uppercase">{ragIntel.verdict || 'WARM LEAD'}</span>
+              <div className="p-6 bg-gradient-to-br from-white/[0.03] to-transparent border border-white/5 rounded-[24px]">
+                <div className="flex flex-col gap-1 mb-6">
+                  <span className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.2em]">RAG Analysis Verdict</span>
+                  <span className="text-[16px] font-black text-white uppercase tracking-tight">{ragIntel.verdict || 'WARM LEAD'}</span>
                 </div>
                 <div className="p-4 bg-indigo-600/5 border border-indigo-500/10 rounded-xl">
                    <div className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2 flex items-center gap-2">

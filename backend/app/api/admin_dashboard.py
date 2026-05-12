@@ -46,14 +46,17 @@ def normalize_user_id(uid):
 def get_all_leads_admin(
     user_id: Optional[str] = Header(None, alias="X-User-Id"),
     page: int = 1,
-    limit: int = 50
+    limit: int = 50,
+    type: Optional[str] = None,
+    status: Optional[str] = None,
+    intent: Optional[str] = None,
+    owner: Optional[str] = None,
+    sector: Optional[str] = None,
+    search: Optional[str] = None
 ):
     """
-    Returns paginated leads for the admin dashboard.
+    Returns paginated leads for the admin dashboard with global filtering.
     """
-    # Simple role check (In a real app, this would check a 'role' column in users table)
-    # For now, we use the 'admin' convention or user_id=1 as admin.
-    
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -62,28 +65,61 @@ def get_all_leads_admin(
         cur.execute("SELECT username FROM users WHERE id = %s", (normalize_user_id(user_id),))
         user = cur.fetchone()
         if not user or user['username'].lower() != 'admin' and normalize_user_id(user_id) != 1:
-             # If you want to be strict, uncomment this. For now we allow if user_id is 'admin' string too.
              if user_id != 'admin':
                 raise HTTPException(status_code=403, detail="Admin access required")
 
         offset = (page - 1) * limit
+        
+        # 2. Build Dynamic WHERE Clause
+        where_clauses = []
+        params = []
+        
+        if type and type != 'ALL':
+            where_clauses.append("l.lead_type ILIKE %s")
+            params.append(type)
+        if status and status != 'ALL':
+            if status.upper() == 'REPLIED':
+                # STRICT: Must have is_responded flag OR status is explicitly REPLIED
+                where_clauses.append("(l.email_status ILIKE 'REPLIED' OR l.is_responded = TRUE)")
+            elif status == 'Interested':
+                where_clauses.append("l.reply_intent = 'INTERESTED'")
+            else:
+                where_clauses.append("l.email_status ILIKE %s")
+                params.append(status)
+        if intent and intent != 'ALL':
+            where_clauses.append("l.reply_intent ILIKE %s")
+            params.append(intent)
+        if owner and owner != 'ALL':
+            where_clauses.append("u.username ILIKE %s")
+            params.append(owner)
+        if sector and sector != 'ALL':
+            where_clauses.append("l.sector ILIKE %s")
+            params.append(sector)
+        if search:
+            where_clauses.append("(l.first_name ILIKE %s OR l.last_name ILIKE %s OR l.company_name ILIKE %s OR l.email ILIKE %s)")
+            s_param = f"%{search}%"
+            params.extend([s_param, s_param, s_param, s_param])
+            
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-        # 2. Fetch leads with only needed columns (reduce memory)
-        query = """
+        # 3. Fetch leads
+        query = f"""
             SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.company_name, l.designation, 
                    l.sector, l.lead_type, l.reply_intent, l.sentiment_score, l.deal_size,
                    l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
                    u.username as owner_name
             FROM leads_raw l
             LEFT JOIN users u ON l.user_id = u.id
+            {where_sql}
             ORDER BY l.updated_at DESC
             LIMIT %s OFFSET %s
         """
-        cur.execute(query, (limit, offset))
+        cur.execute(query, tuple(params + [limit, offset]))
         leads = cur.fetchall()
         
         # Get total count for pagination UI
-        cur.execute("SELECT COUNT(*) FROM leads_raw")
+        count_query = f"SELECT COUNT(*) FROM leads_raw l LEFT JOIN users u ON l.user_id = u.id {where_sql}"
+        cur.execute(count_query, tuple(params))
         total_count = cur.fetchone()[0]
         
         return {
@@ -117,15 +153,15 @@ def get_global_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         total_leads = cur.fetchone()[0]
         
         # Interested (Intent)
-        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE reply_intent = 'INTERESTED'")
+        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE reply_intent ILIKE 'INTERESTED'")
         interested = cur.fetchone()[0]
         
         # Meetings
-        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'Meeting Scheduled' OR meeting_time IS NOT NULL")
+        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status ILIKE 'Meeting Scheduled' OR meeting_time IS NOT NULL")
         meetings = cur.fetchone()[0]
         
         # Active Flows (leads with active outreach sequences)
-        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE followup_status = 'ACTIVE' OR campaign_id IS NOT NULL")
+        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE followup_status ILIKE 'ACTIVE' OR campaign_id IS NOT NULL")
         active_flows = cur.fetchone()[0]
         
         # Avg Score (Sentiment)
@@ -133,11 +169,11 @@ def get_global_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         avg_score = cur.fetchone()[0] or 0
         
         # Active Followups
-        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE followup_status = 'ACTIVE'")
+        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE followup_status ILIKE 'ACTIVE'")
         active_followups = cur.fetchone()[0]
         
         # Engaged Leads (replied or interested)
-        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE reply_intent IN ('INTERESTED', 'MEETING_SCHEDULED')")
+        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE reply_intent ILIKE 'INTERESTED' OR reply_intent ILIKE 'MEETING_SCHEDULED' OR is_responded = TRUE")
         engaged = cur.fetchone()[0]
         
         # System Reach (leads with emails sent)

@@ -25,11 +25,21 @@ class AgentService:
             contradictions.append(f"Sector Mismatch: DB says '{db_sector}', RAG extracted '{rag_sector}'")
 
         # 2. Revenue Mismatch (Basic heuristic)
-        # Assuming actuals contains 'revenue'
         actuals = rag_insights.get('actuals', {})
         if 'revenue' in actuals:
-            # We could compare with a DB revenue field if it existed
-            pass
+            rag_rev = str(actuals['revenue']).lower()
+            db_remarks = (lead_data.get('remarks') or '').lower()
+            # Simple check if DB remarks mention a different revenue
+            if 'cr' in rag_rev or 'l' in rag_rev:
+                # Potential mismatch if DB says pre-revenue but RAG finds cr/l
+                if 'pre-revenue' in db_remarks:
+                    contradictions.append(f"Revenue Conflict: DB suggests 'Pre-revenue', but RAG found '{actuals['revenue']}'")
+
+        # 3. Funding Stage Conflict
+        rag_stage = (rag_insights.get('stage') or '').lower()
+        if rag_stage and 'series' in rag_stage:
+            if 'seed' in db_remarks:
+                contradictions.append(f"Stage Mismatch: DB says 'Seed', but RAG identified '{rag_stage}'")
 
         return contradictions
 

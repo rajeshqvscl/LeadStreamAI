@@ -167,9 +167,25 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
 
         # Extract message body
         from app.services.google_service import extract_message_body, extract_attachments, get_gmail_service
+        # Extract message body and STRIP quoted history to avoid analyzing our own sent text/PDFs
+        from app.services.google_service import extract_message_body, extract_attachments, get_gmail_service
         payload = message_data.get('payload', {})
-        body = extract_message_body(payload)
+        full_body = extract_message_body(payload)
         
+        # Strip everything after 'On ... wrote:' or '--- Original Message ---'
+        import re
+        body = re.split(r'(?m)^On\s+.*wrote:|^---+\s*Original\s+Message\s*---+|From:\s+.*@.*', full_body)[0].strip()
+        
+        # 0. SENDER CHECK: Abort if this message was actually sent by the user (sent folder bleed-over)
+        cur_user = conn.cursor()
+        cur_user.execute("SELECT email FROM users WHERE id = %s", (user_id,))
+        user_record = cur_user.fetchone()
+        cur_user.close()
+        
+        if user_record and user_record[0].lower() in sender_email.lower():
+            print(f"DEBUG: Skipping {sender_email} — this is a sent message, not a reply.")
+            return
+
         # Check for PDF pitch deck attachments
         service = get_gmail_service(user_id)
         msg_id = message_data.get('id')
@@ -194,13 +210,15 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             return  # Hard stop — don't process random inbox mail
         
         lead_id = lead_exists['id']
-            
-        # Step 1: AI Intent Classification
+                 # Step 1: AI Intent Classification
         print(f"DEBUG: Classifying reply from {sender_email}...")
         llm = EmailGenerator()
         ai_data = llm.classify_reply(body)
         intent = ai_data.get("intent", "INTERESTED")
-        deal_size = ai_data.get("deal_size")
+        
+        # USER REQUEST: Do not use email-body estimation for the primary revenue field.
+        # Only show financial metrics if they are verified in a PDF.
+        deal_size = None 
         pitch_deck_url = ai_data.get("pitch_deck_url")
         
         # If we got an actual PDF attachment, upload to Google Drive
@@ -222,7 +240,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
                 pitch_deck_url = f"{base_url}/{file_path}"
             
-        print(f"DEBUG: AI detected intent: {intent}, size: {deal_size}, deck: {pitch_deck_url}")
+        print(f"DEBUG: AI detected intent: {intent}, body_size_estimation: {ai_data.get('deal_size')}, deck: {pitch_deck_url}")
         
         # --- STRICT RAG ENHANCEMENT (STABLE SESSION) ---
         rag_advice = None
@@ -237,7 +255,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             retries = Retry(total=3, backoff_factor=1, status_forcelist=[502, 503, 504])
             s.mount('https://', HTTPAdapter(max_retries=retries))
             
-            # 0. Wake-Up Check (Increased to 60s for Render cold starts)
+            # 0. Wake-Up Check
             try:
                 s.get(RAG_URL, timeout=60, verify=False)
             except:
@@ -249,7 +267,6 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 process_res = s.post(f"{RAG_URL}/process", files=files, timeout=300, verify=False)
                 if process_res.status_code == 200:
                     rag_data = process_res.json()
-                    rag_category = rag_data.get('category') or rag_data.get('type')
                     rag_item_id = rag_data.get('id')
                     
                     if rag_item_id:
@@ -265,11 +282,14 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                                     if insights:
                                         # Capture FULL "A to Z" Data from RAG
                                         rag_advice = f"### RAG VERDICT\n{insights.get('verdict', 'N/A')}\n\n"
-                                        rag_advice += f"### SUMMARY\n{insights.get('summary', 'N/A')}\n\n"
                                         
+                                        # USER REQUEST: Populate deal_size ONLY from PDF insights
                                         if insights.get('actuals'):
+                                            actuals = insights.get('actuals', {})
+                                            deal_size = actuals.get('revenue') or actuals.get('deal_size')
+                                            
                                             rag_advice += "### ACTUALS & METRICS\n"
-                                            for k, v in insights.get('actuals', {}).items():
+                                            for k, v in actuals.items():
                                                 rag_advice += f"- {k.replace('_', ' ').title()}: {v}\n"
                                             rag_advice += "\n"
                                             
@@ -283,27 +303,20 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                                         
                                         rag_intel = {
                                             "answer": rag_advice,
-                                            "source": "Pure Llama 3.1 (RAG Engine)",
                                             "category": rag_category,
-                                            "sentiment_score": insights.get('score', 80),
-                                            "urgency_level": insights.get('strategy', {}).get('priority', 'MEDIUM').upper(),
-                                            "strategy": insights.get('strategy', {}),
                                             "actuals": insights.get('actuals', {}),
-                                            "signals": insights.get('breakdown', {}),
-                                            "key_signals": insights.get('key_signal'),
-                                            "verdict": insights.get('verdict'),
-                                            "full_insights": insights # STORE EVERYTHING
+                                            "strategy": insights.get('strategy', {}),
+                                            "full_insights": insights,
+                                            "filename": pdf_attachment['filename']
                                         }
                                         break
-                                elif current_status == 'failed':
-                                    break
-                            time.sleep(10)
+                                time.sleep(10)
             else:
+                # Non-PDF replies get generic advice, but deal_size remains None
                 import io
                 files = {'file': ('email_reply.txt', io.StringIO(body).getvalue())}
                 s.post(f"{RAG_URL}/ingest", files=files, timeout=60, verify=False)
-                # For non-PDF, we use a simpler /ask
-                query_msg = f"Based on this email reply from {sender_email}, what should I do next to close this deal? Reply body: {body[:300]}"
+                query_msg = f"Reply body: {body[:300]}"
                 query_res = s.post(f"{RAG_URL}/ask", params={"question": query_msg}, timeout=120, verify=False)
                 if query_res.status_code == 200:
                     rag_data = query_res.json()
@@ -311,15 +324,11 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                     rag_intel = rag_data
         except Exception as rag_err:
             print(f"Warning: RAG error: {rag_err}")
-
-        # Step 2: Update Lead Status (Strictly Scoped to User)
-        # We show 'Reverts' for all valid human responses including "NOT INTERESTED"
+ 
+        # Step 2: Update Lead Status
         all_intents = ["INTERESTED", "MEETING_REQUESTED", "NEEDS_MORE_INFO", "NOT_INTERESTED"]
         final_status = 'REPLIED'
-        
-        # Crucial Fix: Set is_responded=TRUE for any valid identified intent
         should_show_in_intel = intent in all_intents
-        
         if intent == 'NOT_INTERESTED':
             final_status = 'CLOSED'
             
@@ -458,10 +467,46 @@ def get_inbound_deals(
             cur.execute(query, (uid, per_page, offset))
             leads = cur.fetchall()
         
-        print(f"DEBUG: Found {len(leads)} leads for uid {uid}. Total count in DB: {total}")
+        # PROACTIVE FILENAME RECOVERY for historical leads (Cleaned)
+        import re
+        INTERNAL_PDFS = ['profile.pdf', 'intro.pdf', 'deck.pdf', 'onepager.pdf', 'company_profile.pdf', 'teaser.pdf']
+        
+        def extract_pdf_name(text):
+            if not text: return None
+            # Scan for patterns like <Name.pdf> or Name_Deck.pdf
+            matches = re.findall(r'([a-zA-Z0-9_\-\s]+\.pdf)', str(text))
+            for m in matches:
+                name = m.strip()
+                if not any(internal in name.lower() for internal in INTERNAL_PDFS):
+                    return name
+            return None
+
+        processed_leads = []
+        for l in leads:
+            lead_dict = dict(l)
+            # Ensure rag_intelligence is a dict for processing
+            intel = lead_dict.get('rag_intelligence')
+            if isinstance(intel, str):
+                try: intel = json.loads(intel)
+                except: intel = {}
+            
+            if not intel: intel = {}
+
+            # If filename is missing, try to recover it from other fields
+            if not intel.get('filename'):
+                recovered = extract_pdf_name(lead_dict.get('remarks')) or \
+                            extract_pdf_name(lead_dict.get('pitch_deck_url')) or \
+                            extract_pdf_name(lead_dict.get('rag_advice'))
+                if recovered:
+                    intel['filename'] = recovered
+                    lead_dict['rag_intelligence'] = intel
+            
+            processed_leads.append(lead_dict)
+
+        print(f"DEBUG: Found {len(processed_leads)} leads for uid {uid}. Total count in DB: {total}")
         
         return {
-            "leads": [dict(l) for l in leads],
+            "leads": processed_leads,
             "total": total,
             "page": page,
             "per_page": per_page

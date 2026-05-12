@@ -26,20 +26,28 @@ const InboundDeals = () => {
   const [totalDeals, setTotalDeals] = useState(0);
   const perPage = 10;
 
-  const fetchDeals = async (isMounted = { current: true }) => {
+  const stripHtml = (html) => {
+    if (!html) return "";
+    const clean = html.replace(/<[^>]*>?/gm, '');
+    return clean;
+  };
+
+  const fetchDeals = async (isMounted = { current: true }, silent = false) => {
     try {
       const user = JSON.parse(localStorage.getItem('user') || '{}');
       const userId = user.id || 'admin';
+      if (!silent) setLoading(true);
       const { data } = await api.get(`/api/gmail/inbound-deals?page=${page}&per_page=${perPage}`, {
         headers: { 'X-User-Id': userId }
       });
       if (!isMounted.current) return;
       setDeals(data.leads || []);
       setTotalDeals(data.total || 0);
-      setLoading(false);
     } catch (err) {
       if (!isMounted.current) return;
       console.error('Error fetching deals:', err);
+    } finally {
+      if (!isMounted.current) return;
       setLoading(false);
     }
   };
@@ -47,7 +55,16 @@ const InboundDeals = () => {
   useEffect(() => {
     let isMounted = { current: true };
     fetchDeals(isMounted);
-    return () => { isMounted.current = false; };
+    
+    // Auto-refresh interval (polling every 15s)
+    const pollId = setInterval(() => {
+      fetchDeals(isMounted, true);
+    }, 15000);
+
+    return () => { 
+      isMounted.current = false; 
+      clearInterval(pollId);
+    };
   }, [page]);
 
   const filteredDeals = deals.filter(deal => {
@@ -105,7 +122,7 @@ const InboundDeals = () => {
       alert('Strategy session scheduled successfully!');
       setSchedulingDeal(null);
       setMeetingTime('');
-      fetchDeals();
+      fetchDeals(undefined, true);
     } catch (e) {
       console.error('Error scheduling:', e);
       alert('Failed to schedule meeting: ' + (e.response?.data?.detail || e.message));
@@ -283,7 +300,7 @@ const InboundDeals = () => {
                         )}
                       </div>
                       <p className="text-slate-400 text-sm line-clamp-2 italic font-medium">
-                        "{deal.remarks?.substring(0, 180) || deal.rag_advice?.substring(0, 180) || 'Analyzing communication patterns...'}"
+                        "{stripHtml(deal.remarks || deal.rag_advice).substring(0, 180) || 'Analyzing communication patterns...'}"
                       </p>
                     </div>
 
@@ -337,9 +354,13 @@ const InboundDeals = () => {
 
         {/* Intelligence Side Panel (FINRAG Dashboard Style) */}
         {selectedDeal && (
-          <div className="fixed inset-0 z-[100] flex justify-end bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="fixed inset-0 z-[1000] flex justify-end bg-black/40 backdrop-blur-sm animate-in fade-in duration-300">
             <div 
-              className="w-full max-w-2xl bg-[#0b0f19] border-l border-white/10 h-full overflow-y-auto shadow-2xl animate-in slide-in-from-right duration-500"
+              className="absolute inset-0" 
+              onClick={() => setSelectedDeal(null)}
+            />
+            <div 
+              className="relative w-full max-w-2xl bg-[#0b0f19] border-l border-white/10 h-full overflow-y-auto shadow-2xl animate-in slide-in-from-right duration-500 z-10"
             >
               {/* Panel Header */}
               <div className="sticky top-0 z-20 bg-[#0b0f19]/90 backdrop-blur-xl border-b border-white/10 p-8 flex justify-between items-start">
@@ -403,7 +424,7 @@ const InboundDeals = () => {
                       "{selectedDeal.meeting_time ? 'Prepare for Strategy Session.' : selectedDeal.reply_intent === 'MEETING_REQUESTED' ? 'Schedule discovery session within 24 hours.' : 'Execute personalized follow-up with traction metrics.'}"
                    </div>
                    <p className="text-slate-400 font-medium leading-relaxed">
-                     {selectedDeal.rag_advice}
+                     {stripHtml(selectedDeal.remarks || selectedDeal.rag_advice)}
                    </p>
                 </div>
 
