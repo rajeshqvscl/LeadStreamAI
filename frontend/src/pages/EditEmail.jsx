@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ChevronLeft, Sparkles, Loader2, Save, Wand2, Type, Briefcase, BarChart3, Smile, CheckCircle2, AlertCircle, Send, Link as LinkIcon, FileText } from 'lucide-react';
+import { ChevronLeft, Sparkles, Loader2, Save, Wand2, Type, Briefcase, BarChart3, Smile, CheckCircle2, AlertCircle, Send, Link as LinkIcon, FileText, List, RotateCcw } from 'lucide-react';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import api from '../services/api';
@@ -21,6 +21,7 @@ const EditEmail = () => {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [scheduledAt, setScheduledAt] = useState(null);
   const [selectedColor, setSelectedColor] = useState('#ffffff');
+  const [history, setHistory] = useState([]);
   const bodyRef = React.useRef(null);
 
   const COLORS = ['#ffffff', '#60a5fa', '#34d399', '#f97316', '#f43f5e', '#a78bfa', '#fbbf24', '#94a3b8'];
@@ -28,24 +29,59 @@ const EditEmail = () => {
   const applyFormat = (tag, attr = '') => {
     const el = bodyRef.current;
     if (!el) return;
+
+    // Save history
+    setHistory(prev => [...prev.slice(-29), body]);
+
     const start = el.selectionStart;
     const end = el.selectionEnd;
     const selected = body.substring(start, end);
-    if (!selected) return;
+    
     let wrapped;
     if (tag === 'color') {
-      wrapped = `<span style="color:${attr}">${selected}</span>`;
+      wrapped = `<span style="color:${attr}">${selected || 'text'}</span>`;
     } else if (tag === 'b') {
-      wrapped = `**${selected}**`;
+      wrapped = `**${selected || 'bold'}**`;
     } else if (tag === 'i') {
-      wrapped = `_${selected}_`;
+      wrapped = `_${selected || 'italic'}_`;
+    } else if (tag === 'list') {
+      if (!selected) {
+        wrapped = '* ';
+      } else {
+        const lines = selected.split('\n');
+        wrapped = lines.map(l => {
+          const trimmed = l.trim();
+          if (trimmed.startsWith('*')) return l;
+          return `* ${l}`;
+        }).join('\n');
+      }
+    } else if (tag === 'ordered') {
+      if (!selected) {
+        wrapped = '1. ';
+      } else {
+        const lines = selected.split('\n');
+        wrapped = lines.map((l, idx) => {
+          const num = idx + 1;
+          if (/^\d+\./.test(l.trim())) return l;
+          return `${num}. ${l}`;
+        }).join('\n');
+      }
     }
+
     const newBody = body.substring(0, start) + wrapped + body.substring(end);
     setBody(newBody);
     setTimeout(() => {
       el.focus();
-      el.setSelectionRange(start + wrapped.length, start + wrapped.length);
+      const newPos = start + wrapped.length;
+      el.setSelectionRange(newPos, newPos);
     }, 0);
+  };
+
+  const handleUndo = () => {
+    if (history.length === 0) return;
+    const prev = history[history.length - 1];
+    setBody(prev);
+    setHistory(prevHist => prevHist.slice(0, -1));
   };
 
   const showNotification = (type, message) => {
@@ -103,34 +139,50 @@ const EditEmail = () => {
       if (!trimmed) return;
 
       const lines = trimmed.split('\n');
-      // Detect lists (must be star/dash/bullet followed by space)
-      if (lines.some(l => /^\s*[\*\-•]\s+/.test(l))) {
+      
+      const isUnordered = lines.some(l => /^\s*[\*\-•]\s+/.test(l));
+      const isOrdered = lines.some(l => /^\s*\d+\.\s+/.test(l));
+
+      if (isUnordered) {
         let listHtml = '<ul style="margin: 1em 0; padding-left: 1.5em; list-style-type: disc;">';
         lines.forEach(l => {
           const match = l.trim().match(/^[\*\-•]\s+(.*)/);
           if (match) {
-            listHtml += `<li style="margin-bottom: 0.5em;">${match[1].trim()}</li>`;
-          } else {
-            listHtml += ` ${l.trim()}`; // Append to previous li
+            listHtml += `<li style="margin-bottom: 0.5em; color: #cbd5e1;">${match[1].trim()}</li>`;
+          } else if (l.trim()) {
+            listHtml += ` ${l.trim()}`;
           }
         });
         listHtml += '</ul>';
         htmlParts.push(listHtml);
+      } else if (isOrdered) {
+        let listHtml = '<ol style="margin: 1em 0; padding-left: 1.5em; list-style-type: decimal;">';
+        lines.forEach(l => {
+          const match = l.trim().match(/^\d+\.\s+(.*)/);
+          if (match) {
+            listHtml += `<li style="margin-bottom: 0.5em; color: #cbd5e1;">${match[1].trim()}</li>`;
+          } else if (l.trim()) {
+            listHtml += ` ${l.trim()}`;
+          }
+        });
+        listHtml += '</ol>';
+        htmlParts.push(listHtml);
       } else {
         // Paragraph: merge single newlines
         const content = trimmed.replace(/\n/g, ' ');
-        htmlParts.push(`<p style="margin-bottom: 1em;">${content}</p>`);
+        htmlParts.push(`<p style="margin-bottom: 1em; color: #cbd5e1;">${content}</p>`);
       }
     });
 
     let finalHtml = htmlParts.join('') + sigHtml;
 
-    // 3. Inline Styles (Bold, Italic, Links)
+    // 3. Inline Styles (Bold, Italic, Links, Fonts)
     return finalHtml
       .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
       .replace(/\*\*(.*?)\*\*/g, '<strong style="color: white; font-weight: 800;">$1</strong>')
       .replace(/_(.*?)_/g, '<em style="font-style:italic">$1</em>')
-      .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color: #60a5fa; text-decoration: underline; font-weight: 700;">$1</a>');
+      .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color: #60a5fa; text-decoration: underline; font-weight: 700;">$1</a>')
+      .replace(/<span style="color:\s*(.*?)">(.*?)<\/span>/g, '<span style="color: $1;">$2</span>');
   };
 
 
@@ -358,6 +410,17 @@ const EditEmail = () => {
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
+                    title="Undo Change"
+                    onClick={handleUndo}
+                    disabled={history.length === 0}
+                    className="w-7 h-7 flex items-center justify-center rounded bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 transition-all cursor-pointer disabled:opacity-30 mr-1"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </button>
+                  <div className="w-px h-4 bg-white/10 mx-1" />
+
+                  <button
+                    type="button"
                     title="Bold (select text first)"
                     onClick={() => applyFormat('b')}
                     className="w-7 h-7 flex items-center justify-center rounded bg-white/5 border border-white/10 text-white font-black text-[13px] hover:bg-blue-500/20 hover:border-blue-500/40 transition-all cursor-pointer"
@@ -368,6 +431,20 @@ const EditEmail = () => {
                     onClick={() => applyFormat('i')}
                     className="w-7 h-7 flex items-center justify-center rounded bg-white/5 border border-white/10 text-white italic font-bold text-[13px] hover:bg-purple-500/20 hover:border-purple-500/40 transition-all cursor-pointer"
                   >I</button>
+                  <button
+                    type="button"
+                    title="Numbered List (select text first)"
+                    onClick={() => applyFormat('ordered')}
+                    className="w-7 h-7 flex items-center justify-center rounded bg-white/5 border border-white/10 text-white text-[11px] font-bold hover:bg-amber-500/20 hover:border-amber-500/40 transition-all cursor-pointer"
+                  >1.</button>
+                  <button
+                    type="button"
+                    title="Add Bullets (select text first)"
+                    onClick={() => applyFormat('list')}
+                    className="w-7 h-7 flex items-center justify-center rounded bg-white/5 border border-white/10 text-white hover:bg-emerald-500/20 hover:border-emerald-500/40 transition-all cursor-pointer"
+                  >
+                    <List className="w-3.5 h-3.5" />
+                  </button>
                   <div className="flex items-center gap-1 ml-1">
                     {COLORS.map(c => (
                       <button

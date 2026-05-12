@@ -527,10 +527,14 @@ def mark_lead_responded(lead_id: int, user_id: Optional[str] = Header(None, alia
 @router.get("/followups")
 def get_followups_endpoint(
     type: Optional[str] = None,
+    page: int = 1,
+    per_page: int = 100,
+    search: Optional[str] = None,
+    stage: Optional[int] = None,
     user_id: Optional[str] = Header(None, alias="X-User-Id")
 ):
     """
-    Returns all leads currently in an active follow-up sequence.
+    Returns paginated and filtered leads currently in an active follow-up sequence.
     Strictly filters by the logged-in user unless the user is an admin.
     """
     try:
@@ -538,8 +542,8 @@ def get_followups_endpoint(
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
         # We fetch leads where followup is active, or they are scheduled
-        query = """
-            SELECT * FROM leads_raw 
+        base_query = """
+            FROM leads_raw 
             WHERE (followup_status IN ('ACTIVE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED'))
             AND COALESCE(is_responded, FALSE) = FALSE
         """
@@ -551,37 +555,49 @@ def get_followups_endpoint(
         
         if not is_admin:
             if uid:
-                query += " AND user_id = %s"
+                base_query += " AND user_id = %s"
                 params.append(uid)
             else:
-                # If we can't resolve the user and they aren't admin, return nothing
-                return []
+                return {"leads": [], "total": 0}
             
-        # 2. Lead Type Filtering (Investor vs Client)
+        # 2. Lead Type Filtering
         if type:
             if type.upper() == 'INVESTOR':
-                # Investors are often the default (NULL)
-                query += " AND (LOWER(lead_type) = 'investor' OR lead_type IS NULL)"
+                base_query += " AND (LOWER(lead_type) = 'investor' OR lead_type IS NULL)"
             else:
-                query += " AND LOWER(lead_type) = LOWER(%s)"
+                base_query += " AND LOWER(lead_type) = LOWER(%s)"
                 params.append(type)
-            
-        query += " ORDER BY COALESCE(scheduled_at, last_outreach_at) DESC"
-        cur.execute(query, tuple(params))
+        
+        # 3. Search Filter
+        if search:
+            base_query += " AND (first_name ILIKE %s OR last_name ILIKE %s OR email ILIKE %s OR company_name ILIKE %s)"
+            s = f"%{search}%"
+            params.extend([s, s, s, s])
+
+        # 4. Stage Filter
+        if stage is not None:
+            base_query += " AND followup_stage = %s"
+            params.append(stage)
+        
+        # Count total
+        cur.execute(f"SELECT COUNT(*) {base_query}", tuple(params))
+        total = cur.fetchone()[0]
+
+        # Fetch paginated results
+        query = f"SELECT * {base_query} ORDER BY COALESCE(scheduled_at, last_outreach_at) DESC LIMIT %s OFFSET %s"
+        cur.execute(query, tuple(params + [per_page, (page - 1) * per_page]))
         rows = cur.fetchall()
         
         results = []
         for r in rows:
             lead_dict = dict(r)
-            # Fetch latest significant activity to provide context
+            # Fetch latest significant activity
             cur.execute("SELECT action, details FROM activity_log WHERE lead_id = %s ORDER BY created_at DESC LIMIT 1", (lead_dict['id'],))
             last_act = cur.fetchone()
             if last_act:
                 act = last_act['action'].upper()
                 det = (last_act['details'] or "").upper()
                 lead_dict['last_action_type'] = act.replace('_', ' ')
-                
-                # Infer Milestone for the UI badge
                 if 'DECK' in det or 'DECK' in act: lead_dict['last_milestone'] = 'Pitch Deck'
                 elif 'TEASER' in det or 'TEASER' in act: lead_dict['last_milestone'] = 'Teaser'
                 elif 'MEET' in det or 'MEET' in act: lead_dict['last_milestone'] = 'Meeting'
@@ -590,19 +606,37 @@ def get_followups_endpoint(
             else:
                 lead_dict['last_milestone'] = 'Initial Outreach'
                 lead_dict['last_action_type'] = 'Outreach'
-
             results.append(lead_dict)
             
         cur.close()
         conn.close()
-        return results
+        return {"leads": results, "total": total}
     except Exception as e:
         logger.error(f"Error fetching follow-ups: {e}")
         return {"error": str(e)}
 
+class ApproveFollowupRequest(BaseModel):
+    custom_body: Optional[str] = None
+
+@router.post("/leads/{lead_id}/save-followup-draft")
+def save_followup_draft(lead_id: int, req: ApproveFollowupRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Saves a follow-up draft for later review."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        cur.execute("UPDATE leads_raw SET followup_draft = %s, updated_at = NOW() WHERE id = %s", (req.custom_body, lead_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Error saving draft: {e}")
+        return {"error": str(e)}
+
 @router.post("/leads/{lead_id}/approve-followup")
-def approve_followup(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Approves and sends a pending follow-up draft."""
+def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Approves and sends a pending follow-up draft. Supports optional custom body."""
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -623,17 +657,20 @@ def approve_followup(lead_id: int, user_id: Optional[str] = Header(None, alias="
         from app.api.drafts import get_sender_profile, inject_signature
         profile = get_sender_profile(user_id)
         
-        # If draft exists but belongs to someone else (or no sig), re-inject
-        body_text = lead['followup_draft'] or ""
+        # If custom body provided, use it. Otherwise use DB draft.
+        body_text = ""
+        if req and req.custom_body:
+            body_text = req.custom_body
+        else:
+            body_text = lead['followup_draft'] or ""
         
-        # If draft is missing, generate it via template
+        # If draft is missing entirely, generate it via template
         if not body_text:
             from app.services.followup_service import get_template_followup
             stage = (lead['followup_stage'] or 0) + 1
             body_text = get_template_followup(lead, stage)
 
         # RE-INJECT SIGNATURE of the CURRENT user
-        # This ensures if Sravanthi approves a draft Yashika generated, Sravanthi's signature is used.
         final_body = inject_signature(body_text, profile, lead_id)
         
         # Parse subject/body from draft if needed

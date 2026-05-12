@@ -19,7 +19,7 @@ FOLLOWUP_TEMPLATES = {
         3: "Hi {name},\n\nI've reached out a few times regarding our platform but haven't heard back, so I'll assume this isn't a priority for you at the moment.\n\nI'll stop my follow-ups for now, but feel free to reach out if your situation changes or if you have any questions in the future."
     },
     "INVESTOR": {
-        1: "Dear {name},\n\nI hope you're doing well. I'm following up on the investment opportunity I shared last week regarding our agritech platform.\n\nWe've seen some great momentum recently and I'd love to share a quick update with you if you're interested.",
+        1: "Dear {name},\n\nI hope you're doing well. I'm following up on the investment opportunity I shared last week regarding our agritech platform.\n\nPlease let me know if you have any questions or require further information.",
         2: "Hi {name},\n\nFollowing up on my previous note. We are currently closing our latest round and have seen strong interest from strategic partners.\n\nGiven your expertise in this space, I'd value the opportunity to get your feedback on our current trajectory.",
         3: "Hi {name},\n\nI'm reaching out one last time to see if you'd like to discuss the opportunity. I understand you're busy, so I'll move this to the back burner if I don't hear from you.\n\nThanks again for your time and consideration."
     }

@@ -32,8 +32,21 @@ const STAGE_CONFIGS = {
 };
 
 const getLeadType = (lead) => {
-  const t = String(lead.lead_type || lead.sector || lead.persona || '').toUpperCase();
-  return (t.includes('CLIENT') || t.includes('CUSTOMER')) ? 'Client' : 'Investor';
+  if (lead.lead_type) {
+    const lt = String(lead.lead_type).toUpperCase();
+    if (lt.includes('CLIENT')) return 'Client';
+    if (lt.includes('INVESTOR')) return 'Investor';
+  }
+  
+  const text = String(`${lead.company_name || ''} ${lead.sector || ''} ${lead.persona || ''}`).toUpperCase();
+  
+  const investorKeywords = ["VENTURE", "CAPITAL", "EQUITY", "INVEST", "PARTNER", "ASSET", "FAMILY OFFICE"];
+  if (investorKeywords.some(kw => text.includes(kw))) return 'Investor';
+  
+  const clientKeywords = ["SAAS", "FINTECH", "SOFTWARE", "CLIENT", "CUSTOMER", "PRODUCT", "SERVICES"];
+  if (clientKeywords.some(kw => text.includes(kw))) return 'Client';
+
+  return 'Investor';
 };
 
 const getStageLabel = (stage, lead) => {
@@ -62,17 +75,52 @@ const Followups = () => {
   const [notification, setNotification] = useState(null);
   const [selectedLead, setSelectedLead] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [typeFilter, setTypeFilter] = useState('All');
+  const [typeFilter, setTypeFilter] = useState(() => {
+    try {
+      const userStr = localStorage.getItem('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        if (user.username?.toLowerCase() === 'yashika') return 'Investor';
+      }
+    } catch (e) {}
+    return 'All';
+  });
   const [stageFilter, setStageFilter] = useState('All');
   const [selectedIds, setSelectedIds] = useState([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedDraft, setEditedDraft] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const perPage = 100;
 
-  useEffect(() => { fetchFollowups(); }, []);
+  useEffect(() => { 
+    setPage(1); 
+    fetchFollowups(1); 
+  }, [searchQuery, typeFilter, stageFilter]);
 
-  const fetchFollowups = async () => {
+  useEffect(() => { fetchFollowups(page); }, [page]);
+
+  const fetchFollowups = async (pageNum = 1) => {
     try {
       setIsLoading(true);
-      const res = await api.get('/api/followups');
-      setFollowups(res.data);
+      const params = {
+        page: pageNum,
+        per_page: perPage,
+        search: searchQuery || undefined,
+        type: typeFilter === 'All' ? undefined : typeFilter,
+      };
+
+      // Map stage filter to numeric stage
+      if (stageFilter !== 'All') {
+        const currentConfigs = STAGE_CONFIGS[typeFilter];
+        const config = currentConfigs.find(c => c.label === stageFilter);
+        if (config) params.stage = config.stage;
+      }
+
+      const res = await api.get('/api/followups', { params });
+      setFollowups(res.data.leads || []);
+      setTotal(res.data.total || 0);
       setSelectedIds([]); 
     } catch (err) {
       showNotification('error', 'Failed to load active follow-ups');
@@ -81,12 +129,29 @@ const Followups = () => {
     }
   };
 
+  const handleSaveDraft = async () => {
+    if (!selectedLead) return;
+    try {
+      setIsSaving(true);
+      await api.post(`/api/leads/${selectedLead.id}/save-followup-draft`, { 
+        custom_body: editedDraft 
+      });
+      showNotification('success', 'Draft saved successfully');
+      setSelectedLead(prev => ({ ...prev, followup_draft: editedDraft }));
+      setIsEditing(false);
+    } catch { showNotification('error', 'Failed to save draft'); }
+    finally { setIsSaving(false); }
+  };
+
   const handleApproveFollowup = async (leadId) => {
     try {
-      await api.post(`/api/leads/${leadId}/approve-followup`);
+      await api.post(`/api/leads/${leadId}/approve-followup`, { 
+        custom_body: isEditing ? editedDraft : undefined 
+      });
       showNotification('success', 'Follow-up sent successfully!');
-      fetchFollowups();
+      fetchFollowups(page);
       setIsModalOpen(false);
+      setIsEditing(false);
     } catch { showNotification('error', 'Failed to send follow-up.'); }
   };
 
@@ -133,10 +198,12 @@ const Followups = () => {
   const openLeadDetails = async (lead) => {
     setSelectedLead(lead);
     setIsModalOpen(true);
+    setIsEditing(false);
     try {
       const res = await api.get(`/api/leads/${lead.id}/followup-preview`);
       if (res.data?.full_html) {
         setSelectedLead(prev => ({ ...prev, followup_draft: res.data.full_html }));
+        setEditedDraft(res.data.body || '');
       }
     } catch {}
   };
@@ -153,25 +220,7 @@ const Followups = () => {
     }
   };
 
-  const filtered = followups.filter(f => {
-    const matchSearch = !searchQuery ||
-      f.first_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      f.last_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      f.company_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      f.email?.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchType = typeFilter === 'All' || getLeadType(f) === typeFilter;
-    const currentConfigs = STAGE_CONFIGS[typeFilter];
-    const selectedConfig = currentConfigs.find(c => c.label === stageFilter);
-    
-    const matchStage = stageFilter === 'All' || (
-      selectedConfig && 
-      f.followup_stage === selectedConfig.stage &&
-      (typeFilter !== 'All' || getLeadType(f) === selectedConfig.type)
-    );
-
-    return matchSearch && matchType && matchStage;
-  });
+  const leadsToDisplay = followups; // Now handled by server-side filtering
 
   return (
     <div className="min-h-screen bg-[#0a0f1a] text-slate-200 pb-24">
@@ -337,15 +386,15 @@ const Followups = () => {
         <div className="flex items-center justify-between mb-4 px-2">
           <div className="flex items-center gap-3">
             <button
-              onClick={() => toggleSelectAll(filtered)}
+              onClick={() => toggleSelectAll(leadsToDisplay)}
               className="flex items-center gap-2 text-[11px] font-black text-slate-500 uppercase tracking-widest hover:text-white transition-colors cursor-pointer"
             >
-              {selectedIds.length === filtered.length && filtered.length > 0 ? <CheckSquare className="w-4 h-4 text-indigo-400" /> : <Square className="w-4 h-4" />}
-              {selectedIds.length === filtered.length && filtered.length > 0 ? 'Deselect All' : 'Select All'}
+              {selectedIds.length === leadsToDisplay.length && leadsToDisplay.length > 0 ? <CheckSquare className="w-4 h-4 text-indigo-400" /> : <Square className="w-4 h-4" />}
+              {selectedIds.length === leadsToDisplay.length && leadsToDisplay.length > 0 ? 'Deselect All' : 'Select All'}
             </button>
             <span className="text-slate-700">|</span>
             <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
-              {filtered.length} results
+              {total} total results
               {selectedIds.length > 0 && <span className="text-indigo-400 ml-2">({selectedIds.length} selected)</span>}
             </p>
           </div>
@@ -357,14 +406,15 @@ const Followups = () => {
             <Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />
             <p className="text-xs font-bold text-slate-500 uppercase tracking-[2px]">Syncing pipeline...</p>
           </div>
-        ) : filtered.length === 0 ? (
+        ) : leadsToDisplay.length === 0 ? (
           <div className="bg-[#0f172a] border border-white/[0.05] rounded-3xl p-20 flex flex-col items-center justify-center text-center space-y-6">
             <History className="w-10 h-10 text-slate-600" />
             <h3 className="text-lg font-black text-white uppercase italic">No Sequences Found</h3>
           </div>
         ) : (
+          <>
           <div className="grid grid-cols-1 gap-3">
-            {filtered.map((lead) => {
+            {leadsToDisplay.map((lead) => {
               const lt = getLeadType(lead);
               const isInvestor = lt === 'Investor';
               const isSelected = selectedIds.includes(lead.id);
@@ -428,6 +478,42 @@ const Followups = () => {
               );
             })}
           </div>
+
+          {/* Pagination */}
+          {total > perPage && (
+            <div className="mt-8 flex items-center justify-center gap-4">
+              <button
+                disabled={page === 1}
+                onClick={() => setPage(p => p - 1)}
+                className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all text-[11px] font-black uppercase tracking-widest cursor-pointer"
+              >
+                Previous
+              </button>
+              <div className="flex items-center gap-2">
+                {[...Array(Math.ceil(total / perPage))].map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setPage(i + 1)}
+                    className={`w-10 h-10 rounded-xl border flex items-center justify-center text-[11px] font-black transition-all cursor-pointer ${
+                      page === i + 1
+                        ? 'bg-indigo-600 border-indigo-600 text-white'
+                        : 'bg-white/5 border-white/10 text-slate-400 hover:border-white/20'
+                    }`}
+                  >
+                    {i + 1}
+                  </button>
+                ))}
+              </div>
+              <button
+                disabled={page === Math.ceil(total / perPage)}
+                onClick={() => setPage(p => p + 1)}
+                className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all text-[11px] font-black uppercase tracking-widest cursor-pointer"
+              >
+                Next
+              </button>
+            </div>
+          )}
+          </>
         )}
       </div>
 
@@ -459,23 +545,57 @@ const Followups = () => {
             </div>
 
             <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto">
-              <div className="bg-slate-950/40 rounded-2xl p-8 border border-white/[0.03] relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500/40" />
-                <div
-                  className="prose prose-invert prose-sm max-w-none text-slate-300 leading-relaxed text-[14px]"
-                  dangerouslySetInnerHTML={{ __html: selectedLead.followup_draft || '<p class="animate-pulse italic text-slate-500">Generating draft...</p>' }}
-                />
+              <div className="flex items-center justify-between px-2">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-[2px]">Message Draft</span>
+                <button 
+                  onClick={() => setIsEditing(!isEditing)}
+                  className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase transition-all ${isEditing ? 'bg-indigo-500 text-white' : 'bg-white/5 text-slate-400 hover:text-white'}`}
+                >
+                  {isEditing ? 'Preview Mode' : '✏️ Edit Draft'}
+                </button>
               </div>
+              
+              {isEditing ? (
+                <textarea
+                  value={editedDraft}
+                  onChange={(e) => setEditedDraft(e.target.value)}
+                  className="w-full h-[300px] bg-slate-950/60 border border-indigo-500/30 rounded-2xl p-6 text-slate-200 text-sm font-medium outline-none focus:border-indigo-500 transition-all resize-none leading-relaxed"
+                  placeholder="Enter your custom message here..."
+                />
+              ) : (
+                <div className="bg-slate-950/40 rounded-2xl p-8 border border-white/[0.03] relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500/40" />
+                  <div
+                    className="prose prose-invert prose-sm max-w-none text-slate-300 leading-relaxed text-[14px]"
+                    dangerouslySetInnerHTML={{ __html: selectedLead.followup_draft || '<p class="animate-pulse italic text-slate-500">Generating draft...</p>' }}
+                  />
+                </div>
+              )}
             </div>
 
-            <div className="p-6 bg-[#131722]/50 border-t border-white/5 flex items-center justify-end gap-3">
-              <button onClick={() => setIsModalOpen(false)} className="px-5 py-2.5 text-[11px] font-black text-slate-400 uppercase tracking-wider hover:text-white transition-colors cursor-pointer">Close</button>
-              <button
-                onClick={() => handleApproveFollowup(selectedLead.id)}
-                className="flex items-center gap-2 px-7 py-2.5 bg-indigo-600 text-white rounded-xl text-[11px] font-black uppercase tracking-wider hover:bg-indigo-500 transition-all cursor-pointer"
-              >
-                <Zap className="w-4 h-4" /> Approve & Send
-              </button>
+            <div className="p-6 bg-[#131722]/50 border-t border-white/5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                {isEditing && (
+                  <button
+                    onClick={handleSaveDraft}
+                    disabled={isSaving}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-white/5 text-slate-300 rounded-xl text-[11px] font-black uppercase tracking-wider hover:bg-white/10 transition-all cursor-pointer border border-white/10 disabled:opacity-50"
+                  >
+                    {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                    Save Changes
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <button onClick={() => setIsModalOpen(false)} className="px-5 py-2.5 text-[11px] font-black text-slate-400 uppercase tracking-wider hover:text-white transition-colors cursor-pointer">Close</button>
+                <button
+                  onClick={() => handleApproveFollowup(selectedLead.id)}
+                  disabled={isSaving}
+                  className="flex items-center gap-2 px-7 py-2.5 bg-indigo-600 text-white rounded-xl text-[11px] font-black uppercase tracking-wider hover:bg-indigo-500 transition-all cursor-pointer shadow-lg shadow-indigo-600/20"
+                >
+                  <Zap className="w-4 h-4" /> Approve & Send
+                </button>
+              </div>
             </div>
           </div>
         </div>
