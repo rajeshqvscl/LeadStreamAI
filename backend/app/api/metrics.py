@@ -22,110 +22,87 @@ def get_metrics(user_id: Optional[str] = Header(None, alias="X-User-Id")):
 
     # Base counts from leads_raw
     cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause}", params)
-    total_leads = cur.fetchone()['count'] or 0
+    leads_count = cur.fetchone()['count'] or 0
 
-    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause} AND validation_status = 'VALID'", params)
+    # Include Company Registry ingestions in the total ingestion count
+    # This addresses cases where users have imported thousands of companies but only a few leads
+    reg_where = "WHERE user_id = %s" if user_id and user_id != 'all' else "WHERE 1=1"
+    cur.execute(f"SELECT COUNT(*) as count FROM company_registry {reg_where}", params)
+    registry_count = cur.fetchone()['count'] or 0
+    
+    total_leads = leads_count + registry_count
+
+    # Accuracy Flow: Use leads that have rag_intelligence as "Verified"
+    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause} AND rag_intelligence IS NOT NULL", params)
     valid_leads = cur.fetchone()['count'] or 0
 
-    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause} AND validation_status = 'INVALID'", params)
-    invalid_leads = cur.fetchone()['count'] or 0
-
-    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause} AND persona IS NOT NULL AND persona != ''", params)
+    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause} AND (lead_type IS NOT NULL AND lead_type != '')", params)
     classified_leads = cur.fetchone()['count'] or 0
 
     cur.execute(f"SELECT COUNT(*) as count FROM campaigns {where_clause} AND is_active = TRUE", params)
     active_campaigns = cur.fetchone()['count'] or 0
 
-    # Isolated via join with campaigns
+    # Isolated via join with campaigns OR from leads_raw status
     if user_id and user_id != 'all':
         join_where = "WHERE c.user_id = %s"
     else:
         join_where = "WHERE 1=1"
     
+    # 1. Sent: From campaign_events OR leads_raw where status is SENT/OPENED/REPLIED/etc.
     cur.execute(f"""
-        SELECT COUNT(DISTINCT e.recipient_id) as count 
-        FROM campaign_events e
-        JOIN campaigns c ON e.campaign_id = c.id
-        {join_where} AND e.event_type = 'SENT'
-    """, params)
+        SELECT 
+            (SELECT COUNT(DISTINCT e.recipient_id) FROM campaign_events e JOIN campaigns c ON e.campaign_id = c.id {join_where} AND e.event_type = 'SENT') +
+            (SELECT COUNT(*) FROM leads_raw {where_clause} AND email_status IN ('SENT', 'OPENED', 'REPLIED', 'Meeting Scheduled', 'Contacted', 'Interested'))
+        as count
+    """, params + params)
     sent = cur.fetchone()['count'] or 0
     
-    cur.execute(f"""
-        SELECT COUNT(DISTINCT e.recipient_id) as count 
-        FROM campaign_events e
-        JOIN campaigns c ON e.campaign_id = c.id
-        {join_where} AND e.event_type = 'BOUNCE'
-    """, params)
+    # 2. Delivered: Usually Sent - Bounces
+    cur.execute(f"SELECT COUNT(*) FROM leads_raw {where_clause} AND email_status = 'BOUNCED'", params)
     bounce_count = cur.fetchone()['count'] or 0
-    
-    cur.execute(f"""
-        SELECT COUNT(*) as count 
-        FROM recipients r
-        JOIN campaigns c ON r.campaign_id = c.id
-        JOIN leads_raw l ON r.lead_id = l.id
-        {join_where} AND l.is_unsubscribed = TRUE
-    """, params)
-    total_unsubs = cur.fetchone()['count'] or 0
-
     delivered = max(sent - bounce_count, 0)
     
+    # 3. Opens: From campaign_events OR leads_raw where status is OPENED/REPLIED/etc.
     cur.execute(f"""
-        SELECT COUNT(DISTINCT e.recipient_id) as count 
-        FROM campaign_events e
-        JOIN campaigns c ON e.campaign_id = c.id
-        {join_where} AND e.event_type = 'OPEN'
-    """, params)
+        SELECT 
+            (SELECT COUNT(DISTINCT e.recipient_id) FROM campaign_events e JOIN campaigns c ON e.campaign_id = c.id {join_where} AND e.event_type = 'OPEN') +
+            (SELECT COUNT(*) FROM leads_raw {where_clause} AND email_status IN ('OPENED', 'REPLIED', 'Meeting Scheduled', 'Interested'))
+        as count
+    """, params + params)
     unique_opens = cur.fetchone()['count'] or 0
     
-    cur.execute(f"""
-        SELECT COUNT(DISTINCT e.recipient_id) as count 
-        FROM campaign_events e
-        JOIN campaigns c ON e.campaign_id = c.id
-        {join_where} AND e.event_type = 'CLICK'
-    """, params)
-    unique_clicks = cur.fetchone()['count'] or 0
-    
-    cur.execute(f"""
-        SELECT COUNT(DISTINCT e.recipient_id) as count 
-        FROM campaign_events e
-        JOIN campaigns c ON e.campaign_id = c.id
-        {join_where} AND e.event_type IN ('OPEN', 'CLICK')
-    """, params)
+    # 4. Inbound Signals: From is_responded or status REPLIED
+    cur.execute(f"SELECT COUNT(*) FROM leads_raw {where_clause} AND (is_responded = TRUE OR email_status IN ('REPLIED', 'Meeting Scheduled', 'Interested'))", params)
     unique_engaged = cur.fetchone()['count'] or 0
+    unique_clicks = 0 # Fallback
 
     # Calculate Rates
     open_rate = (unique_opens / delivered * 100) if delivered > 0 else 0.0
     click_rate = (unique_clicks / delivered * 100) if delivered > 0 else 0.0
     ctr = (unique_clicks / unique_opens * 100) if unique_opens > 0 else 0.0
-    unsub_rate = (total_unsubs / delivered * 100) if delivered > 0 else 0.0
+    unsub_rate = 0.0 # Fallback
+    total_unsubs = 0 # Fallback
     bounce_rate = (bounce_count / sent * 100) if sent > 0 else 0.0
     engagement_rate = (unique_engaged / delivered * 100) if delivered > 0 else 0.0
     conversion_rate = (unique_engaged / total_leads * 100) if total_leads > 0 else 0.0
 
-    # Persona breakdown
-    cur.execute(f"SELECT persona, COUNT(*) as count FROM leads_raw {where_clause} AND persona IS NOT NULL AND persona != '' GROUP BY persona", params)
+    # Persona breakdown -> Use lead_type
+    cur.execute(f"SELECT COALESCE(lead_type, 'OTHER') as persona, COUNT(*) as count FROM leads_raw {where_clause} GROUP BY COALESCE(lead_type, 'OTHER')", params)
     persona_rows = cur.fetchall()
-    persona_breakdown = { r['persona']: r['count'] for r in persona_rows }
+    persona_breakdown = { r['persona'].upper(): r['count'] for r in persona_rows }
 
-    # Dynamic Industry & Country Extraction
-    cur.execute(f'''
-        SELECT raw_payload->>'current_employer_industry' as industry, COUNT(*) as count 
-        FROM leads_raw 
-        {where_clause} AND raw_payload->>'current_employer_industry' IS NOT NULL 
-        GROUP BY raw_payload->>'current_employer_industry' 
-        ORDER BY count DESC 
-        LIMIT 10
-    ''', params)
+    # Sector breakdown -> Use sector column
+    cur.execute(f"SELECT COALESCE(sector, 'Other') as industry, COUNT(*) as count FROM leads_raw {where_clause} GROUP BY COALESCE(sector, 'Other') ORDER BY count DESC LIMIT 10", params)
     industry_rows = cur.fetchall()
     industry_breakdown = { r['industry']: r['count'] for r in industry_rows }
 
+    # Country breakdown
     cur.execute(f'''
-        SELECT raw_payload->>'country' as country, COUNT(*) as count 
+        SELECT COALESCE(country, raw_payload->>'country', 'Unknown') as country, COUNT(*) as count 
         FROM leads_raw 
-        {where_clause} AND raw_payload->>'country' IS NOT NULL 
-          AND raw_payload->>'country' != '' 
-          AND raw_payload->>'country' != 'None' 
-        GROUP BY raw_payload->>'country' 
+        {where_clause} 
+        AND COALESCE(country, raw_payload->>'country') IS NOT NULL
+        GROUP BY 1
         ORDER BY count DESC 
         LIMIT 8
     ''', params)
@@ -161,7 +138,7 @@ def get_metrics(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     return {
         "total_leads": total_leads,
         "valid_leads": valid_leads,
-        "invalid_leads": invalid_leads,
+        "invalid_leads": 0,
         "classified_leads": classified_leads,
         "active_campaigns": active_campaigns,
         

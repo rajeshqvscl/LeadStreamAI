@@ -34,6 +34,8 @@ const AdminDashboard = () => {
   const [isRagLoading, setIsRagLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, pages: 1, limit: 50 });
+  const [availableSectors, setAvailableSectors] = useState([]);
+  const [availableOwners, setAvailableOwners] = useState([]);
 
   useEffect(() => {
     if (selectedLead?.id) {
@@ -81,6 +83,15 @@ const AdminDashboard = () => {
     return html.replace(/<[^>]*>?/gm, '');
   };
 
+  const fetchGlobalStats = async () => {
+    try {
+      const res = await api.get(`/api/admin/stats/global?_t=${Date.now()}`);
+      setStats(res.data || {});
+    } catch (err) {
+      console.error('Failed to fetch stats', err);
+    }
+  };
+
   const fetchData = async (page = 1, silent = false) => {
     try {
       if (!silent) setLoading(true);
@@ -88,26 +99,18 @@ const AdminDashboard = () => {
         page: page,
         limit: 50,
         ...filters,
-        search: debouncedSearch || ''
+        search: debouncedSearch || '',
+        _t: Date.now()
       });
-      const [leadsRes, statsRes] = await Promise.all([
-        api.get(`/api/admin/leads/all?${params.toString()}`),
-        api.get('/api/admin/stats/global')
-      ]);
+      
+      const leadsRes = await api.get(`/api/admin/leads/all?${params.toString()}`);
       
       if (leadsRes.data.leads) {
         setLeads(leadsRes.data.leads);
         setPagination(leadsRes.data.pagination);
-      } else {
-        setLeads(leadsRes.data || []);
+        setAvailableSectors(leadsRes.data.sectors || []);
+        setAvailableOwners(leadsRes.data.owners || []);
       }
-      
-      setStats(statsRes.data || {});
-      
-      // Fetch RAG Debug Stats
-      if (!silent) setIsRagLoading(true);
-      const debugRes = await api.get('/api/intelligence/admin/rag-debug');
-      setRagStats(debugRes.data);
     } catch (err) {
       console.error('Failed to fetch admin data', err);
     } finally {
@@ -117,15 +120,20 @@ const AdminDashboard = () => {
   };
 
   useEffect(() => {
+    fetchGlobalStats();
+  }, []);
+
+  useEffect(() => {
     setCurrentPage(1);
   }, [filters, debouncedSearch]);
 
   useEffect(() => {
     fetchData(currentPage);
 
-    // Auto-refresh interval
+    // Auto-refresh interval (silent)
     const pollId = setInterval(() => {
       fetchData(currentPage, true);
+      fetchGlobalStats();
     }, 20000);
 
     return () => clearInterval(pollId);
@@ -137,8 +145,12 @@ const AdminDashboard = () => {
   }, [leads]);
 
   const owners = useMemo(() => {
-    return ['ALL', ...new Set(leads.map(l => l.owner_name).filter(Boolean))];
-  }, [leads]);
+    return ['ALL', ...availableOwners];
+  }, [availableOwners]);
+
+  const sectors = useMemo(() => {
+    return ['ALL', ...availableSectors];
+  }, [availableSectors]);
 
   if (loading && leads.length === 0) {
     return (
@@ -379,9 +391,8 @@ const AdminDashboard = () => {
             onChange={(e) => setFilters({ ...filters, sector: e.target.value })}
             className="bg-white/[0.03] border border-white/5 rounded-xl py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest focus:outline-none focus:border-indigo-500/50"
           >
-            <option value="ALL">All Sectors</option>
-            {Array.from(new Set(leads.map(l => l.sector).filter(s => s && !['INVESTOR', 'CLIENT'].includes(s.toUpperCase())))).map(s => (
-              <option key={s} value={s}>{s}</option>
+            {sectors.map(s => (
+              <option key={s} value={s}>{s === 'ALL' ? 'All Sectors' : s}</option>
             ))}
           </select>
         </div>

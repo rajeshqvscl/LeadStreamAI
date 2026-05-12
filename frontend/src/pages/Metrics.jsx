@@ -30,7 +30,7 @@ const Metrics = () => {
       if (selectedUserId !== 'all') {
         headers['X-User-Id'] = selectedUserId;
       }
-      const response = await api.get('/api/metrics', { headers });
+      const response = await api.get(`/api/metrics?_t=${Date.now()}`, { headers });
       setData(response.data);
     } catch (err) {
       console.error('Failed to fetch metrics', err);

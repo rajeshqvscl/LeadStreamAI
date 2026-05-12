@@ -122,8 +122,17 @@ def get_all_leads_admin(
         cur.execute(count_query, tuple(params))
         total_count = cur.fetchone()[0]
         
+        # 5. Dynamic Filters (Fetch all unique sectors and owners for the dropdowns)
+        cur.execute("SELECT DISTINCT sector FROM leads_raw WHERE sector IS NOT NULL AND sector != '' ORDER BY sector ASC")
+        all_sectors = [r[0] for r in cur.fetchall()]
+        
+        cur.execute("SELECT DISTINCT username FROM users ORDER BY username ASC")
+        all_owners = [r[0] for r in cur.fetchall()]
+        
         return {
             "leads": [dict(l) for l in leads],
+            "sectors": all_sectors,
+            "owners": all_owners,
             "pagination": {
                 "total": total_count,
                 "page": page,
