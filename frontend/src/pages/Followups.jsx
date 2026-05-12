@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   History, Mail, CheckCircle, Clock, AlertCircle, X,
-  ChevronRight, Loader2, Search, Filter,
+  ChevronRight, Loader2, Search, Filter, ChevronLeft, ChevronRight as ChevronRightIcon,
   Zap, Calendar, User, Rocket, Building2, CheckSquare, Square,
-  ChevronsRight, Cpu
+  ChevronsRight, Cpu, Save
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -136,8 +136,14 @@ const Followups = () => {
       await api.post(`/api/leads/${selectedLead.id}/save-followup-draft`, { 
         custom_body: editedDraft 
       });
+      
+      // Re-fetch preview to show the updated HTML with signature
+      const res = await api.get(`/api/leads/${selectedLead.id}/followup-preview`);
+      if (res.data?.full_html) {
+        setSelectedLead(prev => ({ ...prev, followup_draft: res.data.full_html }));
+      }
+      
       showNotification('success', 'Draft saved successfully');
-      setSelectedLead(prev => ({ ...prev, followup_draft: editedDraft }));
       setIsEditing(false);
     } catch { showNotification('error', 'Failed to save draft'); }
     finally { setIsSaving(false); }

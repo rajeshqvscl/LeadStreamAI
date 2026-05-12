@@ -54,7 +54,10 @@ def generate_followup_preview(lead_id: int, user_id: int):
         lead_type_raw = str(lead.get('lead_type') or lead.get('sector') or lead.get('persona') or '').upper()
         type_key = "CLIENT" if ('CLIENT' in lead_type_raw or 'CUSTOMER' in lead_type_raw) else "INVESTOR"
         
-        body = get_template_followup(lead, next_stage)
+        # Use saved draft if exists, otherwise generate from template
+        body = lead.get('followup_draft')
+        if not body:
+            body = get_template_followup(lead, next_stage)
         
         # Clean subject
         subject = lead.get('last_outreach_subject') or "Following up"
