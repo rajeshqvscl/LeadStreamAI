@@ -15,8 +15,12 @@ const CompanyDatabase = () => {
   const [search, setSearch] = useState('');
   const [notification, setNotification] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [gsheetUrl, setGsheetUrl] = useState('');
+  const [gsheetUrl, setGsheetUrl] = useState(localStorage.getItem('gsheet_sync_url') || '');
+  const [sheetTabs, setSheetTabs] = useState([]);
+  const [selectedTab, setSelectedTab] = useState(null);
+  const [isLoadingTabs, setIsLoadingTabs] = useState(false);
   const [processingId, setProcessingId] = useState(null);
+  const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -24,9 +28,12 @@ const CompanyDatabase = () => {
   const [selectedIds, setSelectedIds] = useState([]);
   const [columnFilters, setColumnFilters] = useState({});
   const [showFilters, setShowFilters] = useState(false);
+  // Browsing Tabs State
+  const [browsingTabs, setBrowsingTabs] = useState(['ALL DATA']);
+  const [activeBrowsingTab, setActiveBrowsingTab] = useState(localStorage.getItem('active_browsing_tab') || 'ALL DATA');
 
   // Pagination State
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(parseInt(localStorage.getItem('current_company_page')) || 1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
@@ -38,7 +45,12 @@ const CompanyDatabase = () => {
   const fetchCompanies = async (page = 1) => {
     setIsLoading(true);
     try {
-      const filtersJson = JSON.stringify(columnFilters);
+      const filtersCopy = { ...columnFilters };
+      if (activeBrowsingTab !== 'ALL DATA') {
+        filtersCopy['_source_tab'] = activeBrowsingTab;
+      }
+
+      const filtersJson = JSON.stringify(filtersCopy);
       const queryParams = new URLSearchParams({
         page: String(page),
         limit: '500'
@@ -54,6 +66,9 @@ const CompanyDatabase = () => {
       const pages = response.data.pages || Math.ceil((response.data.total || 0) / limit);
       setTotalPages(pages);
       setCurrentPage(response.data.page || page);
+      
+      // Extract unique tabs from the data if any (or we could fetch from a dedicated endpoint)
+      // For now, let's fetch unique tabs periodically or once
     } catch (err) {
       console.error('Failed to fetch companies', err);
       showNotification('error', 'Sync Failure: Unable to establish link with the main database.');
@@ -65,11 +80,28 @@ const CompanyDatabase = () => {
   // Debounced Search & Filter Effect
   useEffect(() => {
     const handler = setTimeout(() => {
-      fetchCompanies(1);
+      fetchCompanies(currentPage);
+      localStorage.setItem('current_company_page', String(currentPage));
+      localStorage.setItem('active_browsing_tab', activeBrowsingTab);
     }, 400); // 400ms debounce
 
     return () => clearTimeout(handler);
-  }, [search, columnFilters]);
+  }, [search, columnFilters, activeBrowsingTab, currentPage]);
+
+  const fetchTabs = async () => {
+    try {
+      const response = await api.get('/api/companies/unique-tabs');
+      if (response.data.tabs) {
+        setBrowsingTabs(['ALL DATA', ...response.data.tabs]);
+      }
+    } catch (err) {
+      console.error('Failed to fetch tabs', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchTabs();
+  }, []);
 
   // Handle manual page changes
   const handlePageChange = (newPage) => {
@@ -120,6 +152,7 @@ const CompanyDatabase = () => {
         await api.post('/api/companies/import', jsonData);
         showNotification('success', `Dataset Synced: ${jsonData.length} records integrated.`);
         fetchCompanies();
+        fetchTabs();
       } catch (err) {
         showNotification('error', 'Import Failure: Encryption mismatch or malformed file.');
         console.error(err);
@@ -153,8 +186,27 @@ const CompanyDatabase = () => {
       await api.delete('/api/companies/clear');
       setCompanies([]);
       showNotification('success', 'Registry Cleansed: All company profiles purged.');
+      fetchTabs();
+      setActiveBrowsingTab('ALL DATA');
     } catch (err) {
       showNotification('error', 'Purge Failure: Unable to wipe database shards.');
+    }
+  };
+
+  const handleLoadTabs = async () => {
+    if (!gsheetUrl) return;
+    setIsLoadingTabs(true);
+    setSheetTabs([]);
+    setSelectedTab(null);
+    try {
+      const res = await api.post('/api/companies/gsheet-tabs', { url: gsheetUrl });
+      const tabs = res.data.tabs || [];
+      setSheetTabs(tabs);
+      if (tabs.length > 0) setSelectedTab(tabs[0].name);
+    } catch (err) {
+      showNotification('error', 'Failed to load sheet tabs.');
+    } finally {
+      setIsLoadingTabs(false);
     }
   };
 
@@ -166,9 +218,24 @@ const CompanyDatabase = () => {
     setIsSyncing(true);
     showNotification('success', 'Satellite Link Initiated: Fetching remote dataset...');
     try {
-      await api.post('/api/companies/import-gsheet', { url: gsheetUrl });
+      await api.post('/api/companies/import-gsheet', { 
+        url: gsheetUrl, 
+        sheet_name: selectedTab,
+        auto_sync: isAutoSyncEnabled
+      });
       showNotification('success', 'Satellite Link Established: Cloud dataset integrated.');
+      // Keep URL as requested by user
+      localStorage.setItem('gsheet_sync_url', gsheetUrl);
+      
+      // Auto-switch to the tab we just imported for immediate visibility
+      if (selectedTab && selectedTab !== 'ALL_TABS') {
+        setActiveBrowsingTab(selectedTab);
+      } else {
+        setActiveBrowsingTab('ALL_TABS');
+      }
+
       fetchCompanies(1);
+      fetchTabs();
     } catch (err) {
       showNotification('error', 'Cloud sync failed: ' + (err.response?.data?.detail || err.message));
     } finally {
@@ -421,11 +488,12 @@ const CompanyDatabase = () => {
   };
 
   const headers = React.useMemo(() => {
-    if (companies.length === 0) return ["Name", "Company", "Status", "Sector", "Email", "Mobile", "Note"];
+    // If we have no data, show default columns
+    if (companies.length === 0) return ["Name", "Company", "Email", "LinkedIn Profile", "Designation", "Mobile", "Sector"];
     
-    // Collect all unique keys from the first 20 companies to ensure we don't miss enriched columns
+    // Collect all unique keys from CURRENT companies in this view
     const allKeys = new Set();
-    companies.slice(0, 20).forEach(c => {
+    companies.forEach(c => {
       Object.keys(c).forEach(key => {
         if (key !== 'id' && key !== '_is_generated' && !key.startsWith('_')) {
           allKeys.add(key);
@@ -433,11 +501,11 @@ const CompanyDatabase = () => {
       });
     });
     
-    // Convert to array and ensure a stable order (alphabetical or fixed priority)
-    const priority = ["Company Name", "Name", "Person Name", "Email", "Mobile", "LinkedIn Profile", "Designation"];
+    // Priority ordering for a clean "Spreadsheet" look
+    const priority = ["Company Name", "Name", "Person Name", "Email", "Mobile", "LinkedIn Profile", "LinkedIn URL", "Designation", "Domain", "Website"];
     return Array.from(allKeys).sort((a, b) => {
-      const aIdx = priority.indexOf(a);
-      const bIdx = priority.indexOf(b);
+      const aIdx = priority.findIndex(p => a.toLowerCase().includes(p.toLowerCase()));
+      const bIdx = priority.findIndex(p => b.toLowerCase().includes(p.toLowerCase()));
       if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
       if (aIdx !== -1) return -1;
       if (bIdx !== -1) return 1;
@@ -562,50 +630,109 @@ const CompanyDatabase = () => {
             <X className="w-5 h-5" />
           </button>
 
-          <div className="relative flex-1 lg:max-w-md">
-            <FileSpreadsheet className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500/50" />
-            <input
-              type="text"
-              placeholder="Paste Cloud CSV URL..."
-              className="w-full bg-[#131722]/60 border border-emerald-500/10 rounded-2xl py-3 pl-12 pr-4 text-white text-[11px] focus:outline-none focus:border-emerald-500/30 transition-all font-medium placeholder:text-slate-700"
-              value={gsheetUrl}
-              onChange={(e) => setGsheetUrl(e.target.value)}
-            />
+          <div className="relative flex-1 lg:max-w-md space-y-2">
+            <div className="relative">
+              <FileSpreadsheet className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500/50" />
+              <input
+                type="text"
+                placeholder="Paste Google Sheet URL..."
+                className="w-full bg-[#131722]/60 border border-emerald-500/10 rounded-2xl py-3 pl-12 pr-32 text-white text-[11px] focus:outline-none focus:border-emerald-500/30 transition-all font-medium placeholder:text-slate-700"
+                value={gsheetUrl}
+                onChange={(e) => { 
+                  setGsheetUrl(e.target.value); 
+                  setSheetTabs([]); 
+                  setSelectedTab(null);
+                  localStorage.setItem('gsheet_sync_url', e.target.value);
+                }}
+              />
+              <button
+                onClick={handleLoadTabs}
+                disabled={isLoadingTabs || !gsheetUrl}
+                className="absolute right-2 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all disabled:opacity-40 cursor-pointer"
+              >
+                {isLoadingTabs ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Load Tabs'}
+              </button>
+            </div>
+            {sheetTabs.length > 0 && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setSelectedTab('ALL_TABS')}
+                  className={`h-10 px-4 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer border flex items-center gap-2 ${
+                    selectedTab === 'ALL_TABS'
+                      ? 'bg-amber-500 border-amber-500 text-white shadow-lg shadow-amber-500/20'
+                      : 'bg-amber-500/10 border-amber-500/20 text-amber-500 hover:bg-amber-500/20'
+                  }`}
+                >
+                  <Sparkles className="w-3 h-3" />
+                  All Tabs
+                </button>
+
+                <div className="relative group/select flex-1">
+                  <select
+                    value={selectedTab === 'ALL_TABS' ? '' : (selectedTab || '')}
+                    onChange={(e) => setSelectedTab(e.target.value)}
+                    className="w-full h-10 appearance-none bg-white/5 border border-white/10 rounded-xl px-4 pr-10 text-[10px] font-black text-slate-300 uppercase tracking-widest focus:outline-none focus:border-emerald-500/30 transition-all cursor-pointer"
+                  >
+                    <option value="" disabled className="bg-[#0d1117]">Select Individual Tab</option>
+                    {sheetTabs.map(tab => (
+                      <option key={tab.gid} value={tab.name} className="bg-[#0d1117] text-white py-2">
+                        {tab.name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none group-hover/select:text-slate-300 transition-colors" />
+                </div>
+              </div>
+            )}
+            <div className="flex items-center gap-4 self-end">
+              <label className="flex items-center gap-2.5 cursor-pointer group px-2 py-2 bg-white/5 border border-white/5 rounded-xl hover:bg-white/10 transition-all h-10">
+                <div className="relative">
+                  <input 
+                    type="checkbox" 
+                    className="sr-only peer" 
+                    checked={isAutoSyncEnabled}
+                    onChange={(e) => setIsAutoSyncEnabled(e.target.checked)}
+                  />
+                  <div className="w-8 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500/20 peer-checked:after:bg-emerald-500"></div>
+                </div>
+                <span className="text-[8px] font-black text-slate-500 uppercase tracking-[1px] group-hover:text-slate-400 whitespace-nowrap">Auto Sync</span>
+              </label>
+
+              <button
+                onClick={handleSyncGSheet}
+                disabled={isSyncing || !gsheetUrl}
+                className="h-10 px-6 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-xl flex items-center justify-center gap-2 text-[9px] font-black uppercase tracking-widest text-emerald-500 disabled:opacity-50 cursor-pointer transition-all"
+              >
+                {isSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileSpreadsheet className="w-3.5 h-3.5" />}
+                Sync
+              </button>
+
+              <button
+                onClick={() => document.getElementById('file-upload').click()}
+                disabled={isImporting}
+                className="h-10 px-6 bg-blue-600 hover:bg-blue-500 text-white rounded-xl flex items-center gap-2 text-[9px] font-black uppercase tracking-widest shadow-lg shadow-blue-600/20 disabled:opacity-50 cursor-pointer transition-all"
+              >
+                {isImporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                Import
+              </button>
+
+              <button
+                onClick={handleExport}
+                className="h-10 px-6 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 rounded-xl flex items-center gap-2 text-[9px] font-black uppercase tracking-widest cursor-pointer transition-all"
+              >
+                <Download className="w-3.5 h-3.5 text-slate-500" />
+                Export
+              </button>
+
+              <button
+                onClick={handleClear}
+                className="h-10 px-6 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-500 rounded-xl flex items-center gap-2 text-[9px] font-black uppercase tracking-widest cursor-pointer transition-all"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Purge
+              </button>
+            </div>
           </div>
-
-          <button
-            onClick={handleSyncGSheet}
-            disabled={isSyncing}
-            className="btn bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 px-6 h-12 rounded-2xl flex items-center gap-3 text-[11px] font-black uppercase tracking-widest text-emerald-500 shadow-xl shadow-emerald-500/10 disabled:opacity-50 cursor-pointer"
-          >
-            {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
-            Sync Cloud
-          </button>
-
-          <button
-            onClick={() => document.getElementById('file-upload').click()}
-            disabled={isImporting}
-            className="btn btn-primary px-6 h-12 rounded-2xl flex items-center gap-3 text-[11px] font-black uppercase tracking-widest shadow-xl shadow-blue-500/20 disabled:opacity-50 cursor-pointer"
-          >
-            {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-            Import
-          </button>
-
-          <button
-            onClick={handleExport}
-            className="bg-white/5 hover:bg-white/10 border border-white/10 px-6 h-12 rounded-2xl flex items-center gap-3 text-[11px] font-black uppercase tracking-widest text-slate-300 transition-all cursor-pointer"
-          >
-            <Download className="w-4 h-4" />
-            Export
-          </button>
-
-          <button
-            onClick={handleClear}
-            className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 px-6 h-12 rounded-2xl flex items-center gap-3 text-[11px] font-black uppercase tracking-widest text-red-500 transition-all cursor-pointer"
-          >
-            <Trash2 className="w-4 h-4" />
-            Purge
-          </button>
         </div>
       </div>
 
@@ -698,10 +825,10 @@ const CompanyDatabase = () => {
         )}
 
         <div className="overflow-x-auto custom-scrollbar">
-          <table className="w-full text-left border-collapse table-fixed">
+          <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-white/[0.03] border-b border-white/5">
-                <th className="w-16 px-6 py-6 text-center">
+                <th className="w-16 px-6 py-4 text-center">
                   <input
                     type="checkbox"
                     className="w-4 h-4 rounded border-white/10 bg-transparent text-blue-500 focus:ring-offset-0 focus:ring-0 cursor-pointer"
@@ -710,10 +837,10 @@ const CompanyDatabase = () => {
                   />
                 </th>
                 {headers.map((header) => (
-                  <th key={header} className="px-6 py-6 text-[10px] font-black text-slate-500 uppercase tracking-[3px] border-r border-white/5 last:border-0 min-w-[200px]">
-                    <div className="flex items-center gap-3">
-                      <Table className="w-3 h-3 opacity-30" />
-                      {header.replace(/_/g, ' ')}
+                  <th key={header} className="px-5 py-4 text-[9px] font-black text-slate-500 uppercase tracking-wider border-r border-white/5 last:border-0 min-w-[160px]">
+                    <div className="flex items-center gap-2">
+                      <Table className="w-3 h-3 opacity-40 text-blue-500" />
+                      <span className="whitespace-nowrap">{header.replace(/_/g, ' ')}</span>
                     </div>
                   </th>
                 ))}
@@ -728,7 +855,7 @@ const CompanyDatabase = () => {
             <tbody className="divide-y divide-white/[0.03]">
               {filteredCompanies.map((company, i) => (
                 <tr key={company.id} className={`hover:bg-blue-500/[0.04] transition-all group ${selectedIds.includes(company.id) ? 'bg-blue-500/[0.06]' : ''}`}>
-                  <td className="px-6 py-4 text-center">
+                  <td className="px-6 py-3 text-center">
                     <input
                       type="checkbox"
                       className="w-4 h-4 rounded border-white/10 bg-transparent text-blue-500 focus:ring-offset-0 focus:ring-0 cursor-pointer"
@@ -736,16 +863,36 @@ const CompanyDatabase = () => {
                       onChange={() => toggleSelectRow(company.id)}
                     />
                   </td>
-                  {headers.map((header) => (
-                    <td key={header} className="p-0 border-r border-white/5 last:border-0">
-                      <input
-                        type="text"
-                        defaultValue={company[header] || ''}
-                        onBlur={(e) => handleCellUpdate(company.id, header, e.target.value)}
-                        className="w-full h-full bg-transparent border-none px-6 py-4 text-slate-300 focus:outline-none focus:bg-white/5 focus:text-white text-sm font-medium transition-all"
-                      />
-                    </td>
-                  ))}
+                  {headers.map((header) => {
+                    const val = company[header] || '';
+                    const isLink = (/linkedin|url|website|link/i.test(header) || (val && (val.includes('linkedin.com') || val.includes('http://') || val.includes('https://')))) && val;
+                    return (
+                      <td key={header} className="p-0 border-r border-white/5 last:border-0">
+                        {isLink ? (
+                          <div className="px-5 py-3.5">
+                            <a
+                              href={val.startsWith('http') ? val : `https://${val}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex items-center gap-2 text-blue-400 hover:text-blue-300 text-xs font-medium transition-colors group/link"
+                              title={val}
+                            >
+                              <Globe className="w-3.5 h-3.5 shrink-0 group-hover/link:scale-110 transition-transform" />
+                              <span className="truncate max-w-[140px] underline underline-offset-4">{val}</span>
+                            </a>
+                          </div>
+                        ) : (
+                          <input
+                            type="text"
+                            defaultValue={val}
+                            onBlur={(e) => handleCellUpdate(company.id, header, e.target.value)}
+                            className="w-full h-full bg-transparent border-none px-5 py-3.5 text-slate-300 focus:outline-none focus:bg-white/[0.02] focus:text-white text-xs font-medium transition-all"
+                          />
+                        )}
+                      </td>
+                    );
+                  })}
                   <td className="px-6 py-4 text-center">
                     {company._is_generated ? (
                       <span className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-[9px] font-black text-emerald-500 uppercase tracking-wider">
@@ -801,6 +948,47 @@ const CompanyDatabase = () => {
             </div>
           )}
         </div>
+
+        {/* Spreadsheet-style Bottom Tabs */}
+        {browsingTabs.length > 1 && (
+          <div className="bg-[#0d1117]/90 border-t border-white/10 flex items-center px-4 overflow-x-auto no-scrollbar">
+            <div className="flex items-center h-14">
+              {browsingTabs.map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => { setActiveBrowsingTab(tab); setCurrentPage(1); }}
+                  className={`px-8 h-full flex items-center gap-3 text-[10px] font-black uppercase tracking-[2px] transition-all cursor-pointer border-r border-white/5 last:border-r-0 relative group min-w-[140px] justify-center ${
+                    activeBrowsingTab === tab
+                      ? 'bg-[#131722] text-blue-400'
+                      : 'text-slate-600 hover:bg-white/[0.02] hover:text-slate-400'
+                  }`}
+                >
+                  {tab === 'ALL DATA' ? <Layout className="w-4 h-4" /> : <Tag className="w-3.5 h-3.5 opacity-50" />}
+                  {tab}
+                  {activeBrowsingTab === tab && (
+                    <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-blue-500 shadow-[0_-2px_15px_rgba(59,130,246,0.6)]" />
+                  )}
+                  {activeBrowsingTab === tab && (
+                    <ChevronDown className="w-3.5 h-3.5 text-blue-400/50" />
+                  )}
+                </button>
+              ))}
+              
+              <button className="px-5 h-full flex items-center justify-center text-slate-700 hover:text-white transition-colors cursor-not-allowed border-l border-white/5" title="Add Tab (Read Only)">
+                <Plus className="w-4.5 h-4.5" />
+              </button>
+            </div>
+            
+            <div className="ml-auto flex items-center gap-6 pr-6">
+               <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest hidden md:block">
+                 Matrix Mode: <span className="text-blue-500/50">Active Sync</span>
+               </div>
+               <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest">
+                 Tab View: <span className="text-white">{activeBrowsingTab}</span>
+               </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mt-8 flex flex-col md:flex-row justify-between items-center gap-6">

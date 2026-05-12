@@ -111,6 +111,37 @@ def list_companies(
         cur.close()
         conn.close()
 
+@router.get("/companies/unique-tabs")
+def get_unique_tabs(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Returns a list of unique _source_tab values present in the registry."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    uid = normalize_user_id(user_id)
+    is_admin = (str(user_id or '').lower() == 'admin')
+    
+    where_clause = ""
+    params = []
+    if is_admin:
+        where_clause = "WHERE row_data->>'_source_tab' IS NOT NULL"
+    elif uid:
+        where_clause = "WHERE user_id = %s AND row_data->>'_source_tab' IS NOT NULL"
+        params.append(uid)
+    else:
+        where_clause = "WHERE user_id IS NULL AND row_data->>'_source_tab' IS NOT NULL"
+        
+    try:
+        query = f"SELECT DISTINCT row_data->>'_source_tab' FROM company_registry {where_clause}"
+        cur.execute(query, params)
+        tabs = [r[0] for r in cur.fetchall() if r[0]]
+        return {"tabs": tabs}
+    except Exception as e:
+        print(f"Error fetching unique tabs: {str(e)}")
+        return {"tabs": []}
+    finally:
+        cur.close()
+        conn.close()
+
 @router.post("/companies/import")
 def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Imports a batch of data, automatically enriching missing fields."""
@@ -130,10 +161,28 @@ def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header
         # Fetch existing lead emails for this user to preserve "Generated" status
         cur.execute("SELECT email FROM leads_raw WHERE user_id = %s", (uid,))
         existing_emails = {r[0].lower() for r in cur.fetchall() if r[0]}
-        print(f"DEBUG: Found {len(existing_emails)} existing leads for user {uid}")
-
-        cur.execute("DELETE FROM company_registry WHERE user_id = %s", (uid,))
+        print(f"DEBUG: import_companies started for user {uid} with {len(rows)} raw rows")
+        
+        # Smart Sync vs Full Purge
         if processed_rows:
+            # Extract unique source tabs from incoming data
+            tabs_to_clear = {r["_source_tab"] for r in processed_rows if "_source_tab" in r}
+            
+            # If the user is importing ALL tabs (or we have no tab info), we do a full wipe
+            # as requested ("purge old one and new should appear")
+            # We detect this if there are multiple tabs or if it's the "ALL_TABS" case
+            if len(tabs_to_clear) > 1 or not tabs_to_clear:
+                print(f"DEBUG: Performing FULL Registry Purge for user {uid}")
+                cur.execute("DELETE FROM company_registry WHERE user_id = %s", (uid,))
+            else:
+                # Specific Tab Sync: Only delete rows from that specific tab
+                tab_name = list(tabs_to_clear)[0]
+                print(f"DEBUG: Performing SMART Purge for tab '{tab_name}'")
+                cur.execute("""
+                    DELETE FROM company_registry 
+                    WHERE user_id = %s AND row_data->>'_source_tab' = %s
+                """, (uid, tab_name))
+                
             data_to_insert = []
             match_count = 0
             for row in processed_rows:
@@ -250,6 +299,10 @@ def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 final_key = target_key if target_key else f"Column_{idx}"
                 clean_row[final_key] = val
         
+        # Explicitly preserve critical metadata if it exists
+        if "_source_tab" in row:
+            clean_row["_source_tab"] = row["_source_tab"]
+        
         # Double check: if Email/Mobile are still empty but we found them in unnamed columns
         # this acts as a safety net
         if not clean_row["Email"]:
@@ -258,8 +311,9 @@ def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     clean_row["Email"] = str(v)
                     break
         
-        if not any(v for k, v in clean_row.items() if k not in ["id", "_is_generated", "Email", "Mobile"]): 
-            continue
+        # REMOVED: Aggressive row filtering. We now import ALL rows as requested.
+        # if not any(v for k, v in clean_row.items() if k not in ["id", "_is_generated", "Email", "Mobile"]): 
+        #     continue
         
         # Trigger AI enrichment for missing critical data (Limit to first 30)
         has_email = "@" in clean_row.get("Email", "")
@@ -282,12 +336,132 @@ def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         results.append(clean_row)
     return results
 
+def discover_gsheet_tabs(doc_id: str) -> List[Dict[str, str]]:
+    """Bulletproof method: Download XLSX in memory and parse its internal XML for sheet names."""
+    try:
+        import zipfile
+        import xml.etree.ElementTree as ET
+        import io
+        
+        # 1. Download the workbook as XLSX
+        xlsx_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=xlsx"
+        resp = requests.get(xlsx_url, timeout=20)
+        if resp.status_code != 200:
+            return []
+            
+        # 2. Open as Zip and find workbook.xml
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+            with z.open('xl/workbook.xml') as f:
+                tree = ET.parse(f)
+                root = tree.getroot()
+                
+                # XML namespaces in XLSX
+                ns = {'ns': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+                sheets = root.find('ns:sheets', ns)
+                
+                tabs = []
+                if sheets is not None:
+                    # GSheet internal GIDs are a bit tricky to map from XLSX sheetId
+                    # but we can use the order or try to find the 'gid' in other files.
+                    # However, for importing, we can just use the NAME in the export?format=csv&sheet=Name URL
+                    for i, s in enumerate(sheets.findall('ns:sheet', ns)):
+                        name = s.get('name')
+                        # Note: XLSX sheetId is NOT the same as GSheet GID.
+                        # But Google allows &sheet=SheetName in the export URL!
+                        tabs.append({
+                            "name": name,
+                            "gid": name # We'll use the name as the identifier
+                        })
+                return tabs
+    except Exception as e:
+        print(f"XLSX Tab Discovery Error: {str(e)}")
+        # Fallback to the old scraping method if XLSX fails
+        return []
+
+    except:
+        return []
+
+def save_sync_config(url: str, sheet_name: str, user_id: Optional[str]):
+    """Persists a GSheet sync configuration for background auto-updates."""
+    uid = normalize_user_id(user_id)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        # Check if already exists for this user/url/sheet
+        cur.execute("""
+            SELECT id FROM gsheet_sync_configs 
+            WHERE url = %s AND sheet_name = %s AND user_id = %s
+        """, (url, sheet_name or 'Default', uid))
+        
+        if cur.fetchone():
+            cur.execute("""
+                UPDATE gsheet_sync_configs 
+                SET last_sync = NOW(), is_auto_sync = TRUE
+                WHERE url = %s AND sheet_name = %s AND user_id = %s
+            """, (url, sheet_name or 'Default', uid))
+        else:
+            cur.execute("""
+                INSERT INTO gsheet_sync_configs (url, sheet_name, user_id, last_sync)
+                VALUES (%s, %s, %s, NOW())
+            """, (url, sheet_name or 'Default', uid))
+        conn.commit()
+    except Exception as e:
+        print(f"Error saving sync config: {e}")
+        conn.rollback()
+    finally:
+        cur.close()
+        conn.close()
+
+def background_auto_sync():
+    """Iterates through all auto-sync configs and re-triggers imports."""
+    print("[background] Starting GSheet Auto-Sync cycle...")
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        cur.execute("SELECT * FROM gsheet_sync_configs WHERE is_auto_sync = TRUE")
+        configs = cur.fetchall()
+        for cfg in configs:
+            try:
+                print(f"[background] Auto-syncing: {cfg['url']} ({cfg['sheet_name']})")
+                # Re-importing logic (simplified call to our own endpoint logic)
+                # We can call import_companies_gsheet internal logic or just reuse the function
+                import_companies_gsheet({
+                    "url": cfg['url'],
+                    "sheet_name": cfg['sheet_name'] if cfg['sheet_name'] != 'Default' else None,
+                    "_is_background": "true" # Prevent re-saving config in loop
+                }, str(cfg['user_id']) if cfg['user_id'] else None)
+            except Exception as e:
+                print(f"[background] Sync failed for {cfg['url']}: {e}")
+    finally:
+        cur.close()
+        conn.close()
+
+@router.post("/companies/gsheet-tabs")
+def get_gsheet_tabs(req: Dict[str, str]):
+    """Fetches the list of sheet tabs/names from a public Google Sheet using HTML scraping for maximum reliability."""
+    url = req.get("url", "").strip()
+    if not url or "/d/" not in url:
+        raise HTTPException(status_code=400, detail="Invalid Google Sheet URL.")
+    doc_id = url.split("/d/")[1].split("/")[0]
+    tabs = discover_gsheet_tabs(doc_id)
+    if tabs:
+        return {"tabs": tabs}
+    return {"tabs": [{"name": "Sheet1", "gid": "0"}]}
+
 @router.post("/companies/import-gsheet")
-def import_companies_gsheet(req: Dict[str, str], user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Syncs a public Google Sheet into the company registry."""
+def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Syncs a public Google Sheet into the company registry. Supports specific tabs or all tabs."""
     url = req.get("url")
+    sheet_name = req.get("sheet_name")  # Optional: specific tab name or "ALL_TABS"
+    auto_sync = req.get("auto_sync") == True or req.get("auto_sync") == "true"
+    is_bg = req.get("_is_background") == "true"
+    
     if not url:
         raise HTTPException(status_code=400, detail="URL is required")
+    
+    # Save config if requested and not already in background loop
+    if auto_sync and not is_bg:
+        save_sync_config(url, sheet_name, user_id)
     
     raw_url = url.strip()
     if "/d/" not in raw_url:
@@ -295,56 +469,125 @@ def import_companies_gsheet(req: Dict[str, str], user_id: Optional[str] = Header
     
     doc_id = raw_url.split("/d/")[1].split("/")[0]
     gid_match = re.search(r"[?&#]gid=(\d+)", raw_url)
-    gid = gid_match.group(1) if gid_match else "0"
-    
-    export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv&gid={gid}"
-    
-    try:
-        print(f"Fetching GSheet export from: {export_url}")
-        resp = requests.get(export_url, allow_redirects=True, timeout=60)
-        if resp.status_code != 200:
-            raise HTTPException(status_code=400, detail="Sheet is private or not found.")
+    default_gid = gid_match.group(1) if gid_match else "0"
+
+    all_rows = []
+    tabs_to_process = []
+
+    # Resolve which tabs to process
+    if sheet_name == "ALL_TABS":
+        tabs_to_process = discover_gsheet_tabs(doc_id)
+        if not tabs_to_process:
+            tabs_to_process = [{"name": "Default", "gid": default_gid}]
+    else:
+        target_gid = default_gid
+        if sheet_name:
+            tabs = discover_gsheet_tabs(doc_id)
+            print(f"DEBUG: Discovered {len(tabs)} tabs for sheet {doc_id}")
+            for t in tabs:
+                if t['name'].strip().lower() == sheet_name.strip().lower():
+                    target_gid = t['gid']
+                    print(f"DEBUG: Matched sheet_name '{sheet_name}' to GID {target_gid}")
+                    break
+        tabs_to_process = [{"name": sheet_name or "Sheet1", "gid": target_gid}]
+
+    # Process each resolved tab
+    for tab in tabs_to_process:
+        # Switch to GViz endpoint which supports 'sheet=name' directly and is much more reliable
+        # than standard CSV export which requires internal GIDs.
+        sheet_name_encoded = requests.utils.quote(tab['name'])
+        export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/gviz/tq?tqx=out:csv&sheet={sheet_name_encoded}&_t={int(time.time())}"
         
-        # CLEANUP: Remove leading empty lines or garbage before the actual headers
-        lines = resp.text.splitlines()
-        header_index = 0
-        
-        # Key headers we expect to find in a valid sheet
-        keywords = ['email', 'name', 'company', 'linkedin', 'person', 'investor', 'contact', 'designation', 'note', 'sector']
-        
-        for i, line in enumerate(lines):
-            # Count how many of our keywords are in this line
-            lower_line = line.lower()
-            matches = sum(1 for kw in keywords if kw in lower_line)
+        try:
+            print(f"DEBUG: Fetching GSheet tab '{tab['name']}' using GViz: {export_url}")
+            resp = requests.get(export_url, allow_redirects=True, timeout=60)
+            if resp.status_code != 200:
+                print(f"ERROR: GViz export failed for tab {tab['name']}. Status: {resp.status_code}")
+                continue
             
-            # If a line has at least 2 matching keywords, it's likely our header row
-            if matches >= 2:
-                header_index = i
-                break
+            # CLEANUP: Remove leading empty lines or garbage before the actual headers
+            lines = resp.text.splitlines()
+            header_index = 0
             
-            # Fallback: if it's the first line with any significant content
-            if line.strip() and not line.strip().startswith(",,,") and header_index == 0:
-                header_index = i
-        
-        cleaned_csv = "\n".join(lines[header_index:])
-        reader = csv.reader(io.StringIO(cleaned_csv))
-        
-        # Extract headers and handle rows
-        header_row = next(reader, [])
-        rows = []
-        for row_data in reader:
-            # Create a dict with numeric indices as keys to be safe
-            row_dict = {}
-            for idx, val in enumerate(row_data):
-                key = header_row[idx] if idx < len(header_row) and header_row[idx].strip() else f"Field_{idx}"
-                row_dict[key] = val
-            rows.append(row_dict)
-        
-        # This will call the enriched import_companies
-        return import_companies(rows, user_id)
-    except Exception as e:
-        print(f"GSheet import error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+            # Key headers we expect to find in a valid sheet
+            keywords = ['email', 'name', 'company', 'linkedin', 'person', 'investor', 'contact', 'designation', 'note', 'sector']
+            
+            for i, line in enumerate(lines):
+                # Count how many of our keywords are in this line
+                lower_line = line.lower()
+                matches = sum(1 for kw in keywords if kw in lower_line)
+                
+                # If a line has at least 1 matching keyword, it's likely our header row
+                if matches >= 1:
+                    header_index = i
+                    break
+                
+            # Refined Header Detection: Find the first row with recognized keywords
+            # A header row should match keywords but NOT look like a real data row (no long numbers/emails)
+            header_index = -1
+            for i in range(min(10, len(lines))):
+                lower_line = lines[i].lower()
+                matches = sum(1 for kw in keywords if f"{kw}" in lower_line)
+                
+                # Check if it looks like data (contains a long number or an actual email domain)
+                has_long_number = any(len(re.sub(r'\D', '', part)) > 9 for part in lines[i].split(','))
+                has_real_email = any('@' in part and '.' in part and len(part) > 5 for part in lines[i].split(','))
+                
+                if matches >= 2 and not has_long_number and not has_real_email:
+                    header_index = i
+                    break
+            
+            if header_index != -1:
+                # We found a header row!
+                cleaned_csv = "\n".join(lines[header_index:])
+                reader = csv.reader(io.StringIO(cleaned_csv))
+                header_row = next(reader, [])
+                data_reader = reader
+            else:
+                # No header found! Treat the whole sheet as data and use A, B, C...
+                print(f"DEBUG: No recognizable headers found. Generating default headers (A, B, C...) for tab {tab['name']}")
+                cleaned_csv = "\n".join(lines)
+                data_reader = csv.reader(io.StringIO(cleaned_csv))
+                
+                # Peek at the first row to know how many columns we need
+                first_row = next(data_reader, [])
+                if not first_row: continue
+                
+                num_cols = len(first_row)
+                # Generate Column A, B, C, D...
+                import string
+                header_row = []
+                for i in range(num_cols):
+                    col_name = ""
+                    temp_i = i
+                    while temp_i >= 0:
+                        col_name = string.ascii_uppercase[temp_i % 26] + col_name
+                        temp_i = (temp_i // 26) - 1
+                    header_row.append(f"Column {col_name}")
+                
+                # Re-create data reader including the first row (since it's data)
+                data_reader = csv.reader(io.StringIO(cleaned_csv))
+
+            for row_data in data_reader:
+                # Skip truly empty rows to avoid junk data
+                if not any(val.strip() for val in row_data):
+                    continue
+                    
+                row_dict = {}
+                for idx, val in enumerate(row_data):
+                    key = header_row[idx].strip() if idx < len(header_row) and header_row[idx].strip() else f"Field_{idx}"
+                    row_dict[key] = val
+                row_dict["_source_tab"] = tab["name"]
+                all_rows.append(row_dict)
+        except Exception as e:
+            print(f"GSheet import error for tab {tab['name']}: {str(e)}")
+
+    print(f"DEBUG: Finished processing all tabs. Total rows collected: {len(all_rows)}")
+    if not all_rows:
+        raise HTTPException(status_code=400, detail="No data found in selected tabs. Ensure the sheet is public and tabs contain data.")
+
+    # This will call the enriched import_companies
+    return import_companies(all_rows, user_id)
 
 def enrich_row_data_internal(data: Dict[str, Any]) -> Dict[str, Any]:
     """Helper to enrich a single row's data using AI."""
