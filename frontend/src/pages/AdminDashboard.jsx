@@ -66,6 +66,7 @@ const AdminDashboard = () => {
   const [isBulkActionLoading, setIsBulkActionLoading] = useState(false);
   const [notification, setNotification] = useState(null);
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [exportRange, setExportRange] = useState('ALL');
 
   // Debounce Search Term
   useEffect(() => {
@@ -185,48 +186,79 @@ const AdminDashboard = () => {
 
         <div className="flex items-center gap-4">
           <button
-            onClick={() => {
-              const headers = [
-                'Name', 'Email', 'Designation', 'Company', 'Type', 'Status',
-                'Intent', 'Score', 'Check Size', 'Rejection Reason', 'Sector/Industry', 'Owner',
-                'Last Interaction', 'AI Strategy', 'Analyst Report', 'Key Signals', 'Confidence %'
-              ].join(',');
+            onClick={async () => {
+              try {
+                showNotification('success', `Preparing ${exportRange.toLowerCase()} master export...`);
+                const res = await api.get(`/api/admin/leads/export?range=${exportRange}`);
+                const allLeads = res.data.leads || [];
 
-              const rows = leads.map(l => {
-                const clean = (val) => `"${(val || '').toString().replace(/"/g, '""')}"`;
-                const rejectionReason = l.reply_intent === 'NOT_INTERESTED' ? (l.rag_advice?.split('.')[0] || 'No specific reason') : 'N/A';
-                return [
-                  clean(`${l.first_name} ${l.last_name}`),
-                  clean(l.email),
-                  clean(l.designation),
-                  clean(l.company_name || l.family_office_name),
-                  clean(l.lead_type),
-                  clean(l.email_status),
-                  clean(l.reply_intent),
-                  clean(l.sentiment_score),
-                  clean(l.deal_size),
-                  clean(rejectionReason),
-                  clean(l.sector || 'Other'),
-                  clean(l.owner_name),
-                  clean(new Date(l.updated_at).toLocaleDateString()),
-                  clean(l.rag_intelligence?.strategy || 'General Outreach'),
-                  clean(l.rag_advice || 'Analyst Review Pending'),
-                  clean(Array.isArray(l.rag_intelligence?.signals) ? l.rag_intelligence.signals.join(' | ') : (l.rag_intelligence?.signals || 'N/A')),
-                  clean(l.rag_intelligence?.confidence || 'N/A')
+                const headers = [
+                  'Name', 'Email', 'Designation', 'Company', 'Type', 'Status',
+                  'Intent', 'Score', 'Check Size', 'Rejection Reason', 'Sector/Industry', 'Owner',
+                  'Last Interaction', 'AI Strategy', 'Analyst Report', 'Key Signals', 'Confidence %'
                 ].join(',');
-              });
 
-              const csv = [headers, ...rows].join('\n');
-              const blob = new Blob([csv], { type: 'text/csv' });
-              const url = window.URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.setAttribute('hidden', ''); a.setAttribute('href', url); a.setAttribute('download', `MASTER_WORKSPACE_DATA_${new Date().toISOString().split('T')[0]}.csv`);
-              document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                const rows = allLeads.map(l => {
+                  const clean = (val) => `"${(val || '').toString().replace(/"/g, '""')}"`;
+                  const rejectionReason = l.reply_intent === 'NOT_INTERESTED' ? (l.rag_advice?.split('.')[0] || 'No specific reason') : 'N/A';
+                  
+                  // Brand derivation logic for export
+                  let derivedType = l.lead_type || 'CLIENT';
+                  const owner = (l.owner_name || '').toLowerCase();
+                  const sector = (l.sector || '').toLowerCase();
+                  if (owner.includes('yashika')) {
+                    if (sector.includes('agri')) derivedType = 'Agrivijay';
+                    else derivedType = 'Gigin AI';
+                  }
+
+                  return [
+                    clean(`${l.first_name} ${l.last_name}`),
+                    clean(l.email),
+                    clean(l.designation),
+                    clean(l.company_name || l.family_office_name),
+                    clean(derivedType),
+                    clean(l.email_status),
+                    clean(l.reply_intent),
+                    clean(l.sentiment_score),
+                    clean(l.deal_size),
+                    clean(rejectionReason),
+                    clean(l.sector || 'Other'),
+                    clean(l.owner_name),
+                    clean(new Date(l.updated_at).toLocaleDateString()),
+                    clean(l.rag_intelligence?.strategy || 'General Outreach'),
+                    clean(l.rag_advice || 'Analyst Review Pending'),
+                    clean(Array.isArray(l.rag_intelligence?.signals) ? l.rag_intelligence.signals.join(' | ') : (l.rag_intelligence?.signals || 'N/A')),
+                    clean(l.rag_intelligence?.confidence || 'N/A')
+                  ].join(',');
+                });
+
+                const csv = [headers, ...rows].join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.setAttribute('hidden', ''); a.setAttribute('href', url); a.setAttribute('download', `FULL_MASTER_DATA_${new Date().toISOString().split('T')[0]}.csv`);
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+              } catch (err) {
+                console.error('Full export failed', err);
+                showNotification('error', 'Export Failure: Unable to aggregate total workspace data.');
+              }
             }}
-            className="flex items-center gap-2 px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all"
+            className="flex items-center gap-2 px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-[10px] font-black uppercase tracking-widest rounded-l-xl border-r-0 transition-all shrink-0"
           >
             <Download className="w-3.5 h-3.5" /> Full Master Export
           </button>
+          <select
+            value={exportRange}
+            onChange={(e) => setExportRange(e.target.value)}
+            className="bg-white/5 hover:bg-white/10 border border-white/10 text-white text-[10px] font-black uppercase tracking-widest rounded-r-xl px-3 py-3 focus:outline-none focus:border-indigo-500/50 transition-all appearance-none cursor-pointer"
+          >
+            <option value="ALL">All Time</option>
+            <option value="DAILY">Daily</option>
+            <option value="WEEKLY">Weekly</option>
+            <option value="MONTHLY">Monthly</option>
+            <option value="QUARTERLY">Quarterly</option>
+            <option value="YEARLY">Yearly</option>
+          </select>
 
           <button
             onClick={async () => {
@@ -361,6 +393,8 @@ const AdminDashboard = () => {
             className="bg-white/[0.03] border border-white/5 rounded-xl py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest focus:outline-none focus:border-indigo-500/50"
           >
             <option value="ALL">All Types</option>
+            <option value="AGRIVIJAY">Agrivijay</option>
+            <option value="GIGIN AI">Gigin AI</option>
             <option value="INVESTOR">Investors</option>
             <option value="CLIENT">Clients</option>
           </select>
@@ -605,13 +639,28 @@ const AdminDashboard = () => {
                   <td className="px-2 py-2">
                     {(() => {
                       const name = (lead.owner_name || '').toLowerCase();
+                      const sector = (lead.sector || '').toLowerCase();
                       const isInvestorTeam = name.includes('yashika') || name.includes('kajal') || name.includes('ayush');
                       const isClientTeam = name.includes('palak');
-                      const derivedType = isInvestorTeam ? 'INVESTOR' : isClientTeam ? 'CLIENT' : (lead.lead_type || 'CLIENT');
+                      
+                      let derivedType = isInvestorTeam ? 'INVESTOR' : isClientTeam ? 'CLIENT' : (lead.lead_type || 'CLIENT');
+                      
+                      // Custom branding logic based on user request
+                      if (name.includes('yashika')) {
+                        if (sector.includes('agri')) derivedType = 'Agrivijay';
+                        else derivedType = 'Gigin AI';
+                      }
+
+                      const isSpecial = derivedType === 'Agrivijay' || derivedType === 'Gigin AI';
                       const isInvestor = derivedType.toUpperCase() === 'INVESTOR';
                       
                       return (
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${isInvestor ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-white/5 border-white/10 text-slate-400'}`}>
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${
+                          derivedType === 'Agrivijay' ? 'bg-amber-500/10 border-amber-500/20 text-amber-500' : 
+                          derivedType === 'Gigin AI' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' :
+                          isInvestor ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 
+                          'bg-white/5 border-white/10 text-slate-400'
+                        }`}>
                           {isInvestor ? <Target className="w-3 h-3" /> : <Users className="w-3 h-3" />}
                           {derivedType}
                         </span>
@@ -738,40 +787,74 @@ const AdminDashboard = () => {
 
           {/* Pagination Controls */}
           {pagination.pages > 1 && (
-            <div className="flex items-center justify-between p-6 border-t border-white/5 bg-[#0d0f16]/50">
-              <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                Showing <span className="text-white">{((currentPage - 1) * pagination.limit) + 1}</span> to <span className="text-white">{Math.min(currentPage * pagination.limit, pagination.total)}</span> of <span className="text-white">{pagination.total}</span> leads
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                  disabled={currentPage === 1 || loading}
-                  className="px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black text-slate-400 uppercase tracking-widest hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
-                >
-                  Previous
-                </button>
-                <div className="flex items-center gap-1">
-                  {[...Array(Math.min(5, pagination.pages))].map((_, i) => {
-                    const pageNum = i + 1;
-                    return (
-                      <button
-                        key={pageNum}
-                        onClick={() => setCurrentPage(pageNum)}
-                        disabled={loading}
-                        className={`w-8 h-8 rounded-lg text-[10px] font-black transition-all cursor-pointer ${currentPage === pageNum ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 hover:bg-white/5 hover:text-white disabled:opacity-50'}`}
-                      >
-                        {pageNum}
-                      </button>
-                    );
-                  })}
+            <div className="flex flex-col gap-6 p-8 border-t border-white/5 bg-[#0d0f16]/50">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] font-black text-slate-500 uppercase tracking-[3px]">
+                  Workspace Index <span className="text-white mx-2">{(currentPage - 1) * pagination.limit + 1} – {Math.min(currentPage * pagination.limit, pagination.total)}</span> 
+                  <span className="text-slate-700 mx-2">|</span> Total <span className="text-indigo-400">{pagination.total}</span> leads
                 </div>
-                <button
-                  onClick={() => setCurrentPage(prev => Math.min(pagination.pages, prev + 1))}
-                  disabled={currentPage === pagination.pages || loading}
-                  className="px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black text-slate-400 uppercase tracking-widest hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
-                >
-                  Next
-                </button>
+                
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1 || loading}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black text-slate-400 uppercase tracking-widest hover:bg-white/10 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-all"
+                  >
+                    Previous
+                  </button>
+                  
+                  <div className="flex items-center gap-1 bg-black/20 p-1 rounded-xl border border-white/5">
+                    {(() => {
+                      const pages = [];
+                      const start = Math.max(1, currentPage - 2);
+                      const end = Math.min(pagination.pages, start + 4);
+                      for (let i = start; i <= end; i++) {
+                        pages.push(
+                          <button
+                            key={i}
+                            onClick={() => setCurrentPage(i)}
+                            className={`w-9 h-9 rounded-lg text-[10px] font-black transition-all ${currentPage === i ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/30 scale-110' : 'text-slate-500 hover:bg-white/5 hover:text-white'}`}
+                          >
+                            {i}
+                          </button>
+                        );
+                      }
+                      return pages;
+                    })()}
+                  </div>
+
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.min(pagination.pages, prev + 1))}
+                    disabled={currentPage === pagination.pages || loading}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black text-slate-400 uppercase tracking-widest hover:bg-white/10 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-all"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+
+              {/* SLIDING NAVIGATION (NEW) */}
+              <div className="flex items-center gap-6 px-2">
+                <div className="text-[8px] font-black text-slate-600 uppercase tracking-[4px] shrink-0">Slide To Page</div>
+                <div className="flex-1 relative group py-4">
+                  <input
+                    type="range"
+                    min="1"
+                    max={pagination.pages}
+                    value={currentPage}
+                    onChange={(e) => setCurrentPage(parseInt(e.target.value))}
+                    className="w-full h-1.5 bg-white/5 rounded-lg appearance-none cursor-pointer accent-indigo-500 hover:accent-indigo-400 transition-all"
+                  />
+                  <div 
+                    className="absolute top-0 -translate-y-full px-2 py-1 bg-indigo-600 text-white text-[9px] font-black rounded pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ left: `${((currentPage - 1) / (pagination.pages - 1)) * 100}%`, transform: 'translate(-50%, -8px)' }}
+                  >
+                    PAGE {currentPage}
+                  </div>
+                </div>
+                <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest shrink-0 w-12 text-right">
+                  {currentPage} / {pagination.pages}
+                </div>
               </div>
             </div>
           )}

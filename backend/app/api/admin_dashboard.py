@@ -75,8 +75,14 @@ def get_all_leads_admin(
         params = []
         
         if type and type != 'ALL':
-            where_clauses.append("l.lead_type ILIKE %s")
-            params.append(type)
+            t_upper = type.upper()
+            if t_upper == 'GIGIN AI':
+                where_clauses.append("u.username ILIKE '%%yashika%%' AND (l.sector NOT ILIKE '%%agri%%' OR l.sector IS NULL)")
+            elif t_upper == 'AGRIVIJAY':
+                where_clauses.append("u.username ILIKE '%%yashika%%' AND l.sector ILIKE '%%agri%%'")
+            else:
+                where_clauses.append("l.lead_type ILIKE %s")
+                params.append(type)
         if status and status != 'ALL':
             if status.upper() == 'REPLIED':
                 # STRICT: Must have is_responded flag OR status is explicitly REPLIED
@@ -143,6 +149,63 @@ def get_all_leads_admin(
         
     except Exception as e:
         logger.error("admin_all_leads_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+@router.get("/leads/export")
+def export_all_leads_admin(
+    range: Optional[str] = "ALL", 
+    user_id: Optional[str] = Header(None, alias="X-User-Id")
+):
+    """
+    Returns filtered leads in the system without pagination for full master export.
+    Supports range: DAILY, WEEKLY, MONTHLY, QUARTERLY, YEARLY, ALL
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        # 1. Verify Admin Role
+        cur.execute("SELECT username FROM users WHERE id = %s", (normalize_user_id(user_id),))
+        user = cur.fetchone()
+        if not user or user['username'].lower() != 'admin' and normalize_user_id(user_id) != 1:
+             if user_id != 'admin':
+                raise HTTPException(status_code=403, detail="Admin access required")
+
+        # 2. Build Range Filter
+        range_clause = ""
+        if range == 'DAILY':
+            range_clause = "AND l.created_at >= NOW() - INTERVAL '1 day'"
+        elif range == 'WEEKLY':
+            range_clause = "AND l.created_at >= NOW() - INTERVAL '7 days'"
+        elif range == 'MONTHLY':
+            range_clause = "AND l.created_at >= NOW() - INTERVAL '30 days'"
+        elif range == 'QUARTERLY':
+            range_clause = "AND l.created_at >= NOW() - INTERVAL '90 days'"
+        elif range == 'YEARLY':
+            range_clause = "AND l.created_at >= NOW() - INTERVAL '365 days'"
+
+        # 3. Fetch leads
+        query = f"""
+            SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.company_name, l.designation, 
+                   l.sector, l.lead_type, l.reply_intent, l.sentiment_score, l.deal_size,
+                   l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
+                   l.email_status, l.followup_status,
+                   u.username as owner_name
+            FROM leads_raw l
+            LEFT JOIN users u ON l.user_id = u.id
+            WHERE 1=1 {range_clause}
+            ORDER BY l.created_at DESC
+        """
+        cur.execute(query)
+        leads = cur.fetchall()
+        
+        return {"leads": [dict(l) for l in leads]}
+        
+    except Exception as e:
+        logger.error("admin_export_leads_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if 'conn' in locals():
@@ -234,8 +297,15 @@ def get_global_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
 
         # Type Breakdown
         cur.execute("""
-            SELECT UPPER(COALESCE(lead_type, 'CLIENT')) as label, COUNT(*) as value
-            FROM leads_raw
+            SELECT 
+                CASE 
+                    WHEN u.username ILIKE '%%yashika%%' AND l.sector ILIKE '%%agri%%' THEN 'AGRIVIJAY'
+                    WHEN u.username ILIKE '%%yashika%%' THEN 'GIGIN AI'
+                    ELSE UPPER(COALESCE(l.lead_type, 'CLIENT'))
+                END as label, 
+                COUNT(*) as value
+            FROM leads_raw l
+            LEFT JOIN users u ON l.user_id = u.id
             GROUP BY 1
             ORDER BY 2 DESC
         """)
