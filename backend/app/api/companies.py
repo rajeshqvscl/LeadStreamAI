@@ -121,23 +121,49 @@ def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header
     # --- AUTOMATION: Enrich rows before insertion ---
     processed_rows = process_and_enrich_rows(rows)
     
+    conn = None
+    cur = None
     try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        # Fetch existing lead emails for this user to preserve "Generated" status
+        cur.execute("SELECT email FROM leads_raw WHERE user_id = %s", (uid,))
+        existing_emails = {r[0].lower() for r in cur.fetchall() if r[0]}
+        print(f"DEBUG: Found {len(existing_emails)} existing leads for user {uid}")
+
         cur.execute("DELETE FROM company_registry WHERE user_id = %s", (uid,))
         if processed_rows:
-            data_to_insert = [(json.dumps(row), uid) for row in processed_rows]
+            data_to_insert = []
+            match_count = 0
+            for row in processed_rows:
+                # Robust email detection across all fields (case-insensitive)
+                row_email = None
+                for val in row.values():
+                    if isinstance(val, str) and '@' in val and '.' in val:
+                        row_email = val.strip().lower()
+                        break
+                
+                is_generated = row_email in existing_emails if row_email else False
+                if is_generated: match_count += 1
+                data_to_insert.append((json.dumps(row), uid, is_generated))
+            
+            print(f"DEBUG: Marked {match_count} as Generated out of {len(processed_rows)} rows")
+                
             execute_values(
                 cur,
-                "INSERT INTO company_registry (row_data, user_id) VALUES %s",
+                "INSERT INTO company_registry (row_data, user_id, _is_generated) VALUES %s",
                 data_to_insert
             )
         conn.commit()
         return {"success": True, "count": len(processed_rows)}
     except Exception as e:
-        conn.rollback()
+        if conn: conn.rollback()
+        print(f"ERROR: Import failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
     finally:
-        cur.close()
-        conn.close()
+        if cur: cur.close()
+        if conn: conn.close()
 
 @router.patch("/companies/{row_id}")
 def update_company(row_id: int, row_data: Dict[str, Any], user_id: Optional[str] = Header(None, alias="X-User-Id")):
@@ -426,7 +452,7 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
             norm.get("firm") or norm.get("account") or norm.get("organization")
         )
         if not company:
-            company = "Independent"
+            company = "—"
         
         parts = name.split(" ", 1)
         f_name = parts[0]

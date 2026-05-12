@@ -317,12 +317,12 @@ const AdminDashboard = () => {
       {/* Analytics Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
         {[
-          { label: 'Total Leads', value: stats.total_leads, icon: Users, color: 'indigo' },
-          { label: 'Engaged', value: stats.engaged_leads, icon: Target, color: 'emerald' },
-          { label: 'Followups', value: stats.active_followups, icon: Clock, color: 'rose' },
-          { label: 'Active Flows', value: stats.active_flows, icon: Zap, color: 'amber' },
-          { label: 'Meetings', value: stats.meetings_scheduled, icon: Calendar, color: 'blue' },
-          { label: 'Conv. Rate', value: `${stats.conversion_rate}%`, icon: TrendingUp, color: 'violet' },
+          { label: 'Total Leads', value: stats.total_leads, icon: Users, color: 'indigo', desc: 'Total records in system', contrib: 'From Database' },
+          { label: 'Engaged', value: stats.engaged_leads, icon: Target, color: 'emerald', desc: 'Replied or interested', contrib: 'Email Status & Intent' },
+          { label: 'Followups', value: stats.active_followups, icon: Clock, color: 'rose', desc: 'In active sequences', contrib: 'Automated Sequences' },
+          { label: 'Active Flows', value: stats.active_flows, icon: Zap, color: 'amber', desc: 'Running campaigns', contrib: 'Campaign Engine' },
+          { label: 'Meetings', value: stats.meetings_scheduled, icon: Calendar, color: 'blue', desc: 'Scheduled calls', contrib: 'Meeting Status' },
+          { label: 'Conv. Rate', value: `${stats.conversion_rate}%`, icon: TrendingUp, color: 'violet', desc: 'Engagement percentage', contrib: 'Calculated Ratio' },
         ].map((stat, i) => (
           <div key={i} className="bg-[#111521] border border-white/5 rounded-xl p-3 hover:border-white/10 transition-all group relative overflow-hidden">
             <div className={`absolute top-0 right-0 w-16 h-16 bg-${stat.color}-500/5 blur-2xl rounded-full -mr-8 -mt-8`} />
@@ -330,10 +330,12 @@ const AdminDashboard = () => {
               <div className={`w-8 h-8 rounded-lg bg-${stat.color}-500/10 flex items-center justify-center border border-${stat.color}-500/20`}>
                 <stat.icon className={`w-4 h-4 text-${stat.color}-400`} />
               </div>
+              <div className="text-[7px] font-black text-slate-700 uppercase tracking-widest">{stat.contrib}</div>
             </div>
             <div className="relative z-10">
               <div className="text-[18px] font-black text-white leading-tight mb-0.5">{stat.value}</div>
-              <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest leading-none">{stat.label}</div>
+              <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest leading-none mb-1">{stat.label}</div>
+              <div className="text-[7px] text-slate-600 font-bold uppercase tracking-widest leading-none">{stat.desc}</div>
             </div>
           </div>
         ))}
@@ -401,19 +403,23 @@ const AdminDashboard = () => {
       {/* Visual Analytics Section */}
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-3 mb-6">
         {[
-          { title: 'Lead Intent', sub: 'Pipeline State', icon: PieIcon, color: 'indigo', data: stats.intent_breakdown, type: 'pie' },
-          { title: 'Sectors', sub: 'Industry Volume', icon: Globe, color: 'purple', data: stats.sector_breakdown, type: 'bar' },
-          { title: 'Sources', sub: 'Acquisition', icon: Database, color: 'blue', data: stats.source_breakdown, type: 'pie' },
-          { title: 'Lead Type', sub: 'Investor/Client', icon: Users, color: 'emerald', data: stats.type_breakdown, type: 'pie' }
+          { title: 'Lead Intent', sub: 'Pipeline State', icon: PieIcon, color: 'indigo', data: stats.intent_breakdown, type: 'pie', desc: 'Sentiment of lead replies', contrib: 'AI Sentiment Analysis' },
+          { title: 'Sectors', sub: 'Industry Volume', icon: Globe, color: 'purple', data: stats.sector_breakdown, type: 'bar', desc: 'Lead volume by industry', contrib: 'Registry Classification' },
+          { title: 'Sources', sub: 'Acquisition', icon: Database, color: 'blue', data: stats.source_breakdown, type: 'pie', desc: 'Where leads were imported', contrib: 'Ingestion Metadata' },
+          { title: 'Lead Type', sub: 'Investor/Client', icon: Users, color: 'emerald', data: stats.type_breakdown, type: 'pie', desc: 'Investors vs Clients split', contrib: 'Team Ownership Logic' }
         ].map((item, i) => (
           <div key={i} className="bg-[#111521] border border-white/5 rounded-xl p-3 flex flex-col">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-2">
               <div>
                 <h3 className="text-[11px] font-black text-white uppercase tracking-wider">{item.title}</h3>
-                <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest leading-none">{item.sub}</p>
+                <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">{item.sub}</p>
+                <p className="text-[7px] text-slate-600 font-bold uppercase tracking-widest leading-none">{item.desc}</p>
               </div>
-              <div className={`w-6 h-6 rounded-lg bg-${item.color}-500/10 flex items-center justify-center border border-${item.color}-500/20`}>
-                <item.icon className={`w-3 h-3 text-${item.color}-400`} />
+              <div className="flex flex-col items-end gap-1">
+                <div className={`w-6 h-6 rounded-lg bg-${item.color}-500/10 flex items-center justify-center border border-${item.color}-500/20`}>
+                  <item.icon className={`w-3 h-3 text-${item.color}-400`} />
+                </div>
+                <div className="text-[6px] font-black text-slate-800 uppercase tracking-tighter">{item.contrib}</div>
               </div>
             </div>
             <div className="h-[120px]">
@@ -426,6 +432,8 @@ const AdminDashboard = () => {
                       outerRadius={50}
                       paddingAngle={3}
                       dataKey="value"
+                      label={({ name, value }) => `${value}`}
+                      labelLine={false}
                     >
                       {(item.data || []).map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={item.color === 'emerald' ? (entry.label === 'INVESTOR' ? '#10b981' : '#64748b') : ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'][index % 6]} />
@@ -434,11 +442,11 @@ const AdminDashboard = () => {
                     <Tooltip contentStyle={{ backgroundColor: '#111521', border: '1px solid rgba(255,255,255,0.1)', fontSize: '9px' }} />
                   </PieChart>
                 ) : (
-                  <BarChart data={item.data || []} layout="vertical">
+                  <BarChart data={item.data || []} layout="vertical" margin={{ right: 30 }}>
                     <XAxis type="number" hide />
                     <YAxis dataKey="label" type="category" hide />
                     <Tooltip cursor={{ fill: 'rgba(255,255,255,0.02)' }} contentStyle={{ backgroundColor: '#111521', border: '1px solid rgba(255,255,255,0.1)', fontSize: '9px' }} />
-                    <Bar dataKey="value" fill="#8b5cf6" radius={[0, 4, 4, 0]} barSize={8} />
+                    <Bar dataKey="value" fill="#8b5cf6" radius={[0, 4, 4, 0]} barSize={8} label={{ position: 'right', fill: '#94a3b8', fontSize: 10 }} />
                   </BarChart>
                 )}
               </ResponsiveContainer>
@@ -585,7 +593,7 @@ const AdminDashboard = () => {
                   </td>
                   <td className="px-2 py-2">
                     <div className="text-[11px] font-bold text-slate-400 uppercase tracking-tighter truncate max-w-[150px]">
-                      {lead.company_name || lead.family_office_name || '—'}
+                      {(lead.company_name === 'Independent' || !lead.company_name) ? '—' : (lead.company_name || lead.family_office_name || '—')}
                     </div>
                   </td>
                   <td className="px-2 py-2">

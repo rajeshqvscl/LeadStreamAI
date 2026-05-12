@@ -43,6 +43,7 @@ const CompanyDatabase = () => {
         page: String(page),
         limit: '500'
       });
+      queryParams.append('_t', String(Date.now()));
       if (search) queryParams.append('search', search);
       if (filtersJson !== '{}') queryParams.append('filters', filtersJson);
 
