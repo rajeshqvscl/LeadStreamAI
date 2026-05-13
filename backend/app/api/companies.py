@@ -274,50 +274,16 @@ def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     for i, row in enumerate(rows):
         clean_row = {}
-        # Ensure these core keys ALWAYS exist in the result object
-        clean_row["Email"] = ""
-        clean_row["Mobile"] = ""
-        
         for idx, (k, v) in enumerate(row.items()):
             k_str = str(k).strip()
-            target_key = k_str
-            
-            # Use detected name if original is missing/generic
-            if not k or k_str == "" or k_str.lower() in ["none", "null"] or "field" in k_str.lower():
-                target_key = unnamed_types.get(idx, f"Field_{idx}")
-            
+            # Preserve original key exactly as in sheet
             val = str(v).strip() if v else ""
-            
-            # Map common variations to standard keys
-            tk_low = target_key.lower().replace(" ", "").replace("_", "")
-            if tk_low in ["email", "emailaddress", "workemail", "mail"]:
-                clean_row["Email"] = val
-            elif tk_low in ["mobile", "phone", "contact", "contactnumber", "phonenumber", "tel"]:
-                clean_row["Mobile"] = val
-            else:
-                # Keep original key but avoid empty ones
-                final_key = target_key if target_key else f"Column_{idx}"
-                clean_row[final_key] = val
-        
-        # Explicitly preserve critical metadata if it exists
-        if "_source_tab" in row:
-            clean_row["_source_tab"] = row["_source_tab"]
-        
-        # Double check: if Email/Mobile are still empty but we found them in unnamed columns
-        # this acts as a safety net
-        if not clean_row["Email"]:
-            for k, v in clean_row.items():
-                if "@" in str(v) and "." in str(v) and k not in ["Company Name", "Person Name"]:
-                    clean_row["Email"] = str(v)
-                    break
-        
-        # REMOVED: Aggressive row filtering. We now import ALL rows as requested.
-        # if not any(v for k, v in clean_row.items() if k not in ["id", "_is_generated", "Email", "Mobile"]): 
-        #     continue
+            clean_row[k_str] = val
         
         # Trigger AI enrichment for missing critical data (Limit to first 30)
-        has_email = "@" in clean_row.get("Email", "")
-        has_phone = any(c.isdigit() for c in clean_row.get("Mobile", "")) and len(clean_row.get("Mobile", "")) > 7
+        # We search for email/phone in any field for logic, but don't create new columns
+        has_email = any("@" in str(v) and "." in str(v) for v in clean_row.values())
+        has_phone = any(any(c.isdigit() for c in str(v)) and len(str(v)) > 7 for v in clean_row.values())
             
         if (not has_email or not has_phone) and i < 30:
             try:
@@ -542,6 +508,15 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
                 cleaned_csv = "\n".join(lines[header_index:])
                 reader = csv.reader(io.StringIO(cleaned_csv))
                 header_row = next(reader, [])
+                
+                # TRIM: Find the actual end of data to avoid trailing empty columns (Field_10, Field_11...)
+                last_non_empty = -1
+                for idx, h in enumerate(header_row):
+                    if h.strip(): last_non_empty = idx
+                
+                if last_non_empty != -1:
+                    header_row = header_row[:last_non_empty + 1]
+                
                 data_reader = reader
             else:
                 # No header found! Treat the whole sheet as data and use A, B, C...
@@ -549,12 +524,11 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
                 cleaned_csv = "\n".join(lines)
                 data_reader = csv.reader(io.StringIO(cleaned_csv))
                 
-                # Peek at the first row to know how many columns we need
+                # Peek to determine width
                 first_row = next(data_reader, [])
                 if not first_row: continue
                 
                 num_cols = len(first_row)
-                # Generate Column A, B, C, D...
                 import string
                 header_row = []
                 for i in range(num_cols):
@@ -565,7 +539,7 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
                         temp_i = (temp_i // 26) - 1
                     header_row.append(f"Column {col_name}")
                 
-                # Re-create data reader including the first row (since it's data)
+                # Reset reader to include first row
                 data_reader = csv.reader(io.StringIO(cleaned_csv))
 
             for row_data in data_reader:
@@ -574,9 +548,12 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
                     continue
                     
                 row_dict = {}
-                for idx, val in enumerate(row_data):
-                    key = header_row[idx].strip() if idx < len(header_row) and header_row[idx].strip() else f"Field_{idx}"
+                # Only take data up to the header length to prevent trailing empty fields
+                for idx in range(len(header_row)):
+                    val = row_data[idx] if idx < len(row_data) else ""
+                    key = header_row[idx].strip()
                     row_dict[key] = val
+                
                 row_dict["_source_tab"] = tab["name"]
                 all_rows.append(row_dict)
         except Exception as e:
@@ -622,16 +599,19 @@ def enrich_row_data_internal(data: Dict[str, Any]) -> Dict[str, Any]:
             ai_val = enrichment.get(ai_key)
             if not ai_val: continue
             
-            # Check for existing value
-            exists = False
-            target_key = ui_candidates[0]
+            # Check for existing column matching one of our candidates
+            target_key = None
             for cand in ui_candidates:
+                cand_clean = cand.lower().replace(" ","")
                 for k in data.keys():
-                    if k.lower().replace(" ","") == cand.lower().replace(" ",""):
-                        if data.get(k): exists = True
+                    if k.lower().replace(" ","") == cand_clean:
                         target_key = k
                         break
-            if not exists: data[target_key] = ai_val
+                if target_key: break
+            
+            # Only update if the column EXISTS in the sheet
+            if target_key and not data.get(target_key):
+                data[target_key] = ai_val
             
         return data
     except:
