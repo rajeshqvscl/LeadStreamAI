@@ -162,6 +162,10 @@ def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header
         cur.execute("SELECT email FROM leads_raw WHERE user_id = %s", (uid,))
         existing_emails = {r[0].lower() for r in cur.fetchall() if r[0]}
         print(f"DEBUG: import_companies started for user {uid} with {len(rows)} raw rows")
+        if processed_rows:
+            print(f"DEBUG: First processed row keys: {list(processed_rows[0].keys())}")
+            print(f"DEBUG: First processed row sample: {processed_rows[0]}")
+            print(f"DEBUG: Source tab for first row: {processed_rows[0].get('_source_tab')}")
         
         # Smart Sync vs Full Purge
         if processed_rows:
@@ -289,10 +293,14 @@ def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             try:
                 enriched = enrich_row_data_internal(clean_row)
                 # Update but don't overwrite if we already have it
+                # We use a more flexible mapping to match your sheet's headers
                 for ek, ev in enriched.items():
-                    # Map AI keys to our standard keys
-                    if ek == "email" and not clean_row["Email"]: clean_row["Email"] = ev
-                    elif ek == "phone" and not clean_row["Mobile"]: clean_row["Mobile"] = ev
+                    if ek == "email":
+                        target = "Email" if "Email" in clean_row else ("Emails" if "Emails" in clean_row else "Email")
+                        if not clean_row.get(target): clean_row[target] = ev
+                    elif ek == "phone":
+                        target = "Mobile" if "Mobile" in clean_row else ("Phone" if "Phone" in clean_row else "Mobile")
+                        if not clean_row.get(target): clean_row[target] = ev
                     elif ek == "linkedin_url" and not clean_row.get("LinkedIn Profile"): clean_row["LinkedIn Profile"] = ev
                     elif ek == "designation" and not clean_row.get("Designation"): clean_row["Designation"] = ev
                     elif ek == "industry" and not clean_row.get("Industry"): clean_row["Industry"] = ev
@@ -303,47 +311,81 @@ def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return results
 
 def discover_gsheet_tabs(doc_id: str) -> List[Dict[str, str]]:
-    """Bulletproof method: Download XLSX in memory and parse its internal XML for sheet names."""
+    """
+    Scrapes the real GIDs (Grid IDs) from the Google Sheet HTML.
+    Uses multiple regex patterns for maximum reliability.
+    """
+    try:
+        url = f"https://docs.google.com/spreadsheets/d/{doc_id}/edit"
+        # We use a standard user agent to ensure we get the full HTML bootstrap
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        resp = requests.get(url, headers=headers, timeout=20)
+        if resp.status_code != 200:
+            return []
+            
+        html = resp.text
+        import re
+        
+        # Primary Pattern: Modern Google Sheets bootstrap structure
+        # Look for combinations of name and id/gid
+        patterns = [
+            r'\{"name":"([^"]+)","id":(\d+)',           # Standard id
+            r'"sheetName":"([^"]+)","sheetId":(\d+)',   # Modern sheetId
+            r'"name":"([^"]+)","gid":(\d+)',            # Alternative gid
+            r'\{"1":"([^"]+)","2":(\d+)',               # Obfuscated internal
+        ]
+        
+        tabs_map = {} # Using map to prevent duplicates
+        for pattern in patterns:
+            matches = re.findall(pattern, html)
+            for name, gid in matches:
+                if name not in tabs_map:
+                    tabs_map[name] = str(gid)
+        
+        tabs = [{"name": name, "gid": gid} for name, gid in tabs_map.items()]
+        
+        if not tabs:
+            # Final Fallback: If no numeric GIDs found, use name-based tabs from XLSX
+            print("DEBUG: HTML GID discovery failed. Falling back to XLSX sheet names.")
+            return discover_gsheet_tabs_xlsx(doc_id)
+            
+        print(f"DEBUG: Discovered {len(tabs)} tabs with real GIDs: {[t['name'] for t in tabs]}")
+        return tabs
+    except Exception as e:
+        print(f"Tab Discovery Error: {str(e)}")
+        return []
+    except Exception as e:
+        print(f"Tab Discovery Error: {str(e)}")
+        return []
+
+def discover_gsheet_tabs_xlsx(doc_id: str) -> List[Dict[str, str]]:
+    """Fallback method using XLSX structure."""
     try:
         import zipfile
         import xml.etree.ElementTree as ET
         import io
         
-        # 1. Download the workbook as XLSX
         xlsx_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=xlsx"
         resp = requests.get(xlsx_url, timeout=20)
-        if resp.status_code != 200:
-            return []
+        if resp.status_code != 200: return []
             
-        # 2. Open as Zip and find workbook.xml
         with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
             with z.open('xl/workbook.xml') as f:
                 tree = ET.parse(f)
                 root = tree.getroot()
-                
-                # XML namespaces in XLSX
                 ns = {'ns': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
                 sheets = root.find('ns:sheets', ns)
                 
                 tabs = []
                 if sheets is not None:
-                    # GSheet internal GIDs are a bit tricky to map from XLSX sheetId
-                    # but we can use the order or try to find the 'gid' in other files.
-                    # However, for importing, we can just use the NAME in the export?format=csv&sheet=Name URL
                     for i, s in enumerate(sheets.findall('ns:sheet', ns)):
-                        name = s.get('name')
-                        # Note: XLSX sheetId is NOT the same as GSheet GID.
-                        # But Google allows &sheet=SheetName in the export URL!
                         tabs.append({
-                            "name": name,
-                            "gid": name # We'll use the name as the identifier
+                            "name": s.get('name'),
+                            "gid": s.get('sheetId') or str(i)
                         })
                 return tabs
-    except Exception as e:
-        print(f"XLSX Tab Discovery Error: {str(e)}")
-        # Fallback to the old scraping method if XLSX fails
-        return []
-
     except:
         return []
 
@@ -456,50 +498,55 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
                     print(f"DEBUG: Matched sheet_name '{sheet_name}' to GID {target_gid}")
                     break
         tabs_to_process = [{"name": sheet_name or "Sheet1", "gid": target_gid}]
-
     # Process each resolved tab
     for tab in tabs_to_process:
-        # Switch to GViz endpoint which supports 'sheet=name' directly and is much more reliable
-        # than standard CSV export which requires internal GIDs.
-        sheet_name_encoded = requests.utils.quote(tab['name'])
-        export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/gviz/tq?tqx=out:csv&sheet={sheet_name_encoded}&_t={int(time.time())}"
-        
         try:
-            print(f"DEBUG: Fetching GSheet tab '{tab['name']}' using GViz: {export_url}")
-            resp = requests.get(export_url, allow_redirects=True, timeout=60)
+            # We try two endpoints for maximum reliability: 
+            # 1. GID-based export (standard CSV)
+            # 2. Name-based export (GViz)
+            gid = tab.get('gid', '0')
+            sheet_name_encoded = requests.utils.quote(tab['name'])
+            
+            # Try GID first as it's the primary identifier
+            export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv&gid={gid}"
+            print(f"DEBUG: Syncing tab '{tab['name']}' (GID: {gid})")
+            
+            resp = requests.get(export_url, timeout=30)
+            
+            # If GID fails (sometimes XLSX sheetId != GID), fallback to GViz Name-based export
+            if resp.status_code != 200 or len(resp.text) < 10:
+                print(f"DEBUG: GID export failed or empty for '{tab['name']}'. Falling back to GViz Name-based...")
+                export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/gviz/tq?tqx=out:csv&sheet={sheet_name_encoded}&_t={int(time.time())}"
+                resp = requests.get(export_url, timeout=30)
+            
             if resp.status_code != 200:
-                print(f"ERROR: GViz export failed for tab {tab['name']}. Status: {resp.status_code}")
+                print(f"ERROR: Both GID and Name-based sync failed for tab '{tab['name']}'. Skipping.")
                 continue
             
+            csv_data = resp.text
+            if not csv_data or len(csv_data) < 5:
+                print(f"WARNING: Tab '{tab['name']}' returned no content. Skipping.")
+                continue
+
             # CLEANUP: Remove leading empty lines or garbage before the actual headers
-            lines = resp.text.splitlines()
+            lines = csv_data.splitlines()
             header_index = 0
             
-            # Key headers we expect to find in a valid sheet
-            keywords = ['email', 'name', 'company', 'linkedin', 'person', 'investor', 'contact', 'designation', 'note', 'sector']
-            
-            for i, line in enumerate(lines):
-                # Count how many of our keywords are in this line
-                lower_line = line.lower()
-                matches = sum(1 for kw in keywords if kw in lower_line)
-                
-                # If a line has at least 1 matching keyword, it's likely our header row
-                if matches >= 1:
-                    header_index = i
-                    break
-                
             # Refined Header Detection: Find the first row with recognized keywords
             # A header row should match keywords but NOT look like a real data row (no long numbers/emails)
             header_index = -1
-            for i in range(min(10, len(lines))):
+            keywords = ['name', 'email', 'company', 'website', 'contact', 'member', 'person', 'designation', 'role', 'phone', 'mobile']
+            
+            for i in range(min(15, len(lines))):
                 lower_line = lines[i].lower()
-                matches = sum(1 for kw in keywords if f"{kw}" in lower_line)
+                matches = sum(1 for kw in keywords if kw in lower_line)
                 
                 # Check if it looks like data (contains a long number or an actual email domain)
                 has_long_number = any(len(re.sub(r'\D', '', part)) > 9 for part in lines[i].split(','))
                 has_real_email = any('@' in part and '.' in part and len(part) > 5 for part in lines[i].split(','))
                 
-                if matches >= 2 and not has_long_number and not has_real_email:
+                # If a line has at least 1 matching keyword and doesn't look like data, it's a header
+                if matches >= 1 and not has_long_number and not has_real_email:
                     header_index = i
                     break
             
