@@ -156,6 +156,14 @@ def create_tables():
     );
     """)
 
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS gmail_processed_messages (
+        message_id TEXT PRIMARY KEY,
+        user_id INTEGER,
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+    """)
+
     # Ensure user_id and user_name exist in activity_log
     for col, col_type in [("user_id", "INTEGER"), ("user_name", "TEXT")]:
         try:

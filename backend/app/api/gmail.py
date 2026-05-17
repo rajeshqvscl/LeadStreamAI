@@ -964,6 +964,7 @@ def poll_all_users_for_replies():
     from app.services.google_service import get_gmail_service
     from app.database import get_db_connection
     import psycopg2.extras
+    import re
     
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -984,66 +985,58 @@ def poll_all_users_for_replies():
                 results = service.users().messages().list(userId='me', q='label:INBOX -from:me', maxResults=50).execute()
                 messages = results.get('messages', [])
                 
-                from concurrent.futures import ThreadPoolExecutor
-                from app.services.google_service import get_user_credentials
-                from googleapiclient.discovery import build
-                
-                # Fetch creds once for this user to pass to threads
-                user_creds = get_user_credentials(uid)
-                if not user_creds: continue
-
-                def process_single_msg(msg_meta):
-                    # Local DB connection for thread safety
-                    thread_conn = get_db_connection()
-                    thread_cur = thread_conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-                    # New service object per thread for safety
-                    thread_service = build('gmail', 'v1', credentials=user_creds)
+                for msg_meta in messages:
+                    m_id = msg_meta['id']
+                    
+                    # PERSISTENT DEDUPLICATION: Skip immediately if already processed in DB
+                    cur.execute("SELECT 1 FROM gmail_processed_messages WHERE message_id = %s", (m_id,))
+                    if cur.fetchone():
+                        continue
+                    
                     try:
                         # Check if this thread/message is from a lead
-                        msg = thread_service.users().messages().get(userId='me', id=msg_meta['id'], format='metadata').execute()
+                        msg = service.users().messages().get(userId='me', id=m_id, format='metadata').execute()
                         
                         # Skip if the message is sent BY the user
                         labels = msg.get('labelIds', [])
                         if 'SENT' in labels:
-                            return
+                            cur.execute("INSERT INTO gmail_processed_messages (message_id, user_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (m_id, uid))
+                            conn.commit()
+                            continue
                             
                         headers = msg.get('payload', {}).get('headers', [])
                         sender = next((h['value'] for h in headers if h['name'].lower() == 'from'), "")
                         
                         # Extract pure email from "Name <email@site.com>"
-                        import re
                         email_match = re.search(r'[\w\.-]+@[\w\.-]+', sender)
                         if email_match:
                             sender_email = email_match.group(0).lower()
                             
                             # Check if this email exists as a lead (regardless of owner) and hasn't responded yet
-                            thread_cur.execute("""
+                            cur.execute("""
                                 SELECT id, user_id FROM leads_raw 
                                 WHERE LOWER(email) = LOWER(%s) AND is_responded = FALSE
                                 LIMIT 1
                             """, (sender_email,))
                             
-                            found_lead = thread_cur.fetchone()
+                            found_lead = cur.fetchone()
                             if found_lead:
                                 target_uid = found_lead['user_id'] or uid
                                 
                                 # Fetch full message data for classification
                                 try:
-                                    full_msg_data = thread_service.users().messages().get(userId='me', id=msg_meta['id'], format='full').execute()
+                                    full_msg_data = service.users().messages().get(userId='me', id=m_id, format='full').execute()
                                     handle_potential_reply(target_uid, full_msg_data.get('threadId'), full_msg_data)
-                                    thread_conn.commit()
+                                    conn.commit()
                                 except Exception as fetch_err:
                                     print(f"Error fetching full message for polling: {fetch_err}")
-                    except Exception as e:
-                        print(f"Error processing single message {msg_meta.get('id')}: {e}")
-                    finally:
-                        thread_cur.close()
-                        thread_conn.close()
-
-                # Use ThreadPoolExecutor for parallel processing of Gmail messages
-                with ThreadPoolExecutor(max_workers=10) as executor:
-                    executor.map(process_single_msg, messages)
-
+                        
+                        # Mark as processed in DB
+                        cur.execute("INSERT INTO gmail_processed_messages (message_id, user_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (m_id, uid))
+                        conn.commit()
+                    except Exception as msg_err:
+                        print(f"Error processing single message {m_id}: {msg_err}")
+                        continue
             except Exception as e:
                 print(f"Error polling for user {uid}: {e}")
                 
@@ -1058,13 +1051,12 @@ def retro_sync_pdfs(request: Request, x_user_id: Optional[str] = Header(None)):
     user_id = normalize_user_id(x_user_id)
     
     try:
-        from app.services.google_service import get_gmail_service, get_user_credentials, extract_attachments
-        from concurrent.futures import ThreadPoolExecutor
-        from googleapiclient.discovery import build
-        import threading
+        from app.services.google_service import get_gmail_service, extract_attachments
         import requests
         import psycopg2.extras
         import json
+        import re
+        import os
         
         service = get_gmail_service(int(user_id))
         if not service:
@@ -1075,82 +1067,73 @@ def retro_sync_pdfs(request: Request, x_user_id: Optional[str] = Header(None)):
         messages = results.get('messages', [])
         
         count = 0
-        count_lock = threading.Lock()
         rag_url = "https://rag-sys-gz59.onrender.com"
         
-        user_creds = get_user_credentials(int(user_id))
-        if not user_creds:
-            return {"success": False, "error": "Failed to get user credentials"}
-
-        def process_single_pdf(msg):
-            nonlocal count
-            thread_service = build('gmail', 'v1', credentials=user_creds)
-            try:
-                msg_data = thread_service.users().messages().get(userId='me', id=msg['id'], format='full').execute()
-                headers = msg_data.get('payload', {}).get('headers', [])
-                sender = next((h['value'] for h in headers if h['name'].lower() == 'from'), "")
-                
-                import re
-                match = re.search(r'[\w\.-]+@[\w\.-]+', sender)
-                sender_email = match.group(0).lower() if match else sender.lower()
-                
-                payload = msg_data.get('payload', {})
-                attachments = extract_attachments(thread_service, msg['id'], payload)
-                pdf_attachment = next((att for att in attachments if att['filename'].lower().endswith('.pdf')), None)
-                
-                if pdf_attachment:
-                    import os
-                    os.makedirs("static/pitch_decks", exist_ok=True)
-                    safe_filename = "".join(c for c in pdf_attachment['filename'] if c.isalnum() or c in "._-").replace(" ", "_")
-                    file_path = f"static/pitch_decks/{msg['id']}_{safe_filename}"
-                    with open(file_path, "wb") as f:
-                        f.write(pdf_attachment['data'])
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        try:
+            for msg in messages:
+                try:
+                    msg_data = service.users().messages().get(userId='me', id=msg['id'], format='full').execute()
+                    headers = msg_data.get('payload', {}).get('headers', [])
+                    sender = next((h['value'] for h in headers if h['name'].lower() == 'from'), "")
                     
-                    base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
-                    pitch_deck_url = f"{base_url}/{file_path}"
+                    match = re.search(r'[\w\.-]+@[\w\.-]+', sender)
+                    sender_email = match.group(0).lower() if match else sender.lower()
                     
-                    rag_category = None
-                    rag_advice = None
-                    rag_intel = None
+                    payload = msg_data.get('payload', {})
+                    attachments = extract_attachments(service, msg['id'], payload)
+                    pdf_attachment = next((att for att in attachments if att['filename'].lower().endswith('.pdf')), None)
                     
-                    try:
-                        files = {'file': (pdf_attachment['filename'], pdf_attachment['data'])}
-                        # Send to RAG
-                        rag_res = requests.post(f"{rag_url}/process", files=files, timeout=300, verify=False)
-                        if rag_res.status_code == 200:
-                            rag_data = rag_res.json()
-                            rag_item_id = rag_data.get('id')
-                            if rag_item_id:
-                                import time
-                                for _ in range(30):
-                                    st_res = requests.get(f"{rag_url}/status/{rag_item_id}", timeout=60, verify=False)
-                                    if st_res.status_code == 200:
-                                        st_data = st_res.json()
-                                        if st_data.get('status', '').lower() in ['completed', 'success']:
-                                            ins = st_data.get('insights', {})
-                                            if ins:
-                                                rag_advice = ins.get('summary') or ins.get('verdict')
-                                                rag_category = (ins.get('type') or ins.get('category') or 'INVESTOR').upper()
-                                                rag_intel = {
-                                                    "answer": rag_advice,
-                                                    "source": "Pure Llama 3.1 (RAG Engine)",
-                                                    "category": rag_category,
-                                                    "strategy": ins.get('strategy', {}),
-                                                    "actuals": ins.get('actuals', {}),
-                                                    "full_insights": ins
-                                                }
-                                            break
-                                    time.sleep(10)
-                    except Exception as e:
-                        print(f"RAG Retro Error for {sender_email}: {e}")
-
-                    # Update Database
-                    thread_conn = get_db_connection()
-                    thread_cur = thread_conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-                    try:
+                    if pdf_attachment:
+                        os.makedirs("static/pitch_decks", exist_ok=True)
+                        safe_filename = "".join(c for c in pdf_attachment['filename'] if c.isalnum() or c in "._-").replace(" ", "_")
+                        file_path = f"static/pitch_decks/{msg['id']}_{safe_filename}"
+                        with open(file_path, "wb") as f:
+                            f.write(pdf_attachment['data'])
+                        
+                        base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+                        pitch_deck_url = f"{base_url}/{file_path}"
+                        
+                        rag_category = None
+                        rag_advice = None
+                        rag_intel = None
+                        
+                        try:
+                            files = {'file': (pdf_attachment['filename'], pdf_attachment['data'])}
+                            # Send to RAG
+                            rag_res = requests.post(f"{rag_url}/process", files=files, timeout=300, verify=False)
+                            if rag_res.status_code == 200:
+                                rag_data = rag_res.json()
+                                rag_item_id = rag_data.get('id')
+                                if rag_item_id:
+                                    import time
+                                    for _ in range(30):
+                                        st_res = requests.get(f"{rag_url}/status/{rag_item_id}", timeout=60, verify=False)
+                                        if st_res.status_code == 200:
+                                            st_data = st_res.json()
+                                            if st_data.get('status', '').lower() in ['completed', 'success']:
+                                                ins = st_data.get('insights', {})
+                                                if ins:
+                                                    rag_advice = ins.get('summary') or ins.get('verdict')
+                                                    rag_category = (ins.get('type') or ins.get('category') or 'INVESTOR').upper()
+                                                    rag_intel = {
+                                                        "answer": rag_advice,
+                                                        "source": "Pure Llama 3.1 (RAG Engine)",
+                                                        "category": rag_category,
+                                                        "strategy": ins.get('strategy', {}),
+                                                        "actuals": ins.get('actuals', {}),
+                                                        "full_insights": ins
+                                                    }
+                                                break
+                                        time.sleep(10)
+                        except Exception as e:
+                            print(f"RAG Retro Error for {sender_email}: {e}")
+     
                         # Fetch lead data first for draft generation
-                        thread_cur.execute("SELECT * FROM leads_raw WHERE LOWER(email) = LOWER(%s)", (sender_email,))
-                        lead_row = thread_cur.fetchone()
+                        cur.execute("SELECT * FROM leads_raw WHERE LOWER(email) = LOWER(%s)", (sender_email,))
+                        lead_row = cur.fetchone()
                         
                         fresh_draft_body = None
                         if lead_row and rag_advice:
@@ -1164,8 +1147,8 @@ def retro_sync_pdfs(request: Request, x_user_id: Optional[str] = Header(None)):
                                     if rag_intel: rag_intel["draft"] = fresh_draft_body
                             except Exception as draft_err:
                                 print(f"Failed to generate retro draft for {sender_email}: {draft_err}")
-
-                        thread_cur.execute("""
+     
+                        cur.execute("""
                             UPDATE leads_raw 
                             SET pitch_deck_url = %s,
                                 sector = COALESCE(%s, sector),
@@ -1175,20 +1158,15 @@ def retro_sync_pdfs(request: Request, x_user_id: Optional[str] = Header(None)):
                             WHERE LOWER(email) = LOWER(%s) 
                             AND (pitch_deck_url IS NULL OR pitch_deck_url = '' OR pitch_deck_url LIKE 'Attached PDF:%%' OR rag_advice IS NULL)
                         """, (pitch_deck_url, rag_category, rag_advice, json.dumps(rag_intel) if rag_intel else None, fresh_draft_body, sender_email))
-                        thread_conn.commit()
-                        with count_lock:
-                            count += 1
-                    finally:
-                        thread_cur.close()
-                        thread_conn.close()
-            except Exception as e:
-                print(f"Error retro syncing message {msg['id']}: {e}")
-
-        # Execute parallel processing
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            executor.map(process_single_pdf, messages)
+                        conn.commit()
+                        count += 1
+                except Exception as e:
+                    print(f"Error retro syncing message {msg['id']}: {e}")
             
-        return {"success": True, "updated_deals": count, "message": f"Retro-sync complete. {count} pitch decks processed and classified."}
+            return {"success": True, "updated_deals": count, "message": f"Retro-sync complete. {count} pitch decks processed and classified."}
+        finally:
+            cur.close()
+            conn.close()
     except Exception as e:
         print(f"Retro sync error: {e}")
         return {"success": False, "error": str(e)}
