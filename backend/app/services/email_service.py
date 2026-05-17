@@ -118,7 +118,7 @@ def format_outreach_html(text: str) -> str:
         
     return "\n".join(formatted_lines)
 
-def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None, lead_id: Optional[int] = None, is_system_email: bool = False, user_id: Optional[int] = None, cc: Optional[str] = None) -> bool:
+def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None, lead_id: Optional[int] = None, is_system_email: bool = False, user_id: Optional[int] = None, cc: Optional[str] = None, thread_id: Optional[str] = None, in_reply_to: Optional[str] = None) -> bool:
     """Sends an email using Gmail API (if token available) or falls back to Provider/SMTP."""
     load_dotenv(dotenv_path=env_path, override=True)
     
@@ -200,6 +200,11 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 msg['from'] = clean_from
                 msg['subject'] = clean_subject
                 
+                # Set threading headers for replies
+                if in_reply_to:
+                    msg['In-Reply-To'] = in_reply_to
+                    msg['References'] = in_reply_to
+                
                 if cc:
                     clean_cc = cc.replace('\n', ', ').replace('\r', '').strip()
                     msg['Cc'] = clean_cc
@@ -222,12 +227,21 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 
                 raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode('utf-8')
                 
+                # Build the send body — add threadId if this is a reply
+                send_body = {'raw': raw_message}
+                if thread_id:
+                    send_body['threadId'] = thread_id
+                
                 # Gmail API send
-                sent = service.users().messages().send(userId='me', body={'raw': raw_message}).execute()
+                sent = service.users().messages().send(userId='me', body=send_body).execute()
+                sent_thread_id = sent.get('threadId')
+                # Get the RFC Message-ID from the sent message for future In-Reply-To chaining
+                sent_msg_detail = service.users().messages().get(userId='me', id=sent.get('id'), format='metadata', metadataHeaders=['Message-ID']).execute()
+                sent_rfc_message_id = next((h['value'] for h in sent_msg_detail.get('payload', {}).get('headers', []) if h['name'] == 'Message-ID'), None)
                 logger.info(f"✅ Gmail API dispatch successful to {to_email} (CC: {cc}) — Message ID: {sent.get('id')}")
-                return True, "Success"
+                return True, "Success", sent_thread_id, sent_rfc_message_id
             else:
-                return False, "Gmail service not initialized. Ensure your Google account is linked with correct permissions."
+                return False, "Gmail service not initialized. Ensure your Google account is linked with correct permissions.", None, None
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
@@ -237,18 +251,18 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
             
             error_msg = f"Gmail API Error: {str(e)} {error_content}"
             logger.error(f"❌ Gmail API dispatch failed for User {user_id} to {to_email}: {error_msg}\n{error_details}")
-            return False, error_msg
+            return False, error_msg, None, None
 
     # 2. Fallback to SMTP/Resend logic
     if user_id and not is_system_email:
         logger.error(f"Gmail API dispatch failed for User {user_id}. ABORTING FALLBACK to system SMTP for personalized outreach.")
-        return False, "Gmail API dispatch failed. Personalized outreach requires a working Google connection."
+        return False, "Gmail API dispatch failed. Personalized outreach requires a working Google connection.", None, None
 
     provider = os.getenv("EMAIL_PROVIDER", "resend").lower()
     
     if not from_email:
         logger.error(f"ABORTING DISPATCH: No sender email provided for outreach to {to_email}.")
-        return False, "Sender email missing."
+        return False, "Sender email missing.", None, None
 
     final_from_email = from_email
     final_from_name = from_name or "LeadStream Outreach"

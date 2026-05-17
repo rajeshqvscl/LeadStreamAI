@@ -98,7 +98,15 @@ def create_tables():
         ("pitch_deck_url", "TEXT"),
         ("sector", "TEXT"),
         ("industry", "TEXT"),
-        ("lead_type", "TEXT DEFAULT 'CLIENT'")
+        ("lead_type", "TEXT"),
+        ("last_outreach_at", "TIMESTAMP"),
+        ("last_outreach_subject", "TEXT"),
+        ("followup_draft", "TEXT"),
+        ("followup_approved", "BOOLEAN DEFAULT FALSE"),
+        ("gmail_thread_id", "TEXT"),
+        ("gmail_message_id", "TEXT"),
+        ("first_outreach_at", "TIMESTAMP"),
+        ("first_outreach_subject", "TEXT")
     ]
     for col_name, col_type in columns_to_add:
         try:
@@ -235,7 +243,9 @@ def create_tables():
         ("google_id", "TEXT"),
         ("email", "TEXT UNIQUE"),
         ("credits_used", "INTEGER DEFAULT 0"),
-        ("credits_limit", "INTEGER DEFAULT 200")
+        ("credits_limit", "INTEGER DEFAULT 200"),
+        ("auto_followup", "BOOLEAN DEFAULT FALSE"),
+        ("outreach_daily_limit", "INTEGER DEFAULT 200")
     ]
     for col_name, col_type in user_cols:
         try:

@@ -36,6 +36,8 @@ const AdminDashboard = () => {
   const [pagination, setPagination] = useState({ total: 0, pages: 1, limit: 50 });
   const [availableSectors, setAvailableSectors] = useState([]);
   const [availableOwners, setAvailableOwners] = useState([]);
+  const [systemSettings, setSystemSettings] = useState({ auto_followup: false, outreach_daily_limit: 50 });
+  const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
 
   useEffect(() => {
     if (selectedLead?.id) {
@@ -93,6 +95,29 @@ const AdminDashboard = () => {
     }
   };
 
+  const fetchSystemSettings = async () => {
+    try {
+      const res = await api.get('/api/admin/stats/settings');
+      setSystemSettings(res.data);
+    } catch (err) {
+      console.error('Failed to fetch system settings', err);
+    }
+  };
+
+  const updateSystemSettings = async (updates) => {
+    setIsUpdatingSettings(true);
+    try {
+      const newSettings = { ...systemSettings, ...updates };
+      await api.post('/api/admin/stats/settings', newSettings);
+      setSystemSettings(newSettings);
+      showNotification('success', 'System Intelligence parameters updated successfully.');
+    } catch (err) {
+      showNotification('error', 'Communication Error: Failed to synchronize settings.');
+    } finally {
+      setIsUpdatingSettings(false);
+    }
+  };
+
   const fetchData = async (page = 1, silent = false) => {
     try {
       if (!silent) setLoading(true);
@@ -122,6 +147,7 @@ const AdminDashboard = () => {
 
   useEffect(() => {
     fetchGlobalStats();
+    fetchSystemSettings();
   }, []);
 
   useEffect(() => {
@@ -346,15 +372,17 @@ const AdminDashboard = () => {
         </div>
       </div>
 
+
       {/* Analytics Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 mb-4">
         {[
           { label: 'Total Leads', value: stats.total_leads, icon: Users, color: 'indigo', desc: 'Total records in system', contrib: 'From Database' },
-          { label: 'Engaged', value: stats.engaged_leads, icon: Target, color: 'emerald', desc: 'Replied or interested', contrib: 'Email Status & Intent' },
-          { label: 'Followups', value: stats.active_followups, icon: Clock, color: 'rose', desc: 'In active sequences', contrib: 'Automated Sequences' },
-          { label: 'Active Flows', value: stats.active_flows, icon: Zap, color: 'amber', desc: 'Running campaigns', contrib: 'Campaign Engine' },
-          { label: 'Meetings', value: stats.meetings_scheduled, icon: Calendar, color: 'blue', desc: 'Scheduled calls', contrib: 'Meeting Status' },
-          { label: 'Conv. Rate', value: `${stats.conversion_rate}%`, icon: TrendingUp, color: 'violet', desc: 'Engagement percentage', contrib: 'Calculated Ratio' },
+          { label: 'Followups Sent', value: stats.total_followups, icon: Mail, color: 'emerald', desc: 'Total stages sent', contrib: 'Activity Log' },
+          { label: 'Engaged', value: stats.engaged, icon: Target, color: 'blue', desc: 'Replied or interested', contrib: 'Email Status & Intent' },
+          { label: 'Active Flows', value: stats.active_flows, icon: Zap, color: 'amber', desc: 'Running sequences', contrib: 'Lead Status' },
+          { label: 'Meetings', value: stats.meetings, icon: Calendar, color: 'rose', desc: 'Scheduled calls', contrib: 'Meeting Status' },
+          { label: 'Interested', value: stats.interested, icon: MessageSquare, color: 'violet', desc: 'Intent identified', contrib: 'AI Classification' },
+          { label: 'Avg Score', value: stats.avg_score, icon: TrendingUp, color: 'sky', desc: 'Overall sentiment', contrib: 'Lead Sentiment' },
         ].map((stat, i) => (
           <div key={i} className="bg-[#111521] border border-white/5 rounded-xl p-3 hover:border-white/10 transition-all group relative overflow-hidden">
             <div className={`absolute top-0 right-0 w-16 h-16 bg-${stat.color}-500/5 blur-2xl rounded-full -mr-8 -mt-8`} />
@@ -566,7 +594,8 @@ const AdminDashboard = () => {
 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Intent</th>
                   <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">RAG Analysis</th>
                   <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Check Size</th>
-                  <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Score</th>
+                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Score</th>
+                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Stage</th>
                 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Rejection / Reason</th>
                 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Status</th>
                 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Owner</th>
@@ -703,6 +732,18 @@ const AdminDashboard = () => {
                   <td className="px-3 py-5 text-center">
                     <div className={`text-[15px] font-black ${(lead.rag_intelligence?.sentiment_score || lead.sentiment_score) >= 80 ? 'text-emerald-400' : (lead.rag_intelligence?.sentiment_score || lead.sentiment_score) >= 50 ? 'text-amber-400' : 'text-slate-400'}`}>
                       {lead.rag_intelligence?.sentiment_score || lead.sentiment_score || '—'}
+                    </div>
+                  </td>
+                  <td className="px-3 py-5 text-center">
+                    <div className="flex flex-col items-center gap-1">
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-black tracking-widest uppercase ${lead.followup_stage > 0 ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-slate-800 text-slate-500 border border-white/5'}`}>
+                        {lead.followup_stage === 0 ? 'Initial' : lead.followup_stage === 1 ? 'Outreach' : `Follow-up ${lead.followup_stage - 1}`}
+                      </span>
+                      {lead.last_outreach_at && (
+                        <span className="text-[7px] font-bold text-slate-600 uppercase">
+                          Sent {new Date(lead.last_outreach_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="px-2 py-2">
@@ -983,6 +1024,60 @@ const AdminDashboard = () => {
                       <p className="text-[10px] font-black uppercase tracking-[0.3em]">Processing Analysis...</p>
                     </div>
                   )}
+                </div>
+              </div>
+
+              {/* Follow-up Sequence (NEW) */}
+              <div className="mb-12">
+                <div className="flex items-center gap-3 mb-6">
+                  <Clock className="w-5 h-5 text-emerald-400" />
+                  <h3 className="text-[12px] font-black text-white uppercase tracking-[0.2em]">Outreach Lifecycle</h3>
+                </div>
+                
+                <div className="bg-white/[0.02] border border-white/5 rounded-3xl p-6">
+                  <div className="space-y-6">
+                    <div className="flex items-start gap-4">
+                      <div className="flex flex-col items-center">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center border ${selectedLead.followup_stage >= 1 ? 'bg-indigo-500 border-indigo-400 text-white' : 'bg-slate-800 border-white/10 text-slate-600'}`}>
+                          <Mail className="w-4 h-4" />
+                        </div>
+                        <div className="w-0.5 h-8 bg-white/5 my-1" />
+                      </div>
+                      <div className="flex-1 pt-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black text-white uppercase tracking-widest">Initial Outreach</span>
+                          {selectedLead.last_outreach_at && selectedLead.followup_stage >= 1 && (
+                            <span className="text-[8px] font-bold text-slate-500">{new Date(selectedLead.last_outreach_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                          )}
+                        </div>
+                        <p className="text-[9px] text-slate-500 mt-1 uppercase font-bold">Primary email dispatch</p>
+                      </div>
+                    </div>
+
+                    {[...Array(Math.max(0, selectedLead.followup_stage - 1))].map((_, idx) => (
+                      <div key={idx} className="flex items-start gap-4">
+                        <div className="flex flex-col items-center">
+                          <div className="w-8 h-8 rounded-full flex items-center justify-center bg-emerald-500 border border-emerald-400 text-white">
+                            <Zap className="w-4 h-4" />
+                          </div>
+                          {idx < selectedLead.followup_stage - 2 && <div className="w-0.5 h-8 bg-white/5 my-1" />}
+                        </div>
+                        <div className="flex-1 pt-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-black text-white uppercase tracking-widest">Follow-up {idx + 1}</span>
+                          </div>
+                          <p className="text-[9px] text-emerald-500/80 mt-1 uppercase font-bold italic">Sequence Step {idx + 2} Completed</p>
+                        </div>
+                      </div>
+                    ))}
+
+                    {selectedLead.followup_status === 'ACTIVE' && (
+                      <div className="mt-4 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl flex items-center gap-3">
+                        <div className="w-2 h-2 rounded-full bg-indigo-500 animate-ping" />
+                        <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">Automated sequence actively monitoring for replies</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 

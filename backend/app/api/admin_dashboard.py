@@ -1,6 +1,6 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Header
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import psycopg2.extras
 from app.database import get_db_connection
 import structlog
@@ -38,9 +38,33 @@ def bulk_approve_leads(req: BulkApproveRequest, user_id: Optional[str] = Header(
             conn.close()
 
 def normalize_user_id(uid):
-    if not uid: return None
-    try: return int(uid)
-    except: return uid
+    if not uid or str(uid).strip() == "":
+        return None
+    if str(uid).lower() == "admin":
+        return 1
+    if str(uid).isdigit():
+        return int(uid)
+        
+    # Resolve username or email or full_name to integer ID
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id FROM users 
+            WHERE LOWER(username) = LOWER(%s) 
+            OR LOWER(email) = LOWER(%s)
+            OR LOWER(full_name) = LOWER(%s)
+            LIMIT 1
+        """, (str(uid), str(uid), str(uid)))
+        res = cur.fetchone()
+        cur.close()
+        conn.close()
+        if res:
+            return res[0]
+    except Exception as e:
+        logger.error(f"Error resolving user identity {uid} in admin_dashboard: {e}")
+        
+    return None
 
 @router.get("/leads/all")
 def get_all_leads_admin(
@@ -212,7 +236,7 @@ def export_all_leads_admin(
             conn.close()
 
 @router.get("/stats/global")
-def get_global_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_global_stats(user_id: Any = Header(None, alias="X-User-Id"), _t: Any = None):
     """
     Aggregates metrics across the entire workspace.
     """
@@ -220,32 +244,56 @@ def get_global_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
+        uid = normalize_user_id(user_id)
+        
+        # Determine if user is admin
+        is_admin = False
+        if uid:
+            cur.execute("SELECT role FROM users WHERE id = %s", (uid,))
+            role_row = cur.fetchone()
+            if role_row:
+                role_val = role_row['role'] if isinstance(role_row, dict) else role_row[0]
+                if role_val and str(role_val).upper() == 'ADMIN':
+                    is_admin = True
+
+        # Base filter
+        base_filter = ""
+        params = []
+        if not is_admin:
+            if uid:
+                base_filter = " WHERE user_id = %s"
+                params = [uid]
+            else:
+                return {"total_leads": 0, "interested": 0, "meetings": 0, "active_flows": 0, "avg_score": 0, "total_followups": 0, "engaged": 0}
+
         # Total leads
-        cur.execute("SELECT COUNT(*) FROM leads_raw")
+        cur.execute(f"SELECT COUNT(*) FROM leads_raw {base_filter}", tuple(params))
         total_leads = cur.fetchone()[0]
         
         # Interested (Intent)
-        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE reply_intent ILIKE 'INTERESTED'")
+        cur.execute(f"SELECT COUNT(*) FROM leads_raw {base_filter} {'AND' if base_filter else 'WHERE'} reply_intent ILIKE 'INTERESTED'", tuple(params))
         interested = cur.fetchone()[0]
         
         # Meetings
-        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status ILIKE 'Meeting Scheduled' OR meeting_time IS NOT NULL")
+        cur.execute(f"SELECT COUNT(*) FROM leads_raw {base_filter} {'AND' if base_filter else 'WHERE'} (email_status ILIKE 'Meeting Scheduled' OR meeting_time IS NOT NULL)", tuple(params))
         meetings = cur.fetchone()[0]
         
-        # Active Flows (leads with active outreach sequences)
-        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE followup_status ILIKE 'ACTIVE' OR campaign_id IS NOT NULL")
+        # Active Flows
+        cur.execute(f"SELECT COUNT(*) FROM leads_raw {base_filter} {'AND' if base_filter else 'WHERE'} (followup_status ILIKE 'ACTIVE' OR campaign_id IS NOT NULL)", tuple(params))
         active_flows = cur.fetchone()[0]
         
-        # Avg Score (Sentiment)
-        cur.execute("SELECT AVG(sentiment_score) FROM leads_raw WHERE sentiment_score IS NOT NULL")
+        # Avg Score
+        cur.execute(f"SELECT AVG(sentiment_score) FROM leads_raw {base_filter} {'AND' if base_filter else 'WHERE'} sentiment_score IS NOT NULL", tuple(params))
         avg_score = cur.fetchone()[0] or 0
         
-        # Active Followups
-        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE followup_status ILIKE 'ACTIVE'")
-        active_followups = cur.fetchone()[0]
+        # Total Followups Sent (Stage 1+)
+        # Note: activity_log also has user_id
+        act_filter = f" WHERE user_id = %s" if not is_admin else ""
+        cur.execute(f"SELECT COUNT(*) FROM activity_log {act_filter} {'AND' if act_filter else 'WHERE'} action IN ('AUTO_FOLLOWUP_SENT', 'FOLLOWUP_APPROVED')", tuple(params))
+        total_followups = cur.fetchone()[0]
         
-        # Engaged Leads (replied or interested)
-        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE reply_intent ILIKE 'INTERESTED' OR reply_intent ILIKE 'MEETING_SCHEDULED' OR is_responded = TRUE")
+        # Engaged Leads
+        cur.execute(f"SELECT COUNT(*) FROM leads_raw {base_filter} {'AND' if base_filter else 'WHERE'} (reply_intent ILIKE 'INTERESTED' OR reply_intent ILIKE 'MEETING_SCHEDULED' OR is_responded = TRUE)", tuple(params))
         engaged = cur.fetchone()[0]
         
         # System Reach (leads with emails sent)
@@ -370,13 +418,12 @@ def get_global_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         
         return {
             "total_leads": total_leads,
-            "interested_leads": interested,
-            "meetings_scheduled": meetings,
-            "conversion_rate": conversion_rate,
-            "avg_score": round(float(avg_score), 1),
-            "active_followups": active_followups,
+            "interested": interested,
+            "meetings": meetings,
             "active_flows": active_flows,
-            "engaged_leads": engaged,
+            "total_followups": total_followups,
+            "avg_score": round(float(avg_score), 2),
+            "engaged": engaged,
             "system_reach": system_reach,
             "open_rate": open_rate,
             "click_rate": click_rate,
@@ -393,5 +440,55 @@ def get_global_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         logger.error("admin_global_stats_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        if 'conn' in locals():
-            conn.close()
+        if 'cur' in locals(): cur.close()
+        if 'conn' in locals(): conn.close()
+
+@router.get("/stats/settings")
+def get_system_settings(user_id: Any = Header(None, alias="X-User-Id"), _t: Any = None):
+    """Fetches the current Auto-Pilot and system settings for the user."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        uid = normalize_user_id(user_id)
+        
+        cur.execute("SELECT auto_followup, outreach_daily_limit FROM users WHERE id = %s", (uid,))
+        settings = cur.fetchone()
+        
+        return {
+            "auto_followup": settings['auto_followup'] if settings else False,
+            "outreach_daily_limit": settings['outreach_daily_limit'] if (settings and settings['outreach_daily_limit'] is not None) else 200
+        }
+    except Exception as e:
+        logger.error("get_settings_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'cur' in locals(): cur.close()
+        if 'conn' in locals(): conn.close()
+
+@router.post("/stats/settings")
+def update_system_settings(req: Dict[str, Any], user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Updates Auto-Pilot and system settings."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        uid = normalize_user_id(user_id)
+        
+        auto_followup = req.get("auto_followup", False)
+        daily_limit = req.get("outreach_daily_limit")
+        if daily_limit is None or daily_limit == 0:
+            daily_limit = 100
+        
+        cur.execute("""
+            UPDATE users 
+            SET auto_followup = %s, outreach_daily_limit = %s 
+            WHERE id = %s
+        """, (auto_followup, daily_limit, uid))
+        conn.commit()
+        
+        return {"success": True}
+    except Exception as e:
+        logger.error("update_settings_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'cur' in locals(): cur.close()
+        if 'conn' in locals(): conn.close()

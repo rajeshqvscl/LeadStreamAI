@@ -321,7 +321,12 @@ Looking forward to your response.
         prompt = f"""
         Analyze this email reply from a potential investor/client and extract details in JSON format.
         
-        REPLY:
+        CRITICAL RULES:
+        1. Identify the new response/reply at the very beginning/top of the text. Ignore any quoted historical thread or original outreach text trailing after it (e.g., descriptions of QVSCL, the climate agritech project, traction, etc.).
+        2. If the lead declines the opportunity in the new reply—even in a short sentence like "Pass from us", "Pass for now", "Not interested", "Not within our mandate", "Too early for us", "No thank you"—you MUST classify the intent as "NOT_INTERESTED" and set the sentiment_score between 0 and 20.
+        3. Do NOT let the details of the original outreach email (which is positive) confuse you. Focus 100% on the lead's new reply at the top.
+        
+        REPLY TEXT:
         {text}
         
         JSON STRUCTURE:
@@ -335,14 +340,14 @@ Looking forward to your response.
         }}
         """
         result_text = self._call_llm(prompt, max_tokens=512)
-        if not result_text: return {"intent": "INTERESTED"}
+        if not result_text: return {"intent": "NOT_INTERESTED"}
 
         import re
         json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
         if json_match:
             try: return json.loads(json_match.group(0))
             except: pass
-        return {"intent": "INTERESTED"}
+        return {"intent": "NOT_INTERESTED"}
 
 
 

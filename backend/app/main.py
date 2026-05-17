@@ -34,12 +34,12 @@ async def scheduler_loop():
     from app.api.gmail import poll_all_users_for_replies
     while True:
         try:
-            check_scheduled_emails()
-            # process_outreach_sequences()
-            # poll_all_users_for_replies()
-            pass
-        except Exception:
-            pass
+            # Move synchronous blocking calls to threads
+            await asyncio.to_thread(check_scheduled_emails)
+            await asyncio.to_thread(process_outreach_sequences)
+            await asyncio.to_thread(poll_all_users_for_replies)
+        except Exception as e:
+            print(f"Scheduler error: {e}")
         await asyncio.sleep(60)
 
 async def gsheet_sync_loop():
@@ -90,6 +90,16 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+
+from fastapi.exceptions import RequestValidationError
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.error(f"VALIDATION ERROR on {request.url}: {exc.errors()}")
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "body": exc.body}
+    )
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

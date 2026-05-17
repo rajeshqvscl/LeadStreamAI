@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Header, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Any, Dict
 import json
 import psycopg2
 import psycopg2.extras
@@ -14,6 +14,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
 
 class LeadUpdate(BaseModel):
     first_name: Optional[str] = None
@@ -58,6 +59,9 @@ class LabelRemoveRequest(BaseModel):
 
 class BulkApproveFollowupsRequest(BaseModel):
     lead_ids: List[int]
+
+class ApproveFollowupRequest(BaseModel):
+    custom_body: Optional[str] = None
 
 @router.get("/leads")
 def get_leads(
@@ -268,6 +272,198 @@ def get_leads(
         "leads": leads,
         "total": total
     }
+
+
+@router.get("/leads/followups")
+def list_followups(
+    page: Any = 1, 
+    per_page: Any = 100, 
+    type: Any = None, 
+    stage: Any = None, 
+    search: Any = None,
+    status: Any = 'DUE',
+    user_id: Any = Header(None, alias="X-User-Id"),
+    _t: Any = None
+):
+    """Returns leads that are due for follow-ups or have already been sent/replied."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        status_val = (status or 'DUE').upper()
+        
+        # Base query depends on status
+        if status_val == 'SENT':
+            base_query = " FROM leads_raw WHERE email_status = 'SENT' AND COALESCE(followup_stage, 0) > 0 "
+        elif status_val == 'REPLIED':
+            base_query = " FROM leads_raw WHERE COALESCE(is_responded, FALSE) = TRUE "
+        else: # DUE
+            investor_kw = ["VENTURE", "CAPITAL", "EQUITY", "INVEST", "PARTNER", "ASSET", "FAMILY OFFICE", "ANGEL", "CIRCLE", "NETWORK", "FUND", "VC", "PE", "HOLDING", "SFO", "OFFICE", "ADVISORY", "MANAGEMENT", "PRIVATE", "TRUST", "WEALTH", "ASSOCIATES", "GROUP", "PARTNERS", "ADVISORS", "FOUNDATION"]
+            kw_conditions = " OR ".join([f"company_name ILIKE '%%{kw}%%' OR sector ILIKE '%%{kw}%%'" for kw in investor_kw])
+            
+            # Pre-check for Yashika to use in the SQL string
+            uid = normalize_user_id(user_id)
+            is_yashika_sql = "FALSE"
+            if uid:
+                cur.execute("SELECT username, full_name FROM users WHERE id = %s", (uid,))
+                u_row = cur.fetchone()
+                if u_row:
+                    uname = str(u_row.get('username') or '').lower()
+                    fname = str(u_row.get('full_name') or '').lower()
+                    if 'yashika' in uname or 'yashika' in fname or 'gupta' in uname or 'gupta' in fname:
+                        is_yashika_sql = "TRUE"
+
+            base_query = f"""
+                FROM leads_raw 
+                WHERE (followup_status IN ('ACTIVE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED', 'IDLE') OR email_status = 'SENT')
+                AND COALESCE(is_responded, FALSE) = FALSE
+                AND last_outreach_at IS NOT NULL
+                AND (
+                    -- INVESTOR Rules: 7, 14, 30 days total timeline
+                    (({is_yashika_sql} OR LOWER(lead_type) = 'investor' OR lead_type IS NULL OR {kw_conditions}) AND (
+                        (COALESCE(followup_stage, 0) = 0 AND last_outreach_at <= NOW() - INTERVAL '7 days') OR
+                        (followup_stage = 1 AND last_outreach_at <= NOW() - INTERVAL '7 days') OR
+                        (followup_stage = 2 AND last_outreach_at <= NOW() - INTERVAL '16 days')
+                    ))
+                    OR
+                    -- CLIENT Rules (Only if NOT Yashika and NOT Investor)
+                    (NOT {is_yashika_sql} AND LOWER(lead_type) = 'client' AND NOT ({kw_conditions}) AND (
+                        (COALESCE(followup_stage, 0) = 0 AND last_outreach_at <= NOW() - INTERVAL '2 days') OR
+                        (followup_stage = 1 AND last_outreach_at <= NOW() - INTERVAL '2 days') OR
+                        (followup_stage = 2 AND last_outreach_at <= NOW() - INTERVAL '6 days')
+                    ))
+                )
+            """
+        
+        params = []
+        
+        # 1. Multi-user Segregation
+        uid = normalize_user_id(user_id)
+        
+        # SECURE ADMIN CHECK: Verify role in DB
+        is_admin = False
+        if uid:
+            conn_admin = get_db_connection()
+            cur_admin = conn_admin.cursor()
+            cur_admin.execute("SELECT role FROM users WHERE id = %s", (uid,))
+            role_row = cur_admin.fetchone()
+            if role_row:
+                role_val = role_row['role'] if isinstance(role_row, dict) else role_row[0]
+                if role_val and str(role_val).upper() == 'ADMIN':
+                    is_admin = True
+            cur_admin.close()
+            conn_admin.close()
+
+        # LOG FOR DEBUGGING PRIVACY
+        logger.info(f"FETCH_FOLLOWUPS: header_user_id={user_id}, normalized_uid={uid}, is_admin={is_admin}")
+        
+        if not is_admin:
+            if uid:
+                base_query += " AND user_id = %s"
+                params.append(uid)
+            else:
+                # If we can't identify the user and they aren't admin, return empty
+                return {"leads": [], "total": 0}
+            
+        # 2. Lead Type Filtering
+        investor_kw = ["VENTURE", "CAPITAL", "EQUITY", "INVEST", "PARTNER", "ASSET", "FAMILY OFFICE", "ANGEL", "CIRCLE", "NETWORK", "FUND", "VC", "PE", "HOLDING", "SFO", "OFFICE", "ADVISORY", "MANAGEMENT", "PRIVATE", "TRUST", "WEALTH", "ASSOCIATES", "GROUP", "PARTNERS", "ADVISORS", "FOUNDATION"]
+        kw_conditions = " OR ".join([f"company_name ILIKE '%%{kw}%%' OR sector ILIKE '%%{kw}%%'" for kw in investor_kw])
+
+        # FORCE INVESTOR FOR YASHIKA / GUPTA: Scoped check
+        is_yashika = False
+        if uid:
+            cur.execute("SELECT username, full_name FROM users WHERE id = %s", (uid,))
+            user_row = cur.fetchone()
+            if user_row:
+                uname = str(user_row.get('username') or '').lower()
+                fname = str(user_row.get('full_name') or '').lower()
+                if 'yashika' in uname or 'yashika' in fname or 'gupta' in uname or 'gupta' in fname:
+                    is_yashika = True
+
+        if type:
+            t_upper = type.upper()
+            if t_upper == 'INVESTOR':
+                if is_yashika:
+                    # She only has investors, so no extra filter needed if she asks for them
+                    pass
+                else:
+                    base_query += f" AND (LOWER(lead_type) = 'investor' OR lead_type IS NULL OR {kw_conditions})"
+            elif t_upper == 'CLIENT':
+                if is_yashika:
+                    # She has zero clients, so return nothing if she filters for them
+                    base_query += " AND 1=0 "
+                else:
+                    base_query += f" AND (LOWER(lead_type) = 'client' OR lead_type IS NULL) AND NOT ({kw_conditions})"
+            else:
+                base_query += " AND LOWER(lead_type) = LOWER(%s)"
+                params.append(type)
+        elif is_yashika:
+            # If no type filter, but it's Yashika, we still treat all as Investors for timing rules in base_query if needed
+            # (The base_query already handles the interval logic, but we must ensure it uses Investor rules)
+            pass
+        
+        # 3. Search Filter
+        if search:
+            base_query += " AND (first_name ILIKE %s OR last_name ILIKE %s OR email ILIKE %s OR company_name ILIKE %s)"
+            s = f"%{search}%"
+            params.extend([s, s, s, s])
+
+        # 4. Stage Filter
+        if stage is not None and str(stage).strip() != "":
+            try:
+                stage_val = int(stage)
+                if status_val == 'SENT':
+                    base_query += " AND followup_stage = %s"
+                    params.append(stage_val + 1)
+                else:
+                    base_query += " AND followup_stage = %s"
+                    params.append(stage_val)
+            except:
+                pass
+        
+        # Count total
+        cur.execute(f"SELECT COUNT(*) {base_query}", tuple(params))
+        total = cur.fetchone()[0]
+
+        # Safely convert Any types to int for pagination
+        try:
+            page_val = int(page) if page is not None else 1
+            per_page_val = int(per_page) if per_page is not None else 100
+        except:
+            page_val, per_page_val = 1, 100
+
+        # Fetch paginated results
+        query = f"SELECT * {base_query} ORDER BY COALESCE(scheduled_at, last_outreach_at) DESC LIMIT %s OFFSET %s"
+        cur.execute(query, tuple(params + [per_page_val, (page_val - 1) * per_page_val]))
+        rows = cur.fetchall()
+        
+        results = []
+        for r in rows:
+            lead_dict = dict(r)
+            # Fetch latest significant activity
+            cur.execute("SELECT action, details FROM activity_log WHERE lead_id = %s ORDER BY created_at DESC LIMIT 1", (lead_dict['id'],))
+            last_act = cur.fetchone()
+            if last_act:
+                act = last_act['action'].upper()
+                det = (last_act['details'] or "").upper()
+                lead_dict['last_action_type'] = act.replace('_', ' ')
+                if 'DECK' in det or 'DECK' in act: lead_dict['last_milestone'] = 'Pitch Deck'
+                elif 'TEASER' in det or 'TEASER' in act: lead_dict['last_milestone'] = 'Teaser'
+                elif 'MEET' in det or 'MEET' in act: lead_dict['last_milestone'] = 'Meeting'
+                elif 'DATA' in det or 'ROOM' in det: lead_dict['last_milestone'] = 'Data Room'
+                else: lead_dict['last_milestone'] = 'Follow-up'
+            else:
+                lead_dict['last_milestone'] = 'Initial Outreach'
+                lead_dict['last_action_type'] = 'Outreach'
+            results.append(lead_dict)
+            
+        return {"leads": results, "total": total}
+    except Exception as e:
+        logger.error(f"Error fetching follow-ups: {e}")
+        return {"error": str(e)}
+    finally:
+        if 'cur' in locals(): cur.close()
+        if 'conn' in locals(): conn.close()
 
 @router.get("/leads/export-all")
 def export_all_leads(user_id: Optional[str] = Header(None, alias="X-User-Id")):
@@ -524,99 +720,6 @@ def mark_lead_responded(lead_id: int, user_id: Optional[str] = Header(None, alia
     except Exception as e:
         return {"error": str(e)}
 
-@router.get("/followups")
-def get_followups_endpoint(
-    type: Optional[str] = None,
-    page: int = 1,
-    per_page: int = 100,
-    search: Optional[str] = None,
-    stage: Optional[int] = None,
-    user_id: Optional[str] = Header(None, alias="X-User-Id")
-):
-    """
-    Returns paginated and filtered leads currently in an active follow-up sequence.
-    Strictly filters by the logged-in user unless the user is an admin.
-    """
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
-        # We fetch leads where followup is active, or they are scheduled
-        base_query = """
-            FROM leads_raw 
-            WHERE (followup_status IN ('ACTIVE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED'))
-            AND COALESCE(is_responded, FALSE) = FALSE
-        """
-        params = []
-        
-        # 1. Multi-user Segregation
-        uid = normalize_user_id(user_id)
-        is_admin = (str(user_id).lower() == "admin")
-        
-        if not is_admin:
-            if uid:
-                base_query += " AND user_id = %s"
-                params.append(uid)
-            else:
-                return {"leads": [], "total": 0}
-            
-        # 2. Lead Type Filtering
-        if type:
-            if type.upper() == 'INVESTOR':
-                base_query += " AND (LOWER(lead_type) = 'investor' OR lead_type IS NULL)"
-            else:
-                base_query += " AND LOWER(lead_type) = LOWER(%s)"
-                params.append(type)
-        
-        # 3. Search Filter
-        if search:
-            base_query += " AND (first_name ILIKE %s OR last_name ILIKE %s OR email ILIKE %s OR company_name ILIKE %s)"
-            s = f"%{search}%"
-            params.extend([s, s, s, s])
-
-        # 4. Stage Filter
-        if stage is not None:
-            base_query += " AND followup_stage = %s"
-            params.append(stage)
-        
-        # Count total
-        cur.execute(f"SELECT COUNT(*) {base_query}", tuple(params))
-        total = cur.fetchone()[0]
-
-        # Fetch paginated results
-        query = f"SELECT * {base_query} ORDER BY COALESCE(scheduled_at, last_outreach_at) DESC LIMIT %s OFFSET %s"
-        cur.execute(query, tuple(params + [per_page, (page - 1) * per_page]))
-        rows = cur.fetchall()
-        
-        results = []
-        for r in rows:
-            lead_dict = dict(r)
-            # Fetch latest significant activity
-            cur.execute("SELECT action, details FROM activity_log WHERE lead_id = %s ORDER BY created_at DESC LIMIT 1", (lead_dict['id'],))
-            last_act = cur.fetchone()
-            if last_act:
-                act = last_act['action'].upper()
-                det = (last_act['details'] or "").upper()
-                lead_dict['last_action_type'] = act.replace('_', ' ')
-                if 'DECK' in det or 'DECK' in act: lead_dict['last_milestone'] = 'Pitch Deck'
-                elif 'TEASER' in det or 'TEASER' in act: lead_dict['last_milestone'] = 'Teaser'
-                elif 'MEET' in det or 'MEET' in act: lead_dict['last_milestone'] = 'Meeting'
-                elif 'DATA' in det or 'ROOM' in det: lead_dict['last_milestone'] = 'Data Room'
-                else: lead_dict['last_milestone'] = 'Follow-up'
-            else:
-                lead_dict['last_milestone'] = 'Initial Outreach'
-                lead_dict['last_action_type'] = 'Outreach'
-            results.append(lead_dict)
-            
-        cur.close()
-        conn.close()
-        return {"leads": results, "total": total}
-    except Exception as e:
-        logger.error(f"Error fetching follow-ups: {e}")
-        return {"error": str(e)}
-
-class ApproveFollowupRequest(BaseModel):
-    custom_body: Optional[str] = None
 
 @router.post("/leads/{lead_id}/save-followup-draft")
 def save_followup_draft(lead_id: int, req: ApproveFollowupRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
@@ -683,40 +786,58 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
             body = parts[1] if len(parts) > 1 else body
             
         from app.services.email_service import send_email
-        success = send_email(
+
+        # Use original thread/message IDs to reply in the same Gmail thread
+        existing_thread_id = lead.get('gmail_thread_id')
+        existing_message_id = lead.get('gmail_message_id')
+
+        # Use original subject, keep Re: prefix
+        from app.services.followup_service import get_original_outreach_subject
+        orig_subject = get_original_outreach_subject(lead)
+        saved_subject = f"Re: {orig_subject}"
+
+        success, msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=lead['email'],
-            subject=subject,
-            html_content=body,
+            subject=saved_subject,
+            html_content=body.replace("\n", "<br>"),
+            from_email=profile.get('sender_email') or profile.get('username'),
+            from_name=profile.get('full_name') or profile.get('username'),
             user_id=uid,
-            cc=lead.get('cc_email')
+            thread_id=existing_thread_id,
+            in_reply_to=existing_message_id
         )
         
         if success:
-            next_stage = (lead['followup_stage'] or 0) + 1
+            # Save the thread/message IDs so next follow-up can reply in the same thread
+            save_thread = new_thread_id or existing_thread_id
+            save_msg_id = new_rfc_message_id or existing_message_id
             cur.execute("""
                 UPDATE leads_raw 
-                SET followup_status = 'ACTIVE',
-                    followup_approved = TRUE,
-                    followup_stage = %s,
+                SET followup_stage = COALESCE(followup_stage, 0) + 1,
+                    followup_status = 'ACTIVE',
+                    email_status = 'SENT',
                     last_outreach_at = NOW(),
-                    last_outreach_body = %s,
+                    last_outreach_subject = %s,
+                    gmail_thread_id = %s,
+                    gmail_message_id = %s,
+                    is_responded = FALSE,
                     updated_at = NOW()
                 WHERE id = %s
-            """, (next_stage, final_body, lead_id))
+            """, (saved_subject, save_thread, save_msg_id, lead_id))
             
             from app.models.lead import add_activity_log
-            add_activity_log(lead_id, "FOLLOWUP_SENT", f"Stage {next_stage} follow-up sent after manual approval", get_user_name(user_id))
+            add_activity_log(lead_id, "FOLLOWUP_APPROVED", f"Manual follow-up approved and sent via Gmail", "user", uid)
             conn.commit()
-            return {"success": True, "message": f"Stage {next_stage} follow-up sent successfully."}
+            return {"status": "success"}
         else:
-            raise HTTPException(status_code=500, detail="Failed to send email via Gmail service.")
+            return {"error": f"Gmail dispatch failed: {msg}"}
             
     except Exception as e:
         logger.error(f"Approval failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        cur.close()
-        conn.close()
+        if 'cur' in locals(): cur.close()
+        if 'conn' in locals(): conn.close()
 
 @router.post("/leads/bulk-approve-followups")
 def bulk_approve_followups(req: BulkApproveFollowupsRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
@@ -801,7 +922,7 @@ def normalize_user_id(user_id):
         cur.close()
         conn.close()
         if res:
-            return res[0]
+            return res['id'] if isinstance(res, dict) else res[0]
     except Exception as e:
         logger.error(f"Error resolving user identity {user_id}: {e}")
         

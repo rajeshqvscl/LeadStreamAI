@@ -1079,7 +1079,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             
         body = inject_signature(body, profile, draft_id)
         
-        success, error_msg = send_email(
+        success, error_msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=email,
             subject=subject,
             html_content=markdown_to_html(body),
@@ -1108,9 +1108,14 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
                     followup_status = 'ACTIVE',
                     followup_stage = 0,
                     is_responded = FALSE,
-                    gmail_draft_id = NULL
+                    gmail_draft_id = NULL,
+                    last_outreach_subject = %s,
+                    first_outreach_subject = COALESCE(first_outreach_subject, %s),
+                    first_outreach_at = COALESCE(first_outreach_at, NOW()),
+                    gmail_thread_id = %s,
+                    gmail_message_id = %s
                 WHERE id = %s
-            """, (sender_name, draft_id))
+            """, (sender_name, subject, subject, new_thread_id, new_rfc_message_id, draft_id))
             conn.commit()
 
             # --- Delete Gmail Draft from real Gmail ---
@@ -1373,7 +1378,7 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
 
             # Real Dispatch
             uid_val = normalize_user_id(user_id)
-            success, error_msg = send_email(
+            success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=lead['email'],
                 subject=subject,
                 html_content=markdown_to_html(body),
@@ -1391,11 +1396,16 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
                     SET email_status = 'SENT', 
                         updated_at = NOW(),
                         last_outreach_at = NOW(),
+                        last_outreach_subject = %s,
+                        first_outreach_subject = COALESCE(first_outreach_subject, %s),
+                        first_outreach_at = COALESCE(first_outreach_at, NOW()),
+                        gmail_thread_id = %s,
+                        gmail_message_id = %s,
                         followup_status = 'ACTIVE',
                         followup_stage = 0,
                         is_responded = FALSE
                     WHERE id = %s
-                """, (lead['id'],))
+                """, (subject, subject, new_thread_id, new_rfc_message_id, lead['id']))
                 conn.commit()
                 from app.models.lead import add_activity_log
                 add_activity_log(lead['id'], "EMAIL_SENT", f"Email dispatched via Resend from {sender_email}", "system")
@@ -1459,7 +1469,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
                 subject = parts[0].replace("Subject: ", "").strip()
                 body = parts[1].strip() if len(parts) > 1 else ""
 
-            success, error_msg = send_email(
+            success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=lead['email'],
                 subject=subject,
                 html_content=markdown_to_html(body),
@@ -1478,12 +1488,17 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
                         email_approved_by = %s,
                         updated_at = NOW(),
                         last_outreach_at = NOW(),
+                        last_outreach_subject = %s,
+                        first_outreach_subject = COALESCE(first_outreach_subject, %s),
+                        first_outreach_at = COALESCE(first_outreach_at, NOW()),
+                        gmail_thread_id = %s,
+                        gmail_message_id = %s,
                         followup_status = 'ACTIVE',
                         followup_stage = 0,
                         is_responded = FALSE,
                         gmail_draft_id = NULL
                     WHERE id = %s
-                """, (sender_name, lead['id']))
+                """, (sender_name, subject, subject, new_thread_id, new_rfc_message_id, lead['id']))
                 conn.commit()
                 from app.models.lead import add_activity_log
                 add_activity_log(lead['id'], "EMAIL_SENT", f"Email dispatched via Gmail API from {sender_email} — Appears in Gmail Sent folder", sender_name)
@@ -1727,7 +1742,7 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                 final_body = inject_signature(body, profile, lead['id'])
 
                 # Real Dispatch
-                success, error_msg = send_email(
+                success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                     to_email=lead['email'],
                     subject=subject,
                     html_content=markdown_to_html(final_body),
@@ -1745,11 +1760,14 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                             email_status = 'SENT', 
                             updated_at = NOW(),
                             last_outreach_at = NOW(),
+                            last_outreach_subject = %s,
+                            gmail_thread_id = %s,
+                            gmail_message_id = %s,
                             followup_status = 'ACTIVE',
                             followup_stage = 0,
                             is_responded = FALSE
                         WHERE id = %s
-                    """, (email_content, lead['id']))
+                    """, (email_content, subject, new_thread_id, new_rfc_message_id, lead['id']))
                     add_activity_log(lead['id'], "EMAIL_SENT", f"Bulk domain email dispatched via Resend from {sender_email}", "system")
                     sent_count += 1
             except Exception as e:

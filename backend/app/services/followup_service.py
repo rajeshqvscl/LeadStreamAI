@@ -34,6 +34,43 @@ def get_template_followup(lead: dict, stage: int) -> str:
     lead_name = f"{lead.get('first_name') or ''}".strip() or "there"
     return template.format(name=lead_name)
 
+def get_original_outreach_subject(lead: dict) -> str:
+    """Helper to extract the genuine original email subject to maintain correct threading."""
+    # 1. Try first_outreach_subject
+    subject = lead.get('first_outreach_subject')
+    if subject and subject.strip() and subject.lower() != "following up":
+        subj = subject.strip()
+        while subj.lower().startswith("re:"):
+            subj = subj[3:].strip()
+        if subj and subj.lower() != "following up":
+            return subj
+            
+    # 2. Try last_outreach_subject
+    subject = lead.get('last_outreach_subject')
+    if subject and subject.strip() and subject.lower() != "following up":
+        subj = subject.strip()
+        while subj.lower().startswith("re:"):
+            subj = subj[3:].strip()
+        if subj and subj.lower() != "following up":
+            return subj
+            
+    # 3. Parse from email_draft
+    draft = lead.get('email_draft') or ""
+    if draft and "subject:" in draft.lower():
+        lines = draft.split("\n")
+        for line in lines:
+            if line.strip().lower().startswith("subject:"):
+                subj_parsed = line.split(":", 1)[1].strip()
+                while subj_parsed.lower().startswith("re:"):
+                    subj_parsed = subj_parsed[3:].strip()
+                if subj_parsed and subj_parsed.lower() != "following up":
+                    return subj_parsed
+                    
+    # 4. Fallback to sector/company custom professional subject line
+    company = lead.get('company_name') or "your company"
+    sector = lead.get('sector') or "investment"
+    return f"investment opportunity - {company}"
+
 def generate_followup_preview(lead_id: int, user_id: int):
     """Generates a preview of the next follow-up email for the dashboard using templates."""
     conn = get_db_connection()
@@ -60,9 +97,8 @@ def generate_followup_preview(lead_id: int, user_id: int):
             body = get_template_followup(lead, next_stage)
         
         # Clean subject
-        subject = lead.get('last_outreach_subject') or "Following up"
-        if not subject.startswith("Re:"):
-            subject = "Re: " + subject
+        orig_subject = get_original_outreach_subject(lead)
+        subject = f"Re: {orig_subject}"
 
         # Inject Signature
         profile = get_sender_profile(str(user_id))
@@ -82,82 +118,162 @@ def generate_followup_preview(lead_id: int, user_id: int):
 def process_outreach_sequences():
     """
     Background worker that identifies leads due for follow-ups.
-    Client: Stage 1 (Day 2), Stage 2 (Day 4), Stage 3 (Day 10)
-    Investor: Stage 1 (Day 7), Stage 2 (Day 14), Stage 3 (Day 30)
+    Enforces 'Working Days Only' and sequential 'Drip Sending' with a 30-second gap
+    and enforces a daily limit per user (default 200) to prevent spam flagging.
     """
     try:
+        # SAFETY: Only send on working days (Mon-Fri)
+        now = datetime.now()
+        if now.weekday() >= 5: # 5 = Saturday, 6 = Sunday
+            logger.info("Outreach paused: Weekend protection active.")
+            return
+
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
+        # Fetch leads due for followup + the user's auto-pilot settings
         cur.execute("""
-            SELECT l.*, u.id as sender_id, u.email as sender_email, u.full_name as sender_name
+            SELECT l.*, u.id as sender_id, u.email as sender_email, u.full_name as sender_name,
+                   u.auto_followup, u.outreach_daily_limit, u.google_refresh_token
             FROM leads_raw l
             JOIN users u ON l.user_id = u.id
-            WHERE (l.followup_status = 'ACTIVE' OR l.followup_status IS NULL)
+            WHERE l.followup_status = 'ACTIVE'
             AND l.email_status = 'SENT'
             AND COALESCE(l.is_responded, FALSE) = FALSE
             AND l.followup_stage < 3
-            AND (l.followup_draft IS NULL OR l.followup_approved = TRUE)
             ORDER BY l.last_outreach_at ASC
         """)
         
         leads = cur.fetchall()
-        if not leads:
-            cur.close()
-            conn.close()
-            return
-
-        for lead in leads:
-            lead_id = lead['id']
-            stage = lead['followup_stage'] or 0
-            last_sent = lead['last_outreach_at']
-            if not last_sent: continue
-            
-            # Determine Lead Type
-            lead_type_raw = str(lead.get('lead_type') or lead.get('sector') or lead.get('persona') or '').upper()
-            is_investor = not ('CLIENT' in lead_type_raw or 'CUSTOMER' in lead_type_raw)
-
-            now = datetime.now()
-            days_since_last = (now - last_sent).days
-            
-            should_draft = False
-            next_stage = stage + 1
-            
-            if is_investor:
-                # Investor: Day 7, Day 14, Day 30
-                if stage == 0 and days_since_last >= 7:
-                    should_draft = True
-                elif stage == 1 and days_since_last >= 7: # 7 + 7 = 14
-                    should_draft = True
-                elif stage == 2 and days_since_last >= 16: # 14 + 16 = 30
-                    should_draft = True
-            else:
-                # Client: Day 2, Day 4, Day 10
-                if stage == 0 and days_since_last >= 2:
-                    should_draft = True
-                elif stage == 1 and days_since_last >= 2: # 2 + 2 = 4
-                    should_draft = True
-                elif stage == 2 and days_since_last >= 6: # 4 + 6 = 10
-                    should_draft = True
-            
-            if should_draft:
-                body = get_template_followup(lead, next_stage)
-                
-                # Inject Signature
-                profile = get_sender_profile(str(lead['sender_id']))
-                full_body = inject_signature(body, profile, lead_id)
-                
-                cur.execute("""
-                    UPDATE leads_raw 
-                    SET followup_draft = %s,
-                        followup_status = 'PENDING_APPROVAL',
-                        followup_approved = FALSE,
-                        updated_at = NOW()
-                    WHERE id = %s
-                """, (full_body, lead_id))
-                conn.commit()
-                
         cur.close()
         conn.close()
+
+        if not leads: 
+            return
+
+        import time
+        from app.services.email_service import send_email
+
+        # Group leads by user so we can track and enforce daily limit per sender
+        user_leads = {}
+        for lead in leads:
+            uid = lead['sender_id']
+            if uid not in user_leads:
+                user_leads[uid] = []
+            user_leads[uid].append(lead)
+
+        for uid, group in user_leads.items():
+            first_lead = group[0]
+            # Check user auto_followup flag and Gmail link
+            if not first_lead['auto_followup'] or not first_lead['google_refresh_token']:
+                logger.info(f"Skipping auto-pilot for user {uid}: auto-followup disabled or Gmail not linked.")
+                continue
+
+            # Fetch the user's daily sending limit (default to 200)
+            daily_limit = first_lead['outreach_daily_limit'] or 200
+            
+            # Count how many emails this user has already sent today (last 24 hours)
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT COUNT(*) FROM activity_log
+                WHERE user_id = %s
+                AND action IN ('AUTO_FOLLOWUP_SENT', 'EMAIL_SENT')
+                AND created_at >= NOW() - INTERVAL '1 day'
+            """, (uid,))
+            sent_today = cur.fetchone()[0] or 0
+            cur.close()
+            conn.close()
+
+            remaining_allowance = max(0, daily_limit - sent_today)
+            if remaining_allowance <= 0:
+                logger.info(f"User {uid} has hit their daily outreach limit ({sent_today}/{daily_limit} sent today).")
+                continue
+
+            logger.info(f"User {uid} has {remaining_allowance} emails remaining for today's quota ({sent_today}/{daily_limit} sent).")
+
+            # Process sequentially with strict 30-second delay gap
+            sent_count = 0
+            for lead in group:
+                if sent_count >= remaining_allowance:
+                    logger.info(f"Daily quota reached for user {uid} during sequence run.")
+                    break
+
+                try:
+                    lead_id = lead['id']
+                    stage = lead['followup_stage'] or 0
+                    last_sent = lead['last_outreach_at']
+                    if not last_sent: 
+                        continue
+
+                    # Stage schedule check
+                    lead_type_raw = str(lead.get('lead_type') or lead.get('company_name') or lead.get('sector') or lead.get('persona') or '').upper()
+                    investor_kw = ["VENTURE", "CAPITAL", "EQUITY", "INVEST", "PARTNER", "ASSET", "FAMILY OFFICE", "ANGEL", "CIRCLE", "NETWORK", "FUND", "VC", "PE"]
+                    is_investor = any(kw in lead_type_raw for kw in investor_kw) or not ('CLIENT' in lead_type_raw or 'CUSTOMER' in lead_type_raw)
+                    days_since_last = (now - last_sent).days
+
+                    should_action = False
+                    next_stage = stage + 1
+
+                    if is_investor:
+                        if (stage == 0 and days_since_last >= 7) or (stage == 1 and days_since_last >= 7) or (stage == 2 and days_since_last >= 16):
+                            should_action = True
+                    else:
+                        if (stage == 0 and days_since_last >= 2) or (stage == 1 and days_since_last >= 2) or (stage == 2 and days_since_last >= 6):
+                            should_action = True
+
+                    if not should_action: 
+                        continue
+
+                    body = get_template_followup(lead, next_stage)
+                    profile = get_sender_profile(str(uid))
+                    full_body = inject_signature(body, profile, lead_id)
+                    
+                    # Subject line continuation with Re: prefix
+                    orig_subject = get_original_outreach_subject(lead)
+                    subject = f"Re: {orig_subject}"
+
+                    logger.info(f"Auto-dispatching lead {lead_id} ({lead['email']}) for User {uid}. Subject: {subject}")
+                    
+                    # Dispatch Email
+                    success, msg, new_thread_id, new_rfc_msg_id = send_email(
+                        to_email=lead['email'],
+                        subject=subject,
+                        html_content=full_body.replace("\n", "<br>"),
+                        from_email=lead['sender_email'],
+                        from_name=lead['sender_name'],
+                        user_id=str(uid),
+                        thread_id=lead.get('gmail_thread_id'),
+                        in_reply_to=lead.get('gmail_message_id')
+                    )
+
+                    if success:
+                        # Update Database Row
+                        conn = get_db_connection()
+                        cur = conn.cursor()
+                        cur.execute("""
+                            UPDATE leads_raw 
+                            SET followup_stage = %s, followup_status = 'ACTIVE', email_status = 'SENT',
+                                last_outreach_at = NOW(), last_outreach_subject = %s,
+                                gmail_thread_id = COALESCE(%s, gmail_thread_id),
+                                gmail_message_id = COALESCE(%s, gmail_message_id),
+                                updated_at = NOW()
+                            WHERE id = %s
+                        """, (next_stage, subject, new_thread_id, new_rfc_msg_id, lead_id))
+                        conn.commit()
+                        cur.close()
+                        conn.close()
+
+                        add_activity_log(lead_id, "AUTO_FOLLOWUP_SENT", f"Stage {next_stage} auto-sent", "system", uid)
+                        sent_count += 1
+                        
+                        # ENFORCE USER'S REQUEST: 30-second delay gap between consecutive sends to prevent spam flagging
+                        logger.info("Email sent successfully! Enforcing a 30-second cool-down gap before the next email...")
+                        time.sleep(30)
+                    else:
+                        logger.error(f"Auto-Pilot failed for {lead['email']}: {msg}")
+                except Exception as ex:
+                    logger.error(f"Error dispatching auto-followup for lead {lead.get('id')}: {ex}")
+
     except Exception as e:
         logger.error(f"Error in process_outreach_sequences: {e}")

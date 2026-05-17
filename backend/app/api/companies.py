@@ -11,6 +11,7 @@ from app.models.lead import insert_lead, save_email_draft
 from app.services.llm_services import EmailGenerator
 from psycopg2.extras import execute_values
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 router = APIRouter()
 
@@ -259,16 +260,12 @@ def request_db_access(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     return {"message": "Access restriction removed. You have full system clearance."}
 
 def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Cleans and auto-enriches a list of rows, ensuring critical columns exist and are named correctly."""
-    results = []
-    
+    """Cleans and auto-enriches a list of rows in parallel, ensuring critical columns exist."""
     # First pass: Identify types of unnamed columns by scanning values in ALL rows
     unnamed_types = {} 
-    
     for row in rows:
         for idx, (k, v) in enumerate(row.items()):
             k_str = str(k).strip()
-            # If header is missing, empty, or generic
             if not k or k_str == "" or k_str.lower() in ["none", "null", "field_"]:
                 s_val = str(v).strip().lower()
                 if "@" in s_val and "." in s_val and len(s_val) > 5 and idx not in unnamed_types:
@@ -276,38 +273,37 @@ def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 elif any(c.isdigit() for c in s_val) and len(s_val) > 7 and idx not in unnamed_types:
                     unnamed_types[idx] = "Mobile"
 
-    for i, row in enumerate(rows):
+    def enrich_single_row(args):
+        i, row = args
         clean_row = {}
         for idx, (k, v) in enumerate(row.items()):
             k_str = str(k).strip()
-            # Preserve original key exactly as in sheet
             val = str(v).strip() if v else ""
             clean_row[k_str] = val
         
-        # Trigger AI enrichment for missing critical data (Limit to first 30)
-        # We search for email/phone in any field for logic, but don't create new columns
         has_email = any("@" in str(v) and "." in str(v) for v in clean_row.values())
         has_phone = any(any(c.isdigit() for c in str(v)) and len(str(v)) > 7 for v in clean_row.values())
             
         if (not has_email or not has_phone) and i < 30:
             try:
                 enriched = enrich_row_data_internal(clean_row)
-                # Update but don't overwrite if we already have it
-                # We use a more flexible mapping to match your sheet's headers
                 for ek, ev in enriched.items():
                     if ek == "email":
                         target = "Email" if "Email" in clean_row else ("Emails" if "Emails" in clean_row else "Email")
                         if not clean_row.get(target): clean_row[target] = ev
                     elif ek == "phone":
-                        target = "Mobile" if "Mobile" in clean_row else ("Phone" if "Phone" in clean_row else "Mobile")
+                        target = "Phone" if "Phone" in clean_row else ("Mobile" if "Mobile" in clean_row else "Phone")
                         if not clean_row.get(target): clean_row[target] = ev
-                    elif ek == "linkedin_url" and not clean_row.get("LinkedIn Profile"): clean_row["LinkedIn Profile"] = ev
-                    elif ek == "designation" and not clean_row.get("Designation"): clean_row["Designation"] = ev
-                    elif ek == "industry" and not clean_row.get("Industry"): clean_row["Industry"] = ev
-            except:
-                pass
+                    elif ek == "linkedin_url":
+                        target = "LinkedIn" if "LinkedIn" in clean_row else ("LinkedIn URL" if "LinkedIn URL" in clean_row else "LinkedIn")
+                        if not clean_row.get(target): clean_row[target] = ev
+            except Exception as e:
+                print(f"Row enrichment error: {e}")
+        return clean_row
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = list(executor.map(enrich_single_row, enumerate(rows)))
         
-        results.append(clean_row)
     return results
 
 def discover_gsheet_tabs(doc_id: str) -> List[Dict[str, str]]:
@@ -421,25 +417,28 @@ def save_sync_config(url: str, sheet_name: str, user_id: Optional[str]):
         conn.close()
 
 def background_auto_sync():
-    """Iterates through all auto-sync configs and re-triggers imports."""
+    """Iterates through all auto-sync configs and re-triggers imports in parallel."""
     print("[background] Starting GSheet Auto-Sync cycle...")
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
         cur.execute("SELECT * FROM gsheet_sync_configs WHERE is_auto_sync = TRUE")
         configs = cur.fetchall()
-        for cfg in configs:
+        
+        def process_config(cfg):
             try:
                 print(f"[background] Auto-syncing: {cfg['url']} ({cfg['sheet_name']})")
-                # Re-importing logic (simplified call to our own endpoint logic)
-                # We can call import_companies_gsheet internal logic or just reuse the function
                 import_companies_gsheet({
                     "url": cfg['url'],
                     "sheet_name": cfg['sheet_name'] if cfg['sheet_name'] != 'Default' else None,
-                    "_is_background": "true" # Prevent re-saving config in loop
+                    "_is_background": "true"
                 }, str(cfg['user_id']) if cfg['user_id'] else None)
             except Exception as e:
                 print(f"[background] Sync failed for {cfg['url']}: {e}")
+
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            executor.map(process_config, configs)
+            
     finally:
         cur.close()
         conn.close()
@@ -498,22 +497,18 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
                     print(f"DEBUG: Matched sheet_name '{sheet_name}' to GID {target_gid}")
                     break
         tabs_to_process = [{"name": sheet_name or "Sheet1", "gid": target_gid}]
-    # Process each resolved tab
-    for tab in tabs_to_process:
+
+    import threading
+    all_rows_lock = threading.Lock()
+
+    def process_single_tab(tab):
         try:
-            # We try two endpoints for maximum reliability: 
-            # 1. GID-based export (standard CSV)
-            # 2. Name-based export (GViz)
             gid = tab.get('gid', '0')
             sheet_name_encoded = requests.utils.quote(tab['name'])
-            
-            # Try GID first as it's the primary identifier
             export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv&gid={gid}"
             print(f"DEBUG: Syncing tab '{tab['name']}' (GID: {gid})")
             
             resp = requests.get(export_url, timeout=30)
-            
-            # If GID fails (sometimes XLSX sheetId != GID), fallback to GViz Name-based export
             if resp.status_code != 200 or len(resp.text) < 10:
                 print(f"DEBUG: GID export failed or empty for '{tab['name']}'. Falling back to GViz Name-based...")
                 export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/gviz/tq?tqx=out:csv&sheet={sheet_name_encoded}&_t={int(time.time())}"
@@ -521,60 +516,39 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
             
             if resp.status_code != 200:
                 print(f"ERROR: Both GID and Name-based sync failed for tab '{tab['name']}'. Skipping.")
-                continue
+                return
             
             csv_data = resp.text
-            if not csv_data or len(csv_data) < 5:
-                print(f"WARNING: Tab '{tab['name']}' returned no content. Skipping.")
-                continue
+            if not csv_data or len(csv_data) < 5: return
 
-            # CLEANUP: Remove leading empty lines or garbage before the actual headers
             lines = csv_data.splitlines()
-            header_index = 0
-            
-            # Refined Header Detection: Find the first row with recognized keywords
-            # A header row should match keywords but NOT look like a real data row (no long numbers/emails)
             header_index = -1
             keywords = ['name', 'email', 'company', 'website', 'contact', 'member', 'person', 'designation', 'role', 'phone', 'mobile']
-            
             for i in range(min(15, len(lines))):
                 lower_line = lines[i].lower()
                 matches = sum(1 for kw in keywords if kw in lower_line)
-                
-                # Check if it looks like data (contains a long number or an actual email domain)
                 has_long_number = any(len(re.sub(r'\D', '', part)) > 9 for part in lines[i].split(','))
                 has_real_email = any('@' in part and '.' in part and len(part) > 5 for part in lines[i].split(','))
-                
-                # If a line has at least 1 matching keyword and doesn't look like data, it's a header
                 if matches >= 1 and not has_long_number and not has_real_email:
                     header_index = i
                     break
             
+            tab_rows = []
             if header_index != -1:
-                # We found a header row!
                 cleaned_csv = "\n".join(lines[header_index:])
                 reader = csv.reader(io.StringIO(cleaned_csv))
                 header_row = next(reader, [])
-                
-                # TRIM: Find the actual end of data to avoid trailing empty columns (Field_10, Field_11...)
                 last_non_empty = -1
                 for idx, h in enumerate(header_row):
                     if h.strip(): last_non_empty = idx
-                
                 if last_non_empty != -1:
                     header_row = header_row[:last_non_empty + 1]
-                
                 data_reader = reader
             else:
-                # No header found! Treat the whole sheet as data and use A, B, C...
-                print(f"DEBUG: No recognizable headers found. Generating default headers (A, B, C...) for tab {tab['name']}")
                 cleaned_csv = "\n".join(lines)
                 data_reader = csv.reader(io.StringIO(cleaned_csv))
-                
-                # Peek to determine width
                 first_row = next(data_reader, [])
-                if not first_row: continue
-                
+                if not first_row: return
                 num_cols = len(first_row)
                 import string
                 header_row = []
@@ -585,32 +559,30 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
                         col_name = string.ascii_uppercase[temp_i % 26] + col_name
                         temp_i = (temp_i // 26) - 1
                     header_row.append(f"Column {col_name}")
-                
-                # Reset reader to include first row
                 data_reader = csv.reader(io.StringIO(cleaned_csv))
 
             for row_data in data_reader:
-                # Skip truly empty rows to avoid junk data
-                if not any(val.strip() for val in row_data):
-                    continue
-                    
+                if not any(val.strip() for val in row_data): continue
                 row_dict = {}
-                # Only take data up to the header length to prevent trailing empty fields
                 for idx in range(len(header_row)):
                     val = row_data[idx] if idx < len(row_data) else ""
                     key = header_row[idx].strip()
                     row_dict[key] = val
-                
                 row_dict["_source_tab"] = tab["name"]
-                all_rows.append(row_dict)
+                tab_rows.append(row_dict)
+            
+            with all_rows_lock:
+                all_rows.extend(tab_rows)
         except Exception as e:
             print(f"GSheet import error for tab {tab['name']}: {str(e)}")
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        executor.map(process_single_tab, tabs_to_process)
 
     print(f"DEBUG: Finished processing all tabs. Total rows collected: {len(all_rows)}")
     if not all_rows:
         raise HTTPException(status_code=400, detail="No data found in selected tabs. Ensure the sheet is public and tabs contain data.")
 
-    # This will call the enriched import_companies
     return import_companies(all_rows, user_id)
 
 def enrich_row_data_internal(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -710,6 +682,10 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
             f"{norm.get('firstname', '')} {norm.get('lastname', '')}".strip()
         )
         
+        # URL Safety Check: If name looks like a URL, discard it
+        if name and ("http://" in name.lower() or "https://" in name.lower() or "linkedin.com" in name.lower()):
+            name = ""
+            
         if not name or name.strip() == "":
             # Try to guess from email prefix
             email_prefix = email.split('@')[0]
@@ -743,10 +719,16 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
         
         lead_id = lead_row['id'] if isinstance(lead_row, dict) else lead_row[0]
         
-        # --- NEW: Reuse universal generator logic ---
-        from app.api.drafts import generate_email_internal, DraftRequest
-        req = DraftRequest(lead_id=lead_id, template_type=template_name or 'standard')
-        res = generate_email_internal(req, user_id)
+        try:
+            # --- NEW: Reuse universal generator logic ---
+            from app.api.drafts import generate_email_internal, DraftRequest
+            req = DraftRequest(lead_id=lead_id, template_type=template_name or 'standard')
+            res = generate_email_internal(req, user_id)
+            return res
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Draft Generation Error for lead {lead_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Generation pipeline error: {str(e)}")
         
         subject = res.get("subject")
         body = res.get("body")

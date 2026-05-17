@@ -172,9 +172,11 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         payload = message_data.get('payload', {})
         full_body = extract_message_body(payload)
         
-        # Strip everything after 'On ... wrote:' or '--- Original Message ---'
-        import re
-        body = re.split(r'(?m)^On\s+.*wrote:|^---+\s*Original\s+Message\s*---+|From:\s+.*@.*', full_body)[0].strip()
+        # Strip everything after 'On ... wrote:', 'On ... at ...:', 'From: ...', etc.
+        # Handles case where email clients join inline like "iPhoneOn 8 May 2026, at 10:50 AM"
+        pattern = r'(?mi)(?:On\s+.*wrote:|\bOn\s+.*\b(?:at\b)?\s*\d{1,2}:\d{2}.*?:|On\s+\d{1,2}\s+[a-z]+\s+\d{4},?\s+at\s+\d{1,2}:\d{2}|On\s+[a-z]+,?\s+[a-z]+\s+\d{1,2},?\s+\d{4}|\bFrom:\s+.*@.*|^---+\s*Original\s+Message\s*---+|----------\s*Forwarded\s+message\s*----------)'
+        parts = re.split(pattern, full_body)
+        body = parts[0].strip() if parts else full_body.strip()
         
         # 0. SENDER CHECK: Abort if this message was actually sent by the user (sent folder bleed-over)
         cur_user = conn.cursor()
@@ -196,7 +198,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         # ONLY process replies from leads we actually emailed through this platform.
         # Skip all random inbox emails (marketing, newsletters, unknown senders, etc.)
         conn_check = get_db_connection()
-        cur_check = conn_check.cursor()
+        cur_check = conn_check.cursor(cursor_factory=psycopg2.extras.DictCursor)
         cur_check.execute(
             "SELECT id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND user_id = %s AND email_status IN ('SENT', 'REPLIED', 'CLOSED', 'SCHEDULED')",
             (sender_email, user_id)
@@ -210,8 +212,9 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             return  # Hard stop — don't process random inbox mail
         
         lead_id = lead_exists['id']
-                 # Step 1: AI Intent Classification
+        # Step 1: AI Intent Classification
         print(f"DEBUG: Classifying reply from {sender_email}...")
+        from app.services.llm_services import EmailGenerator
         llm = EmailGenerator()
         ai_data = llm.classify_reply(body)
         intent = ai_data.get("intent", "INTERESTED")
@@ -979,43 +982,68 @@ def poll_all_users_for_replies():
             try:
                 # Exclude messages sent by the user to focus on incoming replies
                 results = service.users().messages().list(userId='me', q='label:INBOX -from:me', maxResults=50).execute()
-                for msg_meta in results.get('messages', []):
-                    # Check if this thread/message is from a lead
-                    msg = service.users().messages().get(userId='me', id=msg_meta['id'], format='metadata').execute()
-                    
-                    # Skip if the message is sent BY the user
-                    labels = msg.get('labelIds', [])
-                    if 'SENT' in labels:
-                        continue
+                messages = results.get('messages', [])
+                
+                from concurrent.futures import ThreadPoolExecutor
+                from app.services.google_service import get_user_credentials
+                from googleapiclient.discovery import build
+                
+                # Fetch creds once for this user to pass to threads
+                user_creds = get_user_credentials(uid)
+                if not user_creds: continue
+
+                def process_single_msg(msg_meta):
+                    # Local DB connection for thread safety
+                    thread_conn = get_db_connection()
+                    thread_cur = thread_conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+                    # New service object per thread for safety
+                    thread_service = build('gmail', 'v1', credentials=user_creds)
+                    try:
+                        # Check if this thread/message is from a lead
+                        msg = thread_service.users().messages().get(userId='me', id=msg_meta['id'], format='metadata').execute()
                         
-                    headers = msg.get('payload', {}).get('headers', [])
-                    sender = next((h['value'] for h in headers if h['name'].lower() == 'from'), "")
-                    
-                    # Extract pure email from "Name <email@site.com>"
-                    import re
-                    email_match = re.search(r'[\w\.-]+@[\w\.-]+', sender)
-                    if email_match:
-                        sender_email = email_match.group(0).lower()
-                        
-                        # Check if this email exists as a lead (regardless of owner) and hasn't responded yet
-                        cur.execute("""
-                            SELECT id, user_id FROM leads_raw 
-                            WHERE LOWER(email) = LOWER(%s) AND is_responded = FALSE
-                            LIMIT 1
-                        """, (sender_email,))
-                        
-                        found_lead = cur.fetchone()
-                        if found_lead:
-                            target_uid = found_lead['user_id'] or uid
-                            print(f"POLLING: Found pending reply from {sender_email} (Lead ID: {found_lead['id']}). Processing for owner {target_uid}...")
+                        # Skip if the message is sent BY the user
+                        labels = msg.get('labelIds', [])
+                        if 'SENT' in labels:
+                            return
                             
-                            # Fetch full message data for classification
-                            try:
-                                full_msg_data = service.users().messages().get(userId='me', id=msg_meta['id'], format='full').execute()
-                                handle_potential_reply(target_uid, full_msg_data.get('threadId'), full_msg_data)
-                                conn.commit()
-                            except Exception as fetch_err:
-                                print(f"Error fetching full message for polling: {fetch_err}")
+                        headers = msg.get('payload', {}).get('headers', [])
+                        sender = next((h['value'] for h in headers if h['name'].lower() == 'from'), "")
+                        
+                        # Extract pure email from "Name <email@site.com>"
+                        import re
+                        email_match = re.search(r'[\w\.-]+@[\w\.-]+', sender)
+                        if email_match:
+                            sender_email = email_match.group(0).lower()
+                            
+                            # Check if this email exists as a lead (regardless of owner) and hasn't responded yet
+                            thread_cur.execute("""
+                                SELECT id, user_id FROM leads_raw 
+                                WHERE LOWER(email) = LOWER(%s) AND is_responded = FALSE
+                                LIMIT 1
+                            """, (sender_email,))
+                            
+                            found_lead = thread_cur.fetchone()
+                            if found_lead:
+                                target_uid = found_lead['user_id'] or uid
+                                
+                                # Fetch full message data for classification
+                                try:
+                                    full_msg_data = thread_service.users().messages().get(userId='me', id=msg_meta['id'], format='full').execute()
+                                    handle_potential_reply(target_uid, full_msg_data.get('threadId'), full_msg_data)
+                                    thread_conn.commit()
+                                except Exception as fetch_err:
+                                    print(f"Error fetching full message for polling: {fetch_err}")
+                    except Exception as e:
+                        print(f"Error processing single message {msg_meta.get('id')}: {e}")
+                    finally:
+                        thread_cur.close()
+                        thread_conn.close()
+
+                # Use ThreadPoolExecutor for parallel processing of Gmail messages
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    executor.map(process_single_msg, messages)
+
             except Exception as e:
                 print(f"Error polling for user {uid}: {e}")
                 
@@ -1030,6 +1058,14 @@ def retro_sync_pdfs(request: Request, x_user_id: Optional[str] = Header(None)):
     user_id = normalize_user_id(x_user_id)
     
     try:
+        from app.services.google_service import get_gmail_service, get_user_credentials, extract_attachments
+        from concurrent.futures import ThreadPoolExecutor
+        from googleapiclient.discovery import build
+        import threading
+        import requests
+        import psycopg2.extras
+        import json
+        
         service = get_gmail_service(int(user_id))
         if not service:
             return {"success": False, "error": "Gmail service not initialized for this user"}
@@ -1039,139 +1075,119 @@ def retro_sync_pdfs(request: Request, x_user_id: Optional[str] = Header(None)):
         messages = results.get('messages', [])
         
         count = 0
+        count_lock = threading.Lock()
         rag_url = "https://rag-sys-gz59.onrender.com"
-        from app.services.google_service import extract_attachments
         
-        for msg in messages:
-            msg_data = service.users().messages().get(userId='me', id=msg['id'], format='full').execute()
-            headers = msg_data.get('payload', {}).get('headers', [])
-            sender = next((h['value'] for h in headers if h['name'].lower() == 'from'), "")
-            
-            import re
-            match = re.search(r'[\w\.-]+@[\w\.-]+', sender)
-            sender_email = match.group(0) if match else sender
-            
-            payload = msg_data.get('payload', {})
-            attachments = extract_attachments(service, msg['id'], payload)
-            pdf_attachment = next((att for att in attachments if att['filename'].lower().endswith('.pdf')), None)
-            
-            if pdf_attachment:
-                import os
-                import requests
-                os.makedirs("static/pitch_decks", exist_ok=True)
-                safe_filename = "".join(c for c in pdf_attachment['filename'] if c.isalnum() or c in "._-").replace(" ", "_")
-                file_path = f"static/pitch_decks/{msg['id']}_{safe_filename}"
-                with open(file_path, "wb") as f:
-                    f.write(pdf_attachment['data'])
-                
-                # Use dynamic backend URL instead of localhost
-                base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
-                pitch_deck_url = f"{base_url}/{file_path}"
-                
-                # --- STRICT RAG ONLY (STABLE SESSION) ---
-                rag_category = None
-                rag_advice = None
-                rag_intel = None
-                try:
-                    import requests
-                    from requests.adapters import HTTPAdapter
-                    from urllib3.util.retry import Retry
-                    
-                    s = requests.Session()
-                    retries = Retry(total=3, backoff_factor=1, status_forcelist=[502, 503, 504])
-                    s.mount('https://', HTTPAdapter(max_retries=retries))
-                    
-                    # 0. Wake-Up Check (Increased to 60s for stability)
-                    try:
-                        s.get(RAG_URL, timeout=60, verify=False)
-                    except:
-                        pass
+        user_creds = get_user_credentials(int(user_id))
+        if not user_creds:
+            return {"success": False, "error": "Failed to get user credentials"}
 
-                    files = {'file': (pdf_attachment['filename'], pdf_attachment['data'])}
-                    process_res = s.post(f"{RAG_URL}/process", files=files, timeout=300, verify=False)
+        def process_single_pdf(msg):
+            nonlocal count
+            thread_service = build('gmail', 'v1', credentials=user_creds)
+            try:
+                msg_data = thread_service.users().messages().get(userId='me', id=msg['id'], format='full').execute()
+                headers = msg_data.get('payload', {}).get('headers', [])
+                sender = next((h['value'] for h in headers if h['name'].lower() == 'from'), "")
+                
+                import re
+                match = re.search(r'[\w\.-]+@[\w\.-]+', sender)
+                sender_email = match.group(0).lower() if match else sender.lower()
+                
+                payload = msg_data.get('payload', {})
+                attachments = extract_attachments(thread_service, msg['id'], payload)
+                pdf_attachment = next((att for att in attachments if att['filename'].lower().endswith('.pdf')), None)
+                
+                if pdf_attachment:
+                    import os
+                    os.makedirs("static/pitch_decks", exist_ok=True)
+                    safe_filename = "".join(c for c in pdf_attachment['filename'] if c.isalnum() or c in "._-").replace(" ", "_")
+                    file_path = f"static/pitch_decks/{msg['id']}_{safe_filename}"
+                    with open(file_path, "wb") as f:
+                        f.write(pdf_attachment['data'])
                     
-                    if process_res.status_code == 200:
-                        rag_data = process_res.json()
-                        rag_category = rag_data.get('category') or rag_data.get('type')
-                        rag_item_id = rag_data.get('id')
-                        
-                        if rag_item_id:
-                            import time
-                            max_polls = 30
-                            for poll in range(max_polls):
-                                status_res = s.get(f"{RAG_URL}/status/{rag_item_id}", timeout=60, verify=False)
-                                if status_res.status_code == 200:
-                                    status_data = status_res.json()
-                                    current_status = status_data.get('status', '').lower()
-                                    if current_status == 'completed' or current_status == 'success':
-                                        insights = status_data.get('insights', {})
-                                        if insights:
-                                            # Capture RAW RAG OUTPUT as the primary advice
-                                            rag_advice = insights.get('summary') or insights.get('verdict') or "Analysis completed but no summary provided."
-                                            
-                                            rag_category = (insights.get('type') or insights.get('category') or 'INVESTOR').upper()
-                                            
-                                            rag_intel = {
-                                                "answer": rag_advice,
-                                                "source": "Pure Llama 3.1 (RAG Engine)",
-                                                "category": rag_category,
-                                                "sentiment_score": insights.get('score', 80),
-                                                "urgency_level": insights.get('strategy', {}).get('priority', 'MEDIUM').upper(),
-                                                "strategy": insights.get('strategy', {}),
-                                                "actuals": insights.get('actuals', {}),
-                                                "signals": insights.get('breakdown', {}),
-                                                "key_signals": insights.get('key_signal'),
-                                                "verdict": insights.get('verdict'),
-                                                "full_insights": insights
-                                            }
+                    base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+                    pitch_deck_url = f"{base_url}/{file_path}"
+                    
+                    rag_category = None
+                    rag_advice = None
+                    rag_intel = None
+                    
+                    try:
+                        files = {'file': (pdf_attachment['filename'], pdf_attachment['data'])}
+                        # Send to RAG
+                        rag_res = requests.post(f"{rag_url}/process", files=files, timeout=300, verify=False)
+                        if rag_res.status_code == 200:
+                            rag_data = rag_res.json()
+                            rag_item_id = rag_data.get('id')
+                            if rag_item_id:
+                                import time
+                                for _ in range(30):
+                                    st_res = requests.get(f"{rag_url}/status/{rag_item_id}", timeout=60, verify=False)
+                                    if st_res.status_code == 200:
+                                        st_data = st_res.json()
+                                        if st_data.get('status', '').lower() in ['completed', 'success']:
+                                            ins = st_data.get('insights', {})
+                                            if ins:
+                                                rag_advice = ins.get('summary') or ins.get('verdict')
+                                                rag_category = (ins.get('type') or ins.get('category') or 'INVESTOR').upper()
+                                                rag_intel = {
+                                                    "answer": rag_advice,
+                                                    "source": "Pure Llama 3.1 (RAG Engine)",
+                                                    "category": rag_category,
+                                                    "strategy": ins.get('strategy', {}),
+                                                    "actuals": ins.get('actuals', {}),
+                                                    "full_insights": ins
+                                                }
                                             break
-                                    elif current_status == 'failed':
-                                        break
-                                time.sleep(10)
-                except Exception as re_err:
-                    print(f"RAG Retro Error: {re_err}")
+                                    time.sleep(10)
+                    except Exception as e:
+                        print(f"RAG Retro Error for {sender_email}: {e}")
 
-                import json
-                rag_intel_json = json.dumps(rag_intel) if rag_intel else None
-
-                # Update database
-                conn = get_db_connection()
-                cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-                
-                # Fetch lead data first for draft generation
-                cur.execute("SELECT * FROM leads_raw WHERE LOWER(email) = LOWER(%s)", (sender_email,))
-                lead_row = cur.fetchone()
-                
-                fresh_draft_body = None
-                if lead_row and rag_advice:
+                    # Update Database
+                    thread_conn = get_db_connection()
+                    thread_cur = thread_conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
                     try:
-                        from app.services.llm_services import EmailGenerator
-                        generator = EmailGenerator()
-                        lead_data_for_draft = {**dict(lead_row), "rag_advice": rag_advice}
-                        fresh_draft = generator.generate_email(lead_data_for_draft)
-                        if fresh_draft:
-                            fresh_draft_body = fresh_draft.get('body')
-                            if rag_intel: rag_intel["draft"] = fresh_draft_body
-                    except Exception as draft_err:
-                        print(f"Failed to generate retro draft: {draft_err}")
+                        # Fetch lead data first for draft generation
+                        thread_cur.execute("SELECT * FROM leads_raw WHERE LOWER(email) = LOWER(%s)", (sender_email,))
+                        lead_row = thread_cur.fetchone()
+                        
+                        fresh_draft_body = None
+                        if lead_row and rag_advice:
+                            try:
+                                from app.services.llm_services import EmailGenerator
+                                generator = EmailGenerator()
+                                lead_data_for_draft = {**dict(lead_row), "rag_advice": rag_advice}
+                                fresh_draft = generator.generate_email(lead_data_for_draft)
+                                if fresh_draft:
+                                    fresh_draft_body = fresh_draft.get('body')
+                                    if rag_intel: rag_intel["draft"] = fresh_draft_body
+                            except Exception as draft_err:
+                                print(f"Failed to generate retro draft for {sender_email}: {draft_err}")
 
-                cur.execute("""
-                    UPDATE leads_raw 
-                    SET pitch_deck_url = %s,
-                        sector = COALESCE(%s, sector),
-                        rag_advice = %s,
-                        rag_intelligence = %s,
-                        email_draft = COALESCE(%s, email_draft)
-                    WHERE LOWER(email) = LOWER(%s) 
-                    AND (pitch_deck_url IS NULL OR pitch_deck_url = '' OR pitch_deck_url LIKE 'Attached PDF:%%' OR rag_advice IS NULL)
-                """, (pitch_deck_url, rag_category, rag_advice, json.dumps(rag_intel) if rag_intel else None, fresh_draft_body, sender_email))
-                
-                if cur.rowcount > 0:
-                    conn.commit()
-                    count += 1
-                cur.close()
-                conn.close()
-                
+                        thread_cur.execute("""
+                            UPDATE leads_raw 
+                            SET pitch_deck_url = %s,
+                                sector = COALESCE(%s, sector),
+                                rag_advice = %s,
+                                rag_intelligence = %s,
+                                email_draft = COALESCE(%s, email_draft)
+                            WHERE LOWER(email) = LOWER(%s) 
+                            AND (pitch_deck_url IS NULL OR pitch_deck_url = '' OR pitch_deck_url LIKE 'Attached PDF:%%' OR rag_advice IS NULL)
+                        """, (pitch_deck_url, rag_category, rag_advice, json.dumps(rag_intel) if rag_intel else None, fresh_draft_body, sender_email))
+                        thread_conn.commit()
+                        with count_lock:
+                            count += 1
+                    finally:
+                        thread_cur.close()
+                        thread_conn.close()
+            except Exception as e:
+                print(f"Error retro syncing message {msg['id']}: {e}")
+
+        # Execute parallel processing
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            executor.map(process_single_pdf, messages)
+            
         return {"success": True, "updated_deals": count, "message": f"Retro-sync complete. {count} pitch decks processed and classified."}
     except Exception as e:
         print(f"Retro sync error: {e}")

@@ -32,16 +32,34 @@ const STAGE_CONFIGS = {
 };
 
 const getLeadType = (lead) => {
+  // FORCE INVESTOR FOR YASHIKA & GUPTA: They don't deal with clients
+  try {
+    const userStr = localStorage.getItem('user');
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      const name = String(user.username || user.full_name || '').toLowerCase();
+      if (name.includes('yashika') || name.includes('gupta')) return 'Investor';
+    }
+  } catch (e) {}
+
+  const text = String(`${lead.company_name || lead.company || ''} ${lead.sector || ''} ${lead.persona || ''}`).toUpperCase();
+  
+  const investorKeywords = [
+    "VENTURE", "CAPITAL", "EQUITY", "INVEST", "PARTNER", "ASSET", 
+    "FAMILY OFFICE", "ANGEL", "CIRCLE", "NETWORK", "FUND", "VC", "PE", "ADVISORY",
+    "HOLDING", "SFO", "OFFICE", "MANAGEMENT", "PRIVATE", "TRUST", "WEALTH",
+    "ASSOCIATES", "GROUP", "PARTNERS", "ADVISORS", "FOUNDATION"
+  ];
+  
+  // High Priority: Keyword matching in company name/sector
+  if (investorKeywords.some(kw => text.includes(kw))) return 'Investor';
+  
+  // Secondary: Explicit lead_type field
   if (lead.lead_type) {
     const lt = String(lead.lead_type).toUpperCase();
     if (lt.includes('CLIENT')) return 'Client';
     if (lt.includes('INVESTOR')) return 'Investor';
   }
-  
-  const text = String(`${lead.company_name || ''} ${lead.sector || ''} ${lead.persona || ''}`).toUpperCase();
-  
-  const investorKeywords = ["VENTURE", "CAPITAL", "EQUITY", "INVEST", "PARTNER", "ASSET", "FAMILY OFFICE"];
-  if (investorKeywords.some(kw => text.includes(kw))) return 'Investor';
   
   const clientKeywords = ["SAAS", "FINTECH", "SOFTWARE", "CLIENT", "CUSTOMER", "PRODUCT", "SERVICES"];
   if (clientKeywords.some(kw => text.includes(kw))) return 'Client';
@@ -49,12 +67,18 @@ const getLeadType = (lead) => {
   return 'Investor';
 };
 
-const getStageLabel = (stage, lead) => {
+const getStageLabel = (stage, lead, status = 'DUE') => {
   const isInvestor = getLeadType(lead) === 'Investor';
-  if (stage === 0) return isInvestor ? 'Day 7' : 'Day 2';
-  if (stage === 1) return isInvestor ? 'Day 14' : 'Day 4';
-  if (stage === 2) return isInvestor ? 'Day 30' : 'Day 10';
-  return `${stage + 1}th Follow-up`;
+  
+  // If we are in the SENT tab, we want to show the badge for what was JUST sent.
+  // If we are in the DUE tab, we show the badge for what is ABOUT to be sent.
+  let displayStage = stage;
+  if (status === 'SENT' && stage > 0) displayStage = stage - 1;
+
+  if (displayStage === 0) return isInvestor ? 'Day 7' : 'Day 2';
+  if (displayStage === 1) return isInvestor ? 'Day 14' : 'Day 4';
+  if (displayStage === 2) return isInvestor ? 'Day 30' : 'Day 10';
+  return `${displayStage + 1}th Follow-up`;
 };
 
 const getStageColor = (stage) => {
@@ -86,18 +110,52 @@ const Followups = () => {
     return 'All';
   });
   const [stageFilter, setStageFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('DUE'); // DUE, SENT, REPLIED
   const [selectedIds, setSelectedIds] = useState([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
   const [editedDraft, setEditedDraft] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [systemSettings, setSystemSettings] = useState({ auto_followup: false, outreach_daily_limit: 200 });
+  const [localLimit, setLocalLimit] = useState('200');
   const perPage = 100;
 
   useEffect(() => { 
-    setPage(1); 
-    fetchFollowups(1); 
-  }, [searchQuery, typeFilter, stageFilter]);
+    if (page === 1) {
+      fetchFollowups(1); 
+    } else {
+      setPage(1); 
+    }
+    fetchSystemSettings();
+  }, [searchQuery, typeFilter, stageFilter, statusFilter]);
+
+  const fetchSystemSettings = async () => {
+    try {
+      const res = await api.get('/api/admin/stats/settings');
+      const limit = res.data.outreach_daily_limit || 200;
+      setSystemSettings({
+        auto_followup: res.data.auto_followup,
+        outreach_daily_limit: limit
+      });
+      setLocalLimit(String(limit));
+    } catch {}
+  };
+
+  const handleUpdateSettings = async (auto, limit) => {
+    // Update local state immediately for snappy UI
+    setSystemSettings({ auto_followup: auto, outreach_daily_limit: limit });
+    setLocalLimit(String(limit));
+    try {
+      await api.post('/api/admin/stats/settings', { 
+        auto_followup: auto, 
+        outreach_daily_limit: limit 
+      });
+      showNotification('success', `Settings updated: Auto-Pilot ${auto ? 'ON' : 'OFF'}, Limit ${limit}`);
+    } catch {
+      showNotification('error', 'Failed to update settings');
+    }
+  };
 
   useEffect(() => { fetchFollowups(page); }, [page]);
 
@@ -109,16 +167,20 @@ const Followups = () => {
         per_page: perPage,
         search: searchQuery || undefined,
         type: typeFilter === 'All' ? undefined : typeFilter,
+        status: statusFilter === 'DUE' ? undefined : statusFilter,
       };
 
       // Map stage filter to numeric stage
       if (stageFilter !== 'All') {
         const currentConfigs = STAGE_CONFIGS[typeFilter];
         const config = currentConfigs.find(c => c.label === stageFilter);
-        if (config) params.stage = config.stage;
+        if (config) {
+          params.stage = config.stage;
+          if (config.type) params.type = config.type;
+        }
       }
 
-      const res = await api.get('/api/followups', { params });
+      const res = await api.get('/api/leads/followups', { params });
       setFollowups(res.data.leads || []);
       setTotal(res.data.total || 0);
       setSelectedIds([]); 
@@ -140,7 +202,11 @@ const Followups = () => {
       // Re-fetch preview to show the updated HTML with signature
       const res = await api.get(`/api/leads/${selectedLead.id}/followup-preview`);
       if (res.data?.full_html) {
-        setSelectedLead(prev => ({ ...prev, followup_draft: res.data.full_html }));
+        setSelectedLead(prev => ({ 
+          ...prev, 
+          followup_draft: res.data.full_html,
+          followup_subject: res.data.subject || prev.followup_subject || 'Following up'
+        }));
       }
       
       showNotification('success', 'Draft saved successfully');
@@ -174,7 +240,7 @@ const Followups = () => {
         setProgress(prev => prev < 90 ? prev + 5 : prev);
       }, 300);
 
-      const res = await api.post('/api/leads/bulk-approve-followups', { lead_ids: selectedIds });
+      const res = await api.post('/api/leads/bulk-approve-followups', { lead_ids: idsToSend });
       
       clearInterval(interval);
       setProgress(100);
@@ -202,13 +268,20 @@ const Followups = () => {
   };
 
   const openLeadDetails = async (lead) => {
-    setSelectedLead(lead);
+    setSelectedLead({
+      ...lead,
+      followup_subject: lead.last_outreach_subject || 'Following up'
+    });
     setIsModalOpen(true);
     setIsEditing(false);
     try {
       const res = await api.get(`/api/leads/${lead.id}/followup-preview`);
       if (res.data?.full_html) {
-        setSelectedLead(prev => ({ ...prev, followup_draft: res.data.full_html }));
+        setSelectedLead(prev => ({ 
+          ...prev, 
+          followup_draft: res.data.full_html,
+          followup_subject: res.data.subject || prev.followup_subject || 'Following up'
+        }));
         setEditedDraft(res.data.body || '');
       }
     } catch {}
@@ -311,7 +384,47 @@ const Followups = () => {
               <p className="text-[11px] text-slate-500 font-bold uppercase tracking-[2px] mt-0.5">Manual Approval Required</p>
             </div>
           </div>
+          
           <div className="flex items-center gap-6">
+            {/* Auto-Pilot Settings Panel */}
+            <div className="bg-[#131722] border border-white/[0.05] rounded-xl px-4 py-2 flex items-center gap-4 shadow-xl">
+              <div className="flex items-center gap-3">
+                <div className={`w-2 h-2 rounded-full ${systemSettings.auto_followup ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`} />
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Auto-Pilot</span>
+                <button
+                  onClick={() => handleUpdateSettings(!systemSettings.auto_followup, systemSettings.outreach_daily_limit)}
+                  className={`w-10 h-5 rounded-full relative transition-all ${systemSettings.auto_followup ? 'bg-indigo-600' : 'bg-slate-700'}`}
+                >
+                  <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all ${systemSettings.auto_followup ? 'left-6' : 'left-1'}`} />
+                </button>
+              </div>
+              <div className="w-px h-6 bg-white/10" />
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Daily Limit</span>
+                <input
+                  type="number"
+                  value={localLimit}
+                  onChange={(e) => setLocalLimit(e.target.value)}
+                  onBlur={() => {
+                    const val = parseInt(localLimit, 10);
+                    if (isNaN(val) || val <= 0) {
+                      setLocalLimit(String(systemSettings.outreach_daily_limit));
+                      return;
+                    }
+                    if (val !== systemSettings.outreach_daily_limit) {
+                      handleUpdateSettings(systemSettings.auto_followup, val);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.target.blur();
+                    }
+                  }}
+                  className="w-16 bg-white/5 border border-white/10 rounded-lg py-1 px-2 text-[11px] font-black text-white text-center outline-none focus:border-indigo-500/50"
+                />
+              </div>
+            </div>
+
             <div className="relative group">
               <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
                 <Search className="w-4 h-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
@@ -321,7 +434,7 @@ const Followups = () => {
                 placeholder="Search sequences..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-[#131722] border border-white/[0.05] rounded-xl pl-12 pr-6 py-3 w-[320px] text-[13px] font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/30 transition-all placeholder:text-slate-600"
+                className="bg-[#131722] border border-white/[0.05] rounded-xl pl-12 pr-6 py-3 w-[280px] text-[13px] font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/30 transition-all placeholder:text-slate-600"
               />
             </div>
           </div>
@@ -358,6 +471,28 @@ const Followups = () => {
           <div className="w-px h-6 bg-white/10" />
 
           <div className="flex items-center gap-2">
+            <CheckCircle className="w-4 h-4 text-slate-500" />
+            <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">Status</span>
+          </div>
+          <div className="flex gap-2">
+            {['DUE', 'SENT', 'REPLIED'].map(s => (
+              <button
+                key={s}
+                onClick={() => setStatusFilter(s)}
+                className={`px-4 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                  statusFilter === s
+                    ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                    : 'bg-white/[0.03] text-slate-500 border-white/[0.05] hover:border-white/20'
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+
+          <div className="w-px h-6 bg-white/10" />
+
+          <div className="flex items-center gap-2">
             <Clock className="w-4 h-4 text-slate-500" />
             <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">Stage</span>
           </div>
@@ -386,6 +521,12 @@ const Followups = () => {
               </button>
             ))}
           </div>
+          {isLoading && (
+            <div className="flex items-center gap-2 ml-auto">
+              <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
+              <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest animate-pulse">Filtering...</span>
+            </div>
+          )}
         </div>
 
         {/* List Actions */}
@@ -447,20 +588,32 @@ const Followups = () => {
                           <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${isInvestor ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20'}`}>
                             {lt}
                           </span>
-                          <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-md border ${getStageColor(lead.followup_stage)}`}>
-                            {getStageLabel(lead.followup_stage, lead)}
+                          <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-md border ${getStageColor(statusFilter === 'SENT' ? Math.max(0, lead.followup_stage - 1) : lead.followup_stage)}`}>
+                            {getStageLabel(lead.followup_stage, lead, statusFilter)}
                           </span>
                         </div>
+                        {lead.last_outreach_subject && (
+                          <div className="text-[11px] font-black text-indigo-400/90 uppercase tracking-widest flex items-center gap-1.5 mt-1 bg-indigo-500/[0.04] border border-indigo-500/10 rounded-lg px-2.5 py-1 w-fit">
+                            <span className="text-slate-500">Thread Subject:</span>
+                            <span className="italic font-bold">"{lead.last_outreach_subject}"</span>
+                          </div>
+                        )}
                         <div className="flex items-center gap-3 text-[12px] font-bold text-slate-500">
                           <span className="flex items-center gap-1.5 text-slate-300">
                             <Building2 className="w-3.5 h-3.5 text-indigo-400" /> 
                             {lead.company_name || 'Independent'}
                           </span>
                           <span className="w-1 h-1 rounded-full bg-slate-700" />
-                          <span className="flex items-center gap-1.5">
-                            <Calendar className="w-3.5 h-3.5" /> 
-                            Last Outreach: {new Date(lead.last_outreach_at).toLocaleDateString()}
-                          </span>
+                          <div className="flex flex-col gap-1 py-1 px-2 rounded-lg bg-white/[0.03]">
+                            <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500">
+                              <Calendar className="w-3 h-3 text-slate-600" />
+                              <span>Initial Outreach: {lead.first_outreach_at ? new Date(lead.first_outreach_at).toLocaleString('en-IN', { day: '2-digit', month: 'short' }) : 'Never'}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400">
+                              <Clock className="w-3 h-3 text-slate-600" />
+                              <span>Last Outreach: {lead.last_outreach_at ? new Date(lead.last_outreach_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Never'}</span>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -551,6 +704,15 @@ const Followups = () => {
             </div>
 
             <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto">
+              {/* Display Subject Line */}
+              <div className="bg-white/[0.02] border border-white/[0.05] rounded-2xl px-6 py-4 flex flex-col gap-1.5 relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500/60" />
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-[2px]">Email Subject</span>
+                <span className="text-[14px] font-black text-indigo-400">
+                  {selectedLead.followup_subject || selectedLead.last_outreach_subject || 'Following up'}
+                </span>
+              </div>
+
               <div className="flex items-center justify-between px-2">
                 <span className="text-[10px] font-black text-slate-500 uppercase tracking-[2px]">Message Draft</span>
                 <button 
