@@ -182,11 +182,11 @@ const GmailDrafts = () => {
       
       // Detect lists (must be star/dash/bullet followed by space)
       if (lines.some(l => /^\s*[\*\-•]\s+/.test(l))) {
-        let listHtml = '<ul style="margin: 1em 0; padding-left: 1.5em; list-style-type: disc;">';
+        let listHtml = '<ul style="margin: 0.8em 0; padding-left: 0; list-style: none;">';
         lines.forEach(l => {
           const match = l.trim().match(/^[\*\-•]\s+(.*)/);
           if (match) {
-            listHtml += `<li style="margin-bottom: 0.5em; color: #cbd5e1;">${match[1].trim()}</li>`;
+            listHtml += `<li style="margin-bottom: 0.4em; position: relative; padding-left: 14px; line-height: 1.6; color: #cbd5e1;"><span style="position: absolute; left: 0; color: #94a3b8; font-size: 9px; top: 0px; display: inline-block; vertical-align: middle;">•</span>${match[1].trim()}</li>`;
           } else {
             listHtml += ` ${l.trim()}`;
           }
@@ -194,8 +194,8 @@ const GmailDrafts = () => {
         listHtml += '</ul>';
         htmlParts.push(listHtml);
       } else {
-        // Paragraph: merge single newlines but preserve paragraph breaks
-        const content = trimmed.replace(/\n/g, ' ');
+        // Paragraph: preserve single newlines as line breaks
+        const content = trimmed.replace(/\n/g, '<br />');
         htmlParts.push(`<p style="margin-bottom: 1.2em; color: #cbd5e1; line-height: 1.6;">${content}</p>`);
       }
     });

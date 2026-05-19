@@ -834,7 +834,18 @@ const Emails = () => {
                       <div className="mt-3 flex items-center gap-2">
                         <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Subject:</span>
                         <span className="text-[10px] font-bold text-slate-400 truncate max-w-[300px]">
-                          {template.content.split('\n')[0].replace('Subject:', '').trim()}
+                          {(() => {
+                            if (!template.content) return "No Subject";
+                            const lines = template.content.split('\n');
+                            const subLine = lines.find(l => l.trim().toLowerCase().startsWith('subject:'));
+                            if (subLine) return subLine.replace(/subject:/i, '').trim();
+                            // Fallback if Subject: tag is missing from memory cache
+                            const firstLine = lines.map(l => l.trim()).find(l => l.length > 0) || "";
+                            if (firstLine.toLowerCase().startsWith('dear') || firstLine.toLowerCase().startsWith('hi') || firstLine.toLowerCase().startsWith('hello') || firstLine.toLowerCase().startsWith("i'm") || firstLine.toLowerCase().startsWith("i hope")) {
+                              return "AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |";
+                            }
+                            return firstLine.replace(/subject:/i, '').trim() || "AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |";
+                          })()}
                         </span>
                       </div>
                     </div>

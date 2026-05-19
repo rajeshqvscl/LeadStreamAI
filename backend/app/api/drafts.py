@@ -16,6 +16,236 @@ import logging
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# Guaranteed self-healing database update at module load/hot-reload time
+try:
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    latest_description = "AI-Powered Hiring Infrastructure Platform fundraising draft ($1M)"
+    latest_content = """Subject: AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |
+
+Dear {{First Name}},
+
+I hope you're doing well.
+
+I'm {{Sender First Name}} from QVSCL (Gurugram), a strategic advisory firm working with high-growth early-stage ventures. We are currently raising a round for a platform building a **vertical AI-powered hiring intelligence layer**, combining AI agents, recruitment workflows, and trust-based verification infrastructure.
+
+**Business Overview**
+
+**Headquarters:** Singapore (with India as a 100% owned subsidiary and a US joint venture)
+
+**Founded:** By industry leaders with 20+ years of experience across HR, fintech, and enterprise technology
+
+**Focus:** Building a unified hiring infrastructure platform that automates and optimizes end-to-end recruitment workflows - spanning sourcing, screening, evaluation, and background verification
+
+**Platform Offering:** A full-stack hiring infrastructure platform integrating applicant tracking, multi-channel sourcing, AI-driven screening, and native background verification into a single system
+
+**Technology:** AI-powered vertical agents enabling sourcing, scheduling, interviewing, and verification workflows, supported by a proprietary trust graph that improves candidate matching and reduces fraud over time
+
+**Revenue Model:** Enterprise SaaS with multi-layered monetization across hiring workflows, verification services, and AI-driven automation modules, enabling scalable and recurring revenue streams
+
+**Core Differentiation:** Unlike fragmented HR tech stacks, the platform functions as a **system of intelligence for hiring** - combining workflows, data, and verification into a unified infrastructure layer that improves decision-making over time. Positioned alongside global AI hiring platforms, with differentiated focus on integrated trust infrastructure and verification layers.
+
+*Designed to become the underlying infrastructure layer for hiring in an era of AI-generated talent and rising trust deficits*
+
+**Industry Overview**
+
+Hiring at scale remains highly inefficient despite large market size:
+
+• 3.6M job vacancies are posted monthly in India, but only 2.1M hires are completed
+• 1.5M workforce gap leading to significant unrealized economic output
+• 80% of employers face talent shortages
+• Hiring processes remain largely manual and fragmented
+
+**Market Opportunity:**
+
+• Global Hiring & Recruitment Tech TAM: $150B+
+• Rapid shift toward AI-driven automation, trust, and verification layers (35-45% CAGR)
+
+**Problems**
+
+**HR & Recruiter Challenges**
+
+• 180 applications per hire leading to massive screening overload
+• Recruiters managing significantly higher workloads without increased team size
+• 57% of time spent on repetitive "data janitorial" tasks
+
+**Process Inefficiencies**
+
+• Fragmented workflows across 20+ tools (ATS, sourcing, BGV, onboarding)
+• Manual data handling and poor system integrations
+• Long hiring cycles (average 44 days to fill roles)
+
+**Trust & Quality Issues**
+
+• 70% resumes contain inaccuracies
+• AI-generated and unverified profiles flooding pipelines
+• High attrition and hiring inefficiencies due to poor matching
+
+**Solutions**
+
+• **AI Hiring Co-Pilot:** Automates sourcing, screening, and evaluation
+• **Unified Infrastructure:** One system across ATS, sourcing, and verification
+• **Trust Layer:** Proprietary graph improving match quality and fraud detection
+• **Background Verification:** Native BGV system with 20+ checks across identity, employment, education, and criminal records
+• **Workflow Automation:** Eliminates manual processes, reducing HR workload and improving hiring efficiency
+• **Scalable Architecture:** APIs and integrations with HRMS/ATS systems enabling enterprise-grade deployment
+
+**Validations & Traction**
+
+• 100K+ companies onboarded on the platform
+• 250+ enterprise customers across 50+ industries
+• Currently in advanced discussions for potential onboarding across multiple enterprise accounts
+• Rapid enterprise adoption across India and international markets, with strong demand from US-based customers
+• 60% of current and projected revenue driven by US market demand
+• 94% customer retention rate
+
+**Operational Impact:**
+
+• Near real-time hiring cycles (2-3 days vs 44 days industry average)
+• Background verification TAT reduced from 15 days to 2 days
+• 40%+ reduction in HR operational workload
+
+**Fundraise**
+
+• Total capital raised in previous rounds: $3M
+• Currently raising: $1M - $3M
+
+Happy to walk you through a quick live product demo showcasing the platform in action
+
+If this aligns with your portfolio focus and does not conflict with it, I'd be happy to share the full presentation or connect over a virtual meeting at your convenience. I have attached the QVSCL Profile. You may also share your investment thesis with us so we can send relevant deal flow in the future.
+
+For more details about our services:
+
+[Website](https://qvscl.com) | [Linkedin](https://www.linkedin.com/company/qvscl/)
+
+Looking forward to your response.
+
+SIG_START
+--
+Thanks & Regards,
+
+***{{Sender Name}}***
+{{Sender Title}}
+[LinkedIn]({{Sender LinkedIn}})
+{{Sender Phone}}
+
+Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you.
+SIG_END"""
+
+    cur.execute("SELECT id FROM prompts WHERE name = 'yashika_draft_ai_tech'")
+    row = cur.fetchone()
+    if row:
+        cur.execute(
+            "UPDATE prompts SET content = %s, description = %s WHERE name = 'yashika_draft_ai_tech'",
+            (latest_content, latest_description)
+        )
+    else:
+        cur.execute(
+            "INSERT INTO prompts (name, description, content, prompt_type) VALUES ('yashika_draft_ai_tech', %s, %s, 'CUSTOM_DRAFT')",
+            (latest_description, latest_content)
+        )
+    conn.commit()
+
+    # Now let's heal any existing squished drafts in the leads_raw table
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, user_id, first_name, last_name, company_name, family_office_name, email_draft 
+        FROM leads_raw 
+        WHERE email_status = 'PENDING_APPROVAL' 
+          AND (email_draft LIKE '%vertical AI-powered hiring%' OR email_draft LIKE '%QVSCL (Gurugram)%')
+    """)
+    leads_to_heal = cur.fetchall()
+    if leads_to_heal:
+        logger.info(f"✨ Found {len(leads_to_heal)} old/squished drafts to self-heal...")
+        for l_id, u_id, f_name, l_name, comp, fam, old_draft in leads_to_heal:
+            # Reconstruct the dynamic content using our latest_content template!
+            first_name = (f_name or "").strip()
+            # clean first name (Dr./Mr./Mrs.)
+            for prefix in ["Dr.", "Mr.", "Mrs.", "Ms.", "Dr", "Mr", "Mrs", "Ms"]:
+                if first_name.lower().startswith(prefix.lower()):
+                    first_name = first_name[len(prefix):].strip()
+                    break
+            
+            last_name = (l_name or "").strip()
+            full_name = f"{first_name} {last_name}".strip()
+            company = (comp or fam or "your organization").strip()
+            
+            # Resolve sender fields
+            profile = {'full_name': 'Kajal Huria', 'job_title': 'Analyst', 'phone': '8527083798', 'linkedin_url': 'https://www.linkedin.com/company/qvscl/'}
+            if u_id:
+                try:
+                    cur.execute("SELECT username, full_name, job_title, phone, linkedin_url FROM users WHERE username = %s OR id::text = %s OR id = %s", (str(u_id), str(u_id), int(u_id) if str(u_id).isdigit() else -1))
+                    p_row = cur.fetchone()
+                    if p_row:
+                        profile = {
+                            'full_name': p_row[1] or p_row[0] or 'Kajal Huria',
+                            'job_title': p_row[2] or 'Analyst',
+                            'phone': p_row[3] or '8527083798',
+                            'linkedin_url': p_row[4] or 'https://www.linkedin.com/company/qvscl/'
+                        }
+                except Exception as e:
+                    logger.error(f"Error querying user profile for self-healing: {e}")
+            
+            sender_full_name = profile['full_name']
+            sender_first_name = sender_full_name.split()[0] if sender_full_name else "Team"
+            sender_title = profile['job_title']
+            sender_phone = profile['phone']
+            sender_linkedin = profile['linkedin_url']
+            
+            # Do replacements in latest_content
+            body = latest_content
+            replacements = [
+                ("{{First Name}}", first_name),
+                ("{{first name}}", first_name),
+                ("{{first_name}}", first_name),
+                ("{{Full Name}}", full_name),
+                ("{{full_name}}", full_name),
+                ("{{Company Name}}", company),
+                ("{{company_name}}", company),
+                ("{{Company}}", company),
+                # Sender placeholders
+                ("{{Sender Name}}", sender_full_name),
+                ("{{Sender Full Name}}", sender_full_name),
+                ("{{Sender First Name}}", sender_first_name),
+                ("{{Sender Title}}", sender_title),
+                ("{{Sender Phone}}", sender_phone),
+                ("{{Sender LinkedIn}}", sender_linkedin),
+                ("{{Sender Linkedin}}", sender_linkedin),
+            ]
+            for placeholder, value in replacements:
+                reg = re.compile(re.escape(placeholder), re.IGNORECASE)
+                body = reg.sub(str(value or ""), body)
+            
+            # Deduplicate/extract subject
+            final_subject = "AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |"
+            final_body_lines = []
+            subject_found = False
+            for line in body.split("\n"):
+                if not subject_found and "subject:" in line.lower():
+                    if ":" in line:
+                        final_subject = line.split(":", 1)[1].strip()
+                    else:
+                        final_subject = line.replace("Subject", "", 1).replace("subject", "", 1).strip()
+                    subject_found = True
+                else:
+                    final_body_lines.append(line)
+            
+            final_body = "\n".join(final_body_lines).strip()
+            
+            # Form email_content
+            new_email_content = f"Subject: {final_subject}\n\n{final_body}"
+            
+            # Update database row
+            cur.execute("UPDATE leads_raw SET email_draft = %s WHERE id = %s", (new_email_content, l_id))
+            logger.info(f"✅ Self-healed draft for Lead ID {l_id} ({first_name} at {company}) with correct Subject and Sender ({sender_full_name})")
+    
+    cur.close()
+    conn.close()
+    logger.info("🚀 Startup Self-heal of 'yashika_draft_ai_tech' template completed successfully!")
+except Exception as db_err:
+    logger.error(f"⚠️ Startup Self-heal of template failed: {db_err}")
+
 def normalize_user_id(user_id: Optional[str]) -> str:
     """Normalizes the user ID from the header to a valid numeric database ID string.
     Handles 'admin' or string usernames by resolving them to their numeric database ID.
@@ -315,6 +545,50 @@ def get_sender_profile(user_id: Optional[str]) -> dict:
         "linkedin_url": "https://linkedin.com"
     }
 
+def heal_draft_content(email_draft: str, user_id: Optional[str]) -> str:
+    if not email_draft:
+        return email_draft
+    
+    # Resolve logged-in user details
+    profile = get_sender_profile(user_id)
+    sender_full_name = profile.get('full_name') or profile.get('username') or "Kajal Huria"
+    sender_first_name = sender_full_name.split()[0] if sender_full_name else "Kajal"
+    if sender_first_name.lower() in ["system", "admin", "team", "the", "test"]:
+        if sender_first_name.lower() == "test":
+            sender_first_name = "Test"
+        else:
+            sender_first_name = "Sravanthi"
+    else:
+        # Capitalize name nicely
+        sender_first_name = sender_first_name.capitalize()
+        
+    healed = email_draft
+    
+    # 1. Case-insensitively replace any occurrence of "Kajal" with the logged-in user's first name
+    if "kajal" in healed.lower():
+        healed = re.sub(r"\bKajal\b", sender_first_name, healed, flags=re.IGNORECASE)
+        
+    # 2. Heal the subject line if this is the AI tech platform draft but has the generic subject
+    healed_lower = healed.lower()
+    is_ai_tech = (
+        "hiring" in healed_lower or 
+        "recruitment" in healed_lower or 
+        "verification" in healed_lower or 
+        "bgv" in healed_lower or 
+        "hr tech" in healed_lower or
+        "ats" in healed_lower or
+        "100k+" in healed_lower
+    )
+    
+    if is_ai_tech:
+        if "strategic partnership" in healed_lower or "strategic investment" in healed_lower or "qvscl x" in healed_lower or "qvscl ×" in healed_lower:
+            lines = healed.split("\n")
+            if lines and lines[0].lower().startswith("subject:"):
+                lines[0] = "Subject: AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |"
+                healed = "\n".join(lines)
+                
+    return healed
+
 def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     """Appends a premium standardized signature and mandatory unsubscribe link."""
     body_text = body.strip()
@@ -450,17 +724,39 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 l_name = (lead.get("last_name") or "").strip()
                 full_name = f"{f_name} {l_name}".strip()
                 company = (lead.get("company_name") or lead.get("family_office_name") or "your organization").strip()
+                designation = (lead.get("designation") or "").strip()
 
                 # Resolving Sender fields
                 sender_full_name = profile.get('full_name') or profile.get('username') or "the team"
-                sender_title = profile.get('job_title') or ""
-                sender_phone = profile.get('phone') or ""
-                sender_linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
+                sender_first_name = sender_full_name.split()[0] if sender_full_name else "Team"
+                sender_title = (profile.get('job_title') or "").strip() or "Analyst"
+                sender_phone = (profile.get('phone') or "").strip() or "8527083798"
+                sender_linkedin = (profile.get('linkedin_url') or "").strip() or "https://www.linkedin.com/company/qvscl/"
 
-                body = template_body.replace("{{First Name}}", f_name).replace("{{first name}}", f_name).replace("{{first_name}}", f_name)
-                body = body.replace("{{Full Name}}", full_name).replace("{{full_name}}", full_name)
-                body = body.replace("{{Company Name}}", company).replace("{{Company}}", company).replace("{{company_name}}", company)
-                body = body.replace("{{Sender Name}}", sender_full_name).replace("{{Sender Title}}", sender_title).replace("{{Sender Phone}}", sender_phone).replace("{{Sender LinkedIn}}", sender_linkedin).replace("{{Sender Linkedin}}", sender_linkedin)
+                body = template_body
+                replacements = [
+                    ("{{First Name}}", f_name),
+                    ("{{first name}}", f_name),
+                    ("{{first_name}}", f_name),
+                    ("{{Full Name}}", full_name),
+                    ("{{full_name}}", full_name),
+                    ("{{Company Name}}", company),
+                    ("{{company_name}}", company),
+                    ("{{Company}}", company),
+                    ("{{Designation}}", designation),
+                    # Sender placeholders
+                    ("{{Sender Name}}", sender_full_name),
+                    ("{{Sender Full Name}}", sender_full_name),
+                    ("{{Sender First Name}}", sender_first_name),
+                    ("{{Sender Title}}", sender_title),
+                    ("{{Sender Phone}}", sender_phone),
+                    ("{{Sender LinkedIn}}", sender_linkedin),
+                    ("{{Sender Linkedin}}", sender_linkedin),
+                ]
+                
+                for placeholder, value in replacements:
+                    reg = re.compile(re.escape(placeholder), re.IGNORECASE)
+                    body = reg.sub(str(value or ""), body)
 
                 subject = f"Strategic Partnership Opportunity | QVSCL × {company}"
             else:
@@ -501,9 +797,12 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         new_body_lines = []
         
         for line in body_lines:
-            if not subject_found and "Subject: " in line:
-                # Use the first 'Subject:' line we find as the official subject
-                subject = line.replace("Subject: ", "").strip()
+            if not subject_found and "subject:" in line.lower():
+                # Extract the subject (skip "Subject: " part)
+                if ":" in line:
+                    subject = line.split(":", 1)[1].strip()
+                else:
+                    subject = line.replace("Subject", "", 1).replace("subject", "", 1).strip()
                 subject_found = True
             else:
                 new_body_lines.append(line)
@@ -585,10 +884,137 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
 # --- List Custom Draft Templates (for template picker modal) ---
 @router.get("/custom-draft-templates")
 def list_custom_draft_templates():
-    """Returns all CUSTOM_DRAFT type prompts for use in the template picker."""
+    """Returns all CUSTOM_DRAFT type prompts for use in the template picker with automatic self-healing."""
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        # Self-healing database update:
+        # Check if 'yashika_draft_ai_tech' has the correct placeholder and Subject prefix.
+        # If not, update it dynamically in the database so the user doesn't need to run scripts!
+        latest_description = "AI-Powered Hiring Infrastructure Platform fundraising draft ($1M)"
+        latest_content = """Subject: AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |
+
+Dear {{First Name}},
+
+I hope you're doing well.
+
+I'm {{Sender First Name}} from QVSCL (Gurugram), a strategic advisory firm working with high-growth early-stage ventures. We are currently raising a round for a platform building a **vertical AI-powered hiring intelligence layer**, combining AI agents, recruitment workflows, and trust-based verification infrastructure.
+
+**Business Overview**
+
+**Headquarters:** Singapore (with India as a 100% owned subsidiary and a US joint venture)
+
+**Founded:** By industry leaders with 20+ years of experience across HR, fintech, and enterprise technology
+
+**Focus:** Building a unified hiring infrastructure platform that automates and optimizes end-to-end recruitment workflows - spanning sourcing, screening, evaluation, and background verification
+
+**Platform Offering:** A full-stack hiring infrastructure platform integrating applicant tracking, multi-channel sourcing, AI-driven screening, and native background verification into a single system
+
+**Technology:** AI-powered vertical agents enabling sourcing, scheduling, interviewing, and verification workflows, supported by a proprietary trust graph that improves candidate matching and reduces fraud over time
+
+**Revenue Model:** Enterprise SaaS with multi-layered monetization across hiring workflows, verification services, and AI-driven automation modules, enabling scalable and recurring revenue streams
+
+**Core Differentiation:** Unlike fragmented HR tech stacks, the platform functions as a **system of intelligence for hiring** - combining workflows, data, and verification into a unified infrastructure layer that improves decision-making over time. Positioned alongside global AI hiring platforms, with differentiated focus on integrated trust infrastructure and verification layers.
+
+*Designed to become the underlying infrastructure layer for hiring in an era of AI-generated talent and rising trust deficits*
+
+**Industry Overview**
+
+Hiring at scale remains highly inefficient despite large market size:
+
+• 3.6M job vacancies are posted monthly in India, but only 2.1M hires are completed
+• 1.5M workforce gap leading to significant unrealized economic output
+• 80% of employers face talent shortages
+• Hiring processes remain largely manual and fragmented
+
+**Market Opportunity:**
+
+• Global Hiring & Recruitment Tech TAM: $150B+
+• Rapid shift toward AI-driven automation, trust, and verification layers (35-45% CAGR)
+
+**Problems**
+
+**HR & Recruiter Challenges**
+
+• 180 applications per hire leading to massive screening overload
+• Recruiters managing significantly higher workloads without increased team size
+• 57% of time spent on repetitive "data janitorial" tasks
+
+**Process Inefficiencies**
+
+• Fragmented workflows across 20+ tools (ATS, sourcing, BGV, onboarding)
+• Manual data handling and poor system integrations
+• Long hiring cycles (average 44 days to fill roles)
+
+**Trust & Quality Issues**
+
+• 70% resumes contain inaccuracies
+• AI-generated and unverified profiles flooding pipelines
+• High attrition and hiring inefficiencies due to poor matching
+
+**Solutions**
+
+• **AI Hiring Co-Pilot:** Automates sourcing, screening, and evaluation
+• **Unified Infrastructure:** One system across ATS, sourcing, and verification
+• **Trust Layer:** Proprietary graph improving match quality and fraud detection
+• **Background Verification:** Native BGV system with 20+ checks across identity, employment, education, and criminal records
+• **Workflow Automation:** Eliminates manual processes, reducing HR workload and improving hiring efficiency
+• **Scalable Architecture:** APIs and integrations with HRMS/ATS systems enabling enterprise-grade deployment
+
+**Validations & Traction**
+
+• 100K+ companies onboarded on the platform
+• 250+ enterprise customers across 50+ industries
+• Currently in advanced discussions for potential onboarding across multiple enterprise accounts
+• Rapid enterprise adoption across India and international markets, with strong demand from US-based customers
+• 60% of current and projected revenue driven by US market demand
+• 94% customer retention rate
+
+**Operational Impact:**
+
+• Near real-time hiring cycles (2-3 days vs 44 days industry average)
+• Background verification TAT reduced from 15 days to 2 days
+• 40%+ reduction in HR operational workload
+
+**Fundraise**
+
+• Total capital raised in previous rounds: $3M
+• Currently raising: $1M - $3M
+
+Happy to walk you through a quick live product demo showcasing the platform in action
+
+If this aligns with your portfolio focus and does not conflict with it, I'd be happy to share the full presentation or connect over a virtual meeting at your convenience. I have attached the QVSCL Profile. You may also share your investment thesis with us so we can send relevant deal flow in the future.
+
+For more details about our services:
+
+[Website](https://qvscl.com) | [Linkedin](https://www.linkedin.com/company/qvscl/)
+
+Looking forward to your response.
+
+SIG_START
+--
+Thanks & Regards,
+
+***{{Sender Name}}***
+{{Sender Title}}
+[LinkedIn]({{Sender LinkedIn}})
+{{Sender Phone}}
+
+Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you.
+SIG_END"""
+        
+        # Select and verify if the database entry needs to be fixed.
+        cur.execute("SELECT content FROM prompts WHERE name = 'yashika_draft_ai_tech'")
+        row = cur.fetchone()
+        if not row or "Subject:" not in row[0] or "Kajal" in row[0] or "Total capital raised in previous rounds: $3M" not in row[0]:
+            # Perform automatic update to correct placeholder, layout and subject prefix
+            cur.execute(
+                "UPDATE prompts SET content = %s, description = %s WHERE name = 'yashika_draft_ai_tech'",
+                (latest_content, latest_description)
+            )
+            conn.commit()
+            
         cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
         rows = cur.fetchall()
         cur.close()
@@ -795,14 +1221,20 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
+        # Normalize User ID
+        uid = normalize_user_id(user_id) if user_id else None
+        
         # Base condition
         where_clause = "WHERE email_draft IS NOT NULL"
         params = []
         
-        if user_id and user_id.lower() != "admin":
-            where_clause += " AND user_id = %s"
-            params.append(user_id)
-        elif user_id and user_id.lower() == "admin":
+        if uid and uid != "1":
+            where_clause += " AND (user_id = %s OR user_id::text = %s)"
+            try:
+                params.extend([int(uid), str(uid)])
+            except:
+                params.extend([uid, uid])
+        elif uid and uid == "1":
             pass
         else:
             where_clause += " AND user_id IS NULL"
@@ -869,6 +1301,8 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         drafts = []
         for r in rows:
             draft_content = r["email_draft"] or ""
+            # Apply healing
+            draft_content = heal_draft_content(draft_content, user_id)
             # Normalize literal \\n to real newlines for consistent parsing
             draft_content = draft_content.replace("\\n", "\n").replace("\\r\\n", "\n")
                 

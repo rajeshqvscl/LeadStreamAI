@@ -7,6 +7,18 @@ import requests
 import csv
 import io
 import re
+import sys
+
+# Dynamically raise the CSV field size limit to the maximum possible for this platform
+# to prevent _csv.Error: field larger than field limit (131072) on large GSheets
+max_limit = sys.maxsize
+while True:
+    try:
+        csv.field_size_limit(max_limit)
+        break
+    except OverflowError:
+        max_limit = int(max_limit / 10)
+
 from app.models.lead import insert_lead, save_email_draft
 from app.services.llm_services import EmailGenerator
 from psycopg2.extras import execute_values
@@ -591,6 +603,16 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
 
     def process_single_tab(tab):
         try:
+            import sys
+            import csv
+            max_limit = sys.maxsize
+            while True:
+                try:
+                    csv.field_size_limit(max_limit)
+                    break
+                except OverflowError:
+                    max_limit = int(max_limit / 10)
+
             gid = tab.get('gid', '0')
             sheet_name_encoded = requests.utils.quote(tab['name'])
             export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv&gid={gid}"

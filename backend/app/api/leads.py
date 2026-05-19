@@ -602,6 +602,10 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
     lead = dict(row)
     lead["status"] = lead.get("email_status") or "PENDING_APPROVAL"
     
+    if lead.get("email_draft"):
+        from app.api.drafts import heal_draft_content
+        lead["email_draft"] = heal_draft_content(lead["email_draft"], user_id)
+    
     # Enrich with payload if needed
     payload = lead.get("raw_payload")
     if isinstance(payload, str):
@@ -830,9 +834,9 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
         else:
             body_text = lead['followup_draft'] or ""
         
-        # If draft is missing entirely, generate it via template
-        if not body_text:
-            from app.services.followup_service import get_template_followup
+        from app.services.followup_service import is_generic_followup, get_template_followup
+        # If draft is missing entirely or matches a generic placeholder, generate it via template
+        if is_generic_followup(body_text):
             stage = (lead['followup_stage'] or 0) + 1
             body_text = get_template_followup(lead, stage)
 
@@ -909,7 +913,7 @@ def bulk_approve_followups(req: BulkApproveFollowupsRequest, user_id: Optional[s
     for lead_id in req.lead_ids:
         try:
             # Call existing single approval logic
-            approve_followup(lead_id, user_id)
+            approve_followup(lead_id=lead_id, user_id=user_id)
             results["success"].append(lead_id)
         except Exception as e:
             logger.error(f"Bulk approval failed for lead {lead_id}: {e}")
@@ -1381,7 +1385,14 @@ def import_from_gsheet(
     user_id: Optional[str] = Header(None, alias="X-User-Id")
 ):
     import requests as http_requests
-    import csv, io, re
+    import csv, io, re, sys
+    max_limit = sys.maxsize
+    while True:
+        try:
+            csv.field_size_limit(max_limit)
+            break
+        except OverflowError:
+            max_limit = int(max_limit / 10)
 
     raw_url = req.url.strip()
     

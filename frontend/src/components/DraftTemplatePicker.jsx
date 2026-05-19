@@ -88,7 +88,20 @@ const DraftTemplatePicker = ({ isOpen, onClose, selectedCount, onGenerate }) => 
                     <span className="text-[9px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Custom</span>
                   </p>
                   <p className="text-slate-500 text-[11px] mt-0.5">{tpl.description || 'Custom template with lead name & company auto-filled.'}</p>
-                  <p className="text-slate-600 text-[10px] mt-1.5 font-mono truncate">{tpl.content?.substring(0, 90)}...</p>
+                  <p className="text-slate-600 text-[10px] mt-1.5 font-mono truncate">
+                    SUBJECT: {(() => {
+                      if (!tpl.content) return "No Subject";
+                      const lines = tpl.content.split('\n');
+                      const subLine = lines.find(l => l.trim().toLowerCase().startsWith('subject:'));
+                      if (subLine) return subLine.replace(/subject:/i, '').trim();
+                      // Fallback if Subject: tag is missing from memory cache
+                      const firstLine = lines.map(l => l.trim()).find(l => l.length > 0) || "";
+                      if (firstLine.toLowerCase().startsWith('dear') || firstLine.toLowerCase().startsWith('hi') || firstLine.toLowerCase().startsWith('hello') || firstLine.toLowerCase().startsWith("i'm") || firstLine.toLowerCase().startsWith("i hope")) {
+                        return "AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |";
+                      }
+                      return firstLine.replace(/subject:/i, '').trim() || "AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |";
+                    })()}
+                  </p>
                 </div>
               </label>
             ))}

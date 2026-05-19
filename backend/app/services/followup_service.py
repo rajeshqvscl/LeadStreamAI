@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 import json
 import psycopg2.extras
+import re
 
 from app.database import get_db_connection
 from app.services.email_service import send_email
@@ -11,6 +12,27 @@ from app.services.llm_services import LLMService
 from app.models.lead import add_activity_log
 
 logger = logging.getLogger(__name__)
+
+def is_generic_followup(body: Optional[str]) -> bool:
+    """Detects legacy, standard, or HTML-wrapped default placeholder follow-ups to allow dynamic healing."""
+    if not body:
+        return True
+    # Strip HTML tags
+    cleaned = re.sub(r'<[^>]+>', '', body).strip().lower()
+    if not cleaned:
+        return True
+    
+    # Check for known generic fallback variations
+    if "just following up on my previous email" in cleaned:
+        return True
+    if "let me know if you have any questions" in cleaned and "following up" in cleaned:
+        return True
+    if cleaned == "hi, just following up on my previous email. let me know if you have any questions!":
+        return True
+    if len(cleaned) < 120 and "following up" in cleaned and ("questions" in cleaned or "previous email" in cleaned):
+        return True
+        
+    return False
 
 FOLLOWUP_TEMPLATES = {
     "CLIENT": {
@@ -32,6 +54,16 @@ FOLLOWUP_TEMPLATES = {
         1: "Dear {name},\n\nI hope you're doing well. Following up on the HealthTech opportunity I shared regarding our AI-enabled diagnostics platform.\n\nPlease let me know if you have any questions or require further information.",
         2: "Hi {name},\n\nFollowing up on my previous note. We are seeing strong traction and expanding our lab network significantly.\n\nGiven your focus in the healthcare space, I'd value the opportunity to get your feedback on our current trajectory. Are you available for a brief sync?",
         3: "Hi {name},\n\nI'm reaching out one last time to see if you'd like to discuss the opportunity. I understand you're busy, so I'll move this to the back burner if I don't hear from you.\n\nThanks again for your time and consideration."
+    },
+    "INVESTOR_DEFENCE": {
+        1: "Dear {name},\n\nI hope you're doing well. Following up on the Defence Deeptech & AI Systems opportunity (iDEX Prime Winner) I shared earlier.\n\nPlease let me know if you have reviewed it or require any additional information for evaluation.",
+        2: "Hi {name},\n\nFollowing up on my previous note. We are seeing exceptional traction and interest from key strategic partners in the deeptech and national security ecosystem.\n\nGiven your focus in this domain, would you be open to a brief 5-10 minute call to discuss this further?",
+        3: "Hi {name},\n\nI understand you are busy, so I'm reaching out one last time. If this isn't a fit for you right now, I'll move this to the back burner.\n\nThank you again for your time and consideration."
+    },
+    "INVESTOR_GENERIC": {
+        1: "Dear {name},\n\nI hope you're doing well. Following up on the investment opportunity teaser I shared earlier.\n\nPlease let me know if you have reviewed it or require any additional information for evaluation.",
+        2: "Hi {name},\n\nFollowing up on my previous note. We are seeing strong interest and strategic progress across our core milestones.\n\nWould you be open to a brief 5-10 minute sync this week to share a quick update and discuss further?",
+        3: "Hi {name},\n\nI understand you are busy, so I'm reaching out one last time. If this isn't a fit for you right now, I'll move this to the back burner.\n\nThank you again for your time and consideration."
     }
 }
 
@@ -43,7 +75,7 @@ def get_template_followup(lead: dict, stage: int) -> str:
     type_key = "CLIENT" if ('CLIENT' in lead_type_raw or 'CUSTOMER' in lead_type_raw) else "INVESTOR"
     
     if type_key == "INVESTOR":
-        # Dynamic campaign detection (AI Hiring vs HealthTech vs Agritech)
+        # Dynamic campaign detection (AI Hiring vs HealthTech vs Agritech vs Defence vs Generic)
         original_subject = get_original_outreach_subject(lead) or ""
         draft_text = lead.get('email_draft') or ""
         persona_text = lead.get('persona') or ""
@@ -67,12 +99,36 @@ def get_template_followup(lead: dict, stage: int) -> str:
             "diagnostic" in draft_text.lower()
         )
         
+        is_defence = (
+            "defence" in original_subject.lower() or
+            "defence" in draft_text.lower() or
+            "defence" in persona_text.lower() or
+            "defence" in sector_text.lower() or
+            "deeptech" in original_subject.lower() or
+            "deeptech" in draft_text.lower() or
+            "idex" in original_subject.lower() or
+            "idex" in draft_text.lower()
+        )
+        
+        is_agritech = (
+            "agritech" in original_subject.lower() or
+            "agritech" in draft_text.lower() or
+            "agritech" in persona_text.lower() or
+            "agritech" in sector_text.lower() or
+            "climate" in original_subject.lower() or
+            "climate" in draft_text.lower()
+        )
+        
         if is_ai_hiring:
             campaign_key = "INVESTOR_AI_HIRING"
         elif is_healthtech:
             campaign_key = "INVESTOR_HEALTHTECH"
-        else:
+        elif is_defence:
+            campaign_key = "INVESTOR_DEFENCE"
+        elif is_agritech:
             campaign_key = "INVESTOR_AGRITECH"
+        else:
+            campaign_key = "INVESTOR_GENERIC"
     else:
         campaign_key = "CLIENT"
         
@@ -136,10 +192,9 @@ def generate_followup_preview(lead_id: int, user_id: int):
         lead_type_raw = str(lead.get('lead_type') or lead.get('sector') or lead.get('persona') or '').upper()
         type_key = "CLIENT" if ('CLIENT' in lead_type_raw or 'CUSTOMER' in lead_type_raw) else "INVESTOR"
         
-        # Use saved draft if exists, unless it is empty or matches the generic default fallback string
+        # Use saved draft if exists, unless it is empty or matches a generic default fallback string
         body = lead.get('followup_draft')
-        generic_default = "Hi, just following up on my previous email. Let me know if you have any questions!"
-        if not body or body.strip() == generic_default:
+        if is_generic_followup(body):
             body = get_template_followup(lead, next_stage)
         
         # Clean subject
@@ -358,7 +413,9 @@ def process_outreach_sequences():
                     subject = f"Re: {orig_subject}"
 
                     # ── DYNAMIC BODY GENERATION ────────────────────────────────────────────
-                    body = get_template_followup(lead, next_stage)
+                    body = lead.get('followup_draft')
+                    if is_generic_followup(body):
+                        body = get_template_followup(lead, next_stage)
                     profile = get_sender_profile(str(uid))
                     
                     # Convert follow-up plain text template to premium HTML
