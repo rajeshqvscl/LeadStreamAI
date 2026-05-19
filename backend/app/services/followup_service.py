@@ -268,6 +268,7 @@ def process_outreach_sequences():
                     break
 
                 try:
+                    lead = dict(lead)
                     lead_id = lead['id']
                     stage = lead['followup_stage'] or 0
                     last_sent = lead['last_outreach_at']
@@ -299,26 +300,10 @@ def process_outreach_sequences():
                     if not should_action: 
                         continue
 
-                    body = get_template_followup(lead, next_stage)
-                    profile = get_sender_profile(str(uid))
-                    
-                    # Convert follow-up plain text template to premium HTML
-                    body_html = markdown_to_html(body)
-                    full_body = inject_signature(body_html, profile, lead_id)
-                    
-                    # We do not append the original email body as a quote block.
-                    # Gmail automatically groups messages sharing the same thread_id into a single thread trail,
-                    # and the user explicitly requested clean, premium follow-up messages without quoted duplicate blocks underneath (2nd image).
-                    
-                    # Subject line continuation with Re: prefix
-                    orig_subject = get_original_outreach_subject(lead)
-                    subject = f"Re: {orig_subject}"
-
-                    logger.info(f"Auto-dispatching lead {lead_id} ({lead['email']}) for User {uid}. Subject: {subject}")
-
-                    # ── ON-THE-FLY THREAD HEALING ──────────────────────────────────────────
+                    # ── ON-THE-FLY THREAD HEALING (RUN FIRST) ──────────────────────────────
                     # If gmail_thread_id is missing (lead was sent before the fix), try to
-                    # recover it from the Gmail Sent folder right now before dispatching.
+                    # recover it from the Gmail Sent folder right now so we can use its actual
+                    # subject and thread properties to generate the follow-up correctly.
                     existing_thread_id = lead.get('gmail_thread_id')
                     existing_msg_id    = lead.get('gmail_message_id')
 
@@ -356,13 +341,10 @@ def process_outreach_sequences():
                                         existing_thread_id = heal_thread_id
                                         existing_msg_id    = heal_msg_id
                                         
-                                        # Use the REAL subject from Gmail for this follow-up
+                                        # Update our dynamic lead dictionary so downstream functions use the correct subject
                                         if heal_subject:
-                                            clean_subj = heal_subject.strip()
-                                            while clean_subj.lower().startswith("re:"):
-                                                clean_subj = clean_subj[3:].strip()
-                                            subject = f"Re: {clean_subj}"
-                                            logger.info(f"Updated subject from Gmail healing: {subject}")
+                                            lead['first_outreach_subject'] = heal_subject
+                                            logger.info(f"Dynamic healing: updated first_outreach_subject to '{heal_subject}'")
 
                                         # Persist to DB so future follow-ups also benefit
                                         heal_conn = get_db_connection()
@@ -381,7 +363,20 @@ def process_outreach_sequences():
                                         logger.info(f"✅ On-the-fly thread heal for lead {lead_id} ({lead['email']}): thread={heal_thread_id}")
                         except Exception as heal_err:
                             logger.warning(f"On-the-fly thread heal failed for lead {lead_id}: {heal_err}")
-                    # ────────────────────────────────────────────────────────────────────────
+
+                    # ── SUBJECT LINE COMPUTATION ───────────────────────────────────────────
+                    orig_subject = get_original_outreach_subject(lead)
+                    subject = f"Re: {orig_subject}"
+
+                    # ── DYNAMIC BODY GENERATION ────────────────────────────────────────────
+                    body = get_template_followup(lead, next_stage)
+                    profile = get_sender_profile(str(uid))
+                    
+                    # Convert follow-up plain text template to premium HTML
+                    body_html = markdown_to_html(body)
+                    full_body = inject_signature(body_html, profile, lead_id)
+                    
+                    logger.info(f"Auto-dispatching lead {lead_id} ({lead['email']}) for User {uid}. Subject: {subject}")
 
                     # Dispatch Email
                     success, msg, new_thread_id, new_rfc_msg_id = send_email(
