@@ -36,26 +36,14 @@ FOLLOWUP_TEMPLATES = {
 }
 
 def get_template_followup(lead: dict, stage: int) -> str:
-    """Returns a dynamic AI-generated follow-up body, falling back to clean template if LLM is unavailable."""
+    """Returns the standardized, high-performance follow-up template for the lead's sector and stage."""
     lead_name = f"{lead.get('first_name') or ''}".strip() or "there"
-    orig_content = lead.get('email_draft') or ""
     
-    try:
-        from app.services.llm_services import EmailGenerator
-        generator = EmailGenerator()
-        ai_body = generator.generate_followup(lead_name, orig_content, stage)
-        if ai_body and len(ai_body.strip()) > 10:
-            # Strip off any leading/trailing quote marks if LLM returned it in quotes
-            ai_body = ai_body.strip().strip('"').strip("'")
-            return ai_body
-    except Exception as e:
-        logger.warning(f"AI follow-up generation failed, falling back to static template: {e}")
-
     lead_type_raw = str(lead.get('lead_type') or lead.get('sector') or lead.get('persona') or '').upper()
     type_key = "CLIENT" if ('CLIENT' in lead_type_raw or 'CUSTOMER' in lead_type_raw) else "INVESTOR"
     
     if type_key == "INVESTOR":
-        # Dynamic campaign detection (AI Hiring vs Agritech)
+        # Dynamic campaign detection (AI Hiring vs HealthTech vs Agritech)
         original_subject = get_original_outreach_subject(lead) or ""
         draft_text = lead.get('email_draft') or ""
         persona_text = lead.get('persona') or ""
@@ -148,9 +136,10 @@ def generate_followup_preview(lead_id: int, user_id: int):
         lead_type_raw = str(lead.get('lead_type') or lead.get('sector') or lead.get('persona') or '').upper()
         type_key = "CLIENT" if ('CLIENT' in lead_type_raw or 'CUSTOMER' in lead_type_raw) else "INVESTOR"
         
-        # Use saved draft if exists, otherwise generate from template
+        # Use saved draft if exists, unless it is empty or matches the generic default fallback string
         body = lead.get('followup_draft')
-        if not body:
+        generic_default = "Hi, just following up on my previous email. Let me know if you have any questions!"
+        if not body or body.strip() == generic_default:
             body = get_template_followup(lead, next_stage)
         
         # Clean subject
