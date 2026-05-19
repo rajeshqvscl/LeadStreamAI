@@ -7,11 +7,45 @@ import psycopg2
 import psycopg2.extras
 from app.database import get_db_connection
 from app.models.lead import get_lead_by_id, update_lead, get_activity_log, add_activity_log
-from app.api.drafts import get_sender_profile, inject_signature
+from app.api.drafts import get_sender_profile, inject_signature, check_daily_email_limit
 
 import logging
 
 logger = logging.getLogger(__name__)
+
+# --- REDIS CACHE INITIALIZATION ---
+import os
+
+redis_client = None
+redis_available = False
+
+try:
+    import redis
+    REDIS_URL = os.getenv("REDIS_URL") or os.getenv("REDIS_TLS_URL") or "redis://localhost:6379"
+    redis_client = redis.Redis.from_url(
+        REDIS_URL, 
+        socket_connect_timeout=1.0, 
+        socket_timeout=1.0, 
+        decode_responses=True
+    )
+    redis_client.ping()
+    redis_available = True
+    logger.info(f"SUCCESS: Connected to Redis Cache inside leads.py at {REDIS_URL.split('@')[-1]}")
+except Exception as re_err:
+    logger.warning(f"NOTICE: Redis is not active inside leads.py. Falling back to direct database. Error: {re_err}")
+    redis_client = None
+    redis_available = False
+
+def invalidate_leads_cache(user_id: str = "*"):
+    if redis_available and redis_client:
+        try:
+            pattern = f"leads:{user_id}:*"
+            keys = redis_client.keys(pattern)
+            if keys:
+                redis_client.delete(*keys)
+                logger.info(f"SUCCESS: Invalidated cache keys for pattern: {pattern}")
+        except Exception as ie:
+            logger.error(f"Failed to invalidate leads cache: {ie}")
 
 router = APIRouter()
 
@@ -80,6 +114,22 @@ def get_leads(
     search_type: Optional[str] = "",
     user_id: Optional[str] = Header(None, alias="X-User-Id")
 ):
+    # Re-standardize user_id for private pipeline filtering
+    uid = normalize_user_id(user_id)
+    is_admin = (str(user_id).lower() == 'admin')
+    
+    # Build unique composite cache key for leads list queries
+    cache_key = f"leads:{uid}:{page}:{per_page}:{exclude_drafted}:{search}:{title}:{persona}:{company}:{validation_status}:{city}:{country}:{source}:{exclude_source}:{search_type}:{is_admin}"
+    
+    if redis_available and redis_client:
+        try:
+            cached = redis_client.get(cache_key)
+            if cached:
+                logger.info(f"INFO: Cache HIT for leads query of user {uid} on page {page}")
+                return json.loads(cached)
+        except Exception as ce:
+            logger.warning(f"WARNING: Redis leads cache read error: {ce}")
+
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
@@ -268,10 +318,20 @@ def get_leads(
             "created_at": r["created_at"].isoformat() + "Z" if r["created_at"] else None
         })
 
-    return {
+    result = {
         "leads": leads,
         "total": total
     }
+    
+    if redis_available and redis_client:
+        try:
+            # Cache results for 10 seconds to keep load off the database, but keep pagination/searching highly snappy
+            redis_client.setex(cache_key, 10, json.dumps(result))
+            logger.info(f"INFO: Cached leads query for user {uid} on page {page}")
+        except Exception as ce:
+            logger.warning(f"WARNING: Redis leads cache write error: {ce}")
+            
+    return result
 
 
 @router.get("/leads/followups")
@@ -692,6 +752,7 @@ def update_lead(lead_id: int, req: UpdateLeadRequest, user_id: Optional[str] = H
     cur.close()
     conn.close()
     
+    invalidate_leads_cache()
     return {"message": "Lead updated successfully"}
 
 @router.post("/leads/{lead_id}/respond")
@@ -740,6 +801,8 @@ def save_followup_draft(lead_id: int, req: ApproveFollowupRequest, user_id: Opti
 @router.post("/leads/{lead_id}/approve-followup")
 def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Approves and sends a pending follow-up draft. Supports optional custom body."""
+    if not check_daily_email_limit(user_id, 1):
+        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this follow-up would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)

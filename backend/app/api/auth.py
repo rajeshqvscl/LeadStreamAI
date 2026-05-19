@@ -224,7 +224,7 @@ def request_access(req: AccessRequest):
     """
     
     # Send email from system to admin
-    success = send_email(
+    res = send_email(
         to_email=admin['email'],
         subject=subject,
         html_content=html_content,
@@ -232,6 +232,7 @@ def request_access(req: AccessRequest):
         from_name="LeadStream Security",
         is_system_email=True
     )
+    success = res[0] if isinstance(res, tuple) else res
     
     if not success:
         raise HTTPException(status_code=500, detail="Failed to send notification email")

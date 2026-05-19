@@ -26,7 +26,11 @@ const Inbox = () => {
     const formatIST = (dateStr, showTime = true) => {
         if (!dateStr) return 'Recently';
         try {
-            const date = new Date(dateStr);
+            let cleanStr = dateStr;
+            if (typeof cleanStr === 'string' && !cleanStr.endsWith('Z') && !cleanStr.includes('+') && !/-[0-9]{2}:[0-9]{2}$/.test(cleanStr)) {
+                cleanStr = cleanStr.replace(' ', 'T') + 'Z';
+            }
+            const date = new Date(cleanStr);
             if (isNaN(date.getTime())) return dateStr;
             const opts = {
                 timeZone: 'Asia/Kolkata',

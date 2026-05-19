@@ -19,7 +19,7 @@ const Dashboard = () => {
     sent: 0,
     conversion_rate: 0,
     daily_sent_count: 0,
-    daily_limit: 100,
+    daily_limit: 2000,
     open_rate: 0,
     unique_opens: 0,
     click_rate: 0,

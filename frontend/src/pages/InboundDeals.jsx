@@ -101,7 +101,11 @@ const InboundDeals = () => {
   const formatIST = (dateStr) => {
     if (!dateStr) return '—';
     try {
-      const d = new Date(dateStr);
+      let cleanStr = dateStr;
+      if (typeof cleanStr === 'string' && !cleanStr.endsWith('Z') && !cleanStr.includes('+') && !/-[0-9]{2}:[0-9]{2}$/.test(cleanStr)) {
+        cleanStr = cleanStr.replace(' ', 'T') + 'Z';
+      }
+      const d = new Date(cleanStr);
       if (isNaN(d.getTime())) return dateStr;
       const date = d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' });
       const time = d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });

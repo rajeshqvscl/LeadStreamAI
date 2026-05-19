@@ -23,6 +23,39 @@ RAG_URL = "https://rag-sys-gz59.onrender.com"
 
 logger = logging.getLogger(__name__)
 
+# --- REDIS CACHE INITIALIZATION ---
+redis_client = None
+redis_available = False
+
+try:
+    import redis
+    REDIS_URL = os.getenv("REDIS_URL") or os.getenv("REDIS_TLS_URL") or "redis://localhost:6379"
+    # Use 1-second connection timeout to prevent backend blocking if Redis server is down
+    redis_client = redis.Redis.from_url(
+        REDIS_URL, 
+        socket_connect_timeout=1.0, 
+        socket_timeout=1.0, 
+        decode_responses=True
+    )
+    redis_client.ping()
+    redis_available = True
+    logger.info(f"SUCCESS: Connected to Redis Cache at {REDIS_URL.split('@')[-1]}")
+except Exception as re_err:
+    logger.warning(f"NOTICE: Redis is not active. Falling back to direct database execution. Error: {re_err}")
+    redis_client = None
+    redis_available = False
+
+def invalidate_inbound_deals_cache(user_id: str):
+    if redis_available and redis_client:
+        try:
+            pattern = f"inbound_deals:{user_id}:*"
+            keys = redis_client.keys(pattern)
+            if keys:
+                redis_client.delete(*keys)
+                logger.info(f"SUCCESS: Invalidated cache keys for pattern: {pattern}")
+        except Exception as ie:
+            logger.error(f"Failed to invalidate Redis cache: {ie}")
+
 def normalize_user_id(user_id: Optional[str]) -> str:
     """Normalizes the user ID from the header to a valid database ID."""
     if not user_id or user_id.strip() == "" or user_id.lower() == "admin":
@@ -364,6 +397,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             lead_name = f"{lead['first_name'] or ''} {lead['last_name'] or ''}".strip() or "Lead"
             print(f"SUCCESS: Auto-detected reply from {sender_email}. Intent: {intent}")
             conn.commit()
+            invalidate_inbound_deals_cache(str(user_id))
 
             # Step 3: Auto-Scheduling (Disabled - User will schedule manually)
             if False: # intent in ["INTERESTED", "MEETING_REQUESTED"]:
@@ -436,8 +470,19 @@ def get_inbound_deals(
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     uid = normalize_user_id(user_id)
-    offset = (page - 1) * per_page
     
+    # Attempt to read from Redis cache first
+    cache_key = f"inbound_deals:{uid}:{page}:{per_page}"
+    if redis_available and redis_client:
+        try:
+            cached = redis_client.get(cache_key)
+            if cached:
+                logger.info(f"INFO: Cache HIT for inbound deals of user {uid} on page {page}")
+                return json.loads(cached)
+        except Exception as ce:
+            logger.warning(f"WARNING: Redis cache read error: {ce}")
+            
+    offset = (page - 1) * per_page
     try:
         # Total Bypass: If a meeting exists, it must show up. Otherwise, show replied leads.
         print(f"DEBUG: Fetching inbound deals for uid: {uid} (Original X-User-Id: {user_id})")
@@ -508,12 +553,22 @@ def get_inbound_deals(
 
         print(f"DEBUG: Found {len(processed_leads)} leads for uid {uid}. Total count in DB: {total}")
         
-        return {
+        result = {
             "leads": processed_leads,
             "total": total,
             "page": page,
             "per_page": per_page
         }
+        
+        if redis_available and redis_client:
+            try:
+                # Cache results for 15 seconds so pagination & reloads are instant, but fresh data is fetched frequently
+                redis_client.setex(cache_key, 15, json.dumps(result))
+                logger.info(f"INFO: Cached inbound deals for user {uid} on page {page}")
+            except Exception as ce:
+                logger.warning(f"WARNING: Redis cache write error: {ce}")
+                
+        return result
     except Exception as e:
         print(f"Error fetching inbound deals: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -574,6 +629,7 @@ def force_sync_inbound(user_id: Optional[str] = Header(None, alias="X-User-Id"))
                     print(f"Error processing message {m_id}: {msg_err}")
                     continue
             
+            invalidate_inbound_deals_cache(str(uid))
             return {"status": "success", "processed": len(messages), "detected": found_count}
         finally:
             cur.close()
@@ -750,7 +806,7 @@ def schedule_manual_meeting(lead_id: int, data: dict = Body(...), user_id: Optio
         confirm_body = f"Hi {lead['first_name'] or 'there'},\n\nI've scheduled our strategy session for {meeting_time.strftime('%A, %B %d at %I:%M %p UTC')}.\n\nYou can join via Google Meet here: {event_data['meet_link']}\n\nLooking forward to it!"
         
         # Final Dispatch: Prefer Gmail API for personalized scheduling
-        success = send_email(
+        res = send_email(
             to_email=lead['email'],
             subject=f"Meeting Scheduled: {lead_name} x LeadStream",
             html_content=confirm_body.replace("\n", "<br>"),
@@ -759,7 +815,9 @@ def schedule_manual_meeting(lead_id: int, data: dict = Body(...), user_id: Optio
             is_system_email=False,
             user_id=uid
         )
+        success = res[0] if isinstance(res, tuple) else res
         
+        invalidate_inbound_deals_cache(str(uid))
         return {"status": "success", "event": event_data, "email_sent": success}
         
     except Exception as e:
@@ -839,6 +897,7 @@ LeadStream Strategy Division
                 user_id=uid
             )
 
+        invalidate_inbound_deals_cache(str(uid))
         return {"success": True, "message": "Meeting successfully rescheduled"}
     except Exception as e:
         print(f"Error rescheduling: {e}")
@@ -1170,3 +1229,121 @@ def retro_sync_pdfs(request: Request, x_user_id: Optional[str] = Header(None)):
     except Exception as e:
         print(f"Retro sync error: {e}")
         return {"success": False, "error": str(e)}
+
+
+@router.post("/gmail/heal-threads")
+def heal_gmail_threads(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """
+    Retroactively heals Gmail thread IDs for all SENT leads with missing gmail_thread_id.
+    Scans the Gmail Sent folder, matches emails by recipient address, and populates
+    gmail_thread_id + gmail_message_id so all future follow-ups nest correctly.
+    """
+    import re as _re
+    uid = normalize_user_id(user_id)
+
+    service = get_gmail_service(int(uid))
+    if not service:
+        raise HTTPException(status_code=400, detail="Gmail not connected. Please link your Google account first.")
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    try:
+        # 1. Find all sent leads that are missing gmail_thread_id for this user
+        cur.execute("""
+            SELECT id, email, last_outreach_subject, first_outreach_subject
+            FROM leads_raw
+            WHERE user_id = %s
+              AND email_status = 'SENT'
+              AND (gmail_thread_id IS NULL OR gmail_thread_id = '')
+              AND followup_status = 'ACTIVE'
+        """, (uid,))
+        broken_leads = cur.fetchall()
+
+        if not broken_leads:
+            return {"status": "ok", "healed": 0, "message": "All leads already have Gmail thread IDs. Nothing to heal."}
+
+        # Build a lookup: recipient email → lead row
+        leads_by_email = {row['email'].lower().strip(): dict(row) for row in broken_leads}
+        logger.info(f"Found {len(leads_by_email)} leads with missing gmail_thread_id for user {uid}. Scanning Sent folder...")
+
+        # 2. Scan Sent folder (last 500 messages) to match by recipient
+        results = service.users().messages().list(
+            userId='me', q='in:sent', maxResults=500
+        ).execute()
+        sent_msgs = results.get('messages', [])
+
+        healed = 0
+        for meta in sent_msgs:
+            if not leads_by_email:
+                break  # All leads healed, stop early
+
+            try:
+                msg = service.users().messages().get(
+                    userId='me',
+                    id=meta['id'],
+                    format='metadata',
+                    metadataHeaders=['To', 'Message-ID', 'Message-Id', 'message-id', 'Subject']
+                ).execute()
+
+                headers = msg.get('payload', {}).get('headers', [])
+                to_raw = next((h['value'] for h in headers if h['name'].lower() == 'to'), '')
+                subject_raw = next((h['value'] for h in headers if h['name'].lower() == 'subject'), '')
+                msg_id_raw = next((h['value'] for h in headers if h['name'].lower() == 'message-id'), None)
+
+                # Extract all recipient emails from To header
+                recipient_emails = [e.lower().strip() for e in _re.findall(r'[\w\.\-\+]+@[\w\.\-]+', to_raw)]
+
+                for recip in recipient_emails:
+                    if recip in leads_by_email:
+                        lead = leads_by_email[recip]
+                        thread_id = msg.get('threadId')
+                        rfc_msg_id = msg_id_raw
+
+                        if not rfc_msg_id:
+                            # Fetch full metadata for RFC Message-ID
+                            try:
+                                full_meta = service.users().messages().get(
+                                    userId='me', id=meta['id'], format='metadata',
+                                    metadataHeaders=['Message-ID', 'Message-Id', 'message-id']
+                                ).execute()
+                                full_headers = full_meta.get('payload', {}).get('headers', [])
+                                rfc_msg_id = next((h['value'] for h in full_headers if h['name'].lower() == 'message-id'), None)
+                            except Exception:
+                                rfc_msg_id = f"<{meta['id']}@mail.gmail.com>"
+
+                        if thread_id:
+                            cur.execute("""
+                                UPDATE leads_raw
+                                SET gmail_thread_id = %s,
+                                    gmail_message_id = %s,
+                                    first_outreach_subject = COALESCE(first_outreach_subject, %s),
+                                    updated_at = NOW()
+                                WHERE id = %s
+                            """, (thread_id, rfc_msg_id, subject_raw, lead['id']))
+                            conn.commit()
+
+                            logger.info(f"✅ Healed thread for lead {lead['id']} ({recip}): thread={thread_id}")
+                            healed += 1
+                            del leads_by_email[recip]  # Remove from pending list
+                            break
+
+            except Exception as msg_err:
+                logger.warning(f"Could not process sent message {meta['id']}: {msg_err}")
+                continue
+
+        still_missing = len(leads_by_email)
+        return {
+            "status": "complete",
+            "healed": healed,
+            "still_missing": still_missing,
+            "message": f"Healed {healed} leads. {still_missing} leads could not be matched (emails may not be in Sent folder)."
+        }
+
+    except Exception as e:
+        logger.error(f"heal_gmail_threads error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+

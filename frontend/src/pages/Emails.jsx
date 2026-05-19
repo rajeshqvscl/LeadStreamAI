@@ -117,9 +117,9 @@ const Emails = () => {
       fetchEmails();
     } catch (err) {
       window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
-        detail: { id: taskId, title: 'Batch Failed', subtitle: 'Check Gmail link', progress: 0, status: 'FAILED' } 
+        detail: { id: taskId, title: 'Batch Failed', subtitle: err?.response?.data?.detail || 'Check Gmail link', progress: 0, status: 'FAILED' } 
       }));
-      showNotification('error', 'Bulk send failed');
+      showNotification('error', err?.response?.data?.detail || 'Bulk send failed');
     }
   };
 
@@ -316,11 +316,11 @@ const Emails = () => {
         detail: { id: taskId, title: 'Batch Completed', subtitle: response.data.message || 'Dispatch successful', progress: 100, status: 'COMPLETED' } 
       }));
       fetchEmails();
-    } catch {
+    } catch (err) {
       window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
-        detail: { id: taskId, title: 'Batch Failed', subtitle: 'Connection error', progress: 0, status: 'FAILED' } 
+        detail: { id: taskId, title: 'Batch Failed', subtitle: err?.response?.data?.detail || 'Connection error', progress: 0, status: 'FAILED' } 
       }));
-      showNotification('error', 'Batch send failed');
+      showNotification('error', err?.response?.data?.detail || 'Batch send failed');
     }
   };
 

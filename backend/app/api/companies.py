@@ -13,12 +13,75 @@ from psycopg2.extras import execute_values
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+# --- REDIS CACHE INITIALIZATION ---
+import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+redis_client = None
+redis_available = False
+
+try:
+    import redis
+    REDIS_URL = os.getenv("REDIS_URL") or os.getenv("REDIS_TLS_URL") or "redis://localhost:6379"
+    redis_client = redis.Redis.from_url(
+        REDIS_URL, 
+        socket_connect_timeout=1.0, 
+        socket_timeout=1.0, 
+        decode_responses=True
+    )
+    redis_client.ping()
+    redis_available = True
+    logger.info(f"SUCCESS: Connected to Redis Cache inside companies.py at {REDIS_URL.split('@')[-1]}")
+except Exception as re_err:
+    logger.warning(f"NOTICE: Redis is not active inside companies.py. Falling back to direct database. Error: {re_err}")
+    redis_client = None
+    redis_available = False
+
+def invalidate_companies_cache(user_id: str = "*"):
+    if redis_available and redis_client:
+        try:
+            pattern = f"companies:{user_id}:*"
+            keys = redis_client.keys(pattern)
+            if keys:
+                redis_client.delete(*keys)
+                logger.info(f"SUCCESS: Invalidated cache keys for pattern: {pattern}")
+        except Exception as ie:
+            logger.error(f"Failed to invalidate companies cache: {ie}")
+
+
 router = APIRouter()
 
 def normalize_user_id(user_id: Optional[str]) -> str:
     if not user_id or user_id.strip() == "":
         return None
     return user_id
+
+
+def check_daily_email_limit(user_id: Optional[str], batch_size: int = 1) -> bool:
+    """Returns True if the user has not exceeded their daily limit of 2000 sent emails."""
+    uid = normalize_user_id(user_id)
+    is_admin = (str(user_id or '').lower() == 'admin')
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        if is_admin:
+            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
+        elif uid:
+            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id = %s AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'", (uid,))
+        else:
+            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id IS NULL AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
+        
+        sent_today = cur.fetchone()[0] or 0
+        return (sent_today + batch_size) <= 2000
+    except Exception as e:
+        logger.error(f"Error checking email limit: {e}")
+        return True
+    finally:
+        cur.close()
+        conn.close()
 
 @router.get("/companies")
 def list_companies(
@@ -29,12 +92,24 @@ def list_companies(
     user_id: Optional[str] = Header(None, alias="X-User-Id")
 ):
     """Returns company profiles from the internal company registry database with pagination and global search."""
+    uid = normalize_user_id(user_id)
+    is_admin = (str(user_id or '').lower() == 'admin')
+    
+    # Build unique composite cache key for companies list queries
+    cache_key = f"companies:{uid}:{page}:{limit}:{search}:{filters}:{is_admin}"
+    
+    if redis_available and redis_client:
+        try:
+            cached = redis_client.get(cache_key)
+            if cached:
+                logger.info(f"INFO: Cache HIT for companies query of user {uid} on page {page}")
+                return json.loads(cached)
+        except Exception as ce:
+            logger.warning(f"WARNING: Redis companies cache read error: {ce}")
+            
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     offset = (page - 1) * limit
-    
-    uid = normalize_user_id(user_id)
-    is_admin = (str(user_id or '').lower() == 'admin')
     
     # Base query construction
     base_where = ""
@@ -97,13 +172,23 @@ def list_companies(
                 data = json.loads(data)
             companies.append({ "id": r['id'], "_is_generated": r["_is_generated"], **data })
 
-        return {
+        result = {
             "companies": companies,
             "total": total,
             "page": page,
             "limit": limit,
             "pages": (total + limit - 1) // limit
         }
+        
+        if redis_available and redis_client:
+            try:
+                # Cache results for 10 seconds to keep load off the database, but keep pagination/searching highly snappy
+                redis_client.setex(cache_key, 10, json.dumps(result))
+                logger.info(f"INFO: Cached companies query for user {uid} on page {page}")
+            except Exception as ce:
+                logger.warning(f"WARNING: Redis companies cache write error: {ce}")
+                
+        return result
     except Exception as e:
         import traceback
         print(traceback.format_exc())
@@ -210,6 +295,7 @@ def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header
                 data_to_insert
             )
         conn.commit()
+        invalidate_companies_cache(str(uid))
         return {"success": True, "count": len(processed_rows)}
     except Exception as e:
         if conn: conn.rollback()
@@ -232,6 +318,7 @@ def update_company(row_id: int, row_data: Dict[str, Any], user_id: Optional[str]
             (json.dumps(row_data), row_id, uid)
         )
         conn.commit()
+        invalidate_companies_cache(str(uid))
         return {"success": True}
     except Exception as e:
         conn.rollback()
@@ -249,6 +336,7 @@ def clear_companies(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     try:
         cur.execute("DELETE FROM company_registry WHERE user_id = %s", (uid,))
         conn.commit()
+        invalidate_companies_cache(str(uid))
         return {"success": True}
     finally:
         cur.close()
@@ -796,6 +884,9 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
 @router.post("/companies/{row_id}/send")
 def send_company_email(row_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Generates and actually dispatches an email for a company record."""
+    if not check_daily_email_limit(user_id, 1):
+        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this email would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
+        
     from app.services.email_service import send_email
     
     # 1. Generate the draft and lead record
@@ -829,20 +920,35 @@ def send_company_email(row_id: int, user_id: Optional[str] = Header(None, alias=
             body = parts[1].strip() if len(parts) > 1 else ""
 
         # 5. Real Dispatch
-        success = send_email(
+        success, error_msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=lead['email'],
             subject=subject,
             html_content=body.replace("\n", "<br>"),
             from_email=sender_email,
-            from_name=sender_name
+            from_name=sender_name,
+            user_id=uid
         )
         
         if success:
-            cur.execute("UPDATE leads_raw SET email_status = 'SENT', updated_at = NOW() WHERE id = %s", (lead_id,))
+            cur.execute("""
+                UPDATE leads_raw 
+                SET email_status = 'SENT', 
+                    last_outreach_at = NOW(),
+                    last_outreach_subject = %s,
+                    first_outreach_subject = COALESCE(first_outreach_subject, %s),
+                    first_outreach_at = COALESCE(first_outreach_at, NOW()),
+                    gmail_thread_id = %s,
+                    gmail_message_id = %s,
+                    followup_status = 'ACTIVE',
+                    followup_stage = 0,
+                    is_responded = FALSE,
+                    updated_at = NOW()
+                WHERE id = %s
+            """, (subject, subject, new_thread_id, new_rfc_message_id, lead_id))
             conn.commit()
-            return {"success": True, "message": f"Email dispatched via Resend to {lead['email']}"}
+            return {"success": True, "message": f"Email dispatched successfully to {lead['email']}"}
         else:
-            raise HTTPException(status_code=500, detail="Dispatch failed. Check Resend configuration.")
+            raise HTTPException(status_code=500, detail=f"Dispatch failed: {error_msg}")
 
     except Exception as e:
         conn.rollback()

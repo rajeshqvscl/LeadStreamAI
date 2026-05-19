@@ -16,6 +16,15 @@ import {
 } from 'recharts';
 
 const AdminDashboard = () => {
+  const parseUtcDate = (dateStr) => {
+    if (!dateStr) return new Date();
+    let cleanStr = dateStr;
+    if (!cleanStr.endsWith('Z') && !cleanStr.includes('+') && !/-[0-9]{2}:[0-9]{2}$/.test(cleanStr)) {
+      cleanStr = cleanStr.replace(' ', 'T') + 'Z';
+    }
+    return new Date(cleanStr);
+  };
+
   const [leads, setLeads] = useState([]);
   const [stats, setStats] = useState({
     total_leads: 0,
@@ -231,10 +240,23 @@ const AdminDashboard = () => {
                   // Brand derivation logic for export
                   let derivedType = l.lead_type || 'CLIENT';
                   const owner = (l.owner_name || '').toLowerCase();
-                  const sector = (l.sector || '').toLowerCase();
                   if (owner.includes('yashika')) {
-                    if (sector.includes('agri')) derivedType = 'Agrivijay';
-                    else derivedType = 'Gigin AI';
+                    const sectorLower = (l.sector || '').toLowerCase();
+                    const draftLower = (l.email_draft || '').toLowerCase();
+                    const personaLower = (l.persona || '').toLowerCase();
+                    const subjLower = (l.first_outreach_subject || l.last_outreach_subject || '').toLowerCase();
+                    const isAiHiring = sectorLower.includes('hiring') || 
+                                       draftLower.includes('hiring') || 
+                                       personaLower.includes('hiring') || 
+                                       subjLower.includes('hiring') || 
+                                       sectorLower.includes('recruitment') || 
+                                       draftLower.includes('recruitment') ||
+                                       draftLower.includes('gigin');
+                    if (isAiHiring) {
+                      derivedType = 'Gigin AI';
+                    } else {
+                      derivedType = 'Agrivijay';
+                    }
                   }
 
                   return [
@@ -250,7 +272,7 @@ const AdminDashboard = () => {
                     clean(rejectionReason),
                     clean(l.sector || 'Other'),
                     clean(l.owner_name),
-                    clean(new Date(l.updated_at).toLocaleDateString()),
+                    clean(parseUtcDate(l.updated_at).toLocaleDateString()),
                     clean(l.rag_intelligence?.strategy || 'General Outreach'),
                     clean(l.rag_advice || 'Analyst Review Pending'),
                     clean(Array.isArray(l.rag_intelligence?.signals) ? l.rag_intelligence.signals.join(' | ') : (l.rag_intelligence?.signals || 'N/A')),
@@ -596,6 +618,7 @@ const AdminDashboard = () => {
                   <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Check Size</th>
                 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Score</th>
                 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Stage</th>
+                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Followups</th>
                 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Rejection / Reason</th>
                 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Status</th>
                 <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Owner</th>
@@ -634,7 +657,7 @@ const AdminDashboard = () => {
                         <div className="flex items-center gap-2">
                           {(() => {
                             const sevenDays = 7 * 24 * 60 * 60 * 1000;
-                            const isStalled = (Date.now() - new Date(lead.updated_at).getTime()) > sevenDays;
+                            const isStalled = (Date.now() - parseUtcDate(lead.updated_at).getTime()) > sevenDays;
                             const isFinal = ['Meeting Scheduled', 'REJECTED', 'NOT_INTERESTED'].includes(lead.email_status) || ['MEETING_SCHEDULED', 'NOT_INTERESTED'].includes(lead.reply_intent);
                             if (isStalled && !isFinal) {
                               return (
@@ -668,7 +691,6 @@ const AdminDashboard = () => {
                   <td className="px-2 py-2">
                     {(() => {
                       const name = (lead.owner_name || '').toLowerCase();
-                      const sector = (lead.sector || '').toLowerCase();
                       const isInvestorTeam = name.includes('yashika') || name.includes('kajal') || name.includes('ayush');
                       const isClientTeam = name.includes('palak');
                       
@@ -676,8 +698,22 @@ const AdminDashboard = () => {
                       
                       // Custom branding logic based on user request
                       if (name.includes('yashika')) {
-                        if (sector.includes('agri')) derivedType = 'Agrivijay';
-                        else derivedType = 'Gigin AI';
+                        const sectorLower = (lead.sector || '').toLowerCase();
+                        const draftLower = (lead.email_draft || '').toLowerCase();
+                        const personaLower = (lead.persona || '').toLowerCase();
+                        const subjLower = (lead.first_outreach_subject || lead.last_outreach_subject || '').toLowerCase();
+                        const isAiHiring = sectorLower.includes('hiring') || 
+                                           draftLower.includes('hiring') || 
+                                           personaLower.includes('hiring') || 
+                                           subjLower.includes('hiring') || 
+                                           sectorLower.includes('recruitment') || 
+                                           draftLower.includes('recruitment') ||
+                                           draftLower.includes('gigin');
+                        if (isAiHiring) {
+                          derivedType = 'Gigin AI';
+                        } else {
+                          derivedType = 'Agrivijay';
+                        }
                       }
 
                       const isSpecial = derivedType === 'Agrivijay' || derivedType === 'Gigin AI';
@@ -735,16 +771,46 @@ const AdminDashboard = () => {
                     </div>
                   </td>
                   <td className="px-3 py-5 text-center">
-                    <div className="flex flex-col items-center gap-1">
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-black tracking-widest uppercase ${lead.followup_stage > 0 ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-slate-800 text-slate-500 border border-white/5'}`}>
-                        {lead.followup_stage === 0 ? 'Initial' : lead.followup_stage === 1 ? 'Outreach' : `Follow-up ${lead.followup_stage - 1}`}
-                      </span>
-                      {lead.last_outreach_at && (
-                        <span className="text-[7px] font-bold text-slate-600 uppercase">
-                          Sent {new Date(lead.last_outreach_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
-                        </span>
-                      )}
-                    </div>
+                    {(() => {
+                      const stageNum = parseInt(lead.followup_stage, 10) || 0;
+                      return (
+                        <div className="flex flex-col items-center gap-1">
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-black tracking-widest uppercase ${stageNum > 0 ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-slate-800 text-slate-500 border border-white/5'}`}>
+                            {stageNum === 0 ? 'Initial' : `Stage ${stageNum}`}
+                          </span>
+                          {lead.last_outreach_at && (
+                            <span className="text-[7px] font-bold text-slate-600 uppercase">
+                              Sent {parseUtcDate(lead.last_outreach_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </td>
+                  <td className="px-3 py-5 text-center">
+                    {(() => {
+                      const stageNum = parseInt(lead.followup_stage, 10) || 0;
+                      return (
+                        <div className="flex flex-col items-center">
+                          <span className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider border ${
+                            stageNum === 1 ? 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400' :
+                            stageNum === 2 ? 'bg-purple-500/10 border-purple-500/20 text-purple-400' :
+                            stageNum === 3 ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' :
+                            'bg-white/5 border-white/10 text-slate-400'
+                          }`}>
+                            {stageNum === 0 ? '0 / 3 Sent' :
+                             stageNum === 1 ? '1 / 3 Sent' :
+                             stageNum === 2 ? '2 / 3 Sent' :
+                             stageNum === 3 ? '3 / 3 Sent' : '0 / 3 Sent'}
+                          </span>
+                          {lead.followup_status === 'ACTIVE' && stageNum < 3 && (
+                            <span className="text-[8px] text-indigo-400/90 font-black uppercase tracking-widest mt-1 animate-pulse">
+                              ● Active
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-2 py-2">
                     {lead.reply_intent === 'NOT_INTERESTED' ? (
@@ -783,10 +849,10 @@ const AdminDashboard = () => {
                     <div className="flex flex-col items-end gap-0.5 text-slate-500">
                       <div className="flex items-center gap-1.5">
                         <Clock className="w-3.5 h-3.5 text-slate-600" />
-                        <span className="text-[11px] font-black text-slate-400 uppercase">{new Date(lead.updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</span>
+                        <span className="text-[11px] font-black text-slate-400 uppercase">{parseUtcDate(lead.updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</span>
                       </div>
                       <span className="text-[9px] font-bold text-slate-600 tracking-tighter">
-                        {new Date(lead.updated_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                        {parseUtcDate(lead.updated_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
                       </span>
                     </div>
                   </td>
@@ -1047,7 +1113,7 @@ const AdminDashboard = () => {
                         <div className="flex items-center justify-between">
                           <span className="text-[10px] font-black text-white uppercase tracking-widest">Initial Outreach</span>
                           {selectedLead.last_outreach_at && selectedLead.followup_stage >= 1 && (
-                            <span className="text-[8px] font-bold text-slate-500">{new Date(selectedLead.last_outreach_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                            <span className="text-[8px] font-bold text-slate-500">{parseUtcDate(selectedLead.last_outreach_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                           )}
                         </div>
                         <p className="text-[9px] text-slate-500 mt-1 uppercase font-bold">Primary email dispatch</p>
@@ -1143,7 +1209,7 @@ const AdminDashboard = () => {
                         <Mail className="w-4 h-4 text-indigo-400" />
                         <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Outgoing Outreach</span>
                       </div>
-                      <span className="text-[9px] font-bold text-slate-500">{new Date(selectedLead.created_at).toLocaleDateString()}</span>
+                      <span className="text-[9px] font-bold text-slate-500">{parseUtcDate(selectedLead.created_at).toLocaleDateString()}</span>
                     </div>
                     <div className="text-sm text-slate-300 line-clamp-4 italic">
                       {selectedLead.email_draft?.replace(/Subject:.*\n\n/, '') || 'Initial outreach sent via system.'}

@@ -120,6 +120,17 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         recent_logs.append(dict(row))
 
         
+    # Count of emails sent today (in the last 24 hours)
+    if is_admin:
+        cur.execute("SELECT COUNT(*) as sent_today FROM leads_raw WHERE email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
+    elif user_id and user_id.strip():
+        cur.execute("SELECT COUNT(*) as sent_today FROM leads_raw WHERE user_id = %s AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'", (user_id,))
+    else:
+        cur.execute("SELECT COUNT(*) as sent_today FROM leads_raw WHERE user_id IS NULL AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
+        
+    sent_today_res = cur.fetchone()
+    sent_today = sent_today_res['sent_today'] if sent_today_res else 0
+
     cur.close()
     conn.close()
 
@@ -130,8 +141,8 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         "pending": pending,
         "sent": sent,
         "refined": refined,
-        "daily_sent_count": sent,
-        "daily_limit": 100,
+        "daily_sent_count": sent_today,
+        "daily_limit": 2000,
         "open_rate": open_rate,
         "click_rate": click_rate,
         "unique_opens": unique_opens,

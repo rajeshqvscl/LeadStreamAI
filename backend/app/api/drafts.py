@@ -48,6 +48,31 @@ def normalize_user_id(user_id: Optional[str]) -> str:
     return "1" # Fallback to admin/system if resolution fails
 
 
+def check_daily_email_limit(user_id: Optional[str], batch_size: int = 1) -> bool:
+    """Returns True if the user has not exceeded their daily limit of 2000 sent emails."""
+    uid = normalize_user_id(user_id)
+    is_admin = (str(user_id or '').lower() == 'admin')
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        if is_admin:
+            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
+        elif uid:
+            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id = %s AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'", (uid,))
+        else:
+            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id IS NULL AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
+        
+        sent_today = cur.fetchone()[0] or 0
+        return (sent_today + batch_size) <= 2000
+    except Exception as e:
+        logger.error(f"Error checking email limit: {e}")
+        return True # Default to True to avoid blocking during transient DB errors
+    finally:
+        cur.close()
+        conn.close()
+
+
 
 def markdown_to_html(text):
     import re
@@ -324,20 +349,20 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     # Active unsubscribe link
     unsub_link = f"https://qvscl.com/unsubscribe?lead_id={lead_id}"
     
-    # Standardized signature in grey
+    # Standardized signature in grey (fully left-aligned with no leading spaces)
     sig_html = f"""
 <br><br>
-<div style="color: #666666; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.5;">
-    <a href="{unsub_link}" style="color: #666666; text-decoration: underline;">Click here to unsubscribe</a><br><br>
-    --<br>
-    <i>Thanks & Regards,</i><br>
-    <i><strong>{name}</strong></i><br>
-    <i>{title}</i><br>
-    <i><a href="{linkedin}" style="color: #0077b5; text-decoration: none;">LinkedIn</a></i><br>
-    <i>{phone}</i><br><br>
-    <div style="font-size: 10px; color: #999999; line-height: 1.2;">
-        {disclaimer}
-    </div>
+<div style="color: #666666; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.5; text-align: left;">
+<a href="{unsub_link}" style="color: #666666; text-decoration: underline;">Click here to unsubscribe</a><br><br>
+--<br>
+<i>Thanks & Regards,</i><br>
+<i><strong>{name}</strong></i><br>
+<i>{title}</i><br>
+<i><a href="{linkedin}" style="color: #0077b5; text-decoration: none;">LinkedIn</a></i><br>
+<i>{phone}</i><br><br>
+<div style="font-size: 10px; color: #999999; line-height: 1.2;">
+{disclaimer}
+</div>
 </div>
 """
     return body_text + sig_html
@@ -990,6 +1015,9 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[s
 @router.post("/approve-email/{draft_id}")
 def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     try:
+        if not check_daily_email_limit(user_id, 1):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this email would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
         from app.services.email_service import send_email
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -1364,6 +1392,12 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     cur.execute(f"SELECT id, email, email_draft, cc_email FROM leads_raw {where_clause}", params)
     leads_to_send = cur.fetchall()
     
+    if leads_to_send and not check_daily_email_limit(user_id, len(leads_to_send)):
+        cur.close()
+        conn.close()
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
+    
     sent_count = 0
     for lead in leads_to_send:
         try:
@@ -1454,6 +1488,12 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
         (req.lead_ids,)
     )
     leads_to_send = cur.fetchall()
+    
+    if leads_to_send and not check_daily_email_limit(user_id, len(leads_to_send)):
+        cur.close()
+        conn.close()
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
 
     sent_count = 0
     failed_count = 0
@@ -1686,6 +1726,12 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
         if not req.lead_ids:
             return {"message": "No leads provided"}
             
+        if not check_daily_email_limit(user_id, len(req.lead_ids)):
+            cur.close()
+            conn.close()
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
+            
         # 1. Fetch User Data
         uid = normalize_user_id(user_id)
         cur.execute("SELECT email, full_name, username, job_title, phone, linkedin_url FROM users WHERE id = %s", (uid,))
@@ -1761,14 +1807,16 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                             updated_at = NOW(),
                             last_outreach_at = NOW(),
                             last_outreach_subject = %s,
+                            first_outreach_subject = COALESCE(first_outreach_subject, %s),
+                            first_outreach_at = COALESCE(first_outreach_at, NOW()),
                             gmail_thread_id = %s,
                             gmail_message_id = %s,
                             followup_status = 'ACTIVE',
                             followup_stage = 0,
                             is_responded = FALSE
                         WHERE id = %s
-                    """, (email_content, subject, new_thread_id, new_rfc_message_id, lead['id']))
-                    add_activity_log(lead['id'], "EMAIL_SENT", f"Bulk domain email dispatched via Resend from {sender_email}", "system")
+                    """, (email_content, subject, subject, new_thread_id, new_rfc_message_id, lead['id']))
+                    add_activity_log(lead['id'], "EMAIL_SENT", f"Bulk domain email dispatched via Gmail API from {sender_email}", "system")
                     sent_count += 1
             except Exception as e:
                 print(f"Error sending bulk lead {lead['id']}: {e}")

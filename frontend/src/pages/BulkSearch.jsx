@@ -8,6 +8,17 @@ import DraftTemplatePicker from '../components/DraftTemplatePicker';
 
 const BulkSearch = () => {
   const navigate = useNavigate();
+  
+  const parseUtcDate = (dateStr) => {
+    if (!dateStr) return null;
+    let cleanStr = dateStr;
+    if (typeof cleanStr === 'string' && !cleanStr.endsWith('Z') && !cleanStr.includes('+') && !/-[0-9]{2}:[0-9]{2}$/.test(cleanStr)) {
+      cleanStr = cleanStr.replace(' ', 'T') + 'Z';
+    }
+    const d = new Date(cleanStr);
+    return isNaN(d.getTime()) ? null : d;
+  };
+
   const [isLoading, setIsLoading] = useState(false);
   const [notification, setNotification] = useState(null);
   const [limit, setLimit] = useState(20);
@@ -875,10 +886,10 @@ const BulkSearch = () => {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex flex-col">
                         <span className="text-[11px] font-bold text-slate-300">
-                          {lead.created_at ? new Date(lead.created_at).toLocaleDateString([], { day: '2-digit', month: 'short' }) : 'N/A'}
+                          {lead.created_at ? parseUtcDate(lead.created_at)?.toLocaleDateString([], { day: '2-digit', month: 'short' }) : 'N/A'}
                         </span>
                         <span className="text-[9px] font-black text-slate-600 uppercase tracking-tighter">
-                          {lead.created_at ? new Date(lead.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                          {lead.created_at ? parseUtcDate(lead.created_at)?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                         </span>
                       </div>
                     </td>

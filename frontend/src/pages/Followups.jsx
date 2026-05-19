@@ -92,6 +92,17 @@ const getStageColor = (stage) => {
 const Followups = () => {
   const navigate = useNavigate();
   const [followups, setFollowups] = useState([]);
+  
+  const parseUtcDate = (dateStr) => {
+    if (!dateStr) return null;
+    let cleanStr = dateStr;
+    if (typeof cleanStr === 'string' && !cleanStr.endsWith('Z') && !cleanStr.includes('+') && !/-[0-9]{2}:[0-9]{2}$/.test(cleanStr)) {
+      cleanStr = cleanStr.replace(' ', 'T') + 'Z';
+    }
+    const d = new Date(cleanStr);
+    return isNaN(d.getTime()) ? null : d;
+  };
+
   const [isLoading, setIsLoading] = useState(true);
   const [isBulkSending, setIsBulkSending] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -255,10 +266,10 @@ const Followups = () => {
         fetchFollowups();
       }, 1000);
       
-    } catch {
+    } catch (err) {
       setIsBulkSending(false);
       setProgress(0);
-      showNotification('error', 'Matrix Dispatch Error');
+      showNotification('error', err?.response?.data?.detail || 'Matrix Dispatch Error');
     }
   };
 
@@ -607,11 +618,11 @@ const Followups = () => {
                           <div className="flex flex-col gap-1 py-1 px-2 rounded-lg bg-white/[0.03]">
                             <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500">
                               <Calendar className="w-3 h-3 text-slate-600" />
-                              <span>Initial Outreach: {lead.first_outreach_at ? new Date(lead.first_outreach_at).toLocaleString('en-IN', { day: '2-digit', month: 'short' }) : 'Never'}</span>
+                              <span>Initial Outreach: {lead.first_outreach_at ? parseUtcDate(lead.first_outreach_at)?.toLocaleString('en-IN', { day: '2-digit', month: 'short' }) : 'Never'}</span>
                             </div>
                             <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400">
                               <Clock className="w-3 h-3 text-slate-600" />
-                              <span>Last Outreach: {lead.last_outreach_at ? new Date(lead.last_outreach_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Never'}</span>
+                              <span>Last Outreach: {lead.last_outreach_at ? parseUtcDate(lead.last_outreach_at)?.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Never'}</span>
                             </div>
                           </div>
                         </div>

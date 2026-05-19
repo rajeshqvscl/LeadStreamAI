@@ -139,26 +139,33 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
         """
     
     # 1. Prepare default attachments (used by both Gmail and Resend)
+    # CRITICAL: Do NOT attach PDFs to follow-up emails! Only attach to the very first email in the sequence.
+    # Detect follow-up by thread_id OR by Re: prefix in subject (handles case where thread_id is NULL in DB)
+    is_followup = bool(thread_id or in_reply_to or (subject and subject.strip().lower().startswith('re:')))
+    
     if not attachments:
         attachments = []
-        asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
-        profile_files = ["QVSCL Company Profile.pdf", "Lalit_Huria_Profile.pdf"]
-        
-        logger.info(f"Looking for attachments in: {asset_dir}")
-        for filename in profile_files:
-            path = asset_dir / filename
-            if path.exists():
-                import base64
-                with open(path, "rb") as f:
-                    content_bytes = f.read()
-                    content_b64 = base64.b64encode(content_bytes).decode('utf-8')
-                attachments.append({
-                    "content": content_b64,
-                    "filename": filename
-                })
-                logger.info(f"Loaded attachment successfully: {filename}")
-            else:
-                logger.error(f"Attachment NOT FOUND directly at: {path}")
+        if not is_followup:
+            asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
+            profile_files = ["QVSCL Company Profile.pdf", "Lalit_Huria_Profile.pdf"]
+            
+            logger.info(f"Looking for attachments in: {asset_dir}")
+            for filename in profile_files:
+                path = asset_dir / filename
+                if path.exists():
+                    import base64
+                    with open(path, "rb") as f:
+                        content_bytes = f.read()
+                        content_b64 = base64.b64encode(content_bytes).decode('utf-8')
+                    attachments.append({
+                        "content": content_b64,
+                        "filename": filename
+                    })
+                    logger.info(f"Loaded attachment successfully: {filename}")
+                else:
+                    logger.error(f"Attachment NOT FOUND directly at: {path}")
+        else:
+            logger.info("Outreach is a follow-up email thread. Default PDF attachments skipped.")
 
     # 2. Attempt Gmail API Dispatch (Highly Preferred for Outreach)
     if user_id and not is_system_email:
@@ -200,10 +207,32 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 msg['from'] = clean_from
                 msg['subject'] = clean_subject
                 
-                # Set threading headers for replies
+                # Thread Healing: if in_reply_to is missing but thread_id is present, fetch the last message's Message-ID from Gmail
+                if thread_id and not in_reply_to:
+                    try:
+                        logger.info(f"in_reply_to is missing for thread {thread_id}. Fetching thread metadata to heal thread...")
+                        thread_detail = service.users().threads().get(
+                            userId='me', 
+                            id=thread_id, 
+                            format='metadata',
+                            metadataHeaders=['Message-ID', 'Message-Id', 'message-id']
+                        ).execute()
+                        messages = thread_detail.get('messages', [])
+                        if messages:
+                            last_msg = messages[-1]
+                            headers = last_msg.get('payload', {}).get('headers', [])
+                            in_reply_to = next((h['value'] for h in headers if h['name'].lower() == 'message-id'), None)
+                            logger.info(f"Successfully healed thread! Extracted Message-ID: {in_reply_to}")
+                    except Exception as he:
+                        logger.error(f"Failed to dynamically heal thread from Gmail: {he}")
+
+                # Set threading headers for replies (wrapped in < > for RFC compliance)
                 if in_reply_to:
-                    msg['In-Reply-To'] = in_reply_to
-                    msg['References'] = in_reply_to
+                    clean_reply_to = in_reply_to.strip()
+                    if not clean_reply_to.startswith('<'):
+                        clean_reply_to = f"<{clean_reply_to}>"
+                    msg['In-Reply-To'] = clean_reply_to
+                    msg['References'] = clean_reply_to
                 
                 if cc:
                     clean_cc = cc.replace('\n', ', ').replace('\r', '').strip()
@@ -235,9 +264,32 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 # Gmail API send
                 sent = service.users().messages().send(userId='me', body=send_body).execute()
                 sent_thread_id = sent.get('threadId')
-                # Get the RFC Message-ID from the sent message for future In-Reply-To chaining
-                sent_msg_detail = service.users().messages().get(userId='me', id=sent.get('id'), format='metadata', metadataHeaders=['Message-ID']).execute()
-                sent_rfc_message_id = next((h['value'] for h in sent_msg_detail.get('payload', {}).get('headers', []) if h['name'] == 'Message-ID'), None)
+                
+                # Robustly get the RFC Message-ID from the sent message for future In-Reply-To chaining
+                import time as py_time
+                sent_rfc_message_id = None
+                for attempt in range(4):
+                    try:
+                        sent_msg_detail = service.users().messages().get(
+                            userId='me', 
+                            id=sent.get('id'), 
+                            format='metadata',
+                            metadataHeaders=['Message-ID', 'Message-Id', 'message-id']
+                        ).execute()
+                        headers = sent_msg_detail.get('payload', {}).get('headers', [])
+                        sent_rfc_message_id = next((h['value'] for h in headers if h['name'].lower() == 'message-id'), None)
+                        if sent_rfc_message_id:
+                            logger.info(f"Successfully retrieved RFC Message-ID on attempt {attempt + 1}: {sent_rfc_message_id}")
+                            break
+                    except Exception as ex:
+                        logger.warning(f"Attempt {attempt + 1} to fetch RFC Message-ID failed: {ex}")
+                    py_time.sleep(0.5)
+                
+                if not sent_rfc_message_id:
+                    # Fallback default Message-ID format if fetch failed
+                    sent_rfc_message_id = f"<{sent.get('id')}@mail.gmail.com>"
+                    logger.warning(f"Could not fetch RFC Message-ID from Gmail API. Using fallback: {sent_rfc_message_id}")
+
                 logger.info(f"✅ Gmail API dispatch successful to {to_email} (CC: {cc}) — Message ID: {sent.get('id')}")
                 return True, "Success", sent_thread_id, sent_rfc_message_id
             else:
@@ -291,7 +343,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
             
             if not resend_key:
                 logger.error("RESEND_API_KEY is missing from environment.")
-                return False, "Resend API key missing."
+                return False, "Resend API key missing.", None, None
             
             # Safe debug: only show prefix to verify key identity
             key_prefix = resend_key[:6] if resend_key else "NONE"
@@ -350,13 +402,13 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
             sent = resend.Emails.send(params)
             sent_id = getattr(sent, "id", str(sent))
             logger.info(f"Email sent successfully via Resend. ID: {sent_id}")
-            return True, "Success"
+            return True, "Success", None, None
         except Exception as e:
             logger.error(f"Resend dispatch failed: {str(e)}")
-            return False, str(e)
+            return False, str(e), None, None
     else:
         success = send_smtp_fallback(to_email, subject, final_html, final_from_email, final_from_name, reply_to=from_email, cc=cc)
-        return success, "SMTP dispatch completed" if success else "SMTP dispatch failed"
+        return success, ("SMTP dispatch completed" if success else "SMTP dispatch failed"), None, None
 
 def check_scheduled_emails():
     """
@@ -372,7 +424,7 @@ def check_scheduled_emails():
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
         cur.execute("""
-            SELECT l.id, l.email, l.email_draft, l.cc_email, u.email as sender_email, u.full_name, u.username
+            SELECT l.id, l.email, l.email_draft, l.cc_email, l.user_id, u.email as sender_email, u.full_name, u.username
             FROM leads_raw l
             LEFT JOIN users u ON l.user_id = u.id
             WHERE l.email_status = 'SCHEDULED' AND l.scheduled_at <= NOW()
@@ -407,13 +459,16 @@ def check_scheduled_emails():
                 
             logger.info(f"Dispatching scheduled email to {to_email}")
             
-            success = send_email(
+            # Fetch user ID to enable Gmail dispatch
+            user_id = lead['user_id']
+            success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=to_email,
                 subject=subject,
                 html_content=body.replace("\n", "<br>"),
                 from_email=sender_email,
                 from_name=sender_name,
                 lead_id=lead_id,
+                user_id=user_id,
                 cc=cc_email
             )
             
@@ -423,11 +478,16 @@ def check_scheduled_emails():
                     SET email_status = 'SENT', 
                         updated_at = NOW(),
                         last_outreach_at = NOW(),
+                        last_outreach_subject = %s,
+                        first_outreach_subject = COALESCE(first_outreach_subject, %s),
+                        first_outreach_at = COALESCE(first_outreach_at, NOW()),
+                        gmail_thread_id = %s,
+                        gmail_message_id = %s,
                         followup_status = 'ACTIVE',
                         followup_stage = 0,
                         is_responded = FALSE
                     WHERE id = %s
-                """, (lead_id,))
+                """, (subject, subject, new_thread_id, new_rfc_message_id, lead_id))
                 conn.commit()
                 try:
                     add_activity_log(lead_id, "EMAIL_SENT", f"Scheduled email dispatched automatically", "system")
@@ -539,7 +599,7 @@ def send_admin_report(to_email: str, report_data: dict) -> bool:
         logger.error("No admin found to receive MIS report.")
         return False
 
-    return send_email(
+    res = send_email(
         to_email=to_email or admin['email'],
         subject=subject,
         html_content=html_content,
@@ -548,3 +608,4 @@ def send_admin_report(to_email: str, report_data: dict) -> bool:
         is_system_email=True,
         attachments=report_data.get("attachments")
     )
+    return res[0] if isinstance(res, tuple) else res
