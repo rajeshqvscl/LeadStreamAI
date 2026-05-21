@@ -107,7 +107,8 @@ def create_tables():
         ("gmail_thread_id", "TEXT"),
         ("gmail_message_id", "TEXT"),
         ("first_outreach_at", "TIMESTAMP"),
-        ("first_outreach_subject", "TEXT")
+        ("first_outreach_subject", "TEXT"),
+        ("cc_email", "TEXT")
     ]
     for col_name, col_type in columns_to_add:
         try:
@@ -255,7 +256,10 @@ def create_tables():
         ("credits_used", "INTEGER DEFAULT 0"),
         ("credits_limit", "INTEGER DEFAULT 200"),
         ("auto_followup", "BOOLEAN DEFAULT FALSE"),
-        ("outreach_daily_limit", "INTEGER DEFAULT 200")
+        ("outreach_daily_limit", "INTEGER DEFAULT 200"),
+        ("google_access_token", "TEXT"),
+        ("google_refresh_token", "TEXT"),
+        ("google_token_expiry", "TIMESTAMP")
     ]
     for col_name, col_type in user_cols:
         try:
