@@ -367,7 +367,20 @@ def create_tables():
             VALUES (%s, %s, %s, %s, %s)
         """, (default_username, "admin@leadstreamai.com", "System Administrator", password_hash, "ADMIN"))
     
-    
+    # Secure Sequence numbering shift for ep-crimson-mouse (New DB)
+    # This prevents any ID/numbering conflicts when migrating data back to the old DB
+    if DATABASE_URL and "ep-crimson-mouse" in DATABASE_URL:
+        for seq in ["leads_raw_id_seq", "activity_log_id_seq", "campaigns_id_seq", "recipients_id_seq", "campaign_events_id_seq", "users_id_seq"]:
+            try:
+                # Only restart sequence if it hasn't already been incremented past 1,000,000
+                cur.execute(f"SELECT COALESCE(last_value, 1) as val FROM pg_sequences WHERE seqname = '{seq}'")
+                row = cur.fetchone()
+                if row and row['val'] < 1000000:
+                    cur.execute(f"ALTER SEQUENCE IF EXISTS {seq} RESTART WITH 1000000;")
+                    conn.commit()
+            except Exception:
+                conn.rollback()
+
     conn.commit()
     cur.close()
     conn.close()
