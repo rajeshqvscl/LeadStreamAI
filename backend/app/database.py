@@ -377,16 +377,16 @@ def create_tables():
     team_members = [
         ("test", "test@leadstreamai.com", "Test User", "sravanthi2026", "ADMIN"),
         ("yashika.g", "yashika.g@leadstreamai.com", "Yashika Gupta", "Yashika2026", "ADMIN"),
-        ("yashika_gupta", "yashika.g@leadstreamai.com", "Yashika Gupta", "Yashika2026", "ADMIN"),
+        ("yashika_gupta", "yashika.gupta@leadstreamai.com", "Yashika Gupta", "Yashika2026", "ADMIN"),
         ("yashika", "yashika@leadstreamai.com", "Yashika Gupta", "Yashika2026", "ADMIN"),
-        ("kajal.n", "kajal@leadstreamai.com", "Kajal Narang", "Kajal2026", "ADMIN"),
-        ("kajal_narang", "kajal@leadstreamai.com", "Kajal Narang", "Kajal2026", "ADMIN"),
-        ("ayush.h", "ayush@leadstreamai.com", "Ayush Heda", "Ayush2026", "ADMIN"),
-        ("ayush_heda", "ayush@leadstreamai.com", "Ayush Heda", "Ayush2026", "ADMIN"),
-        ("palak.j", "palak@leadstreamai.com", "Palak Jain", "Palak2026", "ADMIN"),
-        ("palak_jain", "palak@leadstreamai.com", "Palak Jain", "Palak2026", "ADMIN"),
-        ("payal.n", "payal@leadstreamai.com", "Payal Narang", "Payal2026", "ADMIN"),
-        ("payal_narang", "payal@leadstreamai.com", "Payal Narang", "Payal2026", "ADMIN")
+        ("kajal.n", "kajal.n@leadstreamai.com", "Kajal Narang", "Kajal2026", "ADMIN"),
+        ("kajal_narang", "kajal.narang@leadstreamai.com", "Kajal Narang", "Kajal2026", "ADMIN"),
+        ("ayush.h", "ayush.h@leadstreamai.com", "Ayush Heda", "Ayush2026", "ADMIN"),
+        ("ayush_heda", "ayush.heda@leadstreamai.com", "Ayush Heda", "Ayush2026", "ADMIN"),
+        ("palak.j", "palak.j@leadstreamai.com", "Palak Jain", "Palak2026", "ADMIN"),
+        ("palak_jain", "palak.jain@leadstreamai.com", "Palak Jain", "Palak2026", "ADMIN"),
+        ("payal.n", "payal.n@leadstreamai.com", "Payal Narang", "Payal2026", "ADMIN"),
+        ("payal_narang", "payal.narang@leadstreamai.com", "Payal Narang", "Payal2026", "ADMIN")
     ]
     for uname, email, fname, pswd, role in team_members:
         cur.execute("SELECT COUNT(*) FROM users WHERE username = %s", (uname,))
