@@ -166,6 +166,16 @@ def create_tables():
     );
     """)
 
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS unsubscribe_list (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        reason TEXT,
+        source VARCHAR(100),
+        unsubscribed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    """)
+
     # Ensure user_id and user_name exist in activity_log
     for col, col_type in [("user_id", "INTEGER"), ("user_name", "TEXT")]:
         try:
