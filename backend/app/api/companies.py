@@ -536,8 +536,9 @@ def background_auto_sync():
             except Exception as e:
                 print(f"[background] Sync failed for {cfg['url']}: {e}")
 
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            executor.map(process_config, configs)
+        # Run sequentially to prevent Memory Exhaustion
+        for cfg in configs:
+            process_config(cfg)
             
     finally:
         cur.close()
@@ -583,18 +584,20 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
 
     # Resolve which tabs to process
     if sheet_name == "ALL_TABS":
-        tabs_to_process = discover_gsheet_tabs(doc_id)
+        tabs = discover_gsheet_tabs(doc_id)
+        # To prevent memory crashes, restrict ALL_TABS to only load "ALL DATA"
+        tabs_to_process = [t for t in tabs if t['name'].strip().upper() == "ALL DATA"]
+        if not tabs_to_process and tabs:
+            tabs_to_process = [tabs[0]] # fallback to first tab
         if not tabs_to_process:
             tabs_to_process = [{"name": "Default", "gid": default_gid}]
     else:
         target_gid = default_gid
         if sheet_name:
             tabs = discover_gsheet_tabs(doc_id)
-            print(f"DEBUG: Discovered {len(tabs)} tabs for sheet {doc_id}")
             for t in tabs:
                 if t['name'].strip().lower() == sheet_name.strip().lower():
                     target_gid = t['gid']
-                    print(f"DEBUG: Matched sheet_name '{sheet_name}' to GID {target_gid}")
                     break
         tabs_to_process = [{"name": sheet_name or "Sheet1", "gid": target_gid}]
 
@@ -686,8 +689,9 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
         except Exception as e:
             print(f"GSheet import error for tab {tab['name']}: {str(e)}")
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        executor.map(process_single_tab, tabs_to_process)
+    # Run sequentially to save memory!
+    for tab in tabs_to_process:
+        process_single_tab(tab)
 
     print(f"DEBUG: Finished processing all tabs. Total rows collected: {len(all_rows)}")
     if not all_rows:
