@@ -186,10 +186,10 @@ SIG_END"""
                     p_row = cur.fetchone()
                     if p_row:
                         profile = {
-                            'full_name': p_row[1] or p_row[0] or 'Kajal Huria',
-                            'job_title': p_row[2] or 'Analyst',
-                            'phone': p_row[3] or '8527083798',
-                            'linkedin_url': p_row[4] or 'https://www.linkedin.com/company/qvscl/'
+                            'full_name': p_row['full_name'] or p_row['username'] or 'Kajal Huria',
+                            'job_title': p_row['job_title'] or 'Analyst',
+                            'phone': p_row['phone'] or '8527083798',
+                            'linkedin_url': p_row['linkedin_url'] or 'https://www.linkedin.com/company/qvscl/'
                         }
                 except Exception as e:
                     logger.error(f"Error querying user profile for self-healing: {e}")
