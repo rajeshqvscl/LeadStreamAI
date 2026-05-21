@@ -383,44 +383,6 @@ def create_tables():
             VALUES (%s, %s, %s, %s, %s)
         """, (default_username, "admin@leadstreamai.com", "System Administrator", password_hash, "ADMIN"))
     
-    # Seed default team members if missing (for the new database)
-    team_members = [
-        ("test", "test@leadstreamai.com", "Test User", "sravanthi2026", "ADMIN"),
-        ("yashika.g", "yashika.g@leadstreamai.com", "Yashika Gupta", "Yashika2026", "ADMIN"),
-        ("yashika_gupta", "yashika.gupta@leadstreamai.com", "Yashika Gupta", "Yashika2026", "ADMIN"),
-        ("yashika", "yashika@leadstreamai.com", "Yashika Gupta", "Yashika2026", "ADMIN"),
-        ("kajal.n", "kajal.n@leadstreamai.com", "Kajal Narang", "Kajal2026", "ADMIN"),
-        ("kajal_narang", "kajal.narang@leadstreamai.com", "Kajal Narang", "Kajal2026", "ADMIN"),
-        ("ayush.h", "ayush.h@leadstreamai.com", "Ayush Heda", "Ayush2026", "ADMIN"),
-        ("ayush_heda", "ayush.heda@leadstreamai.com", "Ayush Heda", "Ayush2026", "ADMIN"),
-        ("palak.j", "palak.j@leadstreamai.com", "Palak Jain", "Palak2026", "ADMIN"),
-        ("palak_jain", "palak.jain@leadstreamai.com", "Palak Jain", "Palak2026", "ADMIN"),
-        ("payal.n", "payal.n@leadstreamai.com", "Payal Narang", "Payal2026", "ADMIN"),
-        ("payal_narang", "payal.narang@leadstreamai.com", "Payal Narang", "Payal2026", "ADMIN")
-    ]
-    for uname, email, fname, pswd, role in team_members:
-        cur.execute("SELECT COUNT(*) FROM users WHERE username = %s", (uname,))
-        if cur.fetchone()['count'] == 0:
-            import hashlib
-            pswd_hash = hashlib.sha256(pswd.encode()).hexdigest()
-            cur.execute("""
-                INSERT INTO users (username, email, full_name, password_hash, role, is_active, is_approved)
-                VALUES (%s, %s, %s, %s, %s, TRUE, TRUE)
-            """, (uname, email, fname, pswd_hash, role))
-
-    # Secure Sequence numbering shift for ep-crimson-mouse (New DB)
-    # This prevents any ID/numbering conflicts when migrating data back to the old DB
-    if DATABASE_URL and "ep-crimson-mouse" in DATABASE_URL:
-        for seq in ["leads_raw_id_seq", "activity_log_id_seq", "campaigns_id_seq", "recipients_id_seq", "campaign_events_id_seq", "users_id_seq"]:
-            try:
-                # Only restart sequence if it hasn't already been incremented past 1,000,000
-                cur.execute(f"SELECT COALESCE(last_value, 1) as val FROM pg_sequences WHERE seqname = '{seq}'")
-                row = cur.fetchone()
-                if row and row['val'] < 1000000:
-                    cur.execute(f"ALTER SEQUENCE IF EXISTS {seq} RESTART WITH 1000000;")
-                    conn.commit()
-            except Exception:
-                conn.rollback()
 
     conn.commit()
     cur.close()
