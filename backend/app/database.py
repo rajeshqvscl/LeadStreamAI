@@ -65,6 +65,7 @@ def create_tables():
         scheduled_at TIMESTAMP
     );
     """)
+    conn.commit()
 
     # Ensure columns exist if table was already created with old schema
     columns_to_add = [
@@ -193,6 +194,7 @@ def create_tables():
         updated_at TIMESTAMP DEFAULT NOW()
     );
     """)
+    conn.commit()
 
     # Ensure isolation columns exist in campaigns for existing DBs
     for col, col_type in [("user_id", "INTEGER"), ("user_name", "TEXT")]:
