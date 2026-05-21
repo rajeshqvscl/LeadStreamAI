@@ -158,7 +158,14 @@ SIG_END"""
     leads_to_heal = cur.fetchall()
     if leads_to_heal:
         logger.info(f"✨ Found {len(leads_to_heal)} old/squished drafts to self-heal...")
-        for l_id, u_id, f_name, l_name, comp, fam, old_draft in leads_to_heal:
+        for row_data in leads_to_heal:
+            l_id = row_data['id']
+            u_id = row_data['user_id']
+            f_name = row_data['first_name']
+            l_name = row_data['last_name']
+            comp = row_data['company_name']
+            fam = row_data['family_office_name']
+            old_draft = row_data['email_draft']
             # Reconstruct the dynamic content using our latest_content template!
             first_name = (f_name or "").strip()
             # clean first name (Dr./Mr./Mrs.)
