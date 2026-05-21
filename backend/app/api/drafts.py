@@ -147,111 +147,12 @@ SIG_END"""
         )
     conn.commit()
 
-    # Now let's heal any existing squished drafts in the leads_raw table
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT id, user_id, first_name, last_name, company_name, family_office_name, email_draft 
-        FROM leads_raw 
-        WHERE email_status = 'PENDING_APPROVAL' 
-          AND (email_draft LIKE '%vertical AI-powered hiring%' OR email_draft LIKE '%QVSCL (Gurugram)%')
-    """)
-    leads_to_heal = cur.fetchall()
-    if leads_to_heal:
-        logger.info(f"✨ Found {len(leads_to_heal)} old/squished drafts to self-heal...")
-        for row_data in leads_to_heal:
-            l_id = row_data['id']
-            u_id = row_data['user_id']
-            f_name = row_data['first_name']
-            l_name = row_data['last_name']
-            comp = row_data['company_name']
-            fam = row_data['family_office_name']
-            old_draft = row_data['email_draft']
-            # Reconstruct the dynamic content using our latest_content template!
-            first_name = (f_name or "").strip()
-            # clean first name (Dr./Mr./Mrs.)
-            for prefix in ["Dr.", "Mr.", "Mrs.", "Ms.", "Dr", "Mr", "Mrs", "Ms"]:
-                if first_name.lower().startswith(prefix.lower()):
-                    first_name = first_name[len(prefix):].strip()
-                    break
-            
-            last_name = (l_name or "").strip()
-            full_name = f"{first_name} {last_name}".strip()
-            company = (comp or fam or "your organization").strip()
-            
-            # Resolve sender fields
-            profile = {'full_name': 'Kajal Huria', 'job_title': 'Analyst', 'phone': '8527083798', 'linkedin_url': 'https://www.linkedin.com/company/qvscl/'}
-            if u_id:
-                try:
-                    cur.execute("SELECT username, full_name, job_title, phone, linkedin_url FROM users WHERE username = %s OR id::text = %s OR id = %s", (str(u_id), str(u_id), int(u_id) if str(u_id).isdigit() else -1))
-                    p_row = cur.fetchone()
-                    if p_row:
-                        profile = {
-                            'full_name': p_row['full_name'] or p_row['username'] or 'Kajal Huria',
-                            'job_title': p_row['job_title'] or 'Analyst',
-                            'phone': p_row['phone'] or '8527083798',
-                            'linkedin_url': p_row['linkedin_url'] or 'https://www.linkedin.com/company/qvscl/'
-                        }
-                except Exception as e:
-                    logger.error(f"Error querying user profile for self-healing: {e}")
-            
-            sender_full_name = profile['full_name']
-            sender_first_name = sender_full_name.split()[0] if sender_full_name else "Team"
-            sender_title = profile['job_title']
-            sender_phone = profile['phone']
-            sender_linkedin = profile['linkedin_url']
-            
-            # Do replacements in latest_content
-            body = latest_content
-            replacements = [
-                ("{{First Name}}", first_name),
-                ("{{first name}}", first_name),
-                ("{{first_name}}", first_name),
-                ("{{Full Name}}", full_name),
-                ("{{full_name}}", full_name),
-                ("{{Company Name}}", company),
-                ("{{company_name}}", company),
-                ("{{Company}}", company),
-                # Sender placeholders
-                ("{{Sender Name}}", sender_full_name),
-                ("{{Sender Full Name}}", sender_full_name),
-                ("{{Sender First Name}}", sender_first_name),
-                ("{{Sender Title}}", sender_title),
-                ("{{Sender Phone}}", sender_phone),
-                ("{{Sender LinkedIn}}", sender_linkedin),
-                ("{{Sender Linkedin}}", sender_linkedin),
-            ]
-            for placeholder, value in replacements:
-                reg = re.compile(re.escape(placeholder), re.IGNORECASE)
-                body = reg.sub(str(value or ""), body)
-            
-            # Deduplicate/extract subject
-            final_subject = "AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |"
-            final_body_lines = []
-            subject_found = False
-            for line in body.split("\n"):
-                if not subject_found and "subject:" in line.lower():
-                    if ":" in line:
-                        final_subject = line.split(":", 1)[1].strip()
-                    else:
-                        final_subject = line.replace("Subject", "", 1).replace("subject", "", 1).strip()
-                    subject_found = True
-                else:
-                    final_body_lines.append(line)
-            
-            final_body = "\n".join(final_body_lines).strip()
-            
-            # Form email_content
-            new_email_content = f"Subject: {final_subject}\n\n{final_body}"
-            
-            # Update database row
-            cur.execute("UPDATE leads_raw SET email_draft = %s WHERE id = %s", (new_email_content, l_id))
-            logger.info(f"✅ Self-healed draft for Lead ID {l_id} ({first_name} at {company}) with correct Subject and Sender ({sender_full_name})")
-    
     cur.close()
+    conn.commit()
     conn.close()
-    logger.info("🚀 Startup Self-heal of 'yashika_draft_ai_tech' template completed successfully!")
+    logger.info("🚀 Startup template creation completed successfully!")
 except Exception as db_err:
-    logger.error(f"⚠️ Startup Self-heal of template failed: {db_err}")
+    logger.error(f"⚠️ Startup template creation failed: {db_err}")
 
 def normalize_user_id(user_id: Optional[str]) -> str:
     """Normalizes the user ID from the header to a valid numeric database ID string.

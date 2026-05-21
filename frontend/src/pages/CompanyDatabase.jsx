@@ -655,17 +655,7 @@ const CompanyDatabase = () => {
             </div>
             {sheetTabs.length > 0 && (
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setSelectedTab('ALL_TABS')}
-                  className={`h-10 px-4 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer border flex items-center gap-2 ${
-                    selectedTab === 'ALL_TABS'
-                      ? 'bg-amber-500 border-amber-500 text-white shadow-lg shadow-amber-500/20'
-                      : 'bg-amber-500/10 border-amber-500/20 text-amber-500 hover:bg-amber-500/20'
-                  }`}
-                >
-                  <Sparkles className="w-3 h-3" />
-                  All Tabs
-                </button>
+
 
                 <div className="relative group/select flex-1">
                   <select
