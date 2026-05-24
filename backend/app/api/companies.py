@@ -361,50 +361,52 @@ def request_db_access(user_id: Optional[str] = Header(None, alias="X-User-Id")):
 
 def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Cleans and auto-enriches a list of rows in parallel, ensuring critical columns exist."""
-    # First pass: Identify types of unnamed columns by scanning values in ALL rows
-    unnamed_types = {} 
+    # Process all rows: clean keys and values synchronously (very fast, <0.05s for 10k rows)
+    cleaned_rows = []
     for row in rows:
-        for idx, (k, v) in enumerate(row.items()):
-            k_str = str(k).strip()
-            if not k or k_str == "" or k_str.lower() in ["none", "null", "field_"]:
-                s_val = str(v).strip().lower()
-                if "@" in s_val and "." in s_val and len(s_val) > 5 and idx not in unnamed_types:
-                    unnamed_types[idx] = "Email"
-                elif any(c.isdigit() for c in s_val) and len(s_val) > 7 and idx not in unnamed_types:
-                    unnamed_types[idx] = "Mobile"
-
-    def enrich_single_row(args):
-        i, row = args
         clean_row = {}
-        for idx, (k, v) in enumerate(row.items()):
+        for k, v in row.items():
             k_str = str(k).strip()
             val = str(v).strip() if v else ""
             clean_row[k_str] = val
-        
-        has_email = any("@" in str(v) and "." in str(v) for v in clean_row.values())
-        has_phone = any(any(c.isdigit() for c in str(v)) and len(str(v)) > 7 for v in clean_row.values())
-            
-        if (not has_email or not has_phone) and i < 30:
+        cleaned_rows.append(clean_row)
+
+    # Identify the first 30 rows that are missing email or phone and need parallel AI enrichment
+    rows_to_enrich = []
+    for i in range(min(30, len(cleaned_rows))):
+        row = cleaned_rows[i]
+        has_email = any("@" in str(v) and "." in str(v) for v in row.values())
+        has_phone = any(any(c.isdigit() for c in str(v)) and len(str(v)) > 7 for v in row.values())
+        if not has_email or not has_phone:
+            rows_to_enrich.append((i, row))
+
+    if rows_to_enrich:
+        def enrich_single_row(args):
+            idx, row = args
             try:
-                enriched = enrich_row_data_internal(clean_row)
+                enriched = enrich_row_data_internal(row)
                 for ek, ev in enriched.items():
                     if ek == "email":
-                        target = "Email" if "Email" in clean_row else ("Emails" if "Emails" in clean_row else "Email")
-                        if not clean_row.get(target): clean_row[target] = ev
+                        target = "Email" if "Email" in row else ("Emails" if "Emails" in row else "Email")
+                        if not row.get(target): row[target] = ev
                     elif ek == "phone":
-                        target = "Phone" if "Phone" in clean_row else ("Mobile" if "Mobile" in clean_row else "Phone")
-                        if not clean_row.get(target): clean_row[target] = ev
+                        target = "Phone" if "Phone" in row else ("Mobile" if "Mobile" in row else "Phone")
+                        if not row.get(target): row[target] = ev
                     elif ek == "linkedin_url":
-                        target = "LinkedIn" if "LinkedIn" in clean_row else ("LinkedIn URL" if "LinkedIn URL" in clean_row else "LinkedIn")
-                        if not clean_row.get(target): clean_row[target] = ev
+                        target = "LinkedIn" if "LinkedIn" in row else ("LinkedIn URL" if "LinkedIn URL" in row else "LinkedIn")
+                        if not row.get(target): row[target] = ev
             except Exception as e:
                 print(f"Row enrichment error: {e}")
-        return clean_row
+            return idx, row
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        results = list(executor.map(enrich_single_row, enumerate(rows)))
-        
-    return results
+        # Use dynamic max_workers based on task count up to 10 to avoid thread pool context-switching overhead
+        with ThreadPoolExecutor(max_workers=min(10, len(rows_to_enrich))) as executor:
+            enriched_results = list(executor.map(enrich_single_row, rows_to_enrich))
+            
+        for idx, row in enriched_results:
+            cleaned_rows[idx] = row
+
+    return cleaned_rows
 
 def discover_gsheet_tabs(doc_id: str) -> List[Dict[str, str]]:
     """

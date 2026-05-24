@@ -631,27 +631,20 @@ const EditEmail = () => {
               {/* Attachments Section */}
               <div className="pt-10 mt-10 border-t border-[#ffffff05]">
                 <div className="flex items-center gap-2 mb-4">
-                  <span className="text-[#64748b] text-[10px] font-black uppercase tracking-[2px]">Attachments (2)</span>
+                  <span className="text-[#64748b] text-[10px] font-black uppercase tracking-[2px]">Attachments ({draft.attachments?.length || 0})</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="flex items-center gap-3 p-3 rounded-lg bg-[#0a0f1a] border border-[#ffffff08] hover:border-blue-500/30 transition-colors group cursor-default">
-                    <div className="w-10 h-10 rounded-md bg-red-500/10 flex items-center justify-center text-red-500">
-                      <FileText className="w-5 h-5" />
+                  {draft.attachments?.map((att, idx) => (
+                    <div key={idx} className="flex items-center gap-3 p-3 rounded-lg bg-[#0a0f1a] border border-[#ffffff08] hover:border-blue-500/30 transition-colors group cursor-default">
+                      <div className="w-10 h-10 rounded-md bg-red-500/10 flex items-center justify-center text-red-500">
+                        <FileText className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[12px] font-bold text-slate-200 truncate group-hover:text-blue-400 transition-colors text-ellipsis">{att.name}</p>
+                        <p className="text-[10px] text-slate-500 font-medium uppercase tracking-tight">{att.size || ''}{att.size ? ' • ' : ''}PDF Document</p>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-[12px] font-bold text-slate-200 truncate group-hover:text-blue-400 transition-colors text-ellipsis">QVSCL Company Profile.pdf</p>
-                      <p className="text-[10px] text-slate-500 font-medium uppercase tracking-tight">1.7 MB • PDF Document</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 p-3 rounded-lg bg-[#0a0f1a] border border-[#ffffff08] hover:border-blue-500/30 transition-colors group cursor-default">
-                    <div className="w-10 h-10 rounded-md bg-red-500/10 flex items-center justify-center text-red-500">
-                      <FileText className="w-5 h-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-[12px] font-bold text-slate-200 truncate group-hover:text-blue-400 transition-colors text-ellipsis">Lalit_Huria_Profile.pdf</p>
-                      <p className="text-[10px] text-slate-500 font-medium uppercase tracking-tight">250 KB • PDF Document</p>
-                    </div>
-                  </div>
+                  ))}
                 </div>
               </div>
             </div>

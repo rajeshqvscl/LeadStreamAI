@@ -1,15 +1,17 @@
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, UploadFile, File, HTTPException
 from pydantic import BaseModel
 import traceback
 from typing import Optional, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import re
+import base64
 
 from app.models.lead import get_lead_by_id
 from app.models.draft import insert_draft
 from app.database import get_db_connection
 from app.services.llm_services import EmailGenerator
+from app.services.vision_service import analyze_template_screenshot
 import psycopg2.extras
 import logging
 
@@ -21,6 +23,7 @@ try:
     conn = get_db_connection()
     cur = conn.cursor()
     
+    # 1. Yashika AI Tech Template
     latest_description = "AI-Powered Hiring Infrastructure Platform fundraising draft ($1M)"
     latest_content = """Subject: AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |
 
@@ -147,10 +150,213 @@ SIG_END"""
         )
     conn.commit()
 
-    cur.close()
+    # 2. Ayush Sir Hospital Template
+    hospital_description = "Integrated Multi-Site Hospital Platform in Eastern Uttar Pradesh ($240 Cr EV)"
+    hospital_content = """Subject: Strategic Investment Opportunity – Integrated Multi-Site Hospital Platform in Eastern Uttar Pradesh
+
+Dear {{First Name}},
+
+Greetings for the day.
+
+I hope this message finds you well.
+
+My name is {{Sender First Name}}, an Investment Banker based out of Gurugram, representing QV Strategic Consulting LLP, an Investment Banking firm focused on strategic transactions and growth capital advisory across high-potential sectors in India.
+
+We are currently advising on a **strategic investment / acquisition opportunity** for a rapidly growing **hospitals operating across Eastern Uttar Pradesh, one of India's largest yet significantly underserved healthcare markets**.
+
+This opportunity combines:
+
+• **Strong existing profitability**
+• **Embedded operating leverage**
+• **Asset-backed downside protection**
+• **Infrastructure-ready scalability**
+• **Attractive cash-flow characteristics**
+• **Significant regional healthcare demand tailwinds**
+• **Healthy EBITDA Margins**
+• **PAT Positive Operations**
+
+At a time when institutional investors and strategic healthcare operators are actively seeking scalable regional healthcare platforms, this business offers a differentiated opportunity to acquire a profitable and operationally established healthcare ecosystem ahead of its next phase of expansion.
+
+**Investment Snapshot**
+
+| Particulars | Current Metrics |
+| --- | --- |
+| Net Revenue | ~₹49.2 Cr |
+| EBITDA | ~₹16.8 Cr |
+| EBITDA Margin | ~34.2% |
+| PAT | ~₹8.4 Cr |
+| Installed Capacity | 225 Beds |
+| ARPOB / RPOB | ~₹26,000 |
+| Average Length of Stay | 3.8 Days |
+| Blended Occupancy | ~28.3% |
+
+**Why This Opportunity Stands Out:**
+
+**1. Rare Combination of High Margins + Underutilized Capacity**
+
+The platform is already generating **~34.2% EBITDA margins** despite occupancy levels remaining **significantly below mature hospital-chain benchmarks**.
+
+This is particularly important because current profitability is being generated *before* operational maturity.
+
+The business currently operates at only **~28.3% blended occupancy across 225 installed beds**, creating substantial embedded operating leverage potential as utilization scales.
+
+Unlike many healthcare businesses where profitability is already fully optimized, this platform offers investors the ability to participate in future EBITDA expansion through:
+
+• Occupancy ramp-up
+• Clinician additions
+• Improved referral conversion
+• Diagnostics attachment
+• Better throughput utilization
+• Commercial optimization
+
+while leveraging an already operational infrastructure base.
+
+**2. Strong Monetization Metrics Already Achieved**
+
+Despite relatively low occupancy, the platform has already achieved **ARPOB levels of approximately ₹26,000**, indicating strong monetization quality and healthy case-mix realization for the region.
+
+This is a key indicator because it demonstrates that the current opportunity is not dependent on aggressive pricing assumptions - monetization strength already exists at current throughput levels.
+
+**3. Attractive Revenue Quality & Cash Conversion**
+
+The business benefits from a highly favorable payer mix:
+
+| Revenue Mix | Contribution |
+| --- | --- |
+| Cash | ~58.3% |
+| Corporate | ~39.0% |
+| TPA | Only ~2.7% |
+
+This significantly **reduces**:
+
+• Receivable cycles
+• Insurance adjudication delays
+• Working capital inefficiencies
+• Collection stress
+
+and supports stronger cash generation compared to hospital businesses with heavier TPA dependence.
+
+In addition, revenue remains balanced between:
+
+• **IPD Revenue:** ~50.7%
+• **OPD + Daycare Revenue:** ~49.3%
+
+creating diversified patient monetization and recurring engagement opportunities.
+
+**4. Diversified Clinical Platform**
+
+The platform has established a broad tertiary-care ecosystem across multiple specialties including:
+
+• Cardiology
+• Nephrology
+• Neuro Sciences
+• Orthopedics
+• Gynecology
+• Pediatrics
+• Physician Medicine
+
+Importantly, the business is not dependent on a single specialty vertical, improving resilience and earnings visibility.
+
+The **top 8 specialties contribute ~85.5% of specialty revenue**, providing a balanced mix of bread-and-butter healthcare demand along with higher-acuity procedures.
+
+**5. Infrastructure-Ready Growth Platform**
+
+A significant portion of the infrastructure and operating ecosystem is already in place.
+
+Management indicates that only **~₹5 Cr** of selective readiness and productivity capex may be required to support:
+
+• Equipment refresh
+• Throughput enhancement
+• Facility activation
+• Productivity improvement
+• Selective expansion initiatives
+
+This materially lowers execution and capital deployment risk relative to greenfield hospital expansion strategies.
+
+**6. Strong Historical Momentum**
+
+| Metric | Growth |
+| --- | --- |
+| Core Hospital EBITDA Growth | ~9.9% |
+| Occupancy Growth | ~14.3% |
+| ARPOB Growth | ~4.0% |
+
+The simultaneous improvement in occupancy and monetization highlights strengthening operational quality.
+
+**7. Asset-Backed Downside Protection**
+
+The transaction includes a flagship owned hospital campus providing meaningful underlying hard-asset value within the overall transaction structure.
+
+This creates an additional layer of downside support while preserving upside from future operating scale and institutionalization.
+
+**8. Attractive Industry Positioning & Regional Tailwinds**
+
+Eastern Uttar Pradesh remains significantly underserved in organized tertiary and super-specialty healthcare penetration relative to metropolitan India.
+
+Simultaneously, broader Indian healthcare sector dynamics remain highly favorable:
+
+• Increasing formalization of healthcare delivery
+• Rising patient preference for organized providers
+• Strong Tier-2 and Tier-3 healthcare demand growth
+• Limited availability of scalable regional healthcare assets
+• Expanding institutional capital participation in healthcare
+
+These factors continue to support premium valuations for high-quality regional healthcare platforms with scalable infrastructure and operating visibility.
+
+**9. Indicative Transaction Overview**
+
+The proposed transaction perimeter includes:
+
+• Operating hospital business
+• Owned primary hospital campus
+• Secondary leased campus operations
+
+Currently, the transaction is being discussed at an indicative enterprise valuation of approximately **₹240 Cr** depending on structure and diligence outcomes.
+
+We believe this opportunity represents a compelling combination of:
+
+• **~34.2% existing EBITDA margins**
+• **Strong current cash-flow profile**
+• **Strong existing profitability**
+• **Embedded operating leverage from underutilized capacity**
+• **Infrastructure-ready scalability**
+• **Regional healthcare demand expansion**
+• **Strong monetization characteristics**
+• **Asset-backed downside support**
+
+At QV Strategic Consulting LLP, we specialize in facilitating **high-potential investment opportunities for long-term capital partners**. I would be happy to schedule a 30-minute virtual call to discuss this opportunity further.
+
+I have attached the **QV Strategic Consulting business profile** and **Investment Teaser** for your reference.
+
+SIG_START
+--
+Thanks & Regards,
+
+***{{Sender Name}}***
+{{Sender Title}}
+[LinkedIn]({{Sender LinkedIn}})
+{{Sender Phone}}
+
+Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you.
+SIG_END"""
+
+    cur.execute("SELECT id FROM prompts WHERE name = 'ayush_sir_hospital_draft'")
+    h_row = cur.fetchone()
+    if h_row:
+        cur.execute(
+            "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_sir_hospital_draft'",
+            (hospital_content, hospital_description)
+        )
+    else:
+        cur.execute(
+            "INSERT INTO prompts (name, description, content, prompt_type) VALUES ('ayush_sir_hospital_draft', %s, %s, 'CUSTOM_DRAFT')",
+            (hospital_description, hospital_content)
+        )
     conn.commit()
+
+    cur.close()
     conn.close()
-    logger.info("🚀 Startup template creation completed successfully!")
+    logger.info("🚀 Startup templates creation/verification completed successfully!")
 except Exception as db_err:
     logger.error(f"⚠️ Startup template creation failed: {db_err}")
 
@@ -214,6 +420,8 @@ def check_daily_email_limit(user_id: Optional[str], batch_size: int = 1) -> bool
 
 def markdown_to_html(text):
     import re
+    # Normalize newlines
+    text = text.replace("\r\n", "\n")
     # 1. Strip technical markers
     text = text.replace("SIG_START", "").replace("SIG_END", "").replace("[[SIG_PLACEHOLDER]]", "")
     
@@ -225,13 +433,20 @@ def markdown_to_html(text):
     signature_html = ""
     sig_start_marker = "--"
     
-    # Check if we have a signature block (either via -- or by being after the last 5 lines)
-    if sig_start_marker in text:
-        parts = text.split(sig_start_marker)
-        # If multiple -- exist, we treat everything after the LAST one as the signature 
-        # to avoid splitting on horizontal lines used in the body.
-        main_text = sig_start_marker.join(parts[:-1])
-        raw_sig = sig_start_marker + parts[-1]
+    # Only treat standalone "--" (on its own line, not inside table separators) as sig marker
+    sig_split_marker = None
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped == "--" or stripped == "---" or stripped == "—":
+            sig_split_marker = stripped
+            sig_line_idx = i
+            break
+    
+    if sig_split_marker is not None:
+        all_lines = text.split("\n")
+        main_text = "\n".join(all_lines[:sig_line_idx]).rstrip("\n")
+        raw_sig = sig_split_marker + "\n" + "\n".join(all_lines[sig_line_idx+1:])
         
         # Style the signature block line-by-line
         sig_lines = raw_sig.strip().split("\n")
@@ -253,7 +468,7 @@ def markdown_to_html(text):
             formatted_sig_lines.append(line)
         
         signature_html = '<div style="margin-top: 30px; border-top: 1px solid #f0f0f0; padding-top: 20px; line-height: 1.5;">' + "".join(formatted_sig_lines) + '</div>'
-        text = main_text + "[[SIG_BLOCK_PLACEHOLDER]]"
+        text = main_text + "\n\n[[SIG_BLOCK_PLACEHOLDER]]"
 
     # 4. Handle remaining keywords if they weren't in markdown format
     if "Website" in text and "<a" not in text:
@@ -302,8 +517,28 @@ def markdown_to_html(text):
             list_html += "</ul>"
             html_parts.append(list_html)
         else:
-            content = p.replace("\n", "<br>")
-            html_parts.append(f"<p style='margin-top: 0; margin-bottom: 18px; line-height: 1.6; font-family: Arial, sans-serif;'>{content}</p>")
+            # Check if this is a markdown table
+            lines = p.split("\n")
+            if len(lines) >= 2 and all(l.strip().startswith("|") and l.strip().endswith("|") for l in lines):
+                table_html = "<table style='width:100%;border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:13px;'>"
+                for i, line in enumerate(lines):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    cells = [c.strip() for c in line.split("|")[1:-1]]
+                    if all(re.match(r'^[-:\s]+$', c) for c in cells):
+                        continue
+                    tag = "th" if i == 0 else "td"
+                    th_style = "padding:10px 14px;border:1px solid #e2e8f0;text-align:left;font-weight:700;color:#1e293b;background:#f1f5f9;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;"
+                    td_style = "padding:8px 14px;border:1px solid #e2e8f0;text-align:left;font-weight:400;color:#334155;"
+                    style = th_style if tag == "th" else td_style
+                    row_html = f"<{tag} style='{style}'>" + f"</{tag}><{tag} style='{style}'>".join(cells) + f"</{tag}>"
+                    table_html += f"<tr>{row_html}</tr>"
+                table_html += "</table>"
+                html_parts.append(table_html)
+            else:
+                content = p.replace("\n", "<br>")
+                html_parts.append(f"<p style='margin-top: 0; margin-bottom: 18px; line-height: 1.6; font-family: Arial, sans-serif;'>{content}</p>")
     
     return "".join(html_parts)
 
@@ -786,9 +1021,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
             "gmail_synced": gmail_draft_id is not None
         }
     except Exception as e:
-        traceback.print_exc()
-        return {"error": str(e)}
-
+        pass
 # --- List Custom Draft Templates (for template picker modal) ---
 @router.get("/custom-draft-templates")
 def list_custom_draft_templates():
@@ -920,6 +1153,205 @@ SIG_END"""
             cur.execute(
                 "UPDATE prompts SET content = %s, description = %s WHERE name = 'yashika_draft_ai_tech'",
                 (latest_content, latest_description)
+            )
+            conn.commit()
+
+        # Ayush Sir Hospital Template Self-Healing
+        hospital_description = "Integrated Multi-Site Hospital Platform in Eastern Uttar Pradesh ($240 Cr EV)"
+        hospital_content = """Subject: Strategic Investment Opportunity – Integrated Multi-Site Hospital Platform in Eastern Uttar Pradesh
+
+Dear {{First Name}},
+
+Greetings for the day.
+
+I hope this message finds you well.
+
+My name is {{Sender First Name}}, an Investment Banker based out of Gurugram, representing QV Strategic Consulting LLP, an Investment Banking firm focused on strategic transactions and growth capital advisory across high-potential sectors in India.
+
+We are currently advising on a **strategic investment / acquisition opportunity** for a rapidly growing **hospitals operating across Eastern Uttar Pradesh, one of India's largest yet significantly underserved healthcare markets**.
+
+This opportunity combines:
+
+• **Strong existing profitability**
+• **Embedded operating leverage**
+• **Asset-backed downside protection**
+• **Infrastructure-ready scalability**
+• **Attractive cash-flow characteristics**
+• **Significant regional healthcare demand tailwinds**
+• **Healthy EBITDA Margins**
+• **PAT Positive Operations**
+
+At a time when institutional investors and strategic healthcare operators are actively seeking scalable regional healthcare platforms, this business offers a differentiated opportunity to acquire a profitable and operationally established healthcare ecosystem ahead of its next phase of expansion.
+
+**Investment Snapshot**
+
+| Particulars | Current Metrics |
+| --- | --- |
+| Net Revenue | ~₹49.2 Cr |
+| EBITDA | ~₹16.8 Cr |
+| EBITDA Margin | ~34.2% |
+| PAT | ~₹8.4 Cr |
+| Installed Capacity | 225 Beds |
+| ARPOB / RPOB | ~₹26,000 |
+| Average Length of Stay | 3.8 Days |
+| Blended Occupancy | ~28.3% |
+
+**Why This Opportunity Stands Out:**
+
+**1. Rare Combination of High Margins + Underutilized Capacity**
+
+The platform is already generating **~34.2% EBITDA margins** despite occupancy levels remaining **significantly below mature hospital-chain benchmarks**.
+
+This is particularly important because current profitability is being generated *before* operational maturity.
+
+The business currently operates at only **~28.3% blended occupancy across 225 installed beds**, creating substantial embedded operating leverage potential as utilization scales.
+
+Unlike many healthcare businesses where profitability is already fully optimized, this platform offers investors the ability to participate in future EBITDA expansion through:
+
+• Occupancy ramp-up
+• Clinician additions
+• Improved referral conversion
+• Diagnostics attachment
+• Better throughput utilization
+• Commercial optimization
+
+while leveraging an already operational infrastructure base.
+
+**2. Strong Monetization Metrics Already Achieved**
+
+Despite relatively low occupancy, the platform has already achieved **ARPOB levels of approximately ₹26,000**, indicating strong monetization quality and healthy case-mix realization for the region.
+
+This is a key indicator because it demonstrates that the current opportunity is not dependent on aggressive pricing assumptions - monetization strength already exists at current throughput levels.
+
+**3. Attractive Revenue Quality & Cash Conversion**
+
+The business benefits from a highly favorable payer mix:
+
+| Revenue Mix | Contribution |
+| --- | --- |
+| Cash | ~58.3% |
+| Corporate | ~39.0% |
+| TPA | Only ~2.7% |
+
+This significantly **reduces**:
+
+• Receivable cycles
+• Insurance adjudication delays
+• Working capital inefficiencies
+• Collection stress
+
+and supports stronger cash generation compared to hospital businesses with heavier TPA dependence.
+
+In addition, revenue remains balanced between:
+
+• **IPD Revenue:** ~50.7%
+• **OPD + Daycare Revenue:** ~49.3%
+
+creating diversified patient monetization and recurring engagement opportunities.
+
+**4. Diversified Clinical Platform**
+
+The platform has established a broad tertiary-care ecosystem across multiple specialties including:
+
+• Cardiology
+• Nephrology
+• Neuro Sciences
+• Orthopedics
+• Gynecology
+• Pediatrics
+• Physician Medicine
+
+Importantly, the business is not dependent on a single specialty vertical, improving resilience and earnings visibility.
+
+The **top 8 specialties contribute ~85.5% of specialty revenue**, providing a balanced mix of bread-and-butter healthcare demand along with higher-acuity procedures.
+
+**5. Infrastructure-Ready Growth Platform**
+
+A significant portion of the infrastructure and operating ecosystem is already in place.
+
+Management indicates that only **~₹5 Cr** of selective readiness and productivity capex may be required to support:
+
+• Equipment refresh
+• Throughput enhancement
+• Facility activation
+• Productivity improvement
+• Selective expansion initiatives
+
+This materially lowers execution and capital deployment risk relative to greenfield hospital expansion strategies.
+
+**6. Strong Historical Momentum**
+
+| Metric | Growth |
+| --- | --- |
+| Core Hospital EBITDA Growth | ~9.9% |
+| Occupancy Growth | ~14.3% |
+| ARPOB Growth | ~4.0% |
+
+The simultaneous improvement in occupancy and monetization highlights strengthening operational quality.
+
+**7. Asset-Backed Downside Protection**
+
+The transaction includes a flagship owned hospital campus providing meaningful underlying hard-asset value within the overall transaction structure.
+
+This creates an additional layer of downside support while preserving upside from future operating scale and institutionalization.
+
+**8. Attractive Industry Positioning & Regional Tailwinds**
+
+Eastern Uttar Pradesh remains significantly underserved in organized tertiary and super-specialty healthcare penetration relative to metropolitan India.
+
+Simultaneously, broader Indian healthcare sector dynamics remain highly favorable:
+
+• Increasing formalization of healthcare delivery
+• Rising patient preference for organized providers
+• Strong Tier-2 and Tier-3 healthcare demand growth
+• Limited availability of scalable regional healthcare assets
+• Expanding institutional capital participation in healthcare
+
+These factors continue to support premium valuations for high-quality regional healthcare platforms with scalable infrastructure and operating visibility.
+
+**9. Indicative Transaction Overview**
+
+The proposed transaction perimeter includes:
+
+• Operating hospital business
+• Owned primary hospital campus
+• Secondary leased campus operations
+
+Currently, the transaction is being discussed at an indicative enterprise valuation of approximately **₹240 Cr** depending on structure and diligence outcomes.
+
+We believe this opportunity represents a compelling combination of:
+
+• **~34.2% existing EBITDA margins**
+• **Strong current cash-flow profile**
+• **Strong existing profitability**
+• **Embedded operating leverage from underutilized capacity**
+• **Infrastructure-ready scalability**
+• **Regional healthcare demand expansion**
+• **Strong monetization characteristics**
+• **Asset-backed downside support**
+
+At QV Strategic Consulting LLP, we specialize in facilitating **high-potential investment opportunities for long-term capital partners**. I would be happy to schedule a 30-minute virtual call to discuss this opportunity further.
+
+I have attached the **QV Strategic Consulting business profile** and **Investment Teaser** for your reference.
+
+SIG_START
+--
+Thanks & Regards,
+
+***{{Sender Name}}***
+{{Sender Title}}
+[LinkedIn]({{Sender LinkedIn}})
+{{Sender Phone}}
+
+Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you.
+SIG_END"""
+
+        cur.execute("SELECT content FROM prompts WHERE name = 'ayush_sir_hospital_draft'")
+        h_row_chk = cur.fetchone()
+        if not h_row_chk or "| Particulars |" not in h_row_chk[0]:
+            cur.execute(
+                "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_sir_hospital_draft'",
+                (hospital_content, hospital_description)
             )
             conn.commit()
             
@@ -1090,14 +1522,14 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
         except Exception as ge:
             logger.warning(f"⚠️  Gmail draft sync failed: {ge}")
 
-        # Save to DB (with gmail_draft_id)
+        # Save to DB (with gmail_draft_id and draft_template_used)
         conn2 = get_db_connection()
         cur2 = conn2.cursor()
         cur2.execute("""
             UPDATE leads_raw
-            SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW(), gmail_draft_id = %s
+            SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW(), gmail_draft_id = %s, draft_template_used = %s
             WHERE id = %s
-        """, (email_content, gmail_draft_id, req.lead_id))
+        """, (email_content, gmail_draft_id, req.template_name, req.lead_id))
         conn2.commit()
         cur2.close()
         conn2.close()
@@ -1121,6 +1553,35 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
         traceback.print_exc()
         return {"error": str(e)}
 
+
+
+# ---------------------------------------------------------------------------
+# Template → PDF Attachment Mapping
+# Each template specifies which PDFs get attached (shown in the draft preview
+# and physically attached when the email is sent from email_service.py).
+# ---------------------------------------------------------------------------
+TEMPLATE_ATTACHMENT_MAP = {
+    "ayush_sir_hospital_draft": [
+        {"name": "QVSCL Company Profile.pdf",                                        "size": "1.7 MB",  "type": "application/pdf"},
+        {"name": "eastern_up_hospital_investor_teaser_v5b_investorfriendly (2).pdf", "size": "202 KB", "type": "application/pdf"},
+    ],
+    "yashika_draft_ai_tech": [
+        {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
+        {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
+    ],
+}
+
+# Default attachments for AI-generated or unknown templates
+_DEFAULT_ATTACHMENTS = [
+    {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
+    {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
+]
+
+def _get_template_attachments(template_name: Optional[str]) -> list:
+    """Return the correct attachment metadata list for the given template name."""
+    if not template_name:
+        return _DEFAULT_ATTACHMENTS
+    return TEMPLATE_ATTACHMENT_MAP.get(template_name, _DEFAULT_ATTACHMENTS)
 
 @router.get("/pending-drafts")
 @router.get("/emails")
@@ -1174,6 +1635,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
             SELECT lr.id, lr.first_name, lr.last_name, lr.email, lr.email_draft, lr.email_status,
                    lr.company_name, lr.family_office_name, lr.persona, lr.fit_score, lr.updated_at,
                    lr.email_approved_by, lr.scheduled_at, lr.user_id,
+                   lr.draft_template_used,
                    u.full_name as team_member_name, u.username as team_member_username
             FROM leads_raw lr
             LEFT JOIN users u ON lr.user_id = u.id
@@ -1249,10 +1711,8 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
                 "fit_score": r.get("fit_score", 0),
                 "subject": subject,
                 "body": body,
-                "attachments": [
-                    {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB", "type": "application/pdf"},
-                    {"name": "Lalit_Huria_Profile.pdf", "size": "250 KB", "type": "application/pdf"}
-                ],
+                "attachments": _get_template_attachments(r.get("draft_template_used")),
+                "draft_template_used": r.get("draft_template_used") or "",
                 "status": r["email_status"] or "PENDING_APPROVAL",
                 "performance": {"opens": 0, "clicks": 0},
                 "verifier": r.get("email_approved_by") or ("admin" if r["email_status"] in ["APPROVED", "SENT"] else None),
@@ -2175,3 +2635,42 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
     except Exception as e:
         traceback.print_exc()
         return {"error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Screenshot-based Template Creator
+# ---------------------------------------------------------------------------
+@router.post("/analyze-template-screenshot")
+async def analyze_screenshot(files: List[UploadFile] = File(..., description="Upload 1-5 screenshots of email templates. AI analyzes each and merges them into one template.")):
+    """Upload up to 5 screenshots of an email template. AI analyzes each and merges them into one complete template."""
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded")
+    
+    if len(files) > 5:
+        raise HTTPException(status_code=400, detail="Maximum 5 images allowed")
+    
+    for f in files:
+        if not f.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail=f"'{f.filename}' is not an image file")
+    
+    merged_subject = ""
+    merged_body_parts = []
+    merged_notes = []
+    
+    for file in files:
+        contents = await file.read()
+        image_base64 = base64.b64encode(contents).decode("utf-8")
+        result = analyze_template_screenshot(image_base64)
+        
+        if result.get("subject") and not merged_subject:
+            merged_subject = result["subject"]
+        if result.get("body"):
+            merged_body_parts.append(result["body"])
+        if result.get("formatting_notes"):
+            merged_notes.append(result["formatting_notes"])
+    
+    return {
+        "subject": merged_subject,
+        "body": "\n\n".join(merged_body_parts) if len(merged_body_parts) > 1 else (merged_body_parts[0] if merged_body_parts else ""),
+        "formatting_notes": " | ".join(merged_notes) if merged_notes else ""
+    }

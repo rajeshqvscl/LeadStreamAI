@@ -118,6 +118,20 @@ def format_outreach_html(text: str) -> str:
         
     return "\n".join(formatted_lines)
 
+# ---------------------------------------------------------------------------
+# Template-aware attachment selection
+# Maps email subject keywords → list of PDF filenames to attach from assets/.
+# The hospital teaser replaces Lalit_Huria_Profile.pdf for hospital outreach.
+# ---------------------------------------------------------------------------
+_HOSPITAL_SUBJECT_MARKER = "Integrated Multi-Site Hospital Platform"
+_HOSPITAL_TEASER_FILE    = "eastern_up_hospital_investor_teaser_v5b_investorfriendly (2).pdf"
+
+def _get_attachment_files_for_subject(subject: str) -> list:
+    """Return the list of PDF filenames to attach, chosen based on the email subject."""
+    if subject and _HOSPITAL_SUBJECT_MARKER in subject:
+        return ["QVSCL Company Profile.pdf", _HOSPITAL_TEASER_FILE]
+    return ["QVSCL Company Profile.pdf", "Lalit_Huria_Profile.pdf"]
+
 def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None, lead_id: Optional[int] = None, is_system_email: bool = False, user_id: Optional[int] = None, cc: Optional[str] = None, thread_id: Optional[str] = None, in_reply_to: Optional[str] = None) -> bool:
     """Sends an email using Gmail API (if token available) or falls back to Provider/SMTP."""
     load_dotenv(dotenv_path=env_path, override=True)
@@ -129,7 +143,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     
     import markdown
     # Convert markdown to HTML for a premium look
-    if any(marker in html_content for marker in ['**', '###', '[', '\n*']):
+    if any(marker in html_content for marker in ['**', '###', '[', '\n*', '|']):
         html_content = markdown.markdown(html_content, extensions=['extra', 'nl2br'])
         # Add a professional wrapper for high-impact outreach
         html_content = f"""
@@ -147,7 +161,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
         attachments = []
         if not is_followup:
             asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
-            profile_files = ["QVSCL Company Profile.pdf", "Lalit_Huria_Profile.pdf"]
+            profile_files = _get_attachment_files_for_subject(subject)
             
             logger.info(f"Looking for attachments in: {asset_dir}")
             for filename in profile_files:
@@ -377,7 +391,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 # .parent.parent = backend/app/
                 # .parent.parent.parent = backend/
                 asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
-                profile_files = ["QVSCL Company Profile.pdf", "Lalit_Huria_Profile.pdf"]
+                profile_files = _get_attachment_files_for_subject(subject)
                 
                 logger.info(f"Looking for attachments in: {asset_dir}")
                 

@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Save, Plus, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Sparkles, Save, Plus, Loader2, CheckCircle2, AlertCircle, Upload } from 'lucide-react';
 import api from '../services/api';
+import UploadScreenshotModal from '../components/UploadScreenshotModal';
 
 const Prompts = () => {
   const [prompts, setPrompts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(null); // stores ID of saving prompt
   const [saveSuccess, setSaveSuccess] = useState(null);
+  const [showScreenshotModal, setShowScreenshotModal] = useState(false);
 
   const fetchPrompts = async () => {
     setIsLoading(true);
@@ -68,7 +70,7 @@ const Prompts = () => {
             Manage prompt templates for classification and email generation
           </p>
         </div>
-        <button className="btn bg-blue-600 hover:bg-blue-500 text-white border-none py-2.5 px-6 rounded-xl flex items-center gap-2 shadow-[0_0_20px_rgba(37,99,235,0.3)] transition-all hover:scale-105 active:scale-95">
+        <button onClick={() => setShowScreenshotModal(true)} className="btn bg-blue-600 hover:bg-blue-500 text-white border-none py-2.5 px-6 rounded-xl flex items-center gap-2 shadow-[0_0_20px_rgba(37,99,235,0.3)] transition-all hover:scale-105 active:scale-95">
           <Plus className="w-4 h-4" />
           <span className="text-[13px] font-bold">New Prompt</span>
         </button>
@@ -183,6 +185,15 @@ const Prompts = () => {
           </div>
         </div>
       </div>
+
+      <UploadScreenshotModal
+        isOpen={showScreenshotModal}
+        onClose={() => setShowScreenshotModal(false)}
+        onSaved={() => {
+          setShowScreenshotModal(false);
+          fetchPrompts();
+        }}
+      />
     </div>
   );
 };

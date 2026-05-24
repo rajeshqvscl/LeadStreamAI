@@ -432,6 +432,7 @@ def update_gmail_draft(user_id: int, draft_id: str, subject: str, body: str):
     
     try:
         # Convert Markdown to HTML for professional Gmail rendering
+        body = body.replace("\r\n", "\n")
         html_body = body
         
         # 1. Bold: **text** -> <strong>text</strong>
@@ -449,7 +450,24 @@ def update_gmail_draft(user_id: int, draft_id: str, subject: str, body: str):
         processed_paragraphs = []
         for p in paragraphs:
             lines = p.strip().split('\n')
-            if any(re.match(r'^\s*[\*\-•]\s+', l) for l in lines):
+            if all(l.strip().startswith('|') and l.strip().endswith('|') for l in lines if l.strip()):
+                table_html = '<table style="width:100%;border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:13px;">'
+                for i, line in enumerate(lines):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    cells = [c.strip() for c in line.split('|')[1:-1]]
+                    if all(re.match(r'^[-:\s]+$', c) for c in cells):
+                        continue
+                    tag = 'th' if i == 0 else 'td'
+                    th_style = 'padding:10px 14px;border:1px solid #e2e8f0;text-align:left;font-weight:700;color:#1e293b;background:#f1f5f9;font-size:12px;text-transform:uppercase;'
+                    td_style = 'padding:8px 14px;border:1px solid #e2e8f0;text-align:left;font-weight:400;color:#334155;'
+                    style = th_style if tag == 'th' else td_style
+                    row_html = f"<{tag} style='{style}'>" + f"</{tag}><{tag} style='{style}'>".join(cells) + f"</{tag}>"
+                    table_html += f"<tr>{row_html}</tr>"
+                table_html += '</table>'
+                processed_paragraphs.append(table_html)
+            elif any(re.match(r'^\s*[\*\-•]\s+', l) for l in lines):
                 list_items = []
                 for l in lines:
                     match = re.match(r'^\s*[\*\-•]\s+(.*)', l)

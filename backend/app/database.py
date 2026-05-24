@@ -108,7 +108,9 @@ def create_tables():
         ("gmail_message_id", "TEXT"),
         ("first_outreach_at", "TIMESTAMP"),
         ("first_outreach_subject", "TEXT"),
-        ("cc_email", "TEXT")
+        ("cc_email", "TEXT"),
+        ("gmail_draft_id", "TEXT"),
+        ("draft_template_used", "TEXT")
     ]
     for col_name, col_type in columns_to_add:
         try:

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Loader2, X } from 'lucide-react';
+import { Sparkles, Loader2, X, Upload } from 'lucide-react';
 import api from '../services/api';
+import UploadScreenshotModal from './UploadScreenshotModal';
 
 /**
  * Reusable template picker modal.
@@ -14,6 +15,7 @@ import api from '../services/api';
 const DraftTemplatePicker = ({ isOpen, onClose, selectedCount, onGenerate }) => {
   const [customTemplates, setCustomTemplates] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState('ai');
+  const [showScreenshotModal, setShowScreenshotModal] = useState(false);
 
   useEffect(() => {
     api.get('/api/custom-draft-templates')
@@ -75,6 +77,23 @@ const DraftTemplatePicker = ({ isOpen, onClose, selectedCount, onGenerate }) => 
               </div>
             </label>
 
+            {/* Upload Screenshot */}
+            <button
+              onClick={() => setShowScreenshotModal(true)}
+              className="w-full flex items-start gap-4 p-4 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] hover:border-blue-500/40 transition-colors text-left cursor-pointer group"
+            >
+              <div className="mt-0.5 w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 group-hover:bg-blue-500/20 transition-colors shrink-0">
+                <Upload className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white font-bold text-sm flex items-center gap-2">
+                  📸 Create from Screenshot
+                  <span className="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">New</span>
+                </p>
+                <p className="text-slate-500 text-[11px] mt-0.5">Upload a screenshot of any email template — AI extracts it as a reusable template.</p>
+              </div>
+            </button>
+
             {/* Custom templates */}
             {customTemplates.map(tpl => (
               <label key={tpl.name} className={`flex items-start gap-4 p-4 rounded-2xl border cursor-pointer transition-all ${selectedTemplate === tpl.name ? 'border-purple-500/60 bg-purple-500/10' : 'border-white/8 bg-white/[0.02] hover:border-white/15'}`}>
@@ -124,6 +143,16 @@ const DraftTemplatePicker = ({ isOpen, onClose, selectedCount, onGenerate }) => 
           </div>
         </div>
       </div>
+
+      <UploadScreenshotModal
+        isOpen={showScreenshotModal}
+        onClose={() => setShowScreenshotModal(false)}
+        onSaved={() => {
+          api.get('/api/custom-draft-templates')
+            .then(r => setCustomTemplates(r.data || []))
+            .catch(() => {});
+        }}
+      />
     </>
   );
 };
