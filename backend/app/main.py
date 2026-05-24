@@ -109,7 +109,11 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
             else:
                 resp.headers["Access-Control-Allow-Origin"] = "*"
             resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-            resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-User-Id, X-User-ID, X-User-Id-2, Accept, Origin"
+            req_hdrs = request.headers.get("Access-Control-Request-Headers", "")
+            if req_hdrs:
+                resp.headers["Access-Control-Allow-Headers"] = req_hdrs
+            else:
+                resp.headers["Access-Control-Allow-Headers"] = "*"
             resp.headers["Access-Control-Max-Age"] = "600"
             return resp
 
@@ -121,7 +125,7 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
         else:
             response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-User-Id, X-User-ID, X-User-Id-2, Accept, Origin"
+        response.headers["Access-Control-Allow-Headers"] = "*"
         response.headers["Vary"] = "Origin"
         return response
 
