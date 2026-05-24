@@ -1,6 +1,5 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
 import logging
 
 logger = logging.getLogger(__name__)
@@ -63,33 +62,70 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Get allowed origins from environment variable
+# ---------------------------------------------------------------------------
+# CORS — robust multi-origin setup that works on Render with credentials
+# ---------------------------------------------------------------------------
+# Collect explicit origins (env var is the authoritative source in production)
 raw_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
-# Parse and clean origins
-allowed_origins = [origin.strip().rstrip("/") for origin in raw_origins.split(",") if origin.strip()]
+allowed_origins = [o.strip().rstrip("/") for o in raw_origins.split(",") if o.strip()]
 
-# Always include default dev origins for local testing
-dev_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
-for d in dev_origins:
-    if d not in allowed_origins:
-        allowed_origins.append(d)
+# Always allow local dev + the known deployed frontend
+ALWAYS_ALLOWED = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5173",
+    "https://lead-frontend-5new.onrender.com",
+]
+for o in ALWAYS_ALLOWED:
+    if o not in allowed_origins:
+        allowed_origins.append(o)
 
-# Include the reported frontend URL
-reported_origin = "https://lead-frontend-5new.onrender.com"
-if reported_origin not in allowed_origins:
-    allowed_origins.append(reported_origin)
+import re as _re
+_ONRENDER_RE = _re.compile(r"^https://[a-zA-Z0-9\-]+\.onrender\.com$")
 
-# Initialize database
-create_tables()
+def _origin_allowed(origin: str) -> bool:
+    if not origin:
+        return False
+    if origin in allowed_origins:
+        return True
+    if _ONRENDER_RE.match(origin):
+        return True
+    return False
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response as StarletteResponse
+
+class DynamicCORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        origin = request.headers.get("origin", "")
+        is_allowed = _origin_allowed(origin)
+
+        # Handle pre-flight OPTIONS immediately
+        if request.method == "OPTIONS":
+            resp = StarletteResponse(status_code=204, content="")
+            if is_allowed:
+                resp.headers["Access-Control-Allow-Origin"] = origin
+                resp.headers["Access-Control-Allow-Credentials"] = "true"
+            else:
+                resp.headers["Access-Control-Allow-Origin"] = "*"
+            resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+            resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-User-Id, X-User-ID, X-User-Id-2, Accept, Origin"
+            resp.headers["Access-Control-Max-Age"] = "600"
+            return resp
+
+        response = await call_next(request)
+
+        if is_allowed:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+        else:
+            response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-User-Id, X-User-ID, X-User-Id-2, Accept, Origin"
+        response.headers["Vary"] = "Origin"
+        return response
+
+app.add_middleware(DynamicCORSMiddleware)
 
 from fastapi.exceptions import RequestValidationError
 
