@@ -456,7 +456,7 @@ def markdown_to_html(text):
                     with open(img_path, "rb") as f:
                         b64_data = base64.b64encode(f.read()).decode()
                     new_src = f"data:{mime_type};base64,{b64_data}"
-                    return f'<div style="width: 100%; text-align: center; margin-top: 25px; margin-bottom: 25px;"><img src="{new_src}" alt="{alt_text}" style="width: 100%; max-width: 600px; height: auto; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);" /></div>'
+                    return f'<div style="width: 100%; margin-top: 25px; margin-bottom: 25px;"><img src="{new_src}" alt="{alt_text}" style="width: 100%; height: auto; display: block;" /></div>'
         return m.group(0)
     
     text = re.sub(r'!\[(.*?)\]\((.*?)\)', _inline_md_img, text)
@@ -511,8 +511,8 @@ def markdown_to_html(text):
             
             formatted_sig_lines.append(line)
         
-        signature_html = '<div style="margin-top: 30px; border-top: 1px solid #f0f0f0; padding-top: 20px; line-height: 1.5;">' + "".join(formatted_sig_lines) + '</div>'
-        text = main_text + "\n\n[[SIG_BLOCK_PLACEHOLDER]]"
+        signature_html = '<div style="margin-top: 8px; border-top: 1px solid #f0f0f0; padding-top: 10px; line-height: 1.5;">' + "".join(formatted_sig_lines) + '</div>'
+        text = main_text.rstrip() + "\n[[SIG_BLOCK_PLACEHOLDER]]"
 
     # 4. Handle remaining keywords if they weren't in markdown format
     if "Website" in text and "<a" not in text:
@@ -821,8 +821,8 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 
     backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
     banner_html = f"""
-<div style="width: 100%; text-align: center; margin-top: 25px; margin-bottom: 25px;">
-    <img src="{backend_url}/assets/PHOTO-2026-05-25-10-33-35.jpg" style="width: 100%; max-width: 600px; height: auto; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);" alt="Investment Opportunity Banner" />
+<div style="width: 100%; margin-top: 25px; margin-bottom: 25px;">
+    <img src="{backend_url}/assets/PHOTO-2026-05-25-10-33-35.jpg" style="width: 100%; height: auto; display: block;" alt="Investment Opportunity Banner" />
 </div>
 """
 
@@ -831,8 +831,7 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     
     # Standardized signature in grey (fully left-aligned with no leading spaces)
     sig_html = f"""
-<br><br>
-<div style="color: #666666; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.5; text-align: left;">
+<div style="color: #666666; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.5; text-align: left; margin-top: 4px;">
 <a href="{unsub_link}" style="color: #666666; text-decoration: underline;">Click here to unsubscribe</a><br><br>
 --<br>
 <i>Thanks & Regards,</i><br>

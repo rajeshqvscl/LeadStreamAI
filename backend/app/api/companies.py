@@ -159,6 +159,48 @@ def list_companies(
         except:
             pass # Ignore malformed filters
 
+    # --- SELF-HEALING SYNC ---
+    # Sync _is_generated badge by matching emails between company_registry and leads_raw
+    try:
+        if is_admin:
+            cur.execute("""
+                UPDATE company_registry cr
+                SET _is_generated = TRUE
+                FROM leads_raw lr
+                WHERE cr._is_generated = FALSE
+                  AND lr.email_status IN ('PENDING_APPROVAL', 'SENT', 'REPLIED', 'BOUNCED')
+                  AND (
+                      LOWER(cr.row_data->>'Email') = LOWER(lr.email) OR
+                      LOWER(cr.row_data->>'email') = LOWER(lr.email) OR
+                      LOWER(cr.row_data->>'Work Email') = LOWER(lr.email) OR
+                      LOWER(cr.row_data->>'work_email') = LOWER(lr.email) OR
+                      LOWER(cr.row_data->>'EMAIL') = LOWER(lr.email)
+                  )
+            """)
+        elif uid:
+            cur.execute("""
+                UPDATE company_registry cr
+                SET _is_generated = TRUE
+                FROM leads_raw lr
+                WHERE cr.user_id = %s
+                  AND cr._is_generated = FALSE
+                  AND lr.email_status IN ('PENDING_APPROVAL', 'SENT', 'REPLIED', 'BOUNCED')
+                  AND (
+                      LOWER(cr.row_data->>'Email') = LOWER(lr.email) OR
+                      LOWER(cr.row_data->>'email') = LOWER(lr.email) OR
+                      LOWER(cr.row_data->>'Work Email') = LOWER(lr.email) OR
+                      LOWER(cr.row_data->>'work_email') = LOWER(lr.email) OR
+                      LOWER(cr.row_data->>'EMAIL') = LOWER(lr.email)
+                  )
+            """, (uid,))
+        conn.commit()
+    except Exception as sync_err:
+        logger.warning(f"Self-healing status sync failed: {sync_err}")
+        try:
+            conn.rollback()
+        except:
+            pass
+
     try:
         # Total count with filters
         count_query = f"SELECT COUNT(*) FROM company_registry {base_where}"
