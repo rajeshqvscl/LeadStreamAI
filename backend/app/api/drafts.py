@@ -448,7 +448,7 @@ def markdown_to_html(text):
                     new_src = f"data:{mime_type};base64,{b64_data}"
                     return tag.replace(f'src="{src}"', f'src="{new_src}"')
         return tag
-    text = re.sub(r'<img[^>]+>', _inline_img, text)
+    text = re.sub(r'<img[^>]+>', _inline_img, text, flags=re.DOTALL | re.IGNORECASE)
     
     # 2. Handle Links (Markdown style [Text](URL))
     # Using a more specific regex to avoid catching already-converted HTML tags
