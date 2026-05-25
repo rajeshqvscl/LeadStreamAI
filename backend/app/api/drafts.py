@@ -337,23 +337,19 @@ Thanks & Regards,
 [Website](https://www.qvscl.com) | [LinkedIn]({{Sender LinkedIn}})
 {{Sender Phone}}
 
-<div style="width: 100%; text-align: center; margin-top: 25px; margin-bottom: 25px;">
-    <img src="[[BACKEND_URL]]/assets/PHOTO-2026-05-25-10-33-35.jpg" style="width: 100%; max-width: 600px; height: auto; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);" alt="Investment Opportunity Banner" />
-</div>
+![Investment Opportunity Banner]([[BACKEND_URL]]/assets/PHOTO-2026-05-25-10-33-35.jpg)
 
-**Strictly Private and Confidential.**
+<strong>Strictly Private and Confidential.</strong>
 
 The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
 SIG_END"""
 
-    cur.execute("SELECT id FROM prompts WHERE name = 'ayush_sir_hospital_draft'")
-    h_row = cur.fetchone()
-    if h_row:
-        cur.execute(
-            "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_sir_hospital_draft'",
-            (hospital_content, hospital_description)
-        )
-    else:
+    # FORCE UPDATE
+    cur.execute(
+        "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_sir_hospital_draft'",
+        (hospital_content, hospital_description)
+    )
+    if cur.rowcount == 0:
         cur.execute(
             "INSERT INTO prompts (name, description, content, prompt_type) VALUES ('ayush_sir_hospital_draft', %s, %s, 'CUSTOM_DRAFT')",
             (hospital_description, hospital_content)
@@ -448,7 +444,25 @@ def markdown_to_html(text):
                     new_src = f"data:{mime_type};base64,{b64_data}"
                     return tag.replace(f'src="{src}"', f'src="{new_src}"')
         return tag
+
+    def _inline_md_img(m):
+        alt_text = m.group(1)
+        src = m.group(2)
+        known = {"PHOTO-2026-05-25-10-33-35.jpg": "image/jpeg"}
+        for img_name, mime_type in known.items():
+            if img_name in src:
+                img_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", img_name)
+                if os.path.exists(img_path):
+                    with open(img_path, "rb") as f:
+                        b64_data = base64.b64encode(f.read()).decode()
+                    new_src = f"data:{mime_type};base64,{b64_data}"
+                    return f'<div style="width: 100%; text-align: center; margin-top: 25px; margin-bottom: 25px;"><img src="{new_src}" alt="{alt_text}" style="width: 100%; max-width: 600px; height: auto; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);" /></div>'
+        return m.group(0)
+    
+    text = re.sub(r'!\[(.*?)\]\((.*?)\)', _inline_md_img, text)
     text = re.sub(r'<img[^>]+>', _inline_img, text, flags=re.DOTALL | re.IGNORECASE)
+    # 1.5 Handle Global Bolding (catch any remaining **stars**)
+    text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
     
     # 2. Handle Links (Markdown style [Text](URL))
     # Using a more specific regex to avoid catching already-converted HTML tags
@@ -764,6 +778,14 @@ def heal_draft_content(email_draft: str, user_id: Optional[str]) -> str:
                 lines[0] = "Subject: AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |"
                 healed = "\n".join(lines)
                 
+    # Use an extremely loose regex to catch any variant of the old disclaimer
+    # This catches "Important:..." up to "...Thank you." regardless of exact wording in between
+    old_disclaimer_pattern = r"Important:.*?.Thank\s+you\."
+    new_disclaimer = """<strong>Strictly Private and Confidential.</strong><br><br>The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments."""
+    
+    # Replace any version of the old disclaimer with the new high-fidelity version
+    healed = re.sub(old_disclaimer_pattern, new_disclaimer, healed, flags=re.DOTALL | re.IGNORECASE)
+    
     return healed
 
 def inject_signature(body: str, profile: dict, lead_id: int) -> str:
@@ -795,7 +817,14 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
     phone = profile.get('phone') or "8527083798"
     
-    disclaimer = "Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."
+    disclaimer = """<strong>Strictly Private and Confidential.</strong><br><br>The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments."""
+
+    backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+    banner_html = f"""
+<div style="width: 100%; text-align: center; margin-top: 25px; margin-bottom: 25px;">
+    <img src="{backend_url}/assets/PHOTO-2026-05-25-10-33-35.jpg" style="width: 100%; max-width: 600px; height: auto; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);" alt="Investment Opportunity Banner" />
+</div>
+"""
 
     # Active unsubscribe link
     unsub_link = f"https://qvscl.com/unsubscribe?lead_id={lead_id}"
@@ -810,7 +839,8 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 <i><strong>{name}</strong></i><br>
 <i>{title}</i><br>
 <i><a href="https://qvscl.com" style="color: #0077b5; text-decoration: none;">Website</a> | <a href="{linkedin}" style="color: #0077b5; text-decoration: none;">LinkedIn</a></i><br>
-<i>{phone}</i><br><br>
+<i>{phone}</i><br>
+{banner_html}
 <div style="font-size: 10px; color: #999999; line-height: 1.2;">
 {disclaimer}
 </div>
@@ -1076,27 +1106,27 @@ Dear {{First Name}},
 
 I hope you're doing well.
 
-I'm {{Sender First Name}} from QVSCL (Gurugram), a strategic advisory firm working with high-growth early-stage ventures. We are currently raising a round for a platform building a **vertical AI-powered hiring intelligence layer**, combining AI agents, recruitment workflows, and trust-based verification infrastructure.
+I'm {{Sender First Name}} from QVSCL (Gurugram), a strategic advisory firm working with high-growth early-stage ventures. We are currently raising a round for a platform building a <strong>vertical AI-powered hiring intelligence layer</strong>, combining AI agents, recruitment workflows, and trust-based verification infrastructure.
 
-**Business Overview**
+<strong>Business Overview</strong>
 
-**Headquarters:** Singapore (with India as a 100% owned subsidiary and a US joint venture)
+<strong>Headquarters:</strong> Singapore (with India as a 100% owned subsidiary and a US joint venture)
 
-**Founded:** By industry leaders with 20+ years of experience across HR, fintech, and enterprise technology
+<strong>Founded:</strong> By industry leaders with 20+ years of experience across HR, fintech, and enterprise technology
 
-**Focus:** Building a unified hiring infrastructure platform that automates and optimizes end-to-end recruitment workflows - spanning sourcing, screening, evaluation, and background verification
+<strong>Focus:</strong> Building a unified hiring infrastructure platform that automates and optimizes end-to-end recruitment workflows - spanning sourcing, screening, evaluation, and background verification
 
-**Platform Offering:** A full-stack hiring infrastructure platform integrating applicant tracking, multi-channel sourcing, AI-driven screening, and native background verification into a single system
+<strong>Platform Offering:</strong> A full-stack hiring infrastructure platform integrating applicant tracking, multi-channel sourcing, AI-driven screening, and native background verification into a single system
 
-**Technology:** AI-powered vertical agents enabling sourcing, scheduling, interviewing, and verification workflows, supported by a proprietary trust graph that improves candidate matching and reduces fraud over time
+<strong>Technology:</strong> AI-powered vertical agents enabling sourcing, scheduling, interviewing, and verification workflows, supported by a proprietary trust graph that improves candidate matching and reduces fraud over time
 
-**Revenue Model:** Enterprise SaaS with multi-layered monetization across hiring workflows, verification services, and AI-driven automation modules, enabling scalable and recurring revenue streams
+<strong>Revenue Model:</strong> Enterprise SaaS with multi-layered monetization across hiring workflows, verification services, and AI-driven automation modules, enabling scalable and recurring revenue streams
 
-**Core Differentiation:** Unlike fragmented HR tech stacks, the platform functions as a **system of intelligence for hiring** - combining workflows, data, and verification into a unified infrastructure layer that improves decision-making over time. Positioned alongside global AI hiring platforms, with differentiated focus on integrated trust infrastructure and verification layers.
+<strong>Core Differentiation:</strong> Unlike fragmented HR tech stacks, the platform functions as a <strong>system of intelligence for hiring</strong> - combining workflows, data, and verification into a unified infrastructure layer that improves decision-making over time. Positioned alongside global AI hiring platforms, with differentiated focus on integrated trust infrastructure and verification layers.
 
-*Designed to become the underlying infrastructure layer for hiring in an era of AI-generated talent and rising trust deficits*
+<em>Designed to become the underlying infrastructure layer for hiring in an era of AI-generated talent and rising trust deficits</em>
 
-**Industry Overview**
+<strong>Industry Overview</strong>
 
 Hiring at scale remains highly inefficient despite large market size:
 
@@ -1105,41 +1135,41 @@ Hiring at scale remains highly inefficient despite large market size:
 • 80% of employers face talent shortages
 • Hiring processes remain largely manual and fragmented
 
-**Market Opportunity:**
+<strong>Market Opportunity:</strong>
 
 • Global Hiring & Recruitment Tech TAM: $150B+
 • Rapid shift toward AI-driven automation, trust, and verification layers (35-45% CAGR)
 
-**Problems**
+<strong>Problems</strong>
 
-**HR & Recruiter Challenges**
+<strong>HR & Recruiter Challenges</strong>
 
 • 180 applications per hire leading to massive screening overload
 • Recruiters managing significantly higher workloads without increased team size
 • 57% of time spent on repetitive "data janitorial" tasks
 
-**Process Inefficiencies**
+<strong>Process Inefficiencies</strong>
 
 • Fragmented workflows across 20+ tools (ATS, sourcing, BGV, onboarding)
 • Manual data handling and poor system integrations
 • Long hiring cycles (average 44 days to fill roles)
 
-**Trust & Quality Issues**
+<strong>Trust & Quality Issues</strong>
 
 • 70% resumes contain inaccuracies
 • AI-generated and unverified profiles flooding pipelines
 • High attrition and hiring inefficiencies due to poor matching
 
-**Solutions**
+<strong>Solutions</strong>
 
-• **AI Hiring Co-Pilot:** Automates sourcing, screening, and evaluation
-• **Unified Infrastructure:** One system across ATS, sourcing, and verification
-• **Trust Layer:** Proprietary graph improving match quality and fraud detection
-• **Background Verification:** Native BGV system with 20+ checks across identity, employment, education, and criminal records
-• **Workflow Automation:** Eliminates manual processes, reducing HR workload and improving hiring efficiency
-• **Scalable Architecture:** APIs and integrations with HRMS/ATS systems enabling enterprise-grade deployment
+• <strong>AI Hiring Co-Pilot:</strong> Automates sourcing, screening, and evaluation
+• <strong>Unified Infrastructure:</strong> One system across ATS, sourcing, and verification
+• <strong>Trust Layer:</strong> Proprietary graph improving match quality and fraud detection
+• <strong>Background Verification:</strong> Native BGV system with 20+ checks across identity, employment, education, and criminal records
+• <strong>Workflow Automation:</strong> Eliminates manual processes, reducing HR workload and improving hiring efficiency
+• <strong>Scalable Architecture:</strong> APIs and integrations with HRMS/ATS systems enabling enterprise-grade deployment
 
-**Validations & Traction**
+<strong>Validations & Traction</strong>
 
 • 100K+ companies onboarded on the platform
 • 250+ enterprise customers across 50+ industries
@@ -1148,13 +1178,13 @@ Hiring at scale remains highly inefficient despite large market size:
 • 60% of current and projected revenue driven by US market demand
 • 94% customer retention rate
 
-**Operational Impact:**
+<strong>Operational Impact:</strong>
 
 • Near real-time hiring cycles (2-3 days vs 44 days industry average)
 • Background verification TAT reduced from 15 days to 2 days
 • 40%+ reduction in HR operational workload
 
-**Fundraise**
+<strong>Fundraise</strong>
 
 • Total capital raised in previous rounds: $3M
 • Currently raising: $1M - $3M
@@ -1173,12 +1203,14 @@ SIG_START
 --
 Thanks & Regards,
 
-***{{Sender Name}}***
+<strong>{{Sender Name}}</strong>
 {{Sender Title}}
 [LinkedIn]({{Sender LinkedIn}})
 {{Sender Phone}}
 
-Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you.
+<strong>Strictly Private and Confidential.</strong>
+
+The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
 SIG_END"""
         
         # Select and verify if the database entry needs to be fixed.
@@ -1204,22 +1236,22 @@ I hope this message finds you well.
 
 My name is {{Sender First Name}}, an Investment Banker based out of Gurugram, representing QV Strategic Consulting LLP, an Investment Banking firm focused on strategic transactions and growth capital advisory across high-potential sectors in India.
 
-We are currently advising on a **strategic investment / acquisition opportunity** for a rapidly growing **hospitals operating across Eastern Uttar Pradesh, one of India's largest yet significantly underserved healthcare markets**.
+We are currently advising on a <strong>strategic investment / acquisition opportunity</strong> for a rapidly growing <strong>hospitals operating across Eastern Uttar Pradesh, one of India's largest yet significantly underserved healthcare markets</strong>.
 
 This opportunity combines:
 
-• **Strong existing profitability**
-• **Embedded operating leverage**
-• **Asset-backed downside protection**
-• **Infrastructure-ready scalability**
-• **Attractive cash-flow characteristics**
-• **Significant regional healthcare demand tailwinds**
-• **Healthy EBITDA Margins**
-• **PAT Positive Operations**
+• <strong>Strong existing profitability</strong>
+• <strong>Embedded operating leverage</strong>
+• <strong>Asset-backed downside protection</strong>
+• <strong>Infrastructure-ready scalability</strong>
+• <strong>Attractive cash-flow characteristics</strong>
+• <strong>Significant regional healthcare demand tailwinds</strong>
+• <strong>Healthy EBITDA Margins</strong>
+• <strong>PAT Positive Operations</strong>
 
 At a time when institutional investors and strategic healthcare operators are actively seeking scalable regional healthcare platforms, this business offers a differentiated opportunity to acquire a profitable and operationally established healthcare ecosystem ahead of its next phase of expansion.
 
-**Investment Snapshot**
+<strong>Investment Snapshot</strong>
 
 | Particulars | Current Metrics |
 | --- | --- |
@@ -1232,15 +1264,15 @@ At a time when institutional investors and strategic healthcare operators are ac
 | Average Length of Stay | 3.8 Days |
 | Blended Occupancy | ~28.3% |
 
-**Why This Opportunity Stands Out:**
+<strong>Why This Opportunity Stands Out:</strong>
 
-**1. Rare Combination of High Margins + Underutilized Capacity**
+<strong>1. Rare Combination of High Margins + Underutilized Capacity</strong>
 
-The platform is already generating **~34.2% EBITDA margins** despite occupancy levels remaining **significantly below mature hospital-chain benchmarks**.
+The platform is already generating <strong>~34.2% EBITDA margins</strong> despite occupancy levels remaining <strong>significantly below mature hospital-chain benchmarks</strong>.
 
-This is particularly important because current profitability is being generated *before* operational maturity.
+This is particularly important because current profitability is being generated <em>before</em> operational maturity.
 
-The business currently operates at only **~28.3% blended occupancy across 225 installed beds**, creating substantial embedded operating leverage potential as utilization scales.
+The business currently operates at only <strong>~28.3% blended occupancy across 225 installed beds</strong>, creating substantial embedded operating leverage potential as utilization scales.
 
 Unlike many healthcare businesses where profitability is already fully optimized, this platform offers investors the ability to participate in future EBITDA expansion through:
 
@@ -1253,13 +1285,13 @@ Unlike many healthcare businesses where profitability is already fully optimized
 
 while leveraging an already operational infrastructure base.
 
-**2. Strong Monetization Metrics Already Achieved**
+<strong>2. Strong Monetization Metrics Already Achieved</strong>
 
-Despite relatively low occupancy, the platform has already achieved **ARPOB levels of approximately ₹26,000**, indicating strong monetization quality and healthy case-mix realization for the region.
+Despite relatively low occupancy, the platform has already achieved <strong>ARPOB levels of approximately ₹26,000</strong>, indicating strong monetization quality and healthy case-mix realization for the region.
 
 This is a key indicator because it demonstrates that the current opportunity is not dependent on aggressive pricing assumptions - monetization strength already exists at current throughput levels.
 
-**3. Attractive Revenue Quality & Cash Conversion**
+<strong>3. Attractive Revenue Quality & Cash Conversion</strong>
 
 The business benefits from a highly favorable payer mix:
 
@@ -1269,7 +1301,7 @@ The business benefits from a highly favorable payer mix:
 | Corporate | ~39.0% |
 | TPA | Only ~2.7% |
 
-This significantly **reduces**:
+This significantly <strong>reduces</strong>:
 
 • Receivable cycles
 • Insurance adjudication delays
@@ -1280,12 +1312,12 @@ and supports stronger cash generation compared to hospital businesses with heavi
 
 In addition, revenue remains balanced between:
 
-• **IPD Revenue:** ~50.7%
-• **OPD + Daycare Revenue:** ~49.3%
+• <strong>IPD Revenue:</strong> ~50.7%
+• <strong>OPD + Daycare Revenue:</strong> ~49.3%
 
 creating diversified patient monetization and recurring engagement opportunities.
 
-**4. Diversified Clinical Platform**
+<strong>4. Diversified Clinical Platform</strong>
 
 The platform has established a broad tertiary-care ecosystem across multiple specialties including:
 
@@ -1299,13 +1331,13 @@ The platform has established a broad tertiary-care ecosystem across multiple spe
 
 Importantly, the business is not dependent on a single specialty vertical, improving resilience and earnings visibility.
 
-The **top 8 specialties contribute ~85.5% of specialty revenue**, providing a balanced mix of bread-and-butter healthcare demand along with higher-acuity procedures.
+The <strong>top 8 specialties contribute ~85.5% of specialty revenue</strong>, providing a balanced mix of bread-and-butter healthcare demand along with higher-acuity procedures.
 
-**5. Infrastructure-Ready Growth Platform**
+<strong>5. Infrastructure-Ready Growth Platform</strong>
 
 A significant portion of the infrastructure and operating ecosystem is already in place.
 
-Management indicates that only **~₹5 Cr** of selective readiness and productivity capex may be required to support:
+Management indicates that only <strong>~₹5 Cr</strong> of selective readiness and productivity capex may be required to support:
 
 • Equipment refresh
 • Throughput enhancement
@@ -1315,7 +1347,7 @@ Management indicates that only **~₹5 Cr** of selective readiness and productiv
 
 This materially lowers execution and capital deployment risk relative to greenfield hospital expansion strategies.
 
-**6. Strong Historical Momentum**
+<strong>6. Strong Historical Momentum</strong>
 
 | Metric | Growth |
 | --- | --- |
@@ -1325,13 +1357,13 @@ This materially lowers execution and capital deployment risk relative to greenfi
 
 The simultaneous improvement in occupancy and monetization highlights strengthening operational quality.
 
-**7. Asset-Backed Downside Protection**
+<strong>7. Asset-Backed Downside Protection</strong>
 
 The transaction includes a flagship owned hospital campus providing meaningful underlying hard-asset value within the overall transaction structure.
 
 This creates an additional layer of downside support while preserving upside from future operating scale and institutionalization.
 
-**8. Attractive Industry Positioning & Regional Tailwinds**
+<strong>8. Attractive Industry Positioning & Regional Tailwinds</strong>
 
 Eastern Uttar Pradesh remains significantly underserved in organized tertiary and super-specialty healthcare penetration relative to metropolitan India.
 
@@ -1345,7 +1377,7 @@ Simultaneously, broader Indian healthcare sector dynamics remain highly favorabl
 
 These factors continue to support premium valuations for high-quality regional healthcare platforms with scalable infrastructure and operating visibility.
 
-**9. Indicative Transaction Overview**
+<strong>9. Indicative Transaction Overview</strong>
 
 The proposed transaction perimeter includes:
 
@@ -1353,49 +1385,45 @@ The proposed transaction perimeter includes:
 • Owned primary hospital campus
 • Secondary leased campus operations
 
-Currently, the transaction is being discussed at an indicative enterprise valuation of approximately **₹240 Cr** depending on structure and diligence outcomes.
+Currently, the transaction is being discussed at an indicative enterprise valuation of approximately <strong>₹240 Cr</strong> depending on structure and diligence outcomes.
 
 We believe this opportunity represents a compelling combination of:
 
-• **~34.2% existing EBITDA margins**
-• **Strong current cash-flow profile**
-• **Strong existing profitability**
-• **Embedded operating leverage from underutilized capacity**
-• **Infrastructure-ready scalability**
-• **Regional healthcare demand expansion**
-• **Strong monetization characteristics**
-• **Asset-backed downside support**
+• <strong>~34.2% existing EBITDA margins</strong>
+• <strong>Strong current cash-flow profile</strong>
+• <strong>Strong existing profitability</strong>
+• <strong>Embedded operating leverage from underutilized capacity</strong>
+• <strong>Infrastructure-ready scalability</strong>
+• <strong>Regional healthcare demand expansion</strong>
+• <strong>Strong monetization characteristics</strong>
+• <strong>Asset-backed downside support</strong>
 
-At QV Strategic Consulting LLP, we specialize in facilitating **high-potential investment opportunities for long-term capital partners**. I would be happy to schedule a 30-minute virtual call to discuss this opportunity further.
+At QV Strategic Consulting LLP, we specialize in facilitating <strong>high-potential investment opportunities for long-term capital partners</strong>. I would be happy to schedule a 30-minute virtual call to discuss this opportunity further.
 
-I have attached the **QV Strategic Consulting business profile** and **Investment Teaser** for your reference.
+I have attached the <strong>QV Strategic Consulting business profile</strong> and <strong>Investment Teaser</strong> for your reference.
 
 SIG_START
 --
 Thanks & Regards,
 
-***{{Sender Name}}***
+<strong>{{Sender Name}}</strong>
 {{Sender Title}}
 [Website](https://www.qvscl.com) | [LinkedIn]({{Sender LinkedIn}})
 {{Sender Phone}}
 
-<div style="width: 100%; text-align: center; margin-top: 25px; margin-bottom: 25px;">
-    <img src="[[BACKEND_URL]]/assets/PHOTO-2026-05-25-10-33-35.jpg" style="width: 100%; max-width: 600px; height: auto; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);" alt="Investment Opportunity Banner" />
-</div>
+![Investment Opportunity Banner]([[BACKEND_URL]]/assets/PHOTO-2026-05-25-10-33-35.jpg)
 
-**Strictly Private and Confidential.**
+<strong>Strictly Private and Confidential.</strong>
 
 The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
 SIG_END"""
 
-        cur.execute("SELECT content FROM prompts WHERE name = 'ayush_sir_hospital_draft'")
-        h_row_chk = cur.fetchone()
-        if not h_row_chk or "**Strictly Private" not in h_row_chk[0]:
-            cur.execute(
-                "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_sir_hospital_draft'",
-                (hospital_content, hospital_description)
-            )
-            conn.commit()
+        # FORCE UPDATE EVERY TIME the templates are listed
+        cur.execute(
+            "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_sir_hospital_draft'",
+            (hospital_content, hospital_description)
+        )
+        conn.commit()
             
         cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
         rows = cur.fetchall()
@@ -1735,6 +1763,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
             return None
 
         drafts = []
+        backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
         for r in rows:
             draft_content = r["email_draft"] or ""
             # Apply healing
@@ -1776,7 +1805,8 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
                 "persona": r["persona"],
                 "fit_score": r.get("fit_score", 0),
                 "subject": subject,
-                "body": body,
+                "body": body.replace("[[BACKEND_URL]]", backend_url),
+                "html_body": markdown_to_html(body.replace("[[BACKEND_URL]]", backend_url)),
                 "attachments": _get_template_attachments(r.get("draft_template_used")),
                 "draft_template_used": r.get("draft_template_used") or "",
                 "status": r["email_status"] or "PENDING_APPROVAL",

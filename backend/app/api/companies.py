@@ -840,6 +840,10 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
             from app.api.drafts import generate_email_internal, DraftRequest
             req = DraftRequest(lead_id=lead_id, template_type=template_name or 'standard')
             res = generate_email_internal(req, user_id)
+            # Mark as generated in company registry
+            cur.execute("UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = %s AND user_id = %s", (row_id, uid))
+            conn.commit()
+            invalidate_companies_cache(str(uid))
             return res
         except Exception as e:
             import logging
