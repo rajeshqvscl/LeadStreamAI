@@ -341,7 +341,7 @@ Thanks & Regards,
     <img src="[[BACKEND_URL]]/assets/PHOTO-2026-05-25-10-33-35.jpg" style="width: 100%; max-width: 600px; height: auto; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);" alt="Investment Opportunity Banner" />
 </div>
 
-Strictly Private and Confidential.
+**Strictly Private and Confidential.**
 
 The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
 SIG_END"""
@@ -483,7 +483,9 @@ def markdown_to_html(text):
                 continue
                 
             disclaimer_text = "Important: This message and its attachments"
-            if disclaimer_text in line or line.startswith("Strictly Private") or "quantum value strategic consulting" in line.lower() or "unauthorized dissemination" in line.lower():
+            if disclaimer_text in line or "strictly private" in line.lower() or "quantum value strategic consulting" in line.lower() or "unauthorized dissemination" in line.lower():
+                # Handle nested bolding in disclaimer
+                line = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', line)
                 line = f'<span style="font-size: 10px; color: #999; font-style: normal; line-height: 1.2; display: block; margin-top: 10px; border-top: 1px solid #eee; pt: 10px;">{line}</span>'
             elif "<div" in line or "<img" in line:
                 # Keep raw HTML as-is in the signature
@@ -1381,14 +1383,14 @@ Thanks & Regards,
     <img src="[[BACKEND_URL]]/assets/PHOTO-2026-05-25-10-33-35.jpg" style="width: 100%; max-width: 600px; height: auto; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);" alt="Investment Opportunity Banner" />
 </div>
 
-Strictly Private and Confidential.
+**Strictly Private and Confidential.**
 
 The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
 SIG_END"""
 
         cur.execute("SELECT content FROM prompts WHERE name = 'ayush_sir_hospital_draft'")
         h_row_chk = cur.fetchone()
-        if not h_row_chk or "[[BACKEND_URL]]" not in h_row_chk[0]:
+        if not h_row_chk or "**Strictly Private" not in h_row_chk[0]:
             cur.execute(
                 "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_sir_hospital_draft'",
                 (hospital_content, hospital_description)
