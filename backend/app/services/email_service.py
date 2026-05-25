@@ -126,13 +126,26 @@ def format_outreach_html(text: str) -> str:
 _HOSPITAL_SUBJECT_MARKER = "Integrated Multi-Site Hospital Platform"
 _HOSPITAL_TEASER_FILE    = "eastern_up_hospital_investor_teaser_v5b_investorfriendly (2).pdf"
 
-def _get_attachment_files_for_subject(subject: str) -> list:
-    """Return the list of PDF filenames to attach, chosen based on the email subject."""
+_TEMPLATE_ATTACHMENT_MAP = {
+    "ayush_sir_hospital_draft": [
+        "QVSCL Company Profile.pdf",
+        _HOSPITAL_TEASER_FILE,
+    ],
+    "yashika_draft_ai_tech": [
+        "QVSCL Company Profile.pdf",
+        "Lalit_Huria_Profile.pdf",
+    ],
+}
+
+def _get_attachment_files_for_subject(subject: str, template_name: Optional[str] = None) -> list:
+    """Return the list of PDF filenames to attach, chosen based on the email subject or template name."""
+    if template_name and template_name in _TEMPLATE_ATTACHMENT_MAP:
+        return _TEMPLATE_ATTACHMENT_MAP[template_name]
     if subject and _HOSPITAL_SUBJECT_MARKER in subject:
         return ["QVSCL Company Profile.pdf", _HOSPITAL_TEASER_FILE]
     return ["QVSCL Company Profile.pdf", "Lalit_Huria_Profile.pdf"]
 
-def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None, lead_id: Optional[int] = None, is_system_email: bool = False, user_id: Optional[int] = None, cc: Optional[str] = None, thread_id: Optional[str] = None, in_reply_to: Optional[str] = None) -> bool:
+def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None, lead_id: Optional[int] = None, is_system_email: bool = False, user_id: Optional[int] = None, cc: Optional[str] = None, thread_id: Optional[str] = None, in_reply_to: Optional[str] = None, template_name: Optional[str] = None) -> bool:
     """Sends an email using Gmail API (if token available) or falls back to Provider/SMTP."""
     load_dotenv(dotenv_path=env_path, override=True)
     
@@ -143,7 +156,8 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     
     import markdown
     # Convert markdown to HTML for a premium look
-    if any(marker in html_content for marker in ['**', '###', '[', '\n*', '|']):
+    # Skip if content already appears to be HTML (starts with a block-level tag)
+    if not html_content.strip().startswith('<') and any(marker in html_content for marker in ['**', '###', '[', '\n*', '|']):
         html_content = markdown.markdown(html_content, extensions=['extra', 'nl2br'])
         # Add a professional wrapper for high-impact outreach
         html_content = f"""
@@ -161,7 +175,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
         attachments = []
         if not is_followup:
             asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
-            profile_files = _get_attachment_files_for_subject(subject)
+            profile_files = _get_attachment_files_for_subject(subject, template_name)
             
             logger.info(f"Looking for attachments in: {asset_dir}")
             for filename in profile_files:
@@ -391,7 +405,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 # .parent.parent = backend/app/
                 # .parent.parent.parent = backend/
                 asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
-                profile_files = _get_attachment_files_for_subject(subject)
+                profile_files = _get_attachment_files_for_subject(subject, template_name)
                 
                 logger.info(f"Looking for attachments in: {asset_dir}")
                 

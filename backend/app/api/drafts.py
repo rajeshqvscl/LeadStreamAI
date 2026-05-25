@@ -334,10 +334,16 @@ Thanks & Regards,
 
 ***{{Sender Name}}***
 {{Sender Title}}
-[LinkedIn]({{Sender LinkedIn}})
+[Website](https://www.qvscl.com) | [LinkedIn]({{Sender LinkedIn}})
 {{Sender Phone}}
 
-Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you.
+<div style="width: 100%; text-align: center; margin-top: 25px; margin-bottom: 25px;">
+    <img src="[[BACKEND_URL]]/assets/PHOTO-2026-05-25-10-33-35.jpg" style="width: 100%; max-width: 600px; height: auto; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);" alt="Investment Opportunity Banner" />
+</div>
+
+Strictly Private and Confidential.
+
+The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
 SIG_END"""
 
     cur.execute("SELECT id FROM prompts WHERE name = 'ayush_sir_hospital_draft'")
@@ -425,6 +431,25 @@ def markdown_to_html(text):
     # 1. Strip technical markers
     text = text.replace("SIG_START", "").replace("SIG_END", "").replace("[[SIG_PLACEHOLDER]]", "")
     
+    # Convert known asset images to inline base64 data URIs for reliable rendering in email clients
+    def _inline_img(m):
+        tag = m.group(0)
+        src_m = re.search(r'src="([^"]+)"', tag)
+        if not src_m:
+            return tag
+        src = src_m.group(1)
+        known = {"PHOTO-2026-05-25-10-33-35.jpg": "image/jpeg"}
+        for img_name, mime_type in known.items():
+            if img_name in src:
+                img_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", img_name)
+                if os.path.exists(img_path):
+                    with open(img_path, "rb") as f:
+                        b64_data = base64.b64encode(f.read()).decode()
+                    new_src = f"data:{mime_type};base64,{b64_data}"
+                    return tag.replace(f'src="{src}"', f'src="{new_src}"')
+        return tag
+    text = re.sub(r'<img[^>]+>', _inline_img, text)
+    
     # 2. Handle Links (Markdown style [Text](URL))
     # Using a more specific regex to avoid catching already-converted HTML tags
     text = re.sub(r'(?<!href=")(?<!src=")\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', text)
@@ -458,8 +483,11 @@ def markdown_to_html(text):
                 continue
                 
             disclaimer_text = "Important: This message and its attachments"
-            if disclaimer_text in line:
+            if disclaimer_text in line or line.startswith("Strictly Private") or "quantum value strategic consulting" in line.lower() or "unauthorized dissemination" in line.lower():
                 line = f'<span style="font-size: 10px; color: #999; font-style: normal; line-height: 1.2; display: block; margin-top: 10px; border-top: 1px solid #eee; pt: 10px;">{line}</span>'
+            elif "<div" in line or "<img" in line:
+                # Keep raw HTML as-is in the signature
+                pass
             else:
                 # Handle names in signature (bold them if they are in ***)
                 line = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong>\1</strong>', line)
@@ -537,8 +565,12 @@ def markdown_to_html(text):
                 table_html += "</table>"
                 html_parts.append(table_html)
             else:
-                content = p.replace("\n", "<br>")
-                html_parts.append(f"<p style='margin-top: 0; margin-bottom: 18px; line-height: 1.6; font-family: Arial, sans-serif;'>{content}</p>")
+                # Check if this paragraph is already a block-level HTML (like div or img)
+                if p.strip().startswith("<div") or p.strip().startswith("<img"):
+                    html_parts.append(p.strip())
+                else:
+                    content = p.replace("\n", "<br>")
+                    html_parts.append(f"<p style='margin-top: 0; margin-bottom: 18px; line-height: 1.6; font-family: Arial, sans-serif;'>{content}</p>")
     
     return "".join(html_parts)
 
@@ -775,7 +807,7 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 <i>Thanks & Regards,</i><br>
 <i><strong>{name}</strong></i><br>
 <i>{title}</i><br>
-<i><a href="{linkedin}" style="color: #0077b5; text-decoration: none;">LinkedIn</a></i><br>
+<i><a href="https://qvscl.com" style="color: #0077b5; text-decoration: none;">Website</a> | <a href="{linkedin}" style="color: #0077b5; text-decoration: none;">LinkedIn</a></i><br>
 <i>{phone}</i><br><br>
 <div style="font-size: 10px; color: #999999; line-height: 1.2;">
 {disclaimer}
@@ -895,6 +927,8 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                     ("{{Sender Phone}}", sender_phone),
                     ("{{Sender LinkedIn}}", sender_linkedin),
                     ("{{Sender Linkedin}}", sender_linkedin),
+                    # Dynamic Backend URL for images/assets
+                    ("[[BACKEND_URL]]", os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")),
                 ]
                 
                 for placeholder, value in replacements:
@@ -1340,15 +1374,21 @@ Thanks & Regards,
 
 ***{{Sender Name}}***
 {{Sender Title}}
-[LinkedIn]({{Sender LinkedIn}})
+[Website](https://www.qvscl.com) | [LinkedIn]({{Sender LinkedIn}})
 {{Sender Phone}}
 
-Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you.
+<div style="width: 100%; text-align: center; margin-top: 25px; margin-bottom: 25px;">
+    <img src="[[BACKEND_URL]]/assets/PHOTO-2026-05-25-10-33-35.jpg" style="width: 100%; max-width: 600px; height: auto; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);" alt="Investment Opportunity Banner" />
+</div>
+
+Strictly Private and Confidential.
+
+The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
 SIG_END"""
 
         cur.execute("SELECT content FROM prompts WHERE name = 'ayush_sir_hospital_draft'")
         h_row_chk = cur.fetchone()
-        if not h_row_chk or "| Particulars |" not in h_row_chk[0]:
+        if not h_row_chk or "[[BACKEND_URL]]" not in h_row_chk[0]:
             cur.execute(
                 "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_sir_hospital_draft'",
                 (hospital_content, hospital_description)
@@ -1439,6 +1479,8 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
             ("{{Sender Title}}", sender_title),
             ("{{Sender Phone}}", sender_phone),
             ("{{Sender LinkedIn}}", sender_linkedin),
+            # Dynamic Backend URL for images/assets
+            ("[[BACKEND_URL]]", os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")),
         ]
         
         for placeholder, value in replacements:
@@ -1502,19 +1544,41 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
         except:
             pass
 
-        # --- Sync to Gmail Drafts ---
+        # --- Sync to Gmail Drafts (with PDF attachments) ---
         gmail_draft_id = None
         try:
             from app.services.google_service import get_gmail_service
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.application import MIMEApplication
+            from email.mime.text import MIMEText
             uid_t = normalize_user_id(user_id)
             service = get_gmail_service(int(uid_t))
             if service:
                 to_email = lead.get('email', '')
-                # Use 'html' subtype for bold/italic support
-                message = MIMEText(html_body, 'html')
-                message['to'] = to_email
-                message['subject'] = final_subject
-                raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+                msg = MIMEMultipart('mixed')
+                msg_body = MIMEMultipart('alternative')
+                msg_body.attach(MIMEText(html_body, 'html'))
+                msg.attach(msg_body)
+                msg['to'] = to_email
+                msg['subject'] = final_subject
+                # Attach PDFs based on template name
+                try:
+                    tpl_attachments = TEMPLATE_ATTACHMENT_MAP.get(req.template_name, [])
+                    if tpl_attachments:
+                        assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets")
+                        for att in tpl_attachments:
+                            fpath = os.path.join(assets_dir, att["name"])
+                            if os.path.exists(fpath):
+                                with open(fpath, "rb") as f:
+                                    part = MIMEApplication(f.read(), Name=att["name"])
+                                    part['Content-Disposition'] = f'attachment; filename="{att["name"]}"'
+                                    msg.attach(part)
+                                logger.info(f"📎 Attached {att['name']} to Gmail draft")
+                            else:
+                                logger.warning(f"⚠️  Attachment not found: {fpath}")
+                except Exception as ae:
+                    logger.warning(f"⚠️  Attachment sync failed for draft: {ae}")
+                raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode('utf-8')
                 draft_body = {'message': {'raw': raw_message}}
                 created_draft = service.users().drafts().create(userId='me', body=draft_body).execute()
                 gmail_draft_id = created_draft.get('id')
@@ -1841,7 +1905,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
                     raise HTTPException(status_code=400, detail="Gmail Not Connected. Please go to Settings and link your Google account to send emails from your own address.")
 
         # 2. Fetch/Prepare Draft
-        cur.execute("SELECT first_name, last_name, email, email_draft, cc_email FROM leads_raw WHERE id = %s", (draft_id,))
+        cur.execute("SELECT first_name, last_name, email, email_draft, cc_email, draft_template_used FROM leads_raw WHERE id = %s", (draft_id,))
         lead = cur.fetchone()
         if not lead:
             from fastapi import HTTPException
@@ -1892,8 +1956,10 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         
         cc_email = req.cc if (req and req.cc) else stored_cc
         
-        # --- NEW: Re-inject Signature of the CURRENT logged-in user ---
-        # This ensures if Yashika approves a draft generated by Admin, her signature is used.
+        # --- Re-inject Signature of the CURRENT logged-in user ---
+        # Only for templates without embedded SIG_START/SIG_END markers.
+        # Templates like ayush_sir_hospital_draft have their own complete
+        # signature block with banner image and custom disclaimer.
         profile = {
             "full_name": sender_name,
             "job_title": "Analyst", # Default if not found
@@ -1906,9 +1972,20 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             profile["job_title"] = u.get('job_title') or profile["job_title"]
             profile["phone"] = u.get('phone') or profile["phone"]
             profile["linkedin_url"] = u.get('linkedin_url') or profile["linkedin_url"]
-            
-        body = inject_signature(body, profile, draft_id)
         
+        # Skip signature re-injection for templates with embedded SIG_START/SIG_END markers
+        # to preserve their custom banner image, disclaimer, and formatting
+        if "SIG_START" in body or "SIG_END" in body:
+            # Just replace sender placeholders with current user's info
+            body = body.replace("{{Sender Name}}", profile["full_name"])
+            body = body.replace("{{Sender Title}}", profile["job_title"])
+            body = body.replace("{{Sender Phone}}", profile["phone"])
+            body = body.replace("{{Sender LinkedIn}}", profile["linkedin_url"])
+            body = body.replace("{{Sender Linkedin}}", profile["linkedin_url"])
+        else:
+            body = inject_signature(body, profile, draft_id)
+        
+        template_name = lead.get('draft_template_used') if lead else None
         success, error_msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=email,
             subject=subject,
@@ -1917,7 +1994,8 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             from_name=sender_name,
             lead_id=draft_id,
             user_id=int(uid),
-            cc=cc_email
+            cc=cc_email,
+            template_name=template_name
         )
         
         dispatch_method = "Gmail API" if has_gmail else "Resend/SMTP"
