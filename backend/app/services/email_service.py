@@ -135,6 +135,9 @@ _TEMPLATE_ATTACHMENT_MAP = {
         "QVSCL Company Profile.pdf",
         "Lalit_Huria_Profile.pdf",
     ],
+    "palak_mam_corporate_advisory": [
+        "QVSCL Company Profile.pdf",
+    ],
 }
 
 def _get_attachment_files_for_subject(subject: str, template_name: Optional[str] = None) -> list:

@@ -356,6 +356,59 @@ SIG_END"""
         )
     conn.commit()
 
+    # 3. Palak Mam Corporate Advisory Template
+    palak_corp_description = "Corporate Advisory / Equity Fund Raising Services — QVSCL Introduction"
+    palak_corp_content = """Subject: Corporate Advisory/ Equity Fund Raising Services.
+
+Dear {{First Name}},
+
+Greetings from QVSCL!
+
+I hope you're doing well.
+
+I'm excited to introduce QV Strategic Consulting, your trusted partner for driving sustainable capital growth. With extensive experience across diverse industries, we combine strategic expertise, innovation, and hands-on execution to help businesses achieve their goals.
+
+<strong>Key Areas of Expertise:</strong>
+
+• Preparation to IPO – Standardizing information systems, due diligence, information memorandum, and more.
+• Fund Raising – Equity and debt financing solutions tailored to your needs.
+• Board Advisory – Strategic guidance to enhance governance and decision-making.
+• Implementing Partner – Strengthening management teams for seamless execution.
+• Fostering Strategic Partnerships & Alliances – Facilitating joint ventures, mergers, and acquisitions.
+• Strategic Business Planning – Crafting actionable roadmaps for long-term success.
+
+To learn more about how we can support your growth ambitions, see our [website](https://qvscl.com) or connect with us on [LinkedIn](https://www.linkedin.com/company/qvscl/).
+
+We'd love to schedule a virtual meeting at your convenience to explore potential collaboration. Kindly share your availability, and we'll coordinate a suitable time.
+
+Attached, you'll find our company profile for your reference. Looking forward to connecting!
+
+SIG_START
+--
+Thanks & Regards,
+
+***{{Sender Name}}***
+{{Sender Title}}
+[Website](https://www.qvscl.com) | [LinkedIn]({{Sender LinkedIn}})
+{{Sender Phone}}
+
+<strong>Strictly Private and Confidential.</strong>
+
+The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
+SIG_END"""
+
+    # FORCE UPDATE
+    cur.execute(
+        "UPDATE prompts SET content = %s, description = %s WHERE name = 'palak_mam_corporate_advisory'",
+        (palak_corp_content, palak_corp_description)
+    )
+    if cur.rowcount == 0:
+        cur.execute(
+            "INSERT INTO prompts (name, description, content, prompt_type) VALUES ('palak_mam_corporate_advisory', %s, %s, 'CUSTOM_DRAFT')",
+            (palak_corp_description, palak_corp_content)
+        )
+    conn.commit()
+
     cur.close()
     conn.close()
     logger.info("🚀 Startup templates creation/verification completed successfully!")
@@ -497,15 +550,25 @@ def markdown_to_html(text):
                 continue
                 
             disclaimer_text = "Important: This message and its attachments"
-            if disclaimer_text in line or "strictly private" in line.lower() or "quantum value strategic consulting" in line.lower() or "unauthorized dissemination" in line.lower():
-                # Handle nested bolding in disclaimer
+            is_legal = disclaimer_text in line or "quantum value strategic consulting" in line.lower() or "unauthorized dissemination" in line.lower()
+            is_strictly_private = "strictly private" in line.lower()
+            
+            if is_legal and not is_strictly_private:
+                # Standard legal disclaimer: tiny and grey
                 line = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', line)
-                line = f'<span style="font-size: 10px; color: #999; font-style: normal; line-height: 1.2; display: block; margin-top: 10px; border-top: 1px solid #eee; pt: 10px;">{line}</span>'
+                line = f'<span style="font-size: 10px; color: #999; font-style: normal; line-height: 1.2; display: block; margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px;">{line}</span>'
+            elif is_strictly_private:
+                # Premium Hospital Disclaimer: Bold, prominent, and full-size
+                line = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', line)
+                # Ensure "Strictly Private" itself is bolded if not already
+                if "<strong>" not in line and "strictly private" in line.lower():
+                     line = re.sub(r"(?i)(strictly private and confidential)", r"<strong>\1</strong>", line)
+                line = f'<div style="font-size: 13px; color: #444; font-weight: normal; line-height: 1.4; display: block; margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">{line}</div>'
             elif "<div" in line or "<img" in line:
-                # Keep raw HTML as-is in the signature
+                # Keep raw HTML as-is (like our banner)
                 pass
             else:
-                # Handle names in signature (bold them if they are in ***)
+                # Handle names/titles in signature (bold them if they are in ***)
                 line = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong>\1</strong>', line)
                 line = f'<span style="color: #666; font-style: italic; display: block; margin-bottom: 2px; font-size: 13px;">{line}</span>'
             
@@ -778,14 +841,45 @@ def heal_draft_content(email_draft: str, user_id: Optional[str]) -> str:
                 lines[0] = "Subject: AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |"
                 healed = "\n".join(lines)
                 
-    # Use an extremely loose regex to catch any variant of the old disclaimer
-    # This catches "Important:..." up to "...Thank you." regardless of exact wording in between
-    old_disclaimer_pattern = r"Important:.*?.Thank\s+you\."
-    new_disclaimer = """<strong>Strictly Private and Confidential.</strong><br><br>The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments."""
+    # 3. Hospital-specific healing: detect by unique content fingerprints and upgrade signature
+    hospital_fingerprints = [
+        "hospital", 
+        "beds", 
+        "ebitda", 
+        "occupancy",
+        "uttar pradesh",
+        "arpob",
+        "infrastructure",
+        "ayush"
+    ]
+    # Check if this is likely the hospital draft (Ayush Sir's)
+    is_hospital = any(fp in healed_lower for fp in hospital_fingerprints)
     
-    # Replace any version of the old disclaimer with the new high-fidelity version
-    healed = re.sub(old_disclaimer_pattern, new_disclaimer, healed, flags=re.DOTALL | re.IGNORECASE)
-    
+    if is_hospital:
+        backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+        # We use a markdown image that the renderer will convert to a full-width banner
+        banner_md = f"![Investment Opportunity Banner]({backend_url}/assets/PHOTO-2026-05-25-10-33-35.jpg)"
+        hospital_disclaimer = """<strong>Strictly Private and Confidential.</strong><br><br>The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments."""
+        
+        # NUCLEAR REGEX: If it's a hospital draft, catch anything starting with "Important:" and replace it.
+        # This prevents any residual "Thank you" or old text from being left behind.
+        old_disclaimer_regex = r"Important:.*$"
+        
+        # First, try to replace the old disclaimer nuclear-style (multiline)
+        if re.search(r"Important:", healed, flags=re.IGNORECASE):
+            healed = re.sub(r"Important:.*$", hospital_disclaimer, healed, flags=re.DOTALL | re.IGNORECASE)
+        
+        # Second, ensure the banner is present
+        if "PHOTO-2026-05-25-10-33-35" not in healed:
+            if "<strong>Strictly Private" in healed:
+                 healed = healed.replace(
+                    "<strong>Strictly Private",
+                    f"{banner_md}\n\n<strong>Strictly Private"
+                )
+            else:
+                # Appending banner and then disclaimer if somehow standard detection failed
+                healed = healed.rstrip() + f"\n\n{banner_md}\n\n{hospital_disclaimer}"
+                
     return healed
 
 def inject_signature(body: str, profile: dict, lead_id: int) -> str:
@@ -817,14 +911,7 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
     phone = profile.get('phone') or "8527083798"
     
-    disclaimer = """<strong>Strictly Private and Confidential.</strong><br><br>The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments."""
-
-    backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
-    banner_html = f"""
-<div style="width: 100%; margin-top: 25px; margin-bottom: 25px;">
-    <img src="{backend_url}/assets/PHOTO-2026-05-25-10-33-35.jpg" style="width: 100%; height: auto; display: block;" alt="Investment Opportunity Banner" />
-</div>
-"""
+    disclaimer = """Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."""
 
     # Active unsubscribe link
     unsub_link = f"https://qvscl.com/unsubscribe?lead_id={lead_id}"
@@ -834,12 +921,11 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 <div style="color: #666666; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.5; text-align: left; margin-top: 4px;">
 <a href="{unsub_link}" style="color: #666666; text-decoration: underline;">Click here to unsubscribe</a><br><br>
 --<br>
-<i>Thanks & Regards,</i><br>
+<i>Thanks &amp; Regards,</i><br>
 <i><strong>{name}</strong></i><br>
 <i>{title}</i><br>
 <i><a href="https://qvscl.com" style="color: #0077b5; text-decoration: none;">Website</a> | <a href="{linkedin}" style="color: #0077b5; text-decoration: none;">LinkedIn</a></i><br>
-<i>{phone}</i><br>
-{banner_html}
+<i>{phone}</i><br><br>
 <div style="font-size: 10px; color: #999999; line-height: 1.2;">
 {disclaimer}
 </div>
@@ -1422,6 +1508,57 @@ SIG_END"""
             "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_sir_hospital_draft'",
             (hospital_content, hospital_description)
         )
+
+        # Palak Mam Corporate Advisory — force update
+        palak_corp_description = "Corporate Advisory / Equity Fund Raising Services — QVSCL Introduction"
+        palak_corp_content = """Subject: Corporate Advisory/ Equity Fund Raising Services.
+
+Dear {{First Name}},
+
+Greetings from QVSCL!
+
+I hope you're doing well.
+
+I'm excited to introduce QV Strategic Consulting, your trusted partner for driving sustainable capital growth. With extensive experience across diverse industries, we combine strategic expertise, innovation, and hands-on execution to help businesses achieve their goals.
+
+<strong>Key Areas of Expertise:</strong>
+
+• Preparation to IPO – Standardizing information systems, due diligence, information memorandum, and more.
+• Fund Raising – Equity and debt financing solutions tailored to your needs.
+• Board Advisory – Strategic guidance to enhance governance and decision-making.
+• Implementing Partner – Strengthening management teams for seamless execution.
+• Fostering Strategic Partnerships & Alliances – Facilitating joint ventures, mergers, and acquisitions.
+• Strategic Business Planning – Crafting actionable roadmaps for long-term success.
+
+To learn more about how we can support your growth ambitions, see our [website](https://qvscl.com) or connect with us on [LinkedIn](https://www.linkedin.com/company/qvscl/).
+
+We'd love to schedule a virtual meeting at your convenience to explore potential collaboration. Kindly share your availability, and we'll coordinate a suitable time.
+
+Attached, you'll find our company profile for your reference. Looking forward to connecting!
+
+SIG_START
+--
+Thanks & Regards,
+
+***{{Sender Name}}***
+{{Sender Title}}
+[Website](https://www.qvscl.com) | [LinkedIn]({{Sender LinkedIn}})
+{{Sender Phone}}
+
+<strong>Strictly Private and Confidential.</strong>
+
+The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
+SIG_END"""
+
+        cur.execute(
+            "UPDATE prompts SET content = %s, description = %s WHERE name = 'palak_mam_corporate_advisory'",
+            (palak_corp_content, palak_corp_description)
+        )
+        if cur.rowcount == 0:
+            cur.execute(
+                "INSERT INTO prompts (name, description, content, prompt_type) VALUES ('palak_mam_corporate_advisory', %s, %s, 'CUSTOM_DRAFT')",
+                (palak_corp_description, palak_corp_content)
+            )
         conn.commit()
             
         cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
@@ -1661,6 +1798,9 @@ TEMPLATE_ATTACHMENT_MAP = {
     "yashika_draft_ai_tech": [
         {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
         {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
+    ],
+    "palak_mam_corporate_advisory": [
+        {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
     ],
 }
 
@@ -1943,6 +2083,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             raise HTTPException(status_code=404, detail="Lead not found")
 
         draft_content = lead.get('email_draft')
+        draft_content = heal_draft_content(draft_content, user_id)
         email = lead.get('email')
         stored_cc = lead.get('cc_email')
         
@@ -2313,6 +2454,10 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     for lead in leads_to_send:
         try:
             draft_content = lead['email_draft'] or ""
+            # Apply healing to ensure branding is present even if DB draft is old
+            from app.api.drafts import heal_draft_content
+            draft_content = heal_draft_content(draft_content, user_id)
+            
             # Parse Subject and Body
             subject = "Following up"
             body = draft_content
@@ -2413,6 +2558,10 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
     for lead in leads_to_send:
         try:
             draft_content = lead['email_draft'] or ""
+            # Apply healing to ensure branding is present even if DB draft is old
+            from app.api.drafts import heal_draft_content
+            draft_content = heal_draft_content(draft_content, user_id)
+            
             subject = "Following up"
             body = draft_content
             if "Subject: " in draft_content:
