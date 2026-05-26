@@ -64,6 +64,11 @@ FOLLOWUP_TEMPLATES = {
         1: "Dear {name},\n\nI hope you're doing well. Following up on the investment opportunity teaser I shared earlier.\n\nPlease let me know if you have reviewed it or require any additional information for evaluation.",
         2: "Hi {name},\n\nFollowing up on my previous note. We are seeing strong interest and strategic progress across our core milestones.\n\nWould you be open to a brief 5-10 minute sync this week to share a quick update and discuss further?",
         3: "Hi {name},\n\nI understand you are busy, so I'm reaching out one last time. If this isn't a fit for you right now, I'll move this to the back burner.\n\nThank you again for your time and consideration."
+    },
+    "INVESTOR_PALAK_ADVISORY": {
+        1: "Dear {name},\n\nI hope you are well.\n\nJust following up on my previous email. We would value the opportunity to connect and understand your growth roadmap and any potential capital/funding priorities that may be ahead.\n\nWould you be open to a short video call? Happy to coordinate as per your availability.\n\nLooking forward to hearing from you.",
+        2: "Dear {name},\n\nJust following up on my earlier note.\n\nGiven your growth journey, we thought it may be worthwhile to connect and exchange perspectives around future expansion and funding opportunities.\n\nPlease let us know a suitable time for a brief discussion if this would be of interest.\n\nLooking forward to connecting.",
+        3: "Dear {name},\n\nI understand you are busy, so I'm reaching out one last time. If this isn't a fit for you right now, I'll move this to the back burner.\n\nThank you again for your time and consideration."
     }
 }
 
@@ -119,7 +124,20 @@ def get_template_followup(lead: dict, stage: int) -> str:
             "climate" in draft_text.lower()
         )
         
-        if is_ai_hiring:
+        draft_template = str(lead.get('draft_template_used') or '').strip()
+        is_palak_advisory = (
+            draft_template == 'palak_mam_corporate_advisory' or
+            (
+                not draft_template and (
+                    "corporate advisory" in original_subject.lower() or
+                    ("corporate advisory" in draft_text.lower() and "m&a" not in draft_text.lower() and "partnership" not in draft_text.lower())
+                )
+            )
+        )
+
+        if is_palak_advisory:
+            campaign_key = "INVESTOR_PALAK_ADVISORY"
+        elif is_ai_hiring:
             campaign_key = "INVESTOR_AI_HIRING"
         elif is_healthtech:
             campaign_key = "INVESTOR_HEALTHTECH"
