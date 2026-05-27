@@ -825,21 +825,22 @@ const Emails = () => {
                     <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${selectedTemplate === template.name ? 'border-blue-500' : 'border-slate-700'}`}>
                       {selectedTemplate === template.name && <div className="w-3 h-3 rounded-full bg-blue-500" />}
                     </div>
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3">
                         <span className="text-lg font-black text-white">📝 {template.name}</span>
                         <span className="px-2 py-0.5 bg-violet-500/20 text-violet-400 text-[9px] font-black uppercase tracking-widest rounded-md">Custom</span>
                       </div>
-                      <p className="text-slate-400 text-[13px] font-medium leading-relaxed mt-1 line-clamp-1">{template.description || `Custom outreach template: ${template.name}`}</p>
+                      <div className="mt-1 max-h-[60px] overflow-y-auto custom-scrollbar">
+                        <p className="text-slate-400 text-[13px] font-medium leading-relaxed">{template.description || `Custom outreach template: ${template.name}`}</p>
+                      </div>
                       <div className="mt-3 flex items-center gap-2">
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Subject:</span>
-                        <span className="text-[10px] font-bold text-slate-400 truncate max-w-[300px]">
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest shrink-0">Subject:</span>
+                        <span className="text-[10px] font-bold text-slate-400 overflow-x-auto whitespace-nowrap scrollbar-thin">
                           {(() => {
                             if (!template.content) return "No Subject";
                             const lines = template.content.split('\n');
                             const subLine = lines.find(l => l.trim().toLowerCase().startsWith('subject:'));
                             if (subLine) return subLine.replace(/subject:/i, '').trim();
-                            // Fallback if Subject: tag is missing from memory cache
                             const firstLine = lines.map(l => l.trim()).find(l => l.length > 0) || "";
                             if (firstLine.toLowerCase().startsWith('dear') || firstLine.toLowerCase().startsWith('hi') || firstLine.toLowerCase().startsWith('hello') || firstLine.toLowerCase().startsWith("i'm") || firstLine.toLowerCase().startsWith("i hope")) {
                               return "AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |";

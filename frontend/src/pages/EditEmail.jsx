@@ -92,43 +92,79 @@ const EditEmail = () => {
   const renderEmailPreview = (text) => {
     if (!text) return 'Generate AI draft to begin...';
 
-    // 1. Handle Signature Block (Keep breaks)
+    // 1. Handle Signature Block — split at SIG_START and SIG_END
     const sigStartIdx = text.indexOf('SIG_START');
+    const sigEndIdx = text.indexOf('SIG_END');
     let sigHtml = '';
     let mainText = text;
+    let afterSig = '';
     if (sigStartIdx !== -1) {
-      const sigPart = text.substring(sigStartIdx);
       mainText = text.substring(0, sigStartIdx);
-      const sigContent = sigPart.replace('SIG_START', '').replace('SIG_END', '').trim();
-      
-      const sigLines = sigContent.split('\n').filter(l => l.trim());
-      sigHtml = '<div style="margin-top:24px; border-top:1px solid #ffffff15; padding-top:16px; font-family: sans-serif;">';
-      sigLines.forEach(line => {
-        const trimmed = line.trim();
-        if (trimmed === '--') {
-          sigHtml += '<div style="color:#475569; margin-bottom:8px;">--</div>';
-        } else if (trimmed.startsWith('SIG_LINK_LABEL:')) {
-          const rest = trimmed.replace('SIG_LINK_LABEL:', '');
-          const colonIdx = rest.indexOf(':');
-          const label = colonIdx !== -1 ? rest.substring(0, colonIdx).trim() : 'LinkedIn';
-          const url = colonIdx !== -1 ? rest.substring(colonIdx + 1).trim() : rest;
-          sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:4px;">${label}</a>`;
-        } else if (trimmed.startsWith('SIG_LINK:')) {
-          const url = trimmed.replace('SIG_LINK:', '').trim();
-          sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:4px;">LinkedIn</a>`;
-        } else if (trimmed) {
-          // Apply inline markdown to signature lines too
-          let lineHtml = trimmed
-            .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
-            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-            .replace(/_(.*?)_/g, '<em>$1</em>')
-            .replace(/\*(.*?)\*/g, '<em>$1</em>')
-            .replace(/\[(.*?)\]\((.*?)\)/g, `<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>`);
+      if (sigEndIdx !== -1) {
+        // Content between SIG_START and SIG_END = signature
+        const sigContent = text.substring(sigStartIdx + 9, sigEndIdx).trim();
+        // Content after SIG_END = footer (unsubscribe, confidential)
+        afterSig = text.substring(sigEndIdx + 8).trim();
+        
+        const sigLines = sigContent.split('\n').filter(l => l.trim());
+        sigHtml = '<div style="margin-top:24px; border-top:1px solid #ffffff15; padding-top:16px; font-family: sans-serif;">';
+        sigLines.forEach(line => {
+          const trimmed = line.trim();
+          if (trimmed === '--') {
+            sigHtml += '<div style="color:#475569; margin-bottom:8px;">--</div>';
+          } else if (trimmed.startsWith('SIG_LINK_LABEL:')) {
+            const rest = trimmed.replace('SIG_LINK_LABEL:', '');
+            const colonIdx = rest.indexOf(':');
+            const label = colonIdx !== -1 ? rest.substring(0, colonIdx).trim() : 'LinkedIn';
+            const url = colonIdx !== -1 ? rest.substring(colonIdx + 1).trim() : rest;
+            sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:4px;">${label}</a>`;
+          } else if (trimmed.startsWith('SIG_LINK:')) {
+            const url = trimmed.replace('SIG_LINK:', '').trim();
+            sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:4px;">LinkedIn</a>`;
+          } else if (trimmed) {
+            // Apply inline markdown to signature lines too
+            let lineHtml = trimmed
+              .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+              .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+              .replace(/_(.*?)_/g, '<em>$1</em>')
+              .replace(/\*(.*?)\*/g, '<em>$1</em>')
+              .replace(/\[(.*?)\]\((.*?)\)/g, `<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>`);
 
-          sigHtml += `<div style="color:#94a3b8; font-size:12px; line-height:1.6; margin-bottom:2px;">${lineHtml}</div>`;
-        }
-      });
-      sigHtml += '</div>';
+            sigHtml += `<div style="color:#94a3b8; font-size:12px; line-height:1.6; margin-bottom:2px;">${lineHtml}</div>`;
+          }
+        });
+        sigHtml += '</div>';
+      } else {
+        // No SIG_END — treat everything after SIG_START as sig (backward compat)
+        const sigContent = text.substring(sigStartIdx + 9).trim();
+        const sigLines = sigContent.split('\n').filter(l => l.trim());
+        sigHtml = '<div style="margin-top:24px; border-top:1px solid #ffffff15; padding-top:16px; font-family: sans-serif;">';
+        sigLines.forEach(line => {
+          const trimmed = line.trim();
+          if (trimmed === '--') {
+            sigHtml += '<div style="color:#475569; margin-bottom:8px;">--</div>';
+          } else if (trimmed.startsWith('SIG_LINK_LABEL:')) {
+            const rest = trimmed.replace('SIG_LINK_LABEL:', '');
+            const colonIdx = rest.indexOf(':');
+            const label = colonIdx !== -1 ? rest.substring(0, colonIdx).trim() : 'LinkedIn';
+            const url = colonIdx !== -1 ? rest.substring(colonIdx + 1).trim() : rest;
+            sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:4px;">${label}</a>`;
+          } else if (trimmed.startsWith('SIG_LINK:')) {
+            const url = trimmed.replace('SIG_LINK:', '').trim();
+            sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:4px;">LinkedIn</a>`;
+          } else if (trimmed) {
+            let lineHtml = trimmed
+              .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+              .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+              .replace(/_(.*?)_/g, '<em>$1</em>')
+              .replace(/\*(.*?)\*/g, '<em>$1</em>')
+              .replace(/\[(.*?)\]\((.*?)\)/g, `<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>`);
+
+            sigHtml += `<div style="color:#94a3b8; font-size:12px; line-height:1.6; margin-bottom:2px;">${lineHtml}</div>`;
+          }
+        });
+        sigHtml += '</div>';
+      }
     }
 
     // 2. Split main text into paragraphs
@@ -169,12 +205,34 @@ const EditEmail = () => {
         htmlParts.push(listHtml);
       } else {
         // Paragraph: preserve single newlines as line breaks
-        const content = trimmed.replace(/\n/g, '<br />');
+        let content = trimmed.replace(/\n/g, '<br />');
+        content = content
+          .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+          .replace(/_(.*?)_/g, '<em>$1</em>')
+          .replace(/\*(.*?)\*/g, '<em>$1</em>')
+          .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>');
         htmlParts.push(`<p style="margin-bottom: 1em; color: #cbd5e1;">${content}</p>`);
       }
     });
 
-    let finalHtml = htmlParts.join('') + sigHtml;
+    // Render afterSig (content after SIG_END — unsubscribe, confidential) as regular paragraphs
+    let afterHtml = '';
+    if (afterSig) {
+      const afterParagraphs = afterSig.split('\n\n').filter(p => p.trim());
+      afterHtml = afterParagraphs.map(p => {
+        let content = p.replace(/\n/g, '<br />');
+        content = content
+          .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+          .replace(/_(.*?)_/g, '<em>$1</em>')
+          .replace(/\*(.*?)\*/g, '<em>$1</em>')
+          .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>');
+        return `<p style="margin-top:1.2em; color:#94a3b8; font-size:12px;">${content}</p>`;
+      }).join('');
+    }
+
+    let finalHtml = htmlParts.join('') + sigHtml + afterHtml;
 
     // 3. Inline Styles (Bold, Italic, Links, Fonts)
     return finalHtml

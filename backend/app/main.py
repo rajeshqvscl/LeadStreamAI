@@ -42,7 +42,8 @@ async def scheduler_loop():
         await asyncio.sleep(60)
 
 async def gsheet_sync_loop():
-    from app.api.companies import background_auto_sync
+    # Auto-sync disabled
+    return
     while True:
         try:
             background_auto_sync()
@@ -54,7 +55,6 @@ async def gsheet_sync_loop():
 async def lifespan(app: FastAPI):
     t1 = asyncio.create_task(scheduler_loop())
     t2 = asyncio.create_task(maintenance_loop())
-    t3 = asyncio.create_task(gsheet_sync_loop())
     yield
     t1.cancel()
     t2.cancel()

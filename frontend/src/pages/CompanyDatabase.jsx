@@ -20,7 +20,7 @@ const CompanyDatabase = () => {
   const [selectedTab, setSelectedTab] = useState(null);
   const [isLoadingTabs, setIsLoadingTabs] = useState(false);
   const [processingId, setProcessingId] = useState(null);
-  const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState(true);
+
   const [isSaving, setIsSaving] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -221,7 +221,7 @@ const CompanyDatabase = () => {
       await api.post('/api/companies/import-gsheet', { 
         url: gsheetUrl, 
         sheet_name: selectedTab,
-        auto_sync: isAutoSyncEnabled
+
       });
       showNotification('success', 'Satellite Link Established: Cloud dataset integrated.');
       // Keep URL as requested by user
@@ -675,19 +675,6 @@ const CompanyDatabase = () => {
               </div>
             )}
             <div className="flex items-center gap-4 self-end">
-              <label className="flex items-center gap-2.5 cursor-pointer group px-2 py-2 bg-white/5 border border-white/5 rounded-xl hover:bg-white/10 transition-all h-10">
-                <div className="relative">
-                  <input 
-                    type="checkbox" 
-                    className="sr-only peer" 
-                    checked={isAutoSyncEnabled}
-                    onChange={(e) => setIsAutoSyncEnabled(e.target.checked)}
-                  />
-                  <div className="w-8 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500/20 peer-checked:after:bg-emerald-500"></div>
-                </div>
-                <span className="text-[8px] font-black text-slate-500 uppercase tracking-[1px] group-hover:text-slate-400 whitespace-nowrap">Auto Sync</span>
-              </label>
-
               <button
                 onClick={handleSyncGSheet}
                 disabled={isSyncing || !gsheetUrl}

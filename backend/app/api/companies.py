@@ -622,15 +622,7 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
     """Syncs a public Google Sheet into the company registry. Supports specific tabs or all tabs."""
     url = req.get("url")
     sheet_name = req.get("sheet_name")  # Optional: specific tab name or "ALL_TABS"
-    auto_sync = req.get("auto_sync") == True or req.get("auto_sync") == "true"
     is_bg = req.get("_is_background") == "true"
-    
-    if not url:
-        raise HTTPException(status_code=400, detail="URL is required")
-    
-    # Save config if requested and not already in background loop
-    if auto_sync and not is_bg:
-        save_sync_config(url, sheet_name, user_id)
     
     raw_url = url.strip()
     if "/d/" not in raw_url:

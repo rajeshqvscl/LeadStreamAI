@@ -40,13 +40,13 @@ const DraftTemplatePicker = ({ isOpen, onClose, selectedCount, onGenerate }) => 
         className="fixed inset-0 bg-black/80 backdrop-blur-md z-[5000] animate-in fade-in duration-300"
         onClick={onClose}
       />
-      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-[#0d1117] border border-white/10 rounded-3xl shadow-[0_0_60px_rgba(0,0,0,0.6)] z-[5001] animate-in zoom-in-95 duration-300 overflow-hidden">
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-[#0d1117] border border-white/10 rounded-3xl shadow-[0_0_60px_rgba(0,0,0,0.6)] z-[5001] animate-in zoom-in-95 duration-300 flex flex-col max-h-[85vh]">
         {/* Top gradient bar */}
-        <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 via-purple-500 to-rose-500" />
+        <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 via-purple-500 to-rose-500 shrink-0" />
 
-        <div className="p-8">
+        <div className="p-8 flex flex-col min-h-0">
           {/* Header */}
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-6 shrink-0">
             <div>
               <h2 className="text-lg font-black text-white tracking-tight flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-blue-400" /> Choose Draft Template
@@ -61,7 +61,7 @@ const DraftTemplatePicker = ({ isOpen, onClose, selectedCount, onGenerate }) => 
           </div>
 
           {/* Options */}
-          <div className="space-y-3 mb-8">
+          <div className="space-y-3 flex-1 overflow-y-scroll custom-scrollbar pr-3 min-h-0">
             {/* Regular AI */}
             <label className={`flex items-start gap-4 p-4 rounded-2xl border cursor-pointer transition-all ${selectedTemplate === 'ai' ? 'border-blue-500/60 bg-blue-500/10' : 'border-white/8 bg-white/[0.02] hover:border-white/15'}`}>
               <input type="radio" name="tpl" value="ai" className="sr-only" checked={selectedTemplate === 'ai'} onChange={() => setSelectedTemplate('ai')} />
@@ -107,7 +107,7 @@ const DraftTemplatePicker = ({ isOpen, onClose, selectedCount, onGenerate }) => 
                     <span className="text-[9px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Custom</span>
                   </p>
                   <p className="text-slate-500 text-[11px] mt-0.5">{tpl.description || 'Custom template with lead name & company auto-filled.'}</p>
-                  <p className="text-slate-600 text-[10px] mt-1.5 font-mono truncate">
+                  <p className="text-slate-600 text-[10px] mt-1.5 font-mono overflow-x-auto whitespace-nowrap scrollbar-thin">
                     SUBJECT: {(() => {
                       if (!tpl.content) return "No Subject";
                       const lines = tpl.content.split('\n');
@@ -127,7 +127,7 @@ const DraftTemplatePicker = ({ isOpen, onClose, selectedCount, onGenerate }) => 
           </div>
 
           {/* Actions */}
-          <div className="flex gap-3">
+          <div className="flex gap-3 pt-6 shrink-0">
             <button
               onClick={onClose}
               className="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 font-bold text-xs uppercase tracking-widest border border-white/5 cursor-pointer transition-colors"

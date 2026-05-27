@@ -471,7 +471,7 @@ def check_daily_email_limit(user_id: Optional[str], batch_size: int = 1) -> bool
         cur.close()
         conn.close()
 
-
+_INLINED_IMAGE_CACHE = {}
 
 def markdown_to_html(text):
     import re
@@ -479,6 +479,9 @@ def markdown_to_html(text):
     text = text.replace("\r\n", "\n")
     # 1. Strip technical markers
     text = text.replace("SIG_START", "").replace("SIG_END", "").replace("[[SIG_PLACEHOLDER]]", "")
+    # 1a. Resolve [[BACKEND_URL]] placeholder so images work in send flow
+    backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+    text = text.replace("[[BACKEND_URL]]", backend_url)
     
     # Convert known asset images to inline base64 data URIs for reliable rendering in email clients
     def _inline_img(m):
@@ -490,11 +493,15 @@ def markdown_to_html(text):
         known = {"PHOTO-2026-05-25-10-33-35.jpg": "image/jpeg", "kajal.png": "image/png"}
         for img_name, mime_type in known.items():
             if img_name in src:
+                if img_name in _INLINED_IMAGE_CACHE:
+                    new_src = _INLINED_IMAGE_CACHE[img_name]
+                    return tag.replace(f'src="{src}"', f'src="{new_src}"')
                 img_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", img_name)
                 if os.path.exists(img_path):
                     with open(img_path, "rb") as f:
                         b64_data = base64.b64encode(f.read()).decode()
                     new_src = f"data:{mime_type};base64,{b64_data}"
+                    _INLINED_IMAGE_CACHE[img_name] = new_src
                     return tag.replace(f'src="{src}"', f'src="{new_src}"')
         return tag
 
@@ -504,11 +511,15 @@ def markdown_to_html(text):
         known = {"PHOTO-2026-05-25-10-33-35.jpg": "image/jpeg", "kajal.png": "image/png"}
         for img_name, mime_type in known.items():
             if img_name in src:
+                if img_name in _INLINED_IMAGE_CACHE:
+                    new_src = _INLINED_IMAGE_CACHE[img_name]
+                    return f'<div style="width: 100%; margin-top: 25px; margin-bottom: 25px;"><img src="{new_src}" alt="{alt_text}" style="width: 100%; height: auto; display: block;" /></div>'
                 img_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", img_name)
                 if os.path.exists(img_path):
                     with open(img_path, "rb") as f:
                         b64_data = base64.b64encode(f.read()).decode()
                     new_src = f"data:{mime_type};base64,{b64_data}"
+                    _INLINED_IMAGE_CACHE[img_name] = new_src
                     return f'<div style="width: 100%; margin-top: 25px; margin-bottom: 25px;"><img src="{new_src}" alt="{alt_text}" style="width: 100%; height: auto; display: block;" /></div>'
         return m.group(0)
     
@@ -800,12 +811,13 @@ def get_sender_profile(user_id: Optional[str]) -> dict:
         "linkedin_url": "https://linkedin.com"
     }
 
-def heal_draft_content(email_draft: str, user_id: Optional[str]) -> str:
+def heal_draft_content(email_draft: str, user_id: Optional[str], profile: Optional[dict] = None) -> str:
     if not email_draft:
         return email_draft
     
     # Resolve logged-in user details
-    profile = get_sender_profile(user_id)
+    if profile is None:
+        profile = get_sender_profile(user_id)
     sender_full_name = profile.get('full_name') or profile.get('username') or "Kajal Huria"
     sender_first_name = sender_full_name.split()[0] if sender_full_name else "Kajal"
     if sender_first_name.lower() in ["system", "admin", "team", "the", "test"]:
@@ -819,9 +831,19 @@ def heal_draft_content(email_draft: str, user_id: Optional[str]) -> str:
         
     healed = email_draft
     
+    # 0. Resolve [[BACKEND_URL]] placeholder so images work during send flow
+    backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+    healed = healed.replace("[[BACKEND_URL]]", backend_url)
+    
+    # 0a. Protect image filenames from name replacement below
+    healed = healed.replace("kajal.png", "[[KAJAL_IMG_PNG]]").replace("Kajal.png", "[[KAJAL_IMG_PNG]]")
+    
     # 1. Case-insensitively replace any occurrence of "Kajal" with the logged-in user's first name
     if "kajal" in healed.lower():
         healed = re.sub(r"\bKajal\b", sender_first_name, healed, flags=re.IGNORECASE)
+    
+    # 0b. Restore protected image filenames
+    healed = healed.replace("[[KAJAL_IMG_PNG]]", "kajal.png")
         
     # 2. Heal the subject line if this is the AI tech platform draft but has the generic subject
     healed_lower = healed.lower()
@@ -1104,32 +1126,32 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         html_body = markdown_to_html(body_with_sig)
         email_content = f"Subject: {subject}\n\n{body_with_sig}"
         
-        # --- NEW: Delete OLD Gmail Draft if it exists ---
+        # --- Delete OLD Gmail Draft if it exists ---
         old_gmail_id = lead.get('gmail_draft_id')
+        uid_int = int(normalize_user_id(user_id))
+        if old_gmail_id:
+            try:
+                from app.services.google_service import get_gmail_service
+                service = get_gmail_service(uid_int)
+                if service:
+                    service.users().drafts().delete(userId='me', id=old_gmail_id).execute()
+                    logger.info(f"🗑️ Deleted old Gmail draft {old_gmail_id}")
+            except:
+                pass
+
+        # --- Step 1: Create Gmail Draft ---
+        gmail_draft_id = None
+        draft_to_email = lead.get('email', '')
+        if not draft_to_email:
+            logger.warning(f"⚠️ Skipping Gmail draft — lead {req.lead_id} has no email")
         try:
             from app.services.google_service import get_gmail_service
             import base64
             from email.mime.text import MIMEText
-            
-            uid_int = int(normalize_user_id(user_id))
             service = get_gmail_service(uid_int)
-            if service and old_gmail_id:
-                try:
-                    service.users().drafts().delete(userId='me', id=old_gmail_id).execute()
-                    logger.info(f"🗑️ Deleted old Gmail draft {old_gmail_id}")
-                except:
-                    pass
-        except:
-            pass
-
-        # --- Step 1: Create Gmail Draft ---
-        gmail_draft_id = None
-        try:
-            from app.services.google_service import get_gmail_service
-            service = get_gmail_service(uid_int)
-            if service:
+            if service and draft_to_email:
                 message = MIMEText(html_body, 'html')
-                message['to'] = lead.get('email', '')
+                message['to'] = draft_to_email
                 message['subject'] = subject
                 raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
                 
@@ -1139,6 +1161,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 logger.info(f"✅ Created NEW Gmail draft {gmail_draft_id} for Lead {req.lead_id}")
         except Exception as ge:
             logger.warning(f"⚠️  Gmail draft sync failed: {ge}")
+            gmail_draft_id = None
 
         # --- Step 2: Save to DB ---
         conn2 = get_db_connection()
@@ -1688,35 +1711,32 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
         # Full content for local DB storage
         email_content = f"Subject: {final_subject}\n\n{body_with_sig}"
 
-        # --- NEW: Delete OLD Gmail Draft if it exists ---
+        # --- Delete OLD Gmail Draft if it exists ---
         old_gmail_id = lead.get('gmail_draft_id')
-        try:
-            from app.services.google_service import get_gmail_service
-            import base64
-            from email.mime.text import MIMEText
-            
-            uid_t = normalize_user_id(user_id)
-            service = get_gmail_service(int(uid_t))
-            if service and old_gmail_id:
-                try:
+        uid_t = int(normalize_user_id(user_id))
+        if old_gmail_id:
+            try:
+                from app.services.google_service import get_gmail_service
+                service = get_gmail_service(uid_t)
+                if service:
                     service.users().drafts().delete(userId='me', id=old_gmail_id).execute()
                     logger.info(f"🗑️ Deleted old Gmail draft {old_gmail_id} (template)")
-                except:
-                    pass
-        except:
-            pass
+            except:
+                pass
 
         # --- Sync to Gmail Drafts (with PDF attachments) ---
         gmail_draft_id = None
+        to_email = lead.get('email', '')
+        if not to_email:
+            logger.warning(f"⚠️ Skipping Gmail draft — lead {req.lead_id} has no email")
         try:
             from app.services.google_service import get_gmail_service
+            import base64
             from email.mime.multipart import MIMEMultipart
             from email.mime.application import MIMEApplication
             from email.mime.text import MIMEText
-            uid_t = normalize_user_id(user_id)
-            service = get_gmail_service(int(uid_t))
-            if service:
-                to_email = lead.get('email', '')
+            service = get_gmail_service(uid_t)
+            if service and to_email:
                 msg = MIMEMultipart('mixed')
                 msg_body = MIMEMultipart('alternative')
                 msg_body.attach(MIMEText(html_body, 'html'))
@@ -1747,6 +1767,7 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
                 logger.info(f"✅ Created NEW Gmail draft {gmail_draft_id} for Lead {req.lead_id} (template-html)")
         except Exception as ge:
             logger.warning(f"⚠️  Gmail draft sync failed: {ge}")
+            gmail_draft_id = None
 
         # Save to DB (with gmail_draft_id and draft_template_used)
         conn2 = get_db_connection()
@@ -1826,16 +1847,15 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         where_clause = "WHERE email_draft IS NOT NULL"
         params = []
         
+        # Show drafts for the specific user if uid is provided and not admin (uid != "1")
         if uid and uid != "1":
             where_clause += " AND (user_id = %s OR user_id::text = %s)"
             try:
                 params.extend([int(uid), str(uid)])
             except:
                 params.extend([uid, uid])
-        elif uid and uid == "1":
-            pass
-        else:
-            where_clause += " AND user_id IS NULL"
+        # If uid is admin ("1") or not provided, show all drafts without additional user filter
+        # No extra clause added
 
         if status:
             where_clause += " AND email_status = %s"
@@ -1899,10 +1919,12 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
 
         drafts = []
         backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+        # Pre-fetch sender profile once to avoid N+1 database queries
+        profile = get_sender_profile(user_id)
         for r in rows:
             draft_content = r["email_draft"] or ""
-            # Apply healing
-            draft_content = heal_draft_content(draft_content, user_id)
+            # Apply healing with pre-fetched profile
+            draft_content = heal_draft_content(draft_content, user_id, profile)
             # Normalize literal \\n to real newlines for consistent parsing
             draft_content = draft_content.replace("\\n", "\n").replace("\\r\\n", "\n")
                 
