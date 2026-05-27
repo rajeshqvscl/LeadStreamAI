@@ -487,7 +487,7 @@ def markdown_to_html(text):
         if not src_m:
             return tag
         src = src_m.group(1)
-        known = {"PHOTO-2026-05-25-10-33-35.jpg": "image/jpeg"}
+        known = {"PHOTO-2026-05-25-10-33-35.jpg": "image/jpeg", "kajal.png": "image/png"}
         for img_name, mime_type in known.items():
             if img_name in src:
                 img_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", img_name)
@@ -501,7 +501,7 @@ def markdown_to_html(text):
     def _inline_md_img(m):
         alt_text = m.group(1)
         src = m.group(2)
-        known = {"PHOTO-2026-05-25-10-33-35.jpg": "image/jpeg"}
+        known = {"PHOTO-2026-05-25-10-33-35.jpg": "image/jpeg", "kajal.png": "image/png"}
         for img_name, mime_type in known.items():
             if img_name in src:
                 img_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", img_name)
@@ -581,8 +581,9 @@ def markdown_to_html(text):
     if "Website" in text and "<a" not in text:
         text = text.replace("Website", '<a href="https://qvscl.com" style="color: #0066cc; text-decoration: underline;">Website</a>')
     
-    if "Click here to unsubscribe" in text:
-        text = text.replace("Click here to unsubscribe", '<a href="#" style="color: #0066cc; font-size: 11px; text-decoration: underline;">Click here to unsubscribe</a>')
+    # Skip "Click here to unsubscribe" conversion — `inject_signature` already
+    # adds a proper unsubscribe link, and a plain-text replace would nest it inside
+    # the existing <a> tag, creating duplicate unsubscribe links.
 
     # 5. Standard Markdown
     text = re.sub(r'<b>(.*?)</b>', r'__BOLD__\1__BOLD__', text)
