@@ -38,10 +38,8 @@ try:
     import redis
     REDIS_URL = os.getenv("REDIS_URL") or os.getenv("REDIS_TLS_URL") or "redis://localhost:6379"
     redis_client = redis.Redis.from_url(
-        REDIS_URL, 
-        socket_connect_timeout=1.0, 
-        socket_timeout=1.0, 
-        decode_responses=True
+        REDIS_URL,
+        decode_responses=True,
     )
     redis_client.ping()
     redis_available = True
@@ -98,7 +96,7 @@ def check_daily_email_limit(user_id: Optional[str], batch_size: int = 1) -> bool
 @router.get("/companies")
 def list_companies(
     page: int = 1, 
-    limit: int = 500, 
+    limit: int = 100, 
     search: Optional[str] = None,
     filters: Optional[str] = None, # JSON string of key-value filters
     user_id: Optional[str] = Header(None, alias="X-User-Id")
@@ -159,48 +157,6 @@ def list_companies(
         except:
             pass # Ignore malformed filters
 
-    # --- SELF-HEALING SYNC ---
-    # Sync _is_generated badge by matching emails between company_registry and leads_raw
-    try:
-        if is_admin:
-            cur.execute("""
-                UPDATE company_registry cr
-                SET _is_generated = TRUE
-                FROM leads_raw lr
-                WHERE cr._is_generated = FALSE
-                  AND lr.email_status IN ('PENDING_APPROVAL', 'SENT', 'REPLIED', 'BOUNCED')
-                  AND (
-                      LOWER(cr.row_data->>'Email') = LOWER(lr.email) OR
-                      LOWER(cr.row_data->>'email') = LOWER(lr.email) OR
-                      LOWER(cr.row_data->>'Work Email') = LOWER(lr.email) OR
-                      LOWER(cr.row_data->>'work_email') = LOWER(lr.email) OR
-                      LOWER(cr.row_data->>'EMAIL') = LOWER(lr.email)
-                  )
-            """)
-        elif uid:
-            cur.execute("""
-                UPDATE company_registry cr
-                SET _is_generated = TRUE
-                FROM leads_raw lr
-                WHERE cr.user_id = %s
-                  AND cr._is_generated = FALSE
-                  AND lr.email_status IN ('PENDING_APPROVAL', 'SENT', 'REPLIED', 'BOUNCED')
-                  AND (
-                      LOWER(cr.row_data->>'Email') = LOWER(lr.email) OR
-                      LOWER(cr.row_data->>'email') = LOWER(lr.email) OR
-                      LOWER(cr.row_data->>'Work Email') = LOWER(lr.email) OR
-                      LOWER(cr.row_data->>'work_email') = LOWER(lr.email) OR
-                      LOWER(cr.row_data->>'EMAIL') = LOWER(lr.email)
-                  )
-            """, (uid,))
-        conn.commit()
-    except Exception as sync_err:
-        logger.warning(f"Self-healing status sync failed: {sync_err}")
-        try:
-            conn.rollback()
-        except:
-            pass
-
     try:
         # Total count with filters
         count_query = f"SELECT COUNT(*) FROM company_registry {base_where}"
@@ -236,8 +192,7 @@ def list_companies(
         
         if redis_available and redis_client:
             try:
-                # Cache results for 10 seconds to keep load off the database, but keep pagination/searching highly snappy
-                redis_client.setex(cache_key, 10, json.dumps(result))
+                redis_client.setex(cache_key, 60, json.dumps(result))
                 logger.info(f"INFO: Cached companies query for user {uid} on page {page}")
             except Exception as ce:
                 logger.warning(f"WARNING: Redis companies cache write error: {ce}")
@@ -529,81 +484,7 @@ def discover_gsheet_tabs_xlsx(doc_id: str) -> List[Dict[str, str]]:
     except:
         return []
 
-def save_sync_config(url: str, sheet_name: str, user_id: Optional[str]):
-    """Persists a GSheet sync configuration for background auto-updates.
-    Deactivates previous auto-syncs for the user to prevent loading old sheets.
-    """
-    uid = normalize_user_id(user_id)
-    conn = get_db_connection()
-    cur = conn.cursor()
-    try:
-        # Disable all previous auto-syncs for this user
-        cur.execute("UPDATE gsheet_sync_configs SET is_auto_sync = FALSE WHERE user_id = %s", (uid,))
-        
-        # Check if already exists for this user/url/sheet
-        cur.execute("""
-            SELECT id FROM gsheet_sync_configs 
-            WHERE url = %s AND sheet_name = %s AND user_id = %s
-        """, (url, sheet_name or 'Default', uid))
-        
-        if cur.fetchone():
-            cur.execute("""
-                UPDATE gsheet_sync_configs 
-                SET last_sync = NOW(), is_auto_sync = TRUE
-                WHERE url = %s AND sheet_name = %s AND user_id = %s
-            """, (url, sheet_name or 'Default', uid))
-        else:
-            # If inserting a new row, ensure is_auto_sync is explicitly set to TRUE in case default is missing
-            # But the schema might not have it in the INSERT, we rely on the schema default, or we can add it if the schema has it.
-            # Usually the schema for this table defaults to true, but we'll add it explicitly just in case.
-            try:
-                cur.execute("""
-                    INSERT INTO gsheet_sync_configs (url, sheet_name, user_id, last_sync, is_auto_sync)
-                    VALUES (%s, %s, %s, NOW(), TRUE)
-                """, (url, sheet_name or 'Default', uid))
-            except Exception:
-                # Fallback if is_auto_sync is not explicitly insertable (e.g. if we don't know exact schema)
-                conn.rollback()
-                cur.execute("UPDATE gsheet_sync_configs SET is_auto_sync = FALSE WHERE user_id = %s", (uid,))
-                cur.execute("""
-                    INSERT INTO gsheet_sync_configs (url, sheet_name, user_id, last_sync)
-                    VALUES (%s, %s, %s, NOW())
-                """, (url, sheet_name or 'Default', uid))
-        conn.commit()
-    except Exception as e:
-        print(f"Error saving sync config: {e}")
-        conn.rollback()
-    finally:
-        cur.close()
-        conn.close()
 
-def background_auto_sync():
-    """Iterates through all auto-sync configs and re-triggers imports in parallel."""
-    print("[background] Starting GSheet Auto-Sync cycle...")
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    try:
-        cur.execute("SELECT * FROM gsheet_sync_configs WHERE is_auto_sync = TRUE")
-        configs = cur.fetchall()
-        
-        def process_config(cfg):
-            try:
-                print(f"[background] Auto-syncing: {cfg['url']} ({cfg['sheet_name']})")
-                import_companies_gsheet({
-                    "url": cfg['url'],
-                    "sheet_name": cfg['sheet_name'] if cfg['sheet_name'] != 'Default' else None,
-                    "_is_background": "true"
-                }, str(cfg['user_id']) if cfg['user_id'] else None)
-            except Exception as e:
-                print(f"[background] Sync failed for {cfg['url']}: {e}")
-
-        # Run sequentially to prevent Memory Exhaustion
-        for cfg in configs:
-            process_config(cfg)
-            
-    finally:
-        cur.close()
-        conn.close()
 
 @router.post("/companies/gsheet-tabs")
 def get_gsheet_tabs(req: Dict[str, str]):
@@ -622,7 +503,6 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
     """Syncs a public Google Sheet into the company registry. Supports specific tabs or all tabs."""
     url = req.get("url")
     sheet_name = req.get("sheet_name")  # Optional: specific tab name or "ALL_TABS"
-    is_bg = req.get("_is_background") == "true"
     
     raw_url = url.strip()
     if "/d/" not in raw_url:

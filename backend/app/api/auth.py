@@ -400,6 +400,10 @@ def google_callback(request: Request, code: str, state: str):
             frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
             return RedirectResponse(url=f"{frontend_url}/dashboard?error=permissions_denied")
         
+        # Invalidate cached Gmail service so next call rebuilds with fresh tokens
+        from app.services.google_service import invalidate_gmail_service_cache
+        invalidate_gmail_service_cache(int(user_id))
+
         # Immediately register Gmail watch() for this user
         register_gmail_watch(int(user_id))
         

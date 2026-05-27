@@ -295,19 +295,6 @@ def create_tables():
     );
     """)
 
-    # GSheet Sync Configs (for Auto-Update)
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS gsheet_sync_configs (
-        id SERIAL PRIMARY KEY,
-        url TEXT NOT NULL,
-        sheet_name TEXT, -- "ALL_TABS" or specific name
-        user_id INTEGER,
-        last_sync TIMESTAMP,
-        is_auto_sync BOOLEAN DEFAULT TRUE,
-        created_at TIMESTAMP DEFAULT NOW()
-    );
-    """)
-
     # Company Registry Table (Dynamic Sheet Data)
     cur.execute("""
     CREATE TABLE IF NOT EXISTS company_registry (
@@ -340,6 +327,14 @@ def create_tables():
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
     """)
+
+    # Ensure owner_username column exists on prompts table for template ownership
+    for prompts_col in [("owner_username", "TEXT")]:
+        try:
+            cur.execute(f"ALTER TABLE prompts ADD COLUMN {prompts_col[0]} {prompts_col[1]};")
+            conn.commit()
+        except psycopg2.Error:
+            conn.rollback()
 
     # Seed default prompts if table is empty
     cur.execute("SELECT COUNT(*) FROM prompts")

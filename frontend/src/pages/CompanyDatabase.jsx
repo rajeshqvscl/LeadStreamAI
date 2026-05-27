@@ -53,7 +53,7 @@ const CompanyDatabase = () => {
       const filtersJson = JSON.stringify(filtersCopy);
       const queryParams = new URLSearchParams({
         page: String(page),
-        limit: '500'
+        limit: '100'
       });
       queryParams.append('_t', String(Date.now()));
       if (search) queryParams.append('search', search);

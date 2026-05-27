@@ -30,12 +30,9 @@ redis_available = False
 try:
     import redis
     REDIS_URL = os.getenv("REDIS_URL") or os.getenv("REDIS_TLS_URL") or "redis://localhost:6379"
-    # Use 1-second connection timeout to prevent backend blocking if Redis server is down
     redis_client = redis.Redis.from_url(
-        REDIS_URL, 
-        socket_connect_timeout=1.0, 
-        socket_timeout=1.0, 
-        decode_responses=True
+        REDIS_URL,
+        decode_responses=True,
     )
     redis_client.ping()
     redis_available = True

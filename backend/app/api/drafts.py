@@ -14,9 +14,41 @@ from app.services.llm_services import EmailGenerator
 from app.services.vision_service import analyze_template_screenshot
 import psycopg2.extras
 import logging
+import json
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# --- REDIS CACHE INITIALIZATION ---
+import os
+redis_client = None
+redis_available = False
+
+try:
+    import redis
+    REDIS_URL = os.getenv("REDIS_URL") or os.getenv("REDIS_TLS_URL") or "redis://localhost:6379"
+    redis_client = redis.Redis.from_url(
+        REDIS_URL,
+        decode_responses=True,
+    )
+    redis_client.ping()
+    redis_available = True
+    logger.info(f"SUCCESS: Connected to Redis Cache inside drafts.py at {REDIS_URL.split('@')[-1]}")
+except Exception as re_err:
+    logger.warning(f"NOTICE: Redis is not active inside drafts.py. Falling back to direct database. Error: {re_err}")
+    redis_client = None
+    redis_available = False
+
+def invalidate_pending_drafts_cache(user_id: str = "*"):
+    if redis_available and redis_client:
+        try:
+            pattern = f"pending_drafts:{user_id}:*"
+            keys = redis_client.keys(pattern)
+            if keys:
+                redis_client.delete(*keys)
+                logger.info(f"SUCCESS: Invalidated cache keys for pattern: {pattern}")
+        except Exception as ie:
+            logger.error(f"Failed to invalidate pending drafts cache: {ie}")
 
 # Guaranteed self-healing database update at module load/hot-reload time
 try:
@@ -731,6 +763,8 @@ def bulk_email_action(req: BulkActionRequest, user_id: Optional[str] = Header(No
         conn.commit()
         cur.close()
         conn.close()
+
+        invalidate_pending_drafts_cache(user_id)
         
         return {"message": f"Successfully updated {len(req.lead_ids)} leads to {req.action}"}
     except Exception as e:
@@ -904,6 +938,14 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     """Appends a premium standardized signature and mandatory unsubscribe link."""
     body_text = body.strip()
     body_lower = body_text.lower()
+    
+    # If unsubscribe already exists in body, strip it to avoid duplication,
+    # then let the normal flow add the proper signature + unsubscribe link
+    if "unsubscribe" in body_lower:
+        lines = body_text.split("\n")
+        lines = [l for l in lines if "unsubscribe" not in l.lower()]
+        body_text = "\n".join(lines).strip()
+        body_lower = body_text.lower()
     
     # 1. Strip existing signature to allow replacement by the current logged-in user
     # Look for the formal separator "--"
@@ -1176,6 +1218,8 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         conn2.close()
         
         # Log activity
+        invalidate_pending_drafts_cache(str(uid) if uid else None)
+
         try:
             from app.models.lead import add_activity_log
             add_activity_log(req.lead_id, "DRAFT_GENERATED", f"Email draft regenerated using '{req.template_type}'", profile.get('username') or "system")
@@ -1194,11 +1238,25 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         pass
 # --- List Custom Draft Templates (for template picker modal) ---
 @router.get("/custom-draft-templates")
-def list_custom_draft_templates():
-    """Returns all CUSTOM_DRAFT type prompts for use in the template picker with automatic self-healing."""
+def list_custom_draft_templates(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Returns CUSTOM_DRAFT type prompts filtered by the current user's ownership."""
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        # Seed owner_username for existing templates based on name pattern
+        owner_seed = {
+            "palak_mam_Draft_1": "palak",
+            "palak_mam_corporate_advisory": "palak",
+            "yashika_draft_agritech": "yashika",
+            "yashika_draft_ai_tech": "yashika",
+            "ayush_sir_hospital_draft": "ayush",
+            "kajal_mam_hyphen": "kajal",
+            "kajal_mam_jv": "kajal",
+        }
+        for tpl_name, owner in owner_seed.items():
+            cur.execute("UPDATE prompts SET owner_username = %s WHERE name = %s AND (owner_username IS NULL OR owner_username != %s)", (owner, tpl_name, owner))
+        conn.commit()
         
         # Self-healing database update:
         # Check if 'yashika_draft_ai_tech' has the correct placeholder and Subject prefix.
@@ -1580,7 +1638,30 @@ SIG_END"""
             )
         conn.commit()
             
-        cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
+        # Look up current user to filter templates by ownership
+        current_user_name = None
+        show_all = False
+        if user_id:
+            try:
+                cur.execute("SELECT full_name, username FROM users WHERE id = %s", (normalize_user_id(user_id),))
+                u_row = cur.fetchone()
+                if u_row:
+                    if u_row["username"] and u_row["username"].lower() in ("test", "admin"):
+                        show_all = True
+                    if u_row["full_name"]:
+                        current_user_name = u_row["full_name"].strip().split()[0].lower()
+            except:
+                pass
+
+        if show_all:
+            cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
+        elif current_user_name:
+            cur.execute(
+                "SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND (owner_username IS NULL OR owner_username = %s) ORDER BY id ASC",
+                (current_user_name,)
+            )
+        else:
+            cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -1781,6 +1862,8 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
         cur2.close()
         conn2.close()
 
+        invalidate_pending_drafts_cache(str(uid) if uid else None)
+
         try:
             from app.models.lead import add_activity_log
             add_activity_log(req.lead_id, "DRAFT_GENERATED", f"Custom template draft '{req.template_name}' generated {'(Gmail synced ✅)' if gmail_draft_id else ''}", "system")
@@ -1835,13 +1918,23 @@ def _get_template_attachments(template_name: Optional[str]) -> list:
 
 @router.get("/pending-drafts")
 @router.get("/emails")
-def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Optional[str] = None, geo: Optional[str] = None, company: Optional[str] = None, per_page: int = 20, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Optional[str] = None, geo: Optional[str] = None, company: Optional[str] = None, per_page: int = 60, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     try:
+        uid = normalize_user_id(user_id) if user_id else None
+
+        # Try Redis cache first (only for simple page 1 with no filters to keep it efficient)
+        cache_key = None
+        if redis_available and redis_client and not any([region, geo, company, status]):
+            cache_key = f"pending_drafts:{uid or 'all'}:{page}:{per_page}"
+            try:
+                cached = redis_client.get(cache_key)
+                if cached:
+                    return json.loads(cached)
+            except Exception as ce:
+                logger.warning(f"WARNING: Redis pending drafts cache read error: {ce}")
+
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
-        # Normalize User ID
-        uid = normalize_user_id(user_id) if user_id else None
         
         # Base condition
         where_clause = "WHERE email_draft IS NOT NULL"
@@ -1973,11 +2066,20 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
                 "scheduled_at": r.get("scheduled_at").isoformat() + "Z" if r.get("scheduled_at") and hasattr(r.get("scheduled_at"), 'isoformat') else str(r.get("scheduled_at")) if r.get("scheduled_at") else ""
             })
 
-        return {
+        result = {
             "drafts": drafts,
             "total": total,
             "pages": (total + per_page - 1) // per_page
         }
+
+        # Cache the result in Redis (short TTL of 10s for review queue)
+        if cache_key and redis_available and redis_client:
+            try:
+                redis_client.setex(cache_key, 10, json.dumps(result))
+            except Exception as ce:
+                logger.warning(f"WARNING: Redis pending drafts cache write error: {ce}")
+
+        return result
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -2225,6 +2327,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
                 except Exception as ge:
                     logger.warning(f"⚠️  Failed to delete Gmail draft after send (non-blocking): {ge}")
 
+            invalidate_pending_drafts_cache(str(uid))
             from app.models.lead import add_activity_log
             add_activity_log(draft_id, "EMAIL_SENT", f"Email dispatched via {dispatch_method} from {sender_email} — Will appear in Gmail Sent folder" if has_gmail else f"Email dispatched via {dispatch_method} from {sender_email}", sender_name)
             cur.close()
@@ -2268,6 +2371,7 @@ def reject_draft(draft_id: int, req: Optional[RejectRequest] = None, user_id: Op
     cur.close()
     conn.close()
     
+    invalidate_pending_drafts_cache(user_id)
     from app.models.lead import add_activity_log
     add_activity_log(draft_id, "EMAIL_REJECTED", f"Reason: {req.rejected_reason if req else ''}", "admin")
     
@@ -2296,6 +2400,7 @@ def schedule_email(draft_id: int, req: ScheduleRequest, user_id: Optional[str] =
         conn.commit()
         from app.models.lead import add_activity_log
         add_activity_log(draft_id, "EMAIL_SCHEDULED", f"Email scheduled for {req.scheduled_at}", get_user_name(user_id))
+        invalidate_pending_drafts_cache(user_id)
         cur.close()
         conn.close()
         return {"status": "scheduled", "message": f"Draft scheduled for {req.scheduled_at}"}
@@ -2524,6 +2629,8 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     conn.commit()
     cur.close()
     conn.close()
+
+    invalidate_pending_drafts_cache(user_id)
     
     return {"message": f"Successfully sent {sent_count} approved emails via Gmail API."}
 
@@ -2641,6 +2748,8 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
 
     cur.close()
     conn.close()
+
+    invalidate_pending_drafts_cache(user_id)
 
     return {
         "message": f"Sent {sent_count} of {len(leads_to_send)} emails via Gmail API.",

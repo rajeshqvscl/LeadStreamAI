@@ -8,6 +8,13 @@ from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 import psycopg2.extras
 from app.database import get_db_connection
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Module-level cache for Gmail/Calendar service instances to avoid rebuilding on every call
+_gmail_service_cache: Dict[int, Any] = {}
+_calendar_service_cache: Dict[int, Any] = {}
 
 # Scopes required for the application
 SCOPES = [
@@ -97,18 +104,31 @@ def get_user_credentials(user_id: int) -> Optional[Credentials]:
         conn.close()
 
 def get_gmail_service(user_id: int):
+    if user_id in _gmail_service_cache:
+        return _gmail_service_cache[user_id]
     creds = get_user_credentials(user_id)
     if not creds:
         return None
     # Disable discovery cache to avoid scope restriction bugs
     print(f"DEBUG: Building Gmail service for user {user_id} with SCOPES: {creds.scopes}")
-    return build('gmail', 'v1', credentials=creds, static_discovery=False)
+    service = build('gmail', 'v1', credentials=creds, static_discovery=False)
+    _gmail_service_cache[user_id] = service
+    return service
 
 def get_calendar_service(user_id: int):
+    if user_id in _calendar_service_cache:
+        return _calendar_service_cache[user_id]
     creds = get_user_credentials(user_id)
     if not creds:
         return None
-    return build('calendar', 'v3', credentials=creds, static_discovery=False)
+    service = build('calendar', 'v3', credentials=creds, static_discovery=False)
+    _calendar_service_cache[user_id] = service
+    return service
+
+def invalidate_gmail_service_cache(user_id: int):
+    """Force rebuild on next call — call this after OAuth token refresh/reconnect."""
+    _gmail_service_cache.pop(user_id, None)
+    _calendar_service_cache.pop(user_id, None)
 
 def get_drive_service(user_id: int):
     creds = get_user_credentials(user_id)
