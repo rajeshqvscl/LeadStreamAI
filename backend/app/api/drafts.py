@@ -843,13 +843,8 @@ def heal_draft_content(email_draft: str, user_id: Optional[str]) -> str:
                 
     # 3. Hospital-specific healing: detect by unique content fingerprints and upgrade signature
     hospital_fingerprints = [
-        "hospital", 
-        "beds", 
-        "ebitda", 
-        "occupancy",
         "uttar pradesh",
         "arpob",
-        "infrastructure",
         "ayush"
     ]
     # Check if this is likely the hospital draft (Ayush Sir's)

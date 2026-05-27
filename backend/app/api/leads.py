@@ -7,7 +7,8 @@ import psycopg2
 import psycopg2.extras
 from app.database import get_db_connection
 from app.models.lead import get_lead_by_id, update_lead, get_activity_log, add_activity_log
-from app.api.drafts import get_sender_profile, inject_signature, check_daily_email_limit
+from app.api.drafts import get_sender_profile, inject_signature
+from app.api.companies import check_daily_email_limit
 
 import logging
 

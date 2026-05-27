@@ -530,11 +530,16 @@ def discover_gsheet_tabs_xlsx(doc_id: str) -> List[Dict[str, str]]:
         return []
 
 def save_sync_config(url: str, sheet_name: str, user_id: Optional[str]):
-    """Persists a GSheet sync configuration for background auto-updates."""
+    """Persists a GSheet sync configuration for background auto-updates.
+    Deactivates previous auto-syncs for the user to prevent loading old sheets.
+    """
     uid = normalize_user_id(user_id)
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        # Disable all previous auto-syncs for this user
+        cur.execute("UPDATE gsheet_sync_configs SET is_auto_sync = FALSE WHERE user_id = %s", (uid,))
+        
         # Check if already exists for this user/url/sheet
         cur.execute("""
             SELECT id FROM gsheet_sync_configs 
@@ -548,10 +553,22 @@ def save_sync_config(url: str, sheet_name: str, user_id: Optional[str]):
                 WHERE url = %s AND sheet_name = %s AND user_id = %s
             """, (url, sheet_name or 'Default', uid))
         else:
-            cur.execute("""
-                INSERT INTO gsheet_sync_configs (url, sheet_name, user_id, last_sync)
-                VALUES (%s, %s, %s, NOW())
-            """, (url, sheet_name or 'Default', uid))
+            # If inserting a new row, ensure is_auto_sync is explicitly set to TRUE in case default is missing
+            # But the schema might not have it in the INSERT, we rely on the schema default, or we can add it if the schema has it.
+            # Usually the schema for this table defaults to true, but we'll add it explicitly just in case.
+            try:
+                cur.execute("""
+                    INSERT INTO gsheet_sync_configs (url, sheet_name, user_id, last_sync, is_auto_sync)
+                    VALUES (%s, %s, %s, NOW(), TRUE)
+                """, (url, sheet_name or 'Default', uid))
+            except Exception:
+                # Fallback if is_auto_sync is not explicitly insertable (e.g. if we don't know exact schema)
+                conn.rollback()
+                cur.execute("UPDATE gsheet_sync_configs SET is_auto_sync = FALSE WHERE user_id = %s", (uid,))
+                cur.execute("""
+                    INSERT INTO gsheet_sync_configs (url, sheet_name, user_id, last_sync)
+                    VALUES (%s, %s, %s, NOW())
+                """, (url, sheet_name or 'Default', uid))
         conn.commit()
     except Exception as e:
         print(f"Error saving sync config: {e}")
