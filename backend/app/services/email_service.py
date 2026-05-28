@@ -1,4 +1,5 @@
 import os
+import ssl
 import logging
 import resend
 from datetime import datetime
@@ -292,14 +293,24 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 if thread_id:
                     send_body['threadId'] = thread_id
                 
-                # Gmail API send
-                sent = service.users().messages().send(userId='me', body=send_body).execute()
+                # Gmail API send with SSL retry
+                try:
+                    sent = service.users().messages().send(userId='me', body=send_body).execute()
+                except ssl.SSLError as ssl_err:
+                    logger.warning(f"SSL error on first attempt for user {user_id}: {ssl_err}. Invalidating cache and retrying...")
+                    from app.services.google_service import invalidate_gmail_service_cache
+                    invalidate_gmail_service_cache(int(uid_t))
+                    service = get_gmail_service(int(uid_t))
+                    if service:
+                        sent = service.users().messages().send(userId='me', body=send_body).execute()
+                    else:
+                        raise ssl_err
                 sent_thread_id = sent.get('threadId')
                 
                 # Robustly get the RFC Message-ID from the sent message for future In-Reply-To chaining
                 import time as py_time
                 sent_rfc_message_id = None
-                for attempt in range(4):
+                for attempt in range(2):
                     try:
                         sent_msg_detail = service.users().messages().get(
                             userId='me', 
@@ -314,7 +325,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                             break
                     except Exception as ex:
                         logger.warning(f"Attempt {attempt + 1} to fetch RFC Message-ID failed: {ex}")
-                    py_time.sleep(0.5)
+                    py_time.sleep(0.1)
                 
                 if not sent_rfc_message_id:
                     # Fallback default Message-ID format if fetch failed
@@ -331,6 +342,14 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
             error_content = ""
             if hasattr(e, 'content'):
                 error_content = e.content.decode() if hasattr(e.content, 'decode') else str(e.content)
+            
+            # Invalidate cached service on SSL errors so next call gets a fresh connection
+            if isinstance(e, ssl.SSLError):
+                try:
+                    from app.services.google_service import invalidate_gmail_service_cache
+                    invalidate_gmail_service_cache(int(uid_t))
+                except:
+                    pass
             
             error_msg = f"Gmail API Error: {str(e)} {error_content}"
             logger.error(f"❌ Gmail API dispatch failed for User {user_id} to {to_email}: {error_msg}\n{error_details}")

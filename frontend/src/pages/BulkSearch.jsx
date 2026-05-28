@@ -187,32 +187,61 @@ const BulkSearch = () => {
     }
   };
 
+  const [bulkProgress, setBulkProgress] = useState(null);
+
   const handleTemplateGenerate = async (templateName) => {
-    // single-row mode OR bulk mode
     const leadIds = singleLeadId !== null ? [singleLeadId] : Array.from(selectedLeads);
     if (leadIds.length === 0) return;
     singleLeadId !== null ? setProcessingId(singleLeadId) : setIsBulkActionLoading(true);
+    setBulkProgress({ processed: 0, total: leadIds.length, status: 'running' });
     try {
       if (templateName === 'ai') {
         await api.post('/api/generate-bulk-domain-drafts', { lead_ids: leadIds });
+        setBulkProgress({ processed: leadIds.length, total: leadIds.length, status: 'done', success: leadIds.length });
         showNotification('success', `AI draft${leadIds.length > 1 ? 's' : ''} generated for ${leadIds.length} lead${leadIds.length > 1 ? 's' : ''}.`);
+        setShowTemplatePicker(false);
+        setSingleLeadId(null);
+        if (singleLeadId === null) setSelectedLeads(new Set());
+        fetchBulkLeads(pagination.page);
       } else {
-        let ok = 0;
-        for (const lid of leadIds) {
-          try {
-            await api.post('/api/generate-draft-from-template', { lead_id: lid, template_name: templateName });
-            ok++;
-          } catch {}
+        const res = await api.post('/api/bulk-generate-draft-from-template', {
+          lead_ids: leadIds,
+          template_name: templateName,
+        });
+        const batchId = res.data.batch_id;
+        if (!batchId) {
+          showNotification('error', 'No batch ID returned');
+          setBulkProgress(null);
+          setIsBulkActionLoading(false);
+          setProcessingId(null);
+          return;
         }
-        showNotification('success', `Template "${templateName}" applied to ${ok} lead${ok > 1 ? 's' : ''}.`);
+        const pollInterval = setInterval(async () => {
+          try {
+            const prog = await api.get(`/api/bulk-progress/${batchId}`);
+            const p = prog.data;
+            setBulkProgress(p);
+            if (p.status === 'done' || p.status === 'error') {
+              clearInterval(pollInterval);
+              setBulkProgress(null);
+              setIsBulkActionLoading(false);
+              setProcessingId(null);
+              showNotification('success', `Template "${templateName}" applied to ${p.success}/${p.total} leads.`);
+              setShowTemplatePicker(false);
+              setSingleLeadId(null);
+              if (singleLeadId === null) setSelectedLeads(new Set());
+              fetchBulkLeads(pagination.page);
+            }
+          } catch {
+            clearInterval(pollInterval);
+            setBulkProgress(null);
+            setIsBulkActionLoading(false);
+            setProcessingId(null);
+          }
+        }, 1500);
       }
-      setShowTemplatePicker(false);
-      setSingleLeadId(null);
-      if (singleLeadId === null) setSelectedLeads(new Set());
-      fetchBulkLeads(pagination.page);
     } catch (err) {
       showNotification('error', 'Draft generation failed: ' + (err.response?.data?.error || err.message));
-    } finally {
       setIsBulkActionLoading(false);
       setProcessingId(null);
     }
@@ -715,6 +744,21 @@ const BulkSearch = () => {
           </button>
         </div>
       </div>
+
+      {bulkProgress && (
+        <div className="mb-6 bg-indigo-500/10 border border-indigo-500/30 rounded-[16px] px-6 py-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[12px] font-bold text-indigo-300 uppercase tracking-widest">Processing {bulkProgress.processed}/{bulkProgress.total} leads...</span>
+            <span className="text-[11px] font-bold text-indigo-400">{Math.round((bulkProgress.processed / bulkProgress.total) * 100)}%</span>
+          </div>
+          <div className="h-2 bg-indigo-900/40 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-500"
+              style={{ width: `${Math.round((bulkProgress.processed / bulkProgress.total) * 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Discovery History Table - Slim Rectangle */}
       <div className="bg-[#131722]/40 border border-white/5 rounded-[20px] overflow-hidden backdrop-blur-sm shadow-2xl">

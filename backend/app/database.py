@@ -16,24 +16,23 @@ if DATABASE_URL:
 
 def get_db_connection():
     if not DATABASE_URL:
-        # Check if we can find it again in case of late loading
         url = os.getenv("DATABASE_URL")
         if not url:
              raise Exception("CRITICAL: DATABASE_URL is missing from environment.")
-    
+
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor, connect_timeout=10)
         return conn
     except psycopg2.OperationalError as e:
         print(f"DATABASE CONNECTION ERROR: {e}")
-        # Re-raise with more context
-        raise Exception(f"Failed to connect to database at {DATABASE_URL[:20]}... Error: {str(e)}")
+        raise Exception(f"Failed to connect to database: {str(e)}")
 
 # Create Database Tables
 def create_tables():
     conn = get_db_connection()
     cur = conn.cursor()
-    
+    cur.execute("SET statement_timeout = '10s';")
+
     cur.execute("""
     CREATE TABLE IF NOT EXISTS leads_raw (
         id SERIAL PRIMARY KEY,
@@ -112,13 +111,18 @@ def create_tables():
         ("gmail_draft_id", "TEXT"),
         ("draft_template_used", "TEXT")
     ]
-    for col_name, col_type in columns_to_add:
-        try:
-            cur.execute(f"ALTER TABLE leads_raw ADD COLUMN {col_name} {col_type};")
-            conn.commit()
-        except psycopg2.Error:
-            conn.rollback()
-            continue
+    # Skip ALTER TABLEs if all columns already exist (saves ~11s on Neon)
+    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'leads_raw'")
+    existing = {r['column_name'] for r in cur.fetchall()}
+    needed = {c for c, t in columns_to_add}
+    if not needed.issubset(existing):
+        for col_name, col_type in columns_to_add:
+            try:
+                cur.execute(f"ALTER TABLE leads_raw ADD COLUMN IF NOT EXISTS {col_name} {col_type};")
+                conn.commit()
+            except psycopg2.Error:
+                conn.rollback()
+                continue
 
     # Migrate: Replace single-column email UNIQUE with composite (email, user_id) UNIQUE
     # This enables true per-user data isolation — same email can exist for different users
@@ -273,14 +277,19 @@ def create_tables():
         ("google_refresh_token", "TEXT"),
         ("google_token_expiry", "TIMESTAMP")
     ]
-    for col_name, col_type in user_cols:
-        try:
-            # PostgreSQL 9.6+ supports IF NOT EXISTS for ADD COLUMN
-            cur.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_name} {col_type};")
-            conn.commit() # Commit each change to be safe
-        except psycopg2.Error:
-            conn.rollback()
-            continue
+    # Skip users ALTER TABLEs if all columns exist
+    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'users'")
+    existing_users = {r['column_name'] for r in cur.fetchall()}
+    needed_users = {c for c, t in user_cols}
+    if not needed_users.issubset(existing_users):
+        for col_name, col_type in user_cols:
+            try:
+                # PostgreSQL 9.6+ supports IF NOT EXISTS for ADD COLUMN
+                cur.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_name} {col_type};")
+                conn.commit() # Commit each change to be safe
+            except psycopg2.Error:
+                conn.rollback()
+                continue
 
     # Family Offices Table
     cur.execute("""

@@ -18,6 +18,7 @@ const Emails = () => {
   const [filterRegion, setFilterRegion] = useState('');
   const [filterGeo, setFilterGeo] = useState('');
   const [filterCompany, setFilterCompany] = useState('');
+  const [filterName, setFilterName] = useState('');
   const [isBatchSending, setIsBatchSending] = useState(false);
   const [notification, setNotification] = useState(null);
   const [showRejectModal, setShowRejectModal] = useState(false);
@@ -45,7 +46,7 @@ const Emails = () => {
   const fetchEmails = async () => {
     try {
       setIsLoading(true);
-      const res = await api.get(`/api/emails?page=${pagination.page}&status=${filterStatus}&region=${filterRegion}&geo=${filterGeo}&company=${filterCompany}`);
+      const res = await api.get(`/api/emails?page=${pagination.page}&per_page=60&status=${filterStatus}&region=${filterRegion}&geo=${filterGeo}&company=${filterCompany}&name=${filterName}`);
       setEmails(res.data.drafts);
       setPagination(prev => ({ ...prev, total: res.data.pages }));
     } catch {
@@ -70,7 +71,7 @@ const Emails = () => {
       fetchEmails();
     }, 500);
     return () => clearTimeout(timer);
-  }, [pagination.page, filterStatus, filterRegion, filterGeo, filterCompany]);
+  }, [pagination.page, filterStatus, filterRegion, filterGeo, filterCompany, filterName]);
 
   const handleApprove = async (id) => {
     const taskId = `approve-${id}`;
@@ -159,8 +160,7 @@ const Emails = () => {
     try {
       await api.delete(`/api/leads/${id}`);
       showNotification('success', 'Lead permanently deleted');
-      setEmails(prev => prev.filter(e => e.id !== id));
-      setSelectedIds(prev => prev.filter(i => i !== id));
+      fetchEmails();
     } catch {
       showNotification('error', 'Deletion failed');
     }
@@ -226,22 +226,30 @@ const Emails = () => {
           detail: { id: taskId, title: 'Generation Complete', subtitle: `Generated ${leadIds.length} drafts`, progress: 100, status: 'COMPLETED' } 
         }));
       } else {
-        let ok = 0;
-        for (const lid of leadIds) {
-          try {
-            await api.post('/api/generate-draft-from-template', { lead_id: lid, template_name: selectedTemplate });
-            ok++;
-            const prog = Math.round((ok / leadIds.length) * 100);
-            window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
-              detail: { id: taskId, title: 'Applying Template', subtitle: `${ok}/${leadIds.length} leads...`, progress: prog, status: 'RUNNING' } 
-            }));
-          } catch (err) {
-            console.error("Draft failed:", err);
-          }
+        const res = await api.post('/api/bulk-generate-draft-from-template', {
+          lead_ids: leadIds,
+          template_name: selectedTemplate,
+        });
+        const batchId = res.data.batch_id;
+        if (!batchId) {
+          window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+            detail: { id: taskId, title: 'Generation Failed', subtitle: 'No batch ID', progress: 0, status: 'FAILED' } 
+          }));
+        } else {
+          const pollInterval = setInterval(async () => {
+            try {
+              const prog = await api.get(`/api/bulk-progress/${batchId}`);
+              const p = prog.data;
+              window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+                detail: { id: taskId, title: `Applying ${selectedTemplate}`, subtitle: `${p.processed}/${p.total} leads...`, progress: Math.round((p.processed / p.total) * 100), status: p.status === 'running' ? 'RUNNING' : 'COMPLETED' } 
+              }));
+              if (p.status === 'done' || p.status === 'error') {
+                clearInterval(pollInterval);
+                fetchEmails();
+              }
+            } catch { clearInterval(pollInterval); }
+          }, 1500);
         }
-        window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
-          detail: { id: taskId, title: 'Template Applied', subtitle: `Successfully applied to ${ok} leads`, progress: 100, status: 'COMPLETED' } 
-        }));
       }
       fetchEmails();
     } catch (err) {
@@ -413,8 +421,18 @@ const Emails = () => {
             />
           </div>
 
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="NAME..."
+              className="appearance-none bg-[#0f121b] border border-[#ffffff10] rounded-md px-3 py-1.5 text-[10px] font-bold text-slate-300 uppercase tracking-widest outline-none focus:border-blue-500/50 w-[120px]"
+              value={filterName}
+              onChange={(e) => setFilterName(e.target.value)}
+            />
+          </div>
+
           <button
-            onClick={() => { setFilterStatus(''); setFilterRegion(''); setFilterGeo(''); setFilterCompany(''); }}
+            onClick={() => { setFilterStatus(''); setFilterRegion(''); setFilterGeo(''); setFilterCompany(''); setFilterName(''); }}
             className="px-3 py-1.5 rounded-md text-[10px] font-bold text-slate-400 hover:text-white uppercase tracking-widest transition-colors ml-1 cursor-pointer"
           >
             Reset

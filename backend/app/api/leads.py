@@ -843,7 +843,9 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
             body_text = get_template_followup(lead, stage)
 
         # RE-INJECT SIGNATURE of the CURRENT user
-        final_body = inject_signature(body_text, profile, lead_id)
+        name = profile.get('full_name') or profile.get('username') or 'Team'
+        name = " ".join([p.capitalize() for p in name.split()])
+        final_body = body_text + f"\n\n--\nRegards,\n{name}"
         
         # Parse subject/body from draft if needed
         subject = "Following up"

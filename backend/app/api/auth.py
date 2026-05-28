@@ -355,9 +355,13 @@ def google_callback(request: Request, code: str, state: str):
         google_email = None
         google_id = None
         try:
-            from googleapiclient.discovery import build
-            user_info_service = build('oauth2', 'v2', credentials=creds)
-            user_info = user_info_service.userinfo().get().execute()
+            import requests
+            import json
+            user_info_resp = requests.get(
+                "https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization": f"Bearer {creds.token}"}
+            )
+            user_info = user_info_resp.json()
             google_email = user_info.get('email')
             google_id = user_info.get('id')
         except Exception as e:

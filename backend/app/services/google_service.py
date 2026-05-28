@@ -4,7 +4,8 @@ import json
 from typing import Optional, Dict, Any
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
-from google.auth.transport.requests import Request
+from google.auth.transport.requests import Request, AuthorizedSession
+import ssl
 from googleapiclient.discovery import build
 import psycopg2.extras
 from app.database import get_db_connection
@@ -80,11 +81,12 @@ def get_user_credentials(user_id: int) -> Optional[Credentials]:
             try:
                 creds.refresh(Request())
             except Exception as e:
+                # Invalidate cached services so stale tokens aren't reused
+                invalidate_gmail_service_cache(user_id)
                 # If refresh fails due to scope mismatch (invalid_scope), try refreshing with 
                 # a minimal scope set that we know they likely have
                 if "invalid_scope" in str(e).lower():
                     print(f"CRITICAL: Scope mismatch for user {user_id}. Re-authentication required.")
-                    # Do not downgrade. Let the application handle the 401/403.
                     raise e
                 else:
                     raise e
@@ -103,15 +105,25 @@ def get_user_credentials(user_id: int) -> Optional[Credentials]:
         cur.close()
         conn.close()
 
+class _RequestsHttpBridge:
+    """Wraps requests.Session to match httplib2.Http.request() interface for google-api-client."""
+    def __init__(self, session):
+        self._session = session
+    def request(self, uri, method="GET", body=None, headers=None, **kwargs):
+        resp = self._session.request(method, uri, data=body, headers=headers)
+        class _Resp:
+            status = resp.status_code
+            reason = resp.reason
+        return _Resp(), resp.content
+
 def get_gmail_service(user_id: int):
     if user_id in _gmail_service_cache:
         return _gmail_service_cache[user_id]
     creds = get_user_credentials(user_id)
     if not creds:
         return None
-    # Disable discovery cache to avoid scope restriction bugs
-    print(f"DEBUG: Building Gmail service for user {user_id} with SCOPES: {creds.scopes}")
-    service = build('gmail', 'v1', credentials=creds, static_discovery=False)
+    http = _RequestsHttpBridge(AuthorizedSession(creds))
+    service = build('gmail', 'v1', http=http, static_discovery=False)
     _gmail_service_cache[user_id] = service
     return service
 
@@ -121,7 +133,8 @@ def get_calendar_service(user_id: int):
     creds = get_user_credentials(user_id)
     if not creds:
         return None
-    service = build('calendar', 'v3', credentials=creds, static_discovery=False)
+    http = _RequestsHttpBridge(AuthorizedSession(creds))
+    service = build('calendar', 'v3', http=http, static_discovery=False)
     _calendar_service_cache[user_id] = service
     return service
 
@@ -134,7 +147,8 @@ def get_drive_service(user_id: int):
     creds = get_user_credentials(user_id)
     if not creds:
         return None
-    return build('drive', 'v3', credentials=creds, static_discovery=False)
+    http = _RequestsHttpBridge(AuthorizedSession(creds))
+    return build('drive', 'v3', http=http, static_discovery=False)
 
 def register_gmail_watch(user_id: int):
     """Call Gmail watch() API for a specific user ID."""

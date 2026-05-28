@@ -395,23 +395,35 @@ const Leads = () => {
           detail: { id: taskId, title: 'Generation Complete', subtitle: `Drafted ${leadIds.length} leads`, progress: 100, status: 'COMPLETED' } 
         }));
       } else {
-        let ok = 0;
-        for (const lid of leadIds) {
-          try {
-            await api.post('/api/generate-draft-from-template', { lead_id: lid, template_name: selectedTemplate });
-            ok++;
-            const prog = Math.round((ok / leadIds.length) * 100);
-            window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
-              detail: { id: taskId, title: `Applying: ${selectedTemplate}`, subtitle: `Mapped ${ok}/${leadIds.length} leads...`, progress: prog, status: 'RUNNING' } 
-            }));
-          } catch (err) {
-            console.error("Template failure:", err);
-          }
+        const res = await api.post('/api/bulk-generate-draft-from-template', {
+          lead_ids: leadIds,
+          template_name: selectedTemplate,
+        });
+        const batchId = res.data.batch_id;
+        if (!batchId) {
+          window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+            detail: { id: taskId, title: 'Generation Failed', subtitle: 'No batch ID', progress: 0, status: 'FAILED' } 
+          }));
+        } else {
+          const pollInterval = setInterval(async () => {
+            try {
+              const prog = await api.get(`/api/bulk-progress/${batchId}`);
+              const p = prog.data;
+              window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+                detail: { id: taskId, title: `Applying: ${selectedTemplate}`, subtitle: `${p.processed}/${p.total} leads...`, progress: Math.round((p.processed / p.total) * 100), status: p.status === 'running' ? 'RUNNING' : 'COMPLETED' } 
+              }));
+              if (p.status === 'done') {
+                clearInterval(pollInterval);
+                showNotification('success', `Template "${selectedTemplate}" applied to ${p.success} lead(s).`);
+                fetchLeads();
+              } else if (p.status === 'error') {
+                clearInterval(pollInterval);
+                showNotification('error', 'Template generation failed');
+                fetchLeads();
+              }
+            } catch { clearInterval(pollInterval); }
+          }, 1500);
         }
-        window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
-          detail: { id: taskId, title: 'Processing Complete', subtitle: `Applied to ${ok} leads successfully`, progress: 100, status: 'COMPLETED' } 
-        }));
-        showNotification('success', `Template "${selectedTemplate}" applied to ${ok} lead(s).`);
       }
       fetchLeads();
     } catch (err) {

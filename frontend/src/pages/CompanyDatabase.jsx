@@ -285,30 +285,41 @@ const CompanyDatabase = () => {
     const ids = [...selectedIds];
     setSelectedIds([]);
     
-    let success = 0;
-    let failed = 0;
-    for (const id of ids) {
-      try {
-        await api.post(`/api/companies/${id}/generate-draft`);
-        success++;
-        const prog = Math.round((success / ids.length) * 100);
+    try {
+      const res = await api.post('/api/companies/bulk-generate-drafts', {
+        row_ids: ids,
+        template_name: null,
+      });
+      const batchId = res.data.batch_id;
+      if (!batchId) {
         window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
-          detail: { id: taskId, title: 'Bulk Intelligence Matrix', subtitle: `Integrated ${success}/${ids.length} leads...`, progress: prog, status: 'RUNNING' } 
+          detail: { id: taskId, title: 'Generation Failed', subtitle: 'No batch ID', progress: 0, status: 'FAILED' } 
         }));
-      } catch {
-        failed++;
+      } else {
+        const pollInterval = setInterval(async () => {
+          try {
+            const prog = await api.get(`/api/companies/bulk-progress/${batchId}`);
+            const p = prog.data;
+            window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+              detail: { id: taskId, title: 'Bulk Intelligence Matrix', subtitle: `${p.processed}/${p.total} profiles...`, progress: Math.round((p.processed / p.total) * 100), status: p.status === 'running' ? 'RUNNING' : 'COMPLETED' } 
+            }));
+            if (p.status === 'done') {
+              clearInterval(pollInterval);
+              fetchCompanies();
+              showNotification('success', `✓ ${p.success} lead${p.success > 1 ? 's' : ''} moved to pipeline. Drafts added to Email Queue.`);
+            } else if (p.status === 'error') {
+              clearInterval(pollInterval);
+              fetchCompanies();
+              showNotification('error', 'Bulk generation failed');
+            }
+          } catch { clearInterval(pollInterval); }
+        }, 1500);
       }
-    }
-    
-    window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
-      detail: { id: taskId, title: 'Bulk Generation Complete', subtitle: `Success: ${success} | Failed: ${failed}`, progress: 100, status: 'COMPLETED' } 
-    }));
-    
-    fetchCompanies();
-    if (failed === 0) {
-      showNotification('success', `✓ ${success} lead${success > 1 ? 's' : ''} moved to pipeline. Drafts added to Email Queue.`);
-    } else {
-      showNotification('error', `${success} moved to pipeline, ${failed} failed. Check email fields.`);
+    } catch (err) {
+      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+        detail: { id: taskId, title: 'Bulk Generation Failed', subtitle: err.response?.data?.detail || err.message, progress: 0, status: 'FAILED' } 
+      }));
+      showNotification('error', 'Bulk generation failed');
     }
   };
 
@@ -330,33 +341,42 @@ const CompanyDatabase = () => {
 
     if (templateTarget === null) setSelectedIds([]);
     
-    let success = 0, failed = 0;
-    for (const id of ids) {
-      try {
-        await api.post(`/api/companies/${id}/generate-draft`, null, {
-          params: { template_name: templateName === 'ai' ? 'standard' : templateName }
-        });
-        success++;
-        const prog = Math.round((success / ids.length) * 100);
+    try {
+      const res = await api.post('/api/companies/bulk-generate-drafts', {
+        row_ids: ids,
+        template_name: templateName === 'ai' ? null : templateName,
+      });
+      const batchId = res.data.batch_id;
+      if (!batchId) {
         window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
-          detail: { id: taskId, title: `Template Matrix: ${templateName}`, subtitle: `Mapped ${success}/${ids.length} profiles...`, progress: prog, status: 'RUNNING' } 
+          detail: { id: taskId, title: 'Generation Failed', subtitle: 'No batch ID', progress: 0, status: 'FAILED' } 
         }));
-      } catch (err) {
-        console.error("Bulk draft failure:", err);
-        failed++;
+      } else {
+        const pollInterval = setInterval(async () => {
+          try {
+            const prog = await api.get(`/api/companies/bulk-progress/${batchId}`);
+            const p = prog.data;
+            window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+              detail: { id: taskId, title: `Template Matrix: ${templateName}`, subtitle: `${p.processed}/${p.total} profiles...`, progress: Math.round((p.processed / p.total) * 100), status: p.status === 'running' ? 'RUNNING' : 'COMPLETED' } 
+            }));
+            if (p.status === 'done') {
+              clearInterval(pollInterval);
+              fetchCompanies();
+              showNotification('success', `Template "${templateName}" applied to ${p.success} lead${p.success > 1 ? 's' : ''}.`);
+            } else if (p.status === 'error') {
+              clearInterval(pollInterval);
+              fetchCompanies();
+              showNotification('error', 'Template generation failed');
+            }
+          } catch { clearInterval(pollInterval); }
+        }, 1500);
       }
-    }
-    
-    window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
-      detail: { id: taskId, title: 'Template Execution Complete', subtitle: `Applied: ${success} | Failed: ${failed}`, progress: 100, status: 'COMPLETED' } 
-    }));
-    
-    fetchCompanies();
-    
-    if (failed === 0) {
-      showNotification('success', `✓ ${success} lead(s) drafted using "${templateName}" template.`);
-    } else {
-      showNotification('error', `${success} drafted, ${failed} failed.`);
+    } catch (err) {
+      console.error("Bulk template failure:", err);
+      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+        detail: { id: taskId, title: 'Template Failed', subtitle: err.response?.data?.detail || err.message, progress: 0, status: 'FAILED' } 
+      }));
+      showNotification('error', 'Template generation failed');
     }
   };
 

@@ -69,6 +69,57 @@ FOLLOWUP_TEMPLATES = {
         1: "Dear {name},\n\nI hope you are well.\n\nJust following up on my previous email. We would value the opportunity to connect and understand your growth roadmap and any potential capital/funding priorities that may be ahead.\n\nWould you be open to a short video call? Happy to coordinate as per your availability.\n\nLooking forward to hearing from you.",
         2: "Dear {name},\n\nJust following up on my earlier note.\n\nGiven your growth journey, we thought it may be worthwhile to connect and exchange perspectives around future expansion and funding opportunities.\n\nPlease let us know a suitable time for a brief discussion if this would be of interest.\n\nLooking forward to connecting.",
         3: "Dear {name},\n\nI understand you are busy, so I'm reaching out one last time. If this isn't a fit for you right now, I'll move this to the back burner.\n\nThank you again for your time and consideration."
+    },
+    "INVESTOR_KAJAL_HEALTH_ECOSYSTEM": {
+        1: """Dear {name},
+
+I hope you're doing well.
+
+I wanted to follow up on our earlier note regarding the **Seed Round opportunity in a preventive health ecosystem platform** building India's diagnostics infrastructure layer.
+
+Since our last outreach, the company has continued to demonstrate strong momentum:
+
+- **7,000+ diagnostic orders completed**
+- **300+ labs onboarded** across Delhi NCR
+- **₹89L+ revenue generated to date**
+- **₹2.58 Cr annualized revenue run rate**
+
+The platform is positioned at the intersection of **diagnostics, AI-driven insights, and continuous preventive health monitoring**, addressing a large and underserved market opportunity.
+
+The company is currently raising a **$1M Seed Round** to scale technology, expand the diagnostics network, and strengthen institutional partnerships.
+
+Happy to share the detailed pitch deck and additional information.
+
+Looking forward to your thoughts.""",
+        2: """Dear {name},
+
+I wanted to share updates on the **Seed Round opportunity in a preventive health ecosystem platform** building India's diagnostics infrastructure layer.
+
+Since our last outreach, the company has continued to demonstrate strong momentum:
+
+- **7,000+ diagnostic orders completed**
+- **300+ labs onboarded** across Delhi NCR
+- **₹89L+ revenue generated to date**
+- **₹2.58 Cr annualized revenue run rate**
+
+The platform is positioned at the intersection of **diagnostics, AI-driven insights, and continuous preventive health monitoring**, addressing a large and underserved market opportunity.
+
+The company is currently raising a **$1M Seed Round** to scale technology, expand the diagnostics network, and strengthen institutional partnerships.
+
+Happy to share the detailed pitch deck and additional information.
+
+Looking forward to your thoughts.""",
+        3: """Dear {name},
+
+I hope this finds you well.
+
+I'm reaching out one final time regarding the **Seed Round for our AI-enabled preventive health ecosystem platform** — with 300+ labs, 7,000+ orders, and ₹2.58 Cr ARR, the company has shown strong early traction.
+
+If the timing isn't right or this doesn't align with your current focus, I completely understand — I'll step back from my follow-ups.
+
+However, if circumstances change or you'd like to revisit this opportunity, please don't hesitate to reach out. We'd be happy to share the full deck or connect at your convenience.
+
+Thank you sincerely for your time and consideration."""
     }
 }
 
@@ -76,79 +127,86 @@ def get_template_followup(lead: dict, stage: int) -> str:
     """Returns the standardized, high-performance follow-up template for the lead's sector and stage."""
     lead_name = f"{lead.get('first_name') or ''}".strip() or "there"
     
-    lead_type_raw = str(lead.get('lead_type') or lead.get('sector') or lead.get('persona') or '').upper()
-    type_key = "CLIENT" if ('CLIENT' in lead_type_raw or 'CUSTOMER' in lead_type_raw) else "INVESTOR"
+    # Check draft_template_used FIRST — this overrides lead_type classification
+    draft_template = str(lead.get('draft_template_used') or '').strip()
     
-    if type_key == "INVESTOR":
-        # Dynamic campaign detection (AI Hiring vs HealthTech vs Agritech vs Defence vs Generic)
-        original_subject = get_original_outreach_subject(lead) or ""
-        draft_text = lead.get('email_draft') or ""
-        persona_text = lead.get('persona') or ""
-        sector_text = lead.get('sector') or ""
+    # Also check subject as fallback (some leads may not have draft_template_used saved)
+    orig_subj = get_original_outreach_subject(lead) or ""
+    
+    if draft_template == 'palak_mam_corporate_advisory' or "corporate advisory" in orig_subj.lower():
+        campaign_key = "INVESTOR_PALAK_ADVISORY"
+    elif draft_template == 'kajal_mam_health_ecosystem':
+        campaign_key = "INVESTOR_KAJAL_HEALTH_ECOSYSTEM"
+    else:
+        lead_type_raw = str(lead.get('lead_type') or lead.get('sector') or lead.get('persona') or '').upper()
+        type_key = "CLIENT" if ('CLIENT' in lead_type_raw or 'CUSTOMER' in lead_type_raw) else "INVESTOR"
         
-        is_ai_hiring = (
-            "hiring" in original_subject.lower() or 
-            "hiring" in draft_text.lower() or 
-            "hiring" in persona_text.lower() or 
-            "hiring" in sector_text.lower() or
-            "recruitment" in original_subject.lower() or 
-            "recruitment" in draft_text.lower()
-        )
+        if type_key == "INVESTOR":
+            # Dynamic campaign detection (AI Hiring vs HealthTech vs Agritech vs Defence vs Generic)
+            original_subject = get_original_outreach_subject(lead) or ""
+            draft_text = lead.get('email_draft') or ""
+            persona_text = lead.get('persona') or ""
+            sector_text = lead.get('sector') or ""
+            
+            is_ai_hiring = (
+                "hiring" in original_subject.lower() or 
+                "hiring" in draft_text.lower() or 
+                "hiring" in persona_text.lower() or 
+                "hiring" in sector_text.lower() or
+                "recruitment" in original_subject.lower() or 
+                "recruitment" in draft_text.lower()
+            )
 
-        is_healthtech = (
-            "health" in original_subject.lower() or
-            "health" in draft_text.lower() or
-            "health" in persona_text.lower() or
-            "health" in sector_text.lower() or
-            "diagnostic" in original_subject.lower() or
-            "diagnostic" in draft_text.lower()
-        )
-        
-        is_defence = (
-            "defence" in original_subject.lower() or
-            "defence" in draft_text.lower() or
-            "defence" in persona_text.lower() or
-            "defence" in sector_text.lower() or
-            "deeptech" in original_subject.lower() or
-            "deeptech" in draft_text.lower() or
-            "idex" in original_subject.lower() or
-            "idex" in draft_text.lower()
-        )
-        
-        is_agritech = (
-            "agritech" in original_subject.lower() or
-            "agritech" in draft_text.lower() or
-            "agritech" in persona_text.lower() or
-            "agritech" in sector_text.lower() or
-            "climate" in original_subject.lower() or
-            "climate" in draft_text.lower()
-        )
-        
-        draft_template = str(lead.get('draft_template_used') or '').strip()
-        is_palak_advisory = (
-            draft_template == 'palak_mam_corporate_advisory' or
-            (
+            is_healthtech = (
+                "health" in original_subject.lower() or
+                "health" in draft_text.lower() or
+                "health" in persona_text.lower() or
+                "health" in sector_text.lower() or
+                "diagnostic" in original_subject.lower() or
+                "diagnostic" in draft_text.lower()
+            )
+            
+            is_defence = (
+                "defence" in original_subject.lower() or
+                "defence" in draft_text.lower() or
+                "defence" in persona_text.lower() or
+                "defence" in sector_text.lower() or
+                "deeptech" in original_subject.lower() or
+                "deeptech" in draft_text.lower() or
+                "idex" in original_subject.lower() or
+                "idex" in draft_text.lower()
+            )
+            
+            is_agritech = (
+                "agritech" in original_subject.lower() or
+                "agritech" in draft_text.lower() or
+                "agritech" in persona_text.lower() or
+                "agritech" in sector_text.lower() or
+                "climate" in original_subject.lower() or
+                "climate" in draft_text.lower()
+            )
+            
+            is_palak_advisory = (
                 not draft_template and (
                     "corporate advisory" in original_subject.lower() or
                     ("corporate advisory" in draft_text.lower() and "m&a" not in draft_text.lower() and "partnership" not in draft_text.lower())
                 )
             )
-        )
 
-        if is_palak_advisory:
-            campaign_key = "INVESTOR_PALAK_ADVISORY"
-        elif is_ai_hiring:
-            campaign_key = "INVESTOR_AI_HIRING"
-        elif is_healthtech:
-            campaign_key = "INVESTOR_HEALTHTECH"
-        elif is_defence:
-            campaign_key = "INVESTOR_DEFENCE"
-        elif is_agritech:
-            campaign_key = "INVESTOR_AGRITECH"
+            if is_palak_advisory:
+                campaign_key = "INVESTOR_PALAK_ADVISORY"
+            elif is_ai_hiring:
+                campaign_key = "INVESTOR_AI_HIRING"
+            elif is_healthtech:
+                campaign_key = "INVESTOR_HEALTHTECH"
+            elif is_defence:
+                campaign_key = "INVESTOR_DEFENCE"
+            elif is_agritech:
+                campaign_key = "INVESTOR_AGRITECH"
+            else:
+                campaign_key = "INVESTOR_GENERIC"
         else:
-            campaign_key = "INVESTOR_GENERIC"
-    else:
-        campaign_key = "CLIENT"
+            campaign_key = "CLIENT"
         
     template = FOLLOWUP_TEMPLATES[campaign_key].get(stage, "Hi {name},\n\nFollowing up on my previous email.\n\nBest regards,")
     return template.format(name=lead_name)
@@ -221,15 +279,14 @@ def generate_followup_preview(lead_id: int, user_id: int):
 
         # Inject Signature
         profile = get_sender_profile(str(user_id))
+        name = profile.get('full_name') or profile.get('username') or 'Team'
+        name = " ".join([p.capitalize() for p in name.split()])
         
         # Convert plain text template to premium HTML
         body_html = markdown_to_html(body)
-        full_body = inject_signature(body_html, profile, lead_id)
-        
-        # We do not append the original email body as a quote block.
-        # Gmail automatically groups messages sharing the same thread_id into a single thread trail,
-        # and the user explicitly requested clean, premium follow-up messages without quoted duplicate blocks underneath.
-        
+        sig = f"\n\n--\nRegards,\n{name}"
+        full_body = body_html + sig
+
         return {
             "lead_id": lead_id,
             "next_stage": next_stage,
@@ -241,6 +298,7 @@ def generate_followup_preview(lead_id: int, user_id: int):
         cur.close()
         conn.close()
 
+
 def process_outreach_sequences():
     """
     Background worker that identifies leads due for follow-ups.
@@ -248,19 +306,17 @@ def process_outreach_sequences():
     and enforces a daily limit per user (default 200) to prevent spam flagging.
     """
     try:
-        # SAFETY: Only send on working days (Mon-Fri) based on Indian Standard Time (IST)
         from datetime import timezone, timedelta
         IST = timezone(timedelta(hours=5, minutes=30))
         now = datetime.now(IST).replace(tzinfo=None)
 
-        if now.weekday() >= 5: # 5 = Saturday, 6 = Sunday
+        if now.weekday() >= 5:
             logger.info(f"Outreach paused: Weekend protection active in Indian timezone (IST). Current India Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
             return
 
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
-        # Fetch leads due for followup + the user's auto-pilot settings
+
         cur.execute("""
             SELECT l.*, u.id as sender_id, u.email as sender_email, u.full_name as sender_name,
                    u.auto_followup, u.outreach_daily_limit, u.google_refresh_token
@@ -272,18 +328,17 @@ def process_outreach_sequences():
             AND l.followup_stage < 3
             ORDER BY l.last_outreach_at ASC
         """)
-        
+
         leads = cur.fetchall()
         cur.close()
         conn.close()
 
-        if not leads: 
+        if not leads:
             return
 
         import time
         from app.services.email_service import send_email
 
-        # Group leads by user so we can track and enforce daily limit per sender
         user_leads = {}
         for lead in leads:
             uid = lead['sender_id']
@@ -293,15 +348,13 @@ def process_outreach_sequences():
 
         for uid, group in user_leads.items():
             first_lead = group[0]
-            # Check user auto_followup flag and Gmail link
+            logger.info(f"Auto-pilot checking user {uid} ({first_lead['sender_name']} / {first_lead['sender_email']}): auto_followup={first_lead['auto_followup']}, has_token={bool(first_lead['google_refresh_token'])}")
             if not first_lead['auto_followup'] or not first_lead['google_refresh_token']:
                 logger.info(f"Skipping auto-pilot for user {uid}: auto-followup disabled or Gmail not linked.")
                 continue
 
-            # Fetch the user's daily sending limit (default to 200)
             daily_limit = first_lead['outreach_daily_limit'] or 200
-            
-            # Count how many emails this user has already sent today (last 24 hours)
+
             conn = get_db_connection()
             cur = conn.cursor()
             cur.execute("""
@@ -320,9 +373,6 @@ def process_outreach_sequences():
                 logger.info(f"User {uid} has hit their daily outreach limit ({sent_today}/{daily_limit} sent today).")
                 continue
 
-            logger.info(f"User {uid} has {remaining_allowance} emails remaining for today's quota ({sent_today}/{daily_limit} sent).")
-
-            # Process sequentially with strict 30-second delay gap
             sent_count = 0
             for lead in group:
                 if sent_count >= remaining_allowance:
@@ -334,16 +384,14 @@ def process_outreach_sequences():
                     lead_id = lead['id']
                     stage = lead['followup_stage'] or 0
                     last_sent = lead['last_outreach_at']
-                    if not last_sent: 
+                    if not last_sent:
                         continue
 
-                    # Timezone-aware conversion of last_sent to IST naive for precise subtraction
                     if last_sent.tzinfo:
                         last_sent_ist = last_sent.astimezone(IST).replace(tzinfo=None)
                     else:
                         last_sent_ist = last_sent.replace(tzinfo=timezone.utc).astimezone(IST).replace(tzinfo=None)
 
-                    # Stage schedule check
                     lead_type_raw = str(lead.get('lead_type') or lead.get('company_name') or lead.get('sector') or lead.get('persona') or '').upper()
                     investor_kw = ["VENTURE", "CAPITAL", "EQUITY", "INVEST", "PARTNER", "ASSET", "FAMILY OFFICE", "ANGEL", "CIRCLE", "NETWORK", "FUND", "VC", "PE"]
                     is_investor = any(kw in lead_type_raw for kw in investor_kw) or not ('CLIENT' in lead_type_raw or 'CUSTOMER' in lead_type_raw)
@@ -359,15 +407,11 @@ def process_outreach_sequences():
                         if (stage == 0 and days_since_last >= 2) or (stage == 1 and days_since_last >= 2) or (stage == 2 and days_since_last >= 6):
                             should_action = True
 
-                    if not should_action: 
+                    if not should_action:
                         continue
 
-                    # ── ON-THE-FLY THREAD HEALING (RUN FIRST) ──────────────────────────────
-                    # If gmail_thread_id is missing (lead was sent before the fix), try to
-                    # recover it from the Gmail Sent folder right now so we can use its actual
-                    # subject and thread properties to generate the follow-up correctly.
                     existing_thread_id = lead.get('gmail_thread_id')
-                    existing_msg_id    = lead.get('gmail_message_id')
+                    existing_msg_id = lead.get('gmail_message_id')
 
                     if not existing_thread_id:
                         try:
@@ -375,14 +419,12 @@ def process_outreach_sequences():
                             from app.services.google_service import get_gmail_service
                             heal_service = get_gmail_service(int(uid))
                             if heal_service:
-                                # Search Sent for any email to this recipient
                                 q = f"in:sent to:{lead['email']}"
                                 heal_results = heal_service.users().messages().list(
                                     userId='me', q=q, maxResults=10
                                 ).execute()
                                 heal_msgs = heal_results.get('messages', [])
                                 if heal_msgs:
-                                    # Take the OLDEST sent message (first teaser)
                                     heal_msg = heal_service.users().messages().get(
                                         userId='me',
                                         id=heal_msgs[-1]['id'],
@@ -390,27 +432,23 @@ def process_outreach_sequences():
                                         metadataHeaders=['Message-ID', 'Message-Id', 'message-id', 'Subject']
                                     ).execute()
                                     heal_thread_id = heal_msg.get('threadId')
-                                    heal_headers   = heal_msg.get('payload', {}).get('headers', [])
-                                    heal_msg_id    = next(
+                                    heal_headers = heal_msg.get('payload', {}).get('headers', [])
+                                    heal_msg_id = next(
                                         (h['value'] for h in heal_headers if h['name'].lower() == 'message-id'),
                                         f"<{heal_msgs[-1]['id']}@mail.gmail.com>"
                                     )
-                                    heal_subject   = next(
+                                    heal_subject = next(
                                         (h['value'] for h in heal_headers if h['name'].lower() == 'subject'),
                                         None
                                     )
                                     if heal_thread_id:
                                         existing_thread_id = heal_thread_id
-                                        existing_msg_id    = heal_msg_id
-                                        
-                                        # Update our dynamic lead dictionary so downstream functions use the correct subject
+                                        existing_msg_id = heal_msg_id
                                         if heal_subject:
                                             lead['first_outreach_subject'] = heal_subject
-                                            logger.info(f"Dynamic healing: updated first_outreach_subject to '{heal_subject}'")
 
-                                        # Persist to DB so future follow-ups also benefit
                                         heal_conn = get_db_connection()
-                                        heal_cur  = heal_conn.cursor()
+                                        heal_cur = heal_conn.cursor()
                                         heal_cur.execute("""
                                             UPDATE leads_raw
                                             SET gmail_thread_id = %s,
@@ -422,27 +460,24 @@ def process_outreach_sequences():
                                         heal_conn.commit()
                                         heal_cur.close()
                                         heal_conn.close()
-                                        logger.info(f"✅ On-the-fly thread heal for lead {lead_id} ({lead['email']}): thread={heal_thread_id}")
                         except Exception as heal_err:
                             logger.warning(f"On-the-fly thread heal failed for lead {lead_id}: {heal_err}")
 
-                    # ── SUBJECT LINE COMPUTATION ───────────────────────────────────────────
                     orig_subject = get_original_outreach_subject(lead)
                     subject = f"Re: {orig_subject}"
 
-                    # ── DYNAMIC BODY GENERATION ────────────────────────────────────────────
                     body = lead.get('followup_draft')
                     if is_generic_followup(body):
                         body = get_template_followup(lead, next_stage)
                     profile = get_sender_profile(str(uid))
-                    
-                    # Convert follow-up plain text template to premium HTML
-                    body_html = markdown_to_html(body)
-                    full_body = inject_signature(body_html, profile, lead_id)
-                    
-                    logger.info(f"Auto-dispatching lead {lead_id} ({lead['email']}) for User {uid}. Subject: {subject}")
+                    name = profile.get('full_name') or profile.get('username') or 'Team'
+                    name = " ".join([p.capitalize() for p in name.split()])
+                    first_name = name.split()[0] if name else name
 
-                    # Dispatch Email
+                    body_html = markdown_to_html(body)
+                    sig = f"<br><br>--<br>Regards,<br>{first_name}"
+                    full_body = body_html + sig
+
                     success, msg, new_thread_id, new_rfc_msg_id = send_email(
                         to_email=lead['email'],
                         subject=subject,
@@ -455,7 +490,6 @@ def process_outreach_sequences():
                     )
 
                     if success:
-                        # Update Database Row
                         conn = get_db_connection()
                         cur = conn.cursor()
                         cur.execute("""
@@ -473,14 +507,12 @@ def process_outreach_sequences():
 
                         add_activity_log(lead_id, "AUTO_FOLLOWUP_SENT", f"Stage {next_stage} auto-sent", "system", uid)
                         sent_count += 1
-                        
-                        # ENFORCE USER'S REQUEST: 30-second delay gap between consecutive sends to prevent spam flagging
-                        logger.info("Email sent successfully! Enforcing a 30-second cool-down gap before the next email...")
+
+                        logger.info(f"✅ Auto-followup sent from {first_lead['sender_name']} ({first_lead['sender_email']}) to {lead['email']}. Enforcing 30s cool-down...")
                         time.sleep(30)
                     else:
                         logger.error(f"Auto-Pilot failed for {lead['email']}: {msg}")
                 except Exception as ex:
                     logger.error(f"Error dispatching auto-followup for lead {lead.get('id')}: {ex}")
-
     except Exception as e:
         logger.error(f"Error in process_outreach_sequences: {e}")

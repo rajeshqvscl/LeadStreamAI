@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Header
 from app.database import get_db_connection
 import psycopg2.extras
+from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import json
 import requests
@@ -843,6 +844,168 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
     finally:
         cur.close()
         conn.close()
+
+class BulkCompanyDraftRequest(BaseModel):
+    row_ids: list[int]
+    template_name: Optional[str] = None
+
+import uuid as _uuid
+import threading as _threading
+
+_bulk_company_progress: dict = {}
+
+@router.post("/companies/bulk-generate-drafts")
+def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Bulk template draft generation for company registry records with parallel processing. Returns immediately with batch_id."""
+    if not req.row_ids:
+        return {"error": "No company IDs provided", "batch_id": None}
+
+    batch_id = str(_uuid.uuid4())
+    total = len(req.row_ids)
+    _bulk_company_progress[batch_id] = {
+        "total": total, "processed": 0, "success": 0, "failed": 0, "status": "running"
+    }
+
+    def _run():
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from app.api.drafts import generate_email_internal, DraftRequest
+        import logging, json
+        logger = logging.getLogger(__name__)
+        uid = normalize_user_id(user_id)
+
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cur.execute(
+                "SELECT id, row_data FROM company_registry WHERE id = ANY(%s) AND user_id = %s",
+                (req.row_ids, uid)
+            )
+            rows = cur.fetchall()
+            if not rows:
+                _bulk_company_progress[batch_id]["status"] = "done"
+                cur.close(); conn.close()
+                return
+
+            created_leads = []
+            for row in rows:
+                data = row['row_data']
+                if isinstance(data, str):
+                    data = json.loads(data)
+                norm = {str(k).lower().replace(" ", "").replace("-", "").replace("_", ""): v for k, v in data.items() if v}
+
+                email = (
+                    norm.get("email") or norm.get("emailaddress") or
+                    norm.get("workemail") or norm.get("primaryemail")
+                )
+                if not email:
+                    for k, v in data.items():
+                        val = str(v).strip()
+                        if "@" in val and "." in val and len(val) > 5 and " " not in val:
+                            email = val; break
+                if not email:
+                    _bulk_company_progress[batch_id]["processed"] += 1
+                    _bulk_company_progress[batch_id]["failed"] += 1
+                    continue
+
+                name = (
+                    norm.get("teammember") or norm.get("name") or norm.get("fullname") or
+                    norm.get("leadname") or norm.get("contactname") or norm.get("contact") or
+                    norm.get("investor") or norm.get("person") or norm.get("personname") or
+                    f"{norm.get('firstname', '')} {norm.get('lastname', '')}".strip()
+                )
+                if name and ("http://" in name.lower() or "https://" in name.lower() or "linkedin.com" in name.lower()):
+                    name = ""
+                if not name or name.strip() == "":
+                    email_prefix = email.split('@')[0]
+                    name = email_prefix.replace(".", " ").replace("_", " ").replace("-", " ").title()
+
+                company = (
+                    norm.get("companyname") or norm.get("company") or
+                    norm.get("investorname") or norm.get("org") or
+                    norm.get("firm") or norm.get("account") or norm.get("organization")
+                ) or "—"
+                parts = name.split(" ", 1)
+                f_name, l_name = parts[0], (parts[1] if len(parts) > 1 else "")
+                sender_name = "the team"
+                if uid:
+                    cur.execute("SELECT full_name, username FROM users WHERE id = %s", (uid,))
+                    u = cur.fetchone()
+                    if u: sender_name = u['full_name'] or u['username']
+
+                insert_lead(f_name, l_name, email, "", norm.get("linkedin", ""), company, "intelligence", data, user_id=uid, user_name=sender_name)
+                created_leads.append((row['id'], email))
+
+            lead_id_map = {}
+            for row_id, email in created_leads:
+                cur.execute(
+                    "SELECT id FROM leads_raw WHERE email = %s AND user_id = %s ORDER BY created_at DESC LIMIT 1",
+                    (email, uid)
+                )
+                lr = cur.fetchone()
+                if lr:
+                    lead_id_map[row_id] = lr['id']
+            cur.close(); conn.close()
+
+            if not lead_id_map:
+                _bulk_company_progress[batch_id]["status"] = "done"
+                return
+
+            template_type = req.template_name or 'standard'
+            success_ids, failed_ids = [], []
+
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                def process_one(row_id):
+                    lid = lead_id_map.get(row_id)
+                    if not lid:
+                        return (row_id, False, "lead not found")
+                    try:
+                        draft_req = DraftRequest(lead_id=lid, template_type=template_type)
+                        res = generate_email_internal(draft_req, user_id)
+                        return (row_id, "error" not in res, res)
+                    except Exception as e:
+                        return (row_id, False, str(e))
+
+                futures = {executor.submit(process_one, rid): rid for rid in lead_id_map}
+                for future in as_completed(futures):
+                    rid, ok, _ = future.result()
+                    if ok:
+                        success_ids.append(rid)
+                    else:
+                        failed_ids.append(rid)
+                    p = _bulk_company_progress[batch_id]
+                    p["processed"] += 1
+                    if ok:
+                        p["success"] += 1
+                    else:
+                        p["failed"] += 1
+
+            if success_ids:
+                conn2 = get_db_connection()
+                cur2 = conn2.cursor()
+                cur2.execute(
+                    "UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = ANY(%s) AND user_id = %s",
+                    (success_ids, uid)
+                )
+                conn2.commit()
+                cur2.close(); conn2.close()
+
+            invalidate_companies_cache(str(uid))
+            _bulk_company_progress[batch_id]["status"] = "done"
+        except Exception as e:
+            _bulk_company_progress[batch_id]["status"] = "error"
+            _bulk_company_progress[batch_id]["error"] = str(e)
+        finally:
+            _threading.Timer(300, lambda: _bulk_company_progress.pop(batch_id, None)).start()
+
+    _threading.Thread(target=_run, daemon=True).start()
+    return {"batch_id": batch_id, "total": total}
+
+@router.get("/companies/bulk-progress/{batch_id}")
+def get_bulk_company_progress(batch_id: str):
+    prog = _bulk_company_progress.get(batch_id)
+    if not prog:
+        return {"status": "not_found"}
+    return prog
 
 @router.post("/companies/{row_id}/send")
 def send_company_email(row_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):

@@ -441,6 +441,131 @@ SIG_END"""
         )
     conn.commit()
 
+    # 4. Kajal Mam Health Ecosystem Template
+    kajal_ecosystem_description = "AI-Enabled Preventive Health Ecosystem Platform ($1M Seed)"
+    kajal_ecosystem_content = """Subject: India's AI-Enabled Preventive Health Ecosystem Platform | ₹2.6Cr ARR | 300+ Labs
+
+Dear {{First Name}},
+
+I hope you're doing well.
+
+I'm Kajal from QVSCL (Gurugram), a strategic advisory firm working with high-growth early-stage ventures. We are currently raising a **Seed Round** for a platform building India's preventive health ecosystem layer, combining diagnostics infrastructure, **genomics**, AI-driven insights, and continuous health monitoring.
+
+**Business Overview**
+
+**Founded:** 2024 by an undergraduate student from IIT Madras
+
+**Focus:** Building a preventive health ecosystem platform that digitizes India's fragmented diagnostics sector. The platform integrates diagnostics, **genomic insights**, logistics, and institutional demand through a unified B2B2C marketplace and SaaS-enabled ecosystem.
+
+**Platform Offering:** Enables users to compare diagnostic tests, book home sample collections, access reports, manage health records, and leverage **genomic profiling for personalized preventive care** through a single platform.
+
+**Technology:** AI-powered platform featuring an AI test recommendation engine, AI health monitoring engine, AI chatbot & health assistant, and **genomics-enabled risk assessment layer**, along with real-time lab geo-matching and SaaS-based CRM dashboards for labs.
+
+**Revenue Model:** Built on multi-layered revenue streams combining transaction margins on diagnostic bookings, **genomics-based premium offerings**, and a preventive subscription layer, enabling scalable and diversified revenue generation.
+
+**Social Impact:** By digitizing smaller labs, integrating **genomic intelligence**, and improving access to diagnostics, the platform enhances healthcare accessibility and advances preventive health awareness.
+
+**Industry Overview**
+
+India's diagnostics sector is large but structurally fragmented.
+
+• Delhi NCR Diagnostics Market: ₹9,100 Cr annually
+• Preventive Monitoring Opportunity: ₹3,150 Cr annually
+• Emerging **genomics and personalized medicine market** adding a high-growth layer to preventive healthcare
+• Most diagnostic testing still begins only after symptoms appear
+• Over 90% of diagnostic labs lack digital visibility
+• Adoption of preventive and personalized healthcare is still in early stages
+
+**Problems**
+
+**Patient Challenges**
+
+• No unified platform to manage diagnostic tests, health records, and **genomic data**
+• Diagnostics largely begin after symptoms appear
+• No structured preventive or **genomics-driven health programs**
+• Difficulty comparing prices, labs, and service quality
+
+**Lab Challenges**
+
+• Majority of labs have no digital discovery or booking system
+• Heavy reliance on walk-ins
+• Underutilized capacity
+• Limited participation in **advanced diagnostics like genomics**
+
+**System-Level Challenges**
+
+• No unified diagnostic and **genomics-integrated infrastructure layer**
+• Preventive healthcare programs remain unstructured
+• Limited coordination across labs, logistics, and institutions
+• Absence of a comprehensive ecosystem integrating diagnostics, genomics, and continuous monitoring
+
+**Solutions**
+
+• **Diagnostics Network:** 300+ partner labs integrated
+• **Genomics Integration:** Enabling **genetic testing, risk profiling, and personalized preventive insights**
+• **Home Collection & Logistics:** 24x7 phlebotomy network
+• **Fast Booking:** Under 30 minutes via app/web
+• **Preventive Monitoring:** Structured annual health baseline + **genomics-informed monitoring programs**
+• **Institutional Integrations:** Corporates, schools, RWAs
+• **Technology & SaaS Layer:** Diagnostics aggregation + lab CRM tools
+• **Data Continuity:** Unified diagnostic + **genomic health records** for longitudinal tracking
+• **Ecosystem Approach:** Integrating diagnostics, genomics, logistics, and institutions into a unified preventive health layer
+
+**Validations & Traction**
+
+• Launched: September 2025
+• Active Lab Network: 300+ Labs
+• Orders Completed: 7,000+
+• Revenue Generated: ₹89L+
+• ARR: ₹2.58 Cr
+• Fully operational across Delhi NCR
+
+**Investment Details**
+
+**Fundraise:** **Seed** Round of $1 million
+
+**Utilization Plan:**
+• Technology and product development (including **genomics capabilities**)
+• Expansion of diagnostic & genomics partner network
+• Customer acquisition & market expansion
+• Corporate and institutional partnerships
+• Operational and compliance infrastructure
+
+If this aligns with your portfolio focus and does not conflict with it, I'd be happy to share the full presentation or connect over a virtual meeting at your convenience. I have attached the QVSCL Profile. You may also share your investment thesis with us so we can send relevant deal flow in the future.
+
+For more details about our services:
+[Website](https://qvscl.com) | [Linkedin]({{Sender LinkedIn}})
+
+Looking forward to your response.
+
+SIG_START
+[Click here to unsubscribe](https://qvscl.com/unsubscribe)
+
+--
+Thanks & Regards,
+
+***{{Sender Name}}***
+{{Sender Title}}
+[LinkedIn]({{Sender LinkedIn}})
+{{Sender Phone}}
+<img src="[[BACKEND_URL]]/assets/kajal.png" style="width: 150px; height: auto; display: block; margin-top: 10px;" />
+
+Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at Quantum Value Strategic Consulting LLP by electronic mail message reply. Thank you.
+SIG_END
+
+<div style="text-align: center; margin-top: 25px; font-weight: bold; color: #444; font-size: 12px; letter-spacing: 1.5px;">CONFIDENTIAL | FOR PRIVATE CIRCULATION ONLY</div>"""
+
+    cur.execute(
+        "UPDATE prompts SET content = %s, description = %s WHERE name = 'kajal_mam_health_ecosystem'",
+        (kajal_ecosystem_content, kajal_ecosystem_description)
+    )
+    if cur.rowcount == 0:
+        cur.execute(
+            "INSERT INTO prompts (name, description, content, prompt_type, owner_username) VALUES ('kajal_mam_health_ecosystem', %s, %s, 'CUSTOM_DRAFT', 'kajal')",
+            (kajal_ecosystem_description, kajal_ecosystem_content)
+        )
+    conn.commit()
+
     cur.close()
     conn.close()
     logger.info("🚀 Startup templates creation/verification completed successfully!")
@@ -558,6 +683,7 @@ def markdown_to_html(text):
     text = re.sub(r'!\[(.*?)\]\((.*?)\)', _inline_md_img, text)
     text = re.sub(r'<img[^>]+>', _inline_img, text, flags=re.DOTALL | re.IGNORECASE)
     # 1.5 Handle Global Bolding (catch any remaining **stars**)
+    text = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong><em>\1</em></strong>', text)
     text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
     
     # 2. Handle Links (Markdown style [Text](URL))
@@ -1047,7 +1173,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 body = template_body.replace("{{First Name}}", f_name).replace("{{first name}}", f_name).replace("{{first_name}}", f_name)
                 body = body.replace("{{Full Name}}", full_name).replace("{{full_name}}", full_name)
                 body = body.replace("{{Company Name}}", company).replace("{{Company}}", company).replace("{{company_name}}", company)
-                body = body.replace("{{Sender Name}}", sender_full_name).replace("{{Sender Title}}", sender_title).replace("{{Sender Phone}}", sender_phone).replace("{{Sender LinkedIn}}", sender_linkedin).replace("{{Sender Linkedin}}", sender_linkedin)
+                body = body.replace("***{{Sender Name}}***", sender_full_name).replace("{{Sender Title}}", sender_title).replace("{{Sender Phone}}", sender_phone).replace("{{Sender LinkedIn}}", sender_linkedin).replace("{{Sender Linkedin}}", sender_linkedin)
                 subject = f"Strategic Investment/Partnership Opportunity | QVSCL × {company}"
             else:
                 # Fallback to AI only if DB template is missing
@@ -1097,7 +1223,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                     ("{{Company}}", company),
                     ("{{Designation}}", designation),
                     # Sender placeholders
-                    ("{{Sender Name}}", sender_full_name),
+                    ("***{{Sender Name}}***", sender_full_name),
                     ("{{Sender Full Name}}", sender_full_name),
                     ("{{Sender First Name}}", sender_first_name),
                     ("{{Sender Title}}", sender_title),
@@ -1253,11 +1379,22 @@ def list_custom_draft_templates(user_id: Optional[str] = Header(None, alias="X-U
             "ayush_sir_hospital_draft": "ayush",
             "kajal_mam_hyphen": "kajal",
             "kajal_mam_jv": "kajal",
+            "kajal_mam_health_ecosystem": "kajal",
+            "kajal_mam_agritech": "kajal",
         }
         for tpl_name, owner in owner_seed.items():
             cur.execute("UPDATE prompts SET owner_username = %s WHERE name = %s AND (owner_username IS NULL OR owner_username != %s)", (owner, tpl_name, owner))
         conn.commit()
-        
+
+        # Seed kajal_mam_agritech if it doesn't exist (will get correct content from the update below)
+        cur.execute("SELECT id FROM prompts WHERE name = 'kajal_mam_agritech'")
+        if not cur.fetchone():
+            cur.execute(
+                "INSERT INTO prompts (name, description, content, prompt_type) VALUES (%s, %s, %s, 'CUSTOM_DRAFT')",
+                ("kajal_mam_agritech", "Climate Agritech Platform fundraising draft (USD 500K-1M)", "placeholder")
+            )
+            conn.commit()
+
         # Self-healing database update:
         # Check if 'yashika_draft_ai_tech' has the correct placeholder and Subject prefix.
         # If not, update it dynamically in the database so the user doesn't need to run scripts!
@@ -1364,12 +1501,10 @@ Looking forward to your response.
 SIG_START
 --
 Thanks & Regards,
-
-<strong>{{Sender Name}}</strong>
+***{{Sender Name}}***
 {{Sender Title}}
-[LinkedIn]({{Sender LinkedIn}})
+[Website](https://www.qvscl.com) | [LinkedIn]({{Sender LinkedIn}})
 {{Sender Phone}}
-
 <strong>Strictly Private and Confidential.</strong>
 
 The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
@@ -1568,7 +1703,7 @@ SIG_START
 --
 Thanks & Regards,
 
-<strong>{{Sender Name}}</strong>
+<strong>***{{Sender Name}}***</strong>
 {{Sender Title}}
 [Website](https://www.qvscl.com) | [LinkedIn]({{Sender LinkedIn}})
 {{Sender Phone}}
@@ -1637,32 +1772,105 @@ SIG_END"""
                 (palak_corp_description, palak_corp_content)
             )
         conn.commit()
-            
-        # Look up current user to filter templates by ownership
-        current_user_name = None
-        show_all = False
-        if user_id:
-            try:
-                cur.execute("SELECT full_name, username FROM users WHERE id = %s", (normalize_user_id(user_id),))
-                u_row = cur.fetchone()
-                if u_row:
-                    if u_row["username"] and u_row["username"].lower() in ("test", "admin"):
-                        show_all = True
-                    if u_row["full_name"]:
-                        current_user_name = u_row["full_name"].strip().split()[0].lower()
-            except:
-                pass
 
-        if show_all:
-            cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
-        elif current_user_name:
+        # 5. Yashika Agritech Template
+        agritech_description = "Climate Agritech Platform fundraising draft (USD 500K-1M)"
+        agritech_content = """Subject: Climate Agritech Platform | ₹5.1Cr Revenue | 105% YoY Growth | 1.24L+ Lives Impacted
+
+Dear {{First Name}},
+
+I hope you're doing well.
+
+I'm {{Sender Name}} from QVSCL (Gurugram), a strategic advisory firm working with high-growth early-stage ventures. We are currently raising a round for a **climate-focused agritech platform** that is **building a full-stack renewable energy marketplace for rural India**.
+
+**Business Overview**
+
+* **Sector**: Agritech / Climate / Social Impact
+* **Stage**: Revenue-generating, growth-stage
+* **Positioning**: India's first curated marketplace for renewable & green energy products for farmers and rural households
+* **Platform Offering**:
+* Multi-brand marketplace with **60+ brands and 200+ SKUs** across solar, biogas, and green energy solutions
+* End-to-end solutions spanning product discovery, advisory, deployment, and after-sales service
+* AI-enabled touchpoints including chatbots and localized support
+* **Business Model**:
+* Phygital distribution model combining **AI-enabled digital platform + village-level offline stores**
+* Asset-light approach with **franchise-led last-mile distribution**
+* Multiple revenue streams across **B2C sales, B2B projects, partnerships, franchise fees, and AMC services**
+
+**Problems**
+
+Rural India faces structural inefficiencies in energy access and agri productivity:
+* High dependence on **firewood, diesel, and unreliable electricity**
+* Limited access to **modern technologies and advisory support**
+* Fragmented distribution through traditional dealer networks limits penetration
+
+**Solutions**
+
+A **one-stop, full-stack renewable energy platform** addressing access, affordability, and adoption:
+* **Phygital Marketplace**: Seamless online + offline distribution network
+* **AI-led Advisory**: Personalized product recommendations and assisted buying
+* **Last-Mile Reach**: Deep rural penetration via trained partners and franchise stores
+* **Integrated Offering**: Solar, biogas, thermal, and green energy products under one platform
+* **Value-Added Services**: Financing support, insurance, and long-term after-sales service
+
+**Traction & Impact**
+
+* **Revenue**: INR 5.1 Cr achieved till Feb'26 with ~105% YoY growth
+* **Advance Orders**: INR 2 Cr pipeline
+* **On-ground Impact (FY20-25)**:
+* 1,24,153+ lives impacted; 1,10,000+ women impacted
+* 2,070+ tons of CO₂ emissions abated
+* 66,000+ green jobs created; 900+ acres irrigated via solar
+* Large-scale deployment of renewable energy products across rural India
+
+**Differentiation**
+
+* **First-mover advantage** in building a **renewable energy marketplace with advisory layer**
+* Strong **last-mile rural distribution network** vs. e-commerce-led competitors
+* Integrated stack combining **commerce, financing, service, and impact delivery**
+
+**Fundraise**
+
+* **Raising**: USD 500K - 1M
+* **Use of Funds**: Expansion, product development (AgriVoltaics), team scale-up, and market expansion
+
+If this aligns with your portfolio focus and does not conflict with it, I'd be happy to share the full presentation or connect over a virtual meeting at your convenience. I have attached the QVSCL Profile. You may also share your investment thesis with us so we can send relevant deal flow in the future.
+
+For more details about our services: [Website](https://qvscl.com) | [Linkedin](https://www.linkedin.com/company/qvscl/)
+
+Looking forward to your response.
+
+SIG_START
+--
+**Thanks & Regards,**
+
+***{{Sender Name}}***
+{{Sender Title}}
+[LinkedIn]({{Sender LinkedIn}})
+{{Sender Phone}}
+SIG_END"""
+
+        cur.execute(
+            "UPDATE prompts SET content = %s, description = %s WHERE name = 'yashika_draft_agritech'",
+            (agritech_content, agritech_description)
+        )
+        if cur.rowcount == 0:
             cur.execute(
-                "SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND (owner_username IS NULL OR owner_username = %s) ORDER BY id ASC",
-                (current_user_name,)
+                "INSERT INTO prompts (name, description, content, prompt_type) VALUES ('yashika_draft_agritech', %s, %s, 'CUSTOM_DRAFT')",
+                (agritech_description, agritech_content)
             )
-        else:
-            cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
+        conn.commit()
+
+        # Also update kajal_mam_agritech with same content
+        cur.execute(
+            "UPDATE prompts SET content = %s, description = %s, owner_username = 'kajal' WHERE name = 'kajal_mam_agritech'",
+            (agritech_content, agritech_description)
+        )
+        conn.commit()
+            
+        cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
         rows = cur.fetchall()
+        logger.info(f"{len(rows)} templates found for user_id={user_id}")
         cur.close()
         conn.close()
         return [dict(r) for r in rows]
@@ -1677,6 +1885,11 @@ class TemplateDraftRequest(BaseModel):
 @router.post("/generate-draft-from-template")
 def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Generate a draft using a fixed custom template, replacing {{First Name}}, {{Company Name}} etc."""
+    return _generate_template_draft_inner(req.lead_id, req.template_name, user_id)
+
+
+def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Optional[str]) -> dict:
+    """Core logic for generating a template draft. Used by single and bulk endpoints."""
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -1686,11 +1899,11 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
 
         # Fetch lead
         if user_id and user_id.lower() != "admin":
-            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (req.lead_id, uid))
+            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (lead_id, uid))
         elif user_id and user_id.lower() == "admin":
-            cur.execute("SELECT * FROM leads_raw WHERE id = %s", (req.lead_id,))
+            cur.execute("SELECT * FROM leads_raw WHERE id = %s", (lead_id,))
         else:
-            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (req.lead_id,))
+            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (lead_id,))
 
         lead = cur.fetchone()
         if not lead:
@@ -1698,13 +1911,13 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
         lead = normalize_lead(lead)
 
         # Fetch template
-        cur.execute("SELECT content FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE", (req.template_name,))
+        cur.execute("SELECT content FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE", (template_name,))
         tpl_row = cur.fetchone()
         cur.close()
         conn.close()
 
         if not tpl_row:
-            return {"error": f"Template '{req.template_name}' not found"}
+            return {"error": f"Template '{template_name}' not found"}
 
         template_body = tpl_row["content"]
 
@@ -1739,6 +1952,7 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
             ("{{Company}}", company),
             ("{{Designation}}", designation),
             # Sender placeholders
+            ("***{{Sender Name}}***", sender_full_name),
             ("{{Sender Name}}", sender_full_name),
             ("{{Sender Full Name}}", sender_full_name),
             ("{{Sender First Name}}", sender_first_name),
@@ -1748,7 +1962,7 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
             # Dynamic Backend URL for images/assets
             ("[[BACKEND_URL]]", os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")),
         ]
-        
+
         for placeholder, value in replacements:
             # Use case-insensitive replacement for flexibility
             reg = re.compile(re.escape(placeholder), re.IGNORECASE)
@@ -1758,7 +1972,7 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
         final_subject = subject  # Default
         final_body_lines = []
         subject_found = False
-        
+
         body_lines = body.split("\n")
         for line in body_lines:
             if not subject_found and "subject:" in line.lower():
@@ -1770,7 +1984,7 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
                 subject_found = True
             else:
                 final_body_lines.append(line)
-        
+
         final_body = "\n".join(final_body_lines).strip()
 
         # Inject logged-in user's signature ONLY if the template doesn't already embed one
@@ -1784,11 +1998,11 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
             if "thanks & regards" in body_lower or "best regards" in body_lower or body_lower.endswith("--"):
                 body_with_sig = final_body
             else:
-                body_with_sig = inject_signature(final_body, profile, req.lead_id)
+                body_with_sig = inject_signature(final_body, profile, lead_id)
 
         # RE-GENERATE html_body AFTER deduplication
         html_body = markdown_to_html(body_with_sig)
-        
+
         # Full content for local DB storage
         email_content = f"Subject: {final_subject}\n\n{body_with_sig}"
 
@@ -1809,7 +2023,7 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
         gmail_draft_id = None
         to_email = lead.get('email', '')
         if not to_email:
-            logger.warning(f"⚠️ Skipping Gmail draft — lead {req.lead_id} has no email")
+            logger.warning(f"⚠️ Skipping Gmail draft — lead {lead_id} has no email")
         try:
             from app.services.google_service import get_gmail_service
             import base64
@@ -1826,7 +2040,7 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
                 msg['subject'] = final_subject
                 # Attach PDFs based on template name
                 try:
-                    tpl_attachments = TEMPLATE_ATTACHMENT_MAP.get(req.template_name, [])
+                    tpl_attachments = TEMPLATE_ATTACHMENT_MAP.get(template_name, [])
                     if tpl_attachments:
                         assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets")
                         for att in tpl_attachments:
@@ -1845,7 +2059,7 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
                 draft_body = {'message': {'raw': raw_message}}
                 created_draft = service.users().drafts().create(userId='me', body=draft_body).execute()
                 gmail_draft_id = created_draft.get('id')
-                logger.info(f"✅ Created NEW Gmail draft {gmail_draft_id} for Lead {req.lead_id} (template-html)")
+                logger.info(f"✅ Created NEW Gmail draft {gmail_draft_id} for Lead {lead_id} (template-html)")
         except Exception as ge:
             logger.warning(f"⚠️  Gmail draft sync failed: {ge}")
             gmail_draft_id = None
@@ -1857,7 +2071,7 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
             UPDATE leads_raw
             SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW(), gmail_draft_id = %s, draft_template_used = %s
             WHERE id = %s
-        """, (email_content, gmail_draft_id, req.template_name, req.lead_id))
+        """, (email_content, gmail_draft_id, template_name, lead_id))
         conn2.commit()
         cur2.close()
         conn2.close()
@@ -1866,22 +2080,83 @@ def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[st
 
         try:
             from app.models.lead import add_activity_log
-            add_activity_log(req.lead_id, "DRAFT_GENERATED", f"Custom template draft '{req.template_name}' generated {'(Gmail synced ✅)' if gmail_draft_id else ''}", "system")
+            add_activity_log(lead_id, "DRAFT_GENERATED", f"Custom template draft '{template_name}' generated {'(Gmail synced ✅)' if gmail_draft_id else ''}", "system")
         except:
             pass
 
         return {
             "message": "Draft generated from template",
-            "draft_id": req.lead_id,
+            "draft_id": lead_id,
             "subject": final_subject,
             "body": body_with_sig,
-            "template": req.template_name,
+            "template": template_name,
             "gmail_draft_id": gmail_draft_id,
             "gmail_synced": gmail_draft_id is not None
         }
     except Exception as e:
         traceback.print_exc()
         return {"error": str(e)}
+
+
+class BulkTemplateDraftRequest(BaseModel):
+    lead_ids: list[int]
+    template_name: str
+
+import uuid as _uuid
+import threading as _threading
+
+_bulk_template_progress: dict = {}
+
+@router.post("/bulk-generate-draft-from-template")
+def bulk_generate_draft_from_template(req: BulkTemplateDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Generate drafts for multiple leads using a template, processed in parallel. Returns immediately with batch_id for progress polling."""
+    if not req.lead_ids:
+        return {"error": "No lead IDs provided", "batch_id": None}
+
+    batch_id = str(_uuid.uuid4())
+    _bulk_template_progress[batch_id] = {
+        "total": len(req.lead_ids),
+        "processed": 0,
+        "success": 0,
+        "failed": 0,
+        "status": "running"
+    }
+
+    def _run():
+        try:
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                futures = {executor.submit(_generate_template_draft_inner, lid, req.template_name, user_id): lid for lid in req.lead_ids}
+                for future in as_completed(futures):
+                    lid = futures[future]
+                    try:
+                        res = future.result()
+                        p = _bulk_template_progress[batch_id]
+                        p["processed"] += 1
+                        if "error" not in res:
+                            p["success"] += 1
+                        else:
+                            p["failed"] += 1
+                    except Exception:
+                        _bulk_template_progress[batch_id]["processed"] += 1
+                        _bulk_template_progress[batch_id]["failed"] += 1
+        except Exception as e:
+            _bulk_template_progress[batch_id]["status"] = "error"
+            _bulk_template_progress[batch_id]["error"] = str(e)
+        else:
+            _bulk_template_progress[batch_id]["status"] = "done"
+        # Cleanup after 5 minutes
+        _threading.Timer(300, lambda: _bulk_template_progress.pop(batch_id, None)).start()
+
+    _threading.Thread(target=_run, daemon=True).start()
+    return {"batch_id": batch_id, "total": len(req.lead_ids)}
+
+@router.get("/bulk-progress/{batch_id}")
+def get_bulk_progress(batch_id: str):
+    """Poll this endpoint to get real-time progress of a bulk draft generation job."""
+    prog = _bulk_template_progress.get(batch_id)
+    if not prog:
+        return {"status": "not_found"}
+    return prog
 
 
 
@@ -1896,6 +2171,14 @@ TEMPLATE_ATTACHMENT_MAP = {
         {"name": "eastern_up_hospital_investor_teaser_v5b_investorfriendly (2).pdf", "size": "202 KB", "type": "application/pdf"},
     ],
     "yashika_draft_ai_tech": [
+        {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
+        {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
+    ],
+    "yashika_draft_agritech": [
+        {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
+        {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
+    ],
+    "kajal_mam_agritech": [
         {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
         {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
     ],
@@ -1918,13 +2201,13 @@ def _get_template_attachments(template_name: Optional[str]) -> list:
 
 @router.get("/pending-drafts")
 @router.get("/emails")
-def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Optional[str] = None, geo: Optional[str] = None, company: Optional[str] = None, per_page: int = 60, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Optional[str] = None, geo: Optional[str] = None, company: Optional[str] = None, name: Optional[str] = None, per_page: int = 60, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     try:
         uid = normalize_user_id(user_id) if user_id else None
 
         # Try Redis cache first (only for simple page 1 with no filters to keep it efficient)
         cache_key = None
-        if redis_available and redis_client and not any([region, geo, company, status]):
+        if redis_available and redis_client and not any([region, geo, company, status, name]):
             cache_key = f"pending_drafts:{uid or 'all'}:{page}:{per_page}"
             try:
                 cached = redis_client.get(cache_key)
@@ -1972,6 +2255,10 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         if company:
             where_clause += " AND (company_name ILIKE %s OR family_office_name ILIKE %s)"
             params.extend([f"%{company}%", f"%{company}%"])
+
+        if name:
+            where_clause += " AND (first_name ILIKE %s OR last_name ILIKE %s)"
+            params.extend([f"%{name}%", f"%{name}%"])
 
         query = f"""
             SELECT lr.id, lr.first_name, lr.last_name, lr.email, lr.email_draft, lr.email_status,
@@ -2269,7 +2556,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         # to preserve their custom banner image, disclaimer, and formatting
         if "SIG_START" in body or "SIG_END" in body:
             # Just replace sender placeholders with current user's info
-            body = body.replace("{{Sender Name}}", profile["full_name"])
+            body = body.replace("***{{Sender Name}}***", profile["full_name"])
             body = body.replace("{{Sender Title}}", profile["job_title"])
             body = body.replace("{{Sender Phone}}", profile["phone"])
             body = body.replace("{{Sender LinkedIn}}", profile["linkedin_url"])
@@ -2540,6 +2827,8 @@ def approve_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = H
 @router.post("/send-approved-batch")
 def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     from app.services.email_service import send_email
+    from app.api.drafts import heal_draft_content
+    from app.models.lead import add_activity_log
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
@@ -2552,6 +2841,10 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
         if u:
             sender_email = u['email']
             sender_name = u['full_name'] or u['username']
+
+    # Pre-fetch sender profile once for all heal_draft_content calls
+    from app.api.drafts import get_sender_profile
+    profile = get_sender_profile(user_id)
 
     # 2. Get all approved leads for THIS user
     where_clause = "WHERE email_status = 'APPROVED'"
@@ -2577,11 +2870,8 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     for lead in leads_to_send:
         try:
             draft_content = lead['email_draft'] or ""
-            # Apply healing to ensure branding is present even if DB draft is old
-            from app.api.drafts import heal_draft_content
-            draft_content = heal_draft_content(draft_content, user_id)
+            draft_content = heal_draft_content(draft_content, user_id, profile)
             
-            # Parse Subject and Body
             subject = "Following up"
             body = draft_content
             if "Subject: " in draft_content:
@@ -2589,7 +2879,6 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
                 subject = parts[0].replace("Subject: ", "").strip()
                 body = parts[1].strip() if len(parts) > 1 else ""
 
-            # Real Dispatch
             uid_val = normalize_user_id(user_id)
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=lead['email'],
@@ -2603,7 +2892,6 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
             )
 
             if success:
-                # 4. Update Status and Initialize Follow-up Sequence (Plan A)
                 cur.execute("""
                     UPDATE leads_raw 
                     SET email_status = 'SENT', 
@@ -2619,8 +2907,6 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
                         is_responded = FALSE
                     WHERE id = %s
                 """, (subject, subject, new_thread_id, new_rfc_message_id, lead['id']))
-                conn.commit()
-                from app.models.lead import add_activity_log
                 add_activity_log(lead['id'], "EMAIL_SENT", f"Email dispatched via Resend from {sender_email}", "system")
                 sent_count += 1
         except Exception as e:
@@ -2643,6 +2929,8 @@ class BulkSendRequest(BaseModel):
 def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Send emails for a specific list of lead IDs via the logged-in user's Gmail account."""
     from app.services.email_service import send_email
+    from app.api.drafts import heal_draft_content
+    from app.models.lead import add_activity_log
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
@@ -2658,10 +2946,11 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
             sender_email = u['email']
             sender_name = u['full_name'] or u['username'] or "the team"
             if not u['google_id']:
-                cur.close()
-                conn.close()
                 from fastapi import HTTPException
                 raise HTTPException(status_code=400, detail="Gmail Not Connected. Please link your Google account in Settings before sending.")
+
+    from app.api.drafts import get_sender_profile
+    profile = get_sender_profile(user_id)
 
     # 2. Fetch the requested leads
     cur.execute(
@@ -2683,9 +2972,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
     for lead in leads_to_send:
         try:
             draft_content = lead['email_draft'] or ""
-            # Apply healing to ensure branding is present even if DB draft is old
-            from app.api.drafts import heal_draft_content
-            draft_content = heal_draft_content(draft_content, user_id)
+            draft_content = heal_draft_content(draft_content, user_id, profile)
             
             subject = "Following up"
             body = draft_content
@@ -2706,7 +2993,6 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
             )
 
             if success:
-                # Update status to SENT and start follow-up sequence
                 cur.execute("""
                     UPDATE leads_raw 
                     SET email_status = 'SENT', 
@@ -2724,11 +3010,8 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
                         gmail_draft_id = NULL
                     WHERE id = %s
                 """, (sender_name, subject, subject, new_thread_id, new_rfc_message_id, lead['id']))
-                conn.commit()
-                from app.models.lead import add_activity_log
                 add_activity_log(lead['id'], "EMAIL_SENT", f"Email dispatched via Gmail API from {sender_email} — Appears in Gmail Sent folder", sender_name)
                 
-                # If there was a linked Gmail draft, delete it now
                 if lead.get('gmail_draft_id'):
                     try:
                         from app.services.google_service import delete_gmail_draft
@@ -2746,6 +3029,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
             failed_count += 1
             results.append({"id": lead['id'], "email": lead['email'], "status": "failed", "error": str(e)})
 
+    conn.commit()
     cur.close()
     conn.close()
 

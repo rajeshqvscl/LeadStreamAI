@@ -484,12 +484,6 @@ def update_system_settings(req: Dict[str, Any], user_id: Optional[str] = Header(
             WHERE id = %s
         """, (auto_followup, daily_limit, uid))
         
-        # Globally synchronize for all users to ensure background workers respect the workspace-wide toggle
-        cur.execute("""
-            UPDATE users 
-            SET auto_followup = %s, outreach_daily_limit = %s
-        """, (auto_followup, daily_limit))
-        
         conn.commit()
         
         return {"success": True}
