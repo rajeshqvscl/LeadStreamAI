@@ -475,7 +475,7 @@ def process_outreach_sequences():
                     first_name = name.split()[0] if name else name
 
                     body_html = markdown_to_html(body)
-                    sig = f"<br><br>--<br>Regards,<br>{first_name}"
+                    sig = f"<br>--<br>Regards,<br>{first_name}"
                     full_body = body_html + sig
 
                     success, msg, new_thread_id, new_rfc_msg_id = send_email(
