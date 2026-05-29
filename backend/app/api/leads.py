@@ -356,6 +356,10 @@ def list_followups(
             base_query = " FROM leads_raw WHERE email_status = 'SENT' AND COALESCE(followup_stage, 0) > 0 "
         elif status_val == 'REPLIED':
             base_query = " FROM leads_raw WHERE COALESCE(is_responded, FALSE) = TRUE "
+        elif status_val == 'IN_PROGRESS':
+            base_query = " FROM leads_raw WHERE followup_status IN ('ACTIVE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED', 'IDLE') AND COALESCE(followup_stage, 0) > 0 AND COALESCE(is_responded, FALSE) = FALSE AND last_outreach_at IS NOT NULL "
+        elif status_val == 'STOPPED':
+            base_query = " FROM leads_raw WHERE followup_status = 'STOPPED' AND COALESCE(followup_stage, 0) > 0 "
         else: # DUE
             investor_kw = ["VENTURE", "CAPITAL", "EQUITY", "INVEST", "PARTNER", "ASSET", "FAMILY OFFICE", "ANGEL", "CIRCLE", "NETWORK", "FUND", "VC", "PE", "HOLDING", "SFO", "OFFICE", "ADVISORY", "MANAGEMENT", "PRIVATE", "TRUST", "WEALTH", "ASSOCIATES", "GROUP", "PARTNERS", "ADVISORS", "FOUNDATION"]
             kw_conditions = " OR ".join([f"company_name ILIKE '%%{kw}%%' OR sector ILIKE '%%{kw}%%'" for kw in investor_kw])
@@ -499,6 +503,12 @@ def list_followups(
         results = []
         for r in rows:
             lead_dict = dict(r)
+            # Fetch first outreach date if first_outreach_at is null
+            if not lead_dict.get('first_outreach_at'):
+                cur.execute("SELECT created_at FROM activity_log WHERE lead_id = %s AND action = 'EMAIL_SENT' ORDER BY created_at ASC LIMIT 1", (lead_dict['id'],))
+                first_act = cur.fetchone()
+                if first_act:
+                    lead_dict['first_outreach_at'] = first_act['created_at']
             # Fetch latest significant activity
             cur.execute("SELECT action, details FROM activity_log WHERE lead_id = %s ORDER BY created_at DESC LIMIT 1", (lead_dict['id'],))
             last_act = cur.fetchone()
@@ -912,16 +922,32 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
 
 @router.post("/leads/bulk-approve-followups")
 def bulk_approve_followups(req: BulkApproveFollowupsRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Approves and sends follow-up emails for multiple leads in a batch."""
+    """Approves and sends follow-up emails for multiple leads in a batch using parallel workers."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from app.api.companies import check_daily_email_limit
+
+    batch_size = len(req.lead_ids)
+    if not check_daily_email_limit(user_id, batch_size):
+        raise HTTPException(status_code=400, detail=f"Daily limit exceeded — sending {batch_size} emails would exceed your 2000 daily quota.")
+
     results = {"success": [], "failed": []}
-    for lead_id in req.lead_ids:
+
+    def process_one(lead_id):
         try:
-            # Call existing single approval logic
             approve_followup(lead_id=lead_id, user_id=user_id)
-            results["success"].append(lead_id)
+            return ("ok", lead_id, None)
         except Exception as e:
-            logger.error(f"Bulk approval failed for lead {lead_id}: {e}")
-            results["failed"].append({"id": lead_id, "error": str(e)})
+            return ("err", lead_id, str(e))
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {pool.submit(process_one, lid): lid for lid in req.lead_ids}
+        for f in as_completed(futures):
+            status, lid, err = f.result()
+            if status == "ok":
+                results["success"].append(lid)
+            else:
+                results["failed"].append({"id": lid, "error": err})
+
     return results
 
 @router.get("/leads/{lead_id}/followup-preview")

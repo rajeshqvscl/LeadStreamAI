@@ -69,7 +69,7 @@ ALWAYS_ALLOWED = [
     "http://localhost:5173",
     "http://localhost:5174",
     "http://127.0.0.1:5173",
-    "https://lead-frontend-5new.onrender.com",
+    "https://leadstreamai.onrender.com",
 ]
 for o in ALWAYS_ALLOWED:
     if o not in allowed_origins:
@@ -145,7 +145,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     # Get current origins to match CORS
     raw_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
     allowed_origins = [origin.strip().rstrip("/") for origin in raw_origins.split(",") if origin.strip()]
-    reported_origin = "https://lead-frontend-5new.onrender.com"
+    reported_origin = "https://leadstreamai.onrender.com"
     if reported_origin not in allowed_origins:
         allowed_origins.append(reported_origin)
     

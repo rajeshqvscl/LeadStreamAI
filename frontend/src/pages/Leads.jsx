@@ -505,7 +505,7 @@ const Leads = () => {
 
   const removeLabel = async (leadId, label) => {
     try {
-      await axios.post(`http://localhost:8000/api/leads/${leadId}/remove-label`, { label });
+      await api.post(`/api/leads/${leadId}/remove-label`, { label });
       setLeads(leads.map(l => l.id === leadId ? { ...l, labels: l.labels.filter(x => x !== label) } : l));
     } catch (err) {
       console.error(err);

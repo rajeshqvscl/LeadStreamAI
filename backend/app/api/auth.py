@@ -197,7 +197,7 @@ def request_access(req: AccessRequest):
     # 3. Final Fallback to a valid string, never Null
     if not base_url or base_url.lower() == "null" or base_url.strip() == "":
         # We also check the commented out production URL in case it's helpful
-        base_url = "https://lead-backend-ipls.onrender.com" # Probable render URL from .env comments
+        base_url = "https://lead-backend-g9de.onrender.com"
     
     # Clean the URL
     base_url = base_url.rstrip("/")
@@ -263,7 +263,7 @@ def approve_user_landing(user_id: int):
         cur.close()
         conn.close()
 
-    frontend_url = os.getenv("FRONTEND_URL", "https://lead-frontend-5new.onrender.com")
+    frontend_url = os.getenv("FRONTEND_URL", "https://leadstreamai.onrender.com")
     
     return HTMLResponse(content=f"""
         <div style="font-family: sans-serif; text-align: center; padding: 50px; background-color: #f8fafc; min-height: 100vh;">

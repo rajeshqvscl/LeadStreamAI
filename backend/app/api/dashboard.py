@@ -27,7 +27,7 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
     # Include ALL sources for total dashboard counts
     leads_filter = "AND 1=1"
     
-    cur.execute(f"SELECT COUNT(*) as total FROM leads_raw {where_clause} {leads_filter}", params)
+    cur.execute(f"SELECT COUNT(*) as total FROM leads_raw {where_clause} AND (is_responded = TRUE OR email_status IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED') OR reply_intent = 'INTERESTED')", params)
     total_leads = cur.fetchone()['total']
     
     cur.execute(f"SELECT COUNT(*) as valid FROM leads_raw {where_clause} AND validation_status = 'VALID' {leads_filter}", params)
@@ -120,16 +120,23 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         recent_logs.append(dict(row))
 
         
-    # Count of emails sent today (in the last 24 hours)
+    # Count of emails sent today (using activity_log for accuracy, IST timezone)
+    ist_date = "(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date"
     if is_admin:
-        cur.execute("SELECT COUNT(*) as sent_today FROM leads_raw WHERE email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
+        cur.execute(f"SELECT COUNT(*) as sent_today FROM activity_log WHERE action = 'EMAIL_SENT' AND {ist_date} = (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
+        sent_today = cur.fetchone()['sent_today'] or 0
+        cur.execute(f"SELECT COUNT(*) as fup_today FROM activity_log WHERE action IN ('FOLLOWUP_SENT','AUTO_FOLLOWUP_SENT') AND {ist_date} = (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
+        fup_today = cur.fetchone()['fup_today'] or 0
     elif user_id and user_id.strip():
-        cur.execute("SELECT COUNT(*) as sent_today FROM leads_raw WHERE user_id = %s AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'", (user_id,))
+        cur.execute(f"SELECT COUNT(*) as sent_today FROM activity_log WHERE action = 'EMAIL_SENT' AND user_id = %s AND {ist_date} = (NOW() AT TIME ZONE 'Asia/Kolkata')::date", (user_id,))
+        sent_today = cur.fetchone()['sent_today'] or 0
+        cur.execute(f"SELECT COUNT(*) as fup_today FROM activity_log WHERE action IN ('FOLLOWUP_SENT','AUTO_FOLLOWUP_SENT') AND user_id = %s AND {ist_date} = (NOW() AT TIME ZONE 'Asia/Kolkata')::date", (user_id,))
+        fup_today = cur.fetchone()['fup_today'] or 0
     else:
-        cur.execute("SELECT COUNT(*) as sent_today FROM leads_raw WHERE user_id IS NULL AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
-        
-    sent_today_res = cur.fetchone()
-    sent_today = sent_today_res['sent_today'] if sent_today_res else 0
+        cur.execute(f"SELECT COUNT(*) as sent_today FROM activity_log WHERE action = 'EMAIL_SENT' AND user_id IS NULL AND {ist_date} = (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
+        sent_today = cur.fetchone()['sent_today'] or 0
+        cur.execute(f"SELECT COUNT(*) as fup_today FROM activity_log WHERE action IN ('FOLLOWUP_SENT','AUTO_FOLLOWUP_SENT') AND user_id IS NULL AND {ist_date} = (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
+        fup_today = cur.fetchone()['fup_today'] or 0
 
     cur.close()
     conn.close()
@@ -142,6 +149,7 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         "sent": sent,
         "refined": refined,
         "daily_sent_count": sent_today,
+        "today_followups": fup_today,
         "daily_limit": 2000,
         "open_rate": open_rate,
         "click_rate": click_rate,

@@ -14,6 +14,7 @@ const Layout = () => {
   const [totalLeads, setTotalLeads] = useState(0);
   const [totalCompanies, setTotalCompanies] = useState(0);
   const [todaySent, setTodaySent] = useState(0);
+  const [todayFollowups, setTodayFollowups] = useState(0);
 
   useEffect(() => {
     const urlSearch = searchParams.get('search');
@@ -39,6 +40,7 @@ const Layout = () => {
           if (data.total_leads !== undefined) setTotalLeads(data.total_leads);
           if (data.total_companies !== undefined) setTotalCompanies(data.total_companies);
           if (data.daily_sent_count !== undefined) setTodaySent(data.daily_sent_count);
+          if (data.today_followups !== undefined) setTodayFollowups(data.today_followups);
         }
       } catch (err) {
         console.error('Failed to fetch topbar stats', err);
@@ -202,9 +204,6 @@ const Layout = () => {
               <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'admin-audit-logs' ? 'text-white' : 'text-[#94a3b8]'}`}>📋</span> Audit Logs
             </Link>
           )}
-          <Link to="/dashboard/export" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'export' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
-            <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'export' ? 'text-white' : 'text-[#94a3b8]'}`}>📥</span> Export Data
-          </Link>
           {user.role === 'ADMIN' && (
             <Link to="/dashboard/history" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'history' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
               <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'history' ? 'text-white' : 'text-[#94a3b8]'}`}>🕒</span> History
@@ -285,10 +284,17 @@ const Layout = () => {
           </div>
           <div className="w-px h-8 bg-white/10 mx-1" />
           <div className="flex flex-col animate-pulse">
-            <span className="text-[9px] font-semibold uppercase tracking-[0.8px] text-[#64748b] leading-none">Today Sent</span>
+            <span className="text-[9px] font-semibold uppercase tracking-[0.8px] text-[#64748b] leading-none">Emails Sent</span>
             <div className="flex items-baseline gap-1 mt-1">
               <span className="text-[18px] font-bold text-blue-400">{todaySent}</span>
               <span className="text-[9px] font-semibold text-slate-500">/2000</span>
+            </div>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-[9px] font-semibold uppercase tracking-[0.8px] text-[#64748b] leading-none">Follow-ups</span>
+            <div className="flex items-baseline gap-1.5 mt-1">
+              <span className="text-[18px] font-bold text-emerald-400">{todayFollowups}</span>
+              <span className="text-[9px] font-semibold text-slate-500">today</span>
             </div>
           </div>
           <div className="bg-black/20 border border-white/5 px-4 py-2 rounded-[10px] flex items-center gap-3">

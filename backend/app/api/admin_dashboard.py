@@ -137,6 +137,7 @@ def get_all_leads_admin(
             SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.company_name, l.designation, 
                    l.sector, l.lead_type, l.reply_intent, l.sentiment_score, l.deal_size,
                    l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
+                   l.followup_stage, l.followup_status, l.last_outreach_at,
                    u.username as owner_name
             FROM leads_raw l
             LEFT JOIN users u ON l.user_id = u.id

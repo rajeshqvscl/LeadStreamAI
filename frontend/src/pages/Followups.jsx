@@ -84,8 +84,10 @@ const getStageLabel = (stage, lead, status = 'DUE') => {
 const getStageColor = (stage) => {
   if (stage === 0) return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
   if (stage === 1) return 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20';
-  if (stage <= 3) return 'bg-violet-500/10 text-violet-400 border-violet-500/20';
-  if (stage <= 9) return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+  if (stage === 2) return 'bg-violet-500/10 text-violet-400 border-violet-500/20';
+  if (stage === 3) return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+  if (stage === 4) return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+  if (stage >= 5) return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
   return 'bg-slate-500/10 text-slate-400 border-slate-500/20';
 };
 
@@ -183,11 +185,16 @@ const Followups = () => {
 
       // Map stage filter to numeric stage
       if (stageFilter !== 'All') {
-        const currentConfigs = STAGE_CONFIGS[typeFilter];
-        const config = currentConfigs.find(c => c.label === stageFilter);
-        if (config) {
-          params.stage = config.stage;
-          if (config.type) params.type = config.type;
+        if (statusFilter === 'IN_PROGRESS') {
+          const match = stageFilter.match(/Stage (\d+)/);
+          if (match) params.stage = parseInt(match[1]);
+        } else {
+          const currentConfigs = STAGE_CONFIGS[typeFilter];
+          const config = currentConfigs.find(c => c.label === stageFilter);
+          if (config) {
+            params.stage = config.stage;
+            if (config.type) params.type = config.type;
+          }
         }
       }
 
@@ -486,13 +493,15 @@ const Followups = () => {
             <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">Status</span>
           </div>
           <div className="flex gap-2">
-            {['DUE', 'SENT', 'REPLIED'].map(s => (
+            {['DUE', 'SENT', 'REPLIED', 'IN PROGRESS', 'STOPPED'].map(s => (
               <button
                 key={s}
-                onClick={() => setStatusFilter(s)}
+                onClick={() => { setStatusFilter(s === 'IN PROGRESS' ? 'IN_PROGRESS' : s); setStageFilter('All'); }}
                 className={`px-4 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
-                  statusFilter === s
-                    ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                  statusFilter === (s === 'IN PROGRESS' ? 'IN_PROGRESS' : s)
+                    ? s === 'IN PROGRESS' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    : s === 'STOPPED' ? 'bg-red-500/20 text-red-300 border-red-500/40'
+                    : 'bg-blue-500/20 text-blue-300 border-blue-500/40'
                     : 'bg-white/[0.03] text-slate-500 border-white/[0.05] hover:border-white/20'
                 }`}
               >
@@ -518,7 +527,7 @@ const Followups = () => {
             >
               All
             </button>
-            {STAGE_CONFIGS[typeFilter].map(s => (
+            {(statusFilter === 'IN_PROGRESS' ? [1,2,3].map(s => ({ label: `Stage ${s}`, stage: s })) : STAGE_CONFIGS[typeFilter]).map(s => (
               <button
                 key={s.label}
                 onClick={() => setStageFilter(s.label)}
@@ -538,6 +547,20 @@ const Followups = () => {
               <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest animate-pulse">Filtering...</span>
             </div>
           )}
+        </div>
+
+        {/* Search Bar */}
+        <div className="relative mb-4">
+          <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+            <Search className="w-4 h-4 text-slate-500" />
+          </div>
+          <input
+            type="text"
+            placeholder="Search by name, email, company..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full bg-[#0f172a] border border-white/[0.05] rounded-xl pl-12 pr-4 py-3 text-[13px] font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/30 transition-all placeholder:text-slate-600"
+          />
         </div>
 
         {/* List Actions */}
@@ -600,8 +623,27 @@ const Followups = () => {
                             {lt}
                           </span>
                           <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-md border ${getStageColor(statusFilter === 'SENT' ? Math.max(0, lead.followup_stage - 1) : lead.followup_stage)}`}>
-                            {getStageLabel(lead.followup_stage, lead, statusFilter)}
+                            {statusFilter === 'IN_PROGRESS' ? `Stage ${lead.followup_stage}/3` : getStageLabel(lead.followup_stage, lead, statusFilter)}
                           </span>
+                          {statusFilter === 'IN_PROGRESS' && (
+                            <>
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border ${lead.followup_stage >= 3 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}`}>
+                                {lead.followup_stage}x sent
+                              </span>
+                              {(lead.first_outreach_at || lead.last_outreach_at) && (
+                                <span className="text-[10px] font-black px-2 py-0.5 rounded-md border bg-amber-500/10 text-amber-400 border-amber-500/20">
+                                  {(() => {
+                                    const d = new Date(lead.first_outreach_at || lead.last_outreach_at);
+                                    if (isNaN(d.getTime())) return '';
+                                    const now = new Date();
+                                    const diff = now.getTime() - d.getTime();
+                                    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                                    return `${days}d`;
+                                  })()}
+                                </span>
+                              )}
+                            </>
+                          )}
                         </div>
                         {lead.last_outreach_subject && (
                           <div className="text-[11px] font-black text-indigo-400/90 uppercase tracking-widest flex items-center gap-1.5 mt-1 bg-indigo-500/[0.04] border border-indigo-500/10 rounded-lg px-2.5 py-1 w-fit">
@@ -629,19 +671,35 @@ const Followups = () => {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-3">
+                      {statusFilter === 'IN_PROGRESS' && (
+                        <div className="flex flex-col items-end gap-1">
+                          <div className="flex items-center gap-1">
+                            {[1,2,3].map(s => (
+                              <div key={s} className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black border transition-all ${lead.followup_stage >= s ? 'bg-indigo-500/30 border-indigo-500/60 text-indigo-300' : 'bg-white/5 border-white/10 text-slate-600'}`}>
+                                {s}
+                              </div>
+                            ))}
+                          </div>
+                          <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md ${lead.followup_stage >= 3 ? 'bg-emerald-500/10 text-emerald-400' : lead.followup_stage >= 2 ? 'bg-amber-500/10 text-amber-400' : 'bg-indigo-500/10 text-indigo-400'}`}>
+                            Stage {lead.followup_stage}/3
+                          </span>
+                        </div>
+                      )}
                       <button
                         onClick={(e) => { e.stopPropagation(); openLeadDetails(lead); }}
                         className="p-2.5 bg-[#1a2235] text-slate-400 rounded-xl border border-white/[0.05] hover:text-white hover:border-white/20 transition-all cursor-pointer"
                       >
                         <Mail className="w-4 h-4" />
                       </button>
+                      {statusFilter !== 'IN_PROGRESS' && (
                       <button
                         onClick={(e) => { e.stopPropagation(); handleApproveFollowup(lead.id); }}
                         className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-[11px] font-black uppercase tracking-wider hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-600/20 cursor-pointer"
                       >
                         <Zap className="w-3.5 h-3.5" /> Send
                       </button>
+                      )}
                     </div>
                   </div>
                 </div>
