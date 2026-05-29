@@ -1868,9 +1868,25 @@ SIG_END"""
         )
         conn.commit()
             
-        cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
+        # Filter by owner_username so each user only sees their own templates
+        owner_filter = None
+        if user_id:
+            try:
+                cur.execute("SELECT username, full_name FROM users WHERE id = %s", (int(user_id),))
+                user_row = cur.fetchone()
+                if user_row:
+                    uname = str(user_row['username'] or '').lower()
+                    fname = str(user_row['full_name'] or '').lower()
+                    owner_filter = uname.split('.')[0] or fname.split()[0] if fname else uname
+            except Exception:
+                pass
+
+        if owner_filter:
+            cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND owner_username = %s ORDER BY id ASC", (owner_filter,))
+        else:
+            cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND owner_username IS NULL ORDER BY id ASC")
         rows = cur.fetchall()
-        logger.info(f"{len(rows)} templates found for user_id={user_id}")
+        logger.info(f"{len(rows)} templates found for user_id={user_id} (owner_filter={owner_filter})")
         cur.close()
         conn.close()
         return [dict(r) for r in rows]

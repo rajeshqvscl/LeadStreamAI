@@ -410,6 +410,21 @@ def process_outreach_sequences():
                     if not should_action:
                         continue
 
+                    # Re-verify stage hasn't changed (prevents duplicate sends from overlapping runs)
+                    try:
+                        verify_conn = get_db_connection()
+                        verify_cur = verify_conn.cursor()
+                        verify_cur.execute("SELECT followup_stage FROM leads_raw WHERE id = %s", (lead_id,))
+                        verify_row = verify_cur.fetchone()
+                        current_stage = list(verify_row.values())[0] if verify_row else None
+                        verify_cur.close()
+                        verify_conn.close()
+                        if current_stage is not None and current_stage != stage:
+                            logger.info(f"Lead {lead_id} stage changed from {stage} to {current_stage} — skipping (already processed)")
+                            continue
+                    except Exception as verify_err:
+                        logger.warning(f"Stage re-verify failed for lead {lead_id}: {verify_err}")
+
                     existing_thread_id = lead.get('gmail_thread_id')
                     existing_msg_id = lead.get('gmail_message_id')
 
@@ -499,11 +514,16 @@ def process_outreach_sequences():
                                 gmail_thread_id = COALESCE(%s, gmail_thread_id),
                                 gmail_message_id = COALESCE(%s, gmail_message_id),
                                 updated_at = NOW()
-                            WHERE id = %s
-                        """, (next_stage, subject, new_thread_id, new_rfc_msg_id, lead_id))
+                            WHERE id = %s AND followup_stage = %s
+                        """, (next_stage, subject, new_thread_id, new_rfc_msg_id, lead_id, stage))
                         conn.commit()
+                        updated_count = cur.rowcount
                         cur.close()
                         conn.close()
+
+                        if updated_count == 0:
+                            logger.warning(f"Lead {lead_id} stage already changed — email sent but stage not updated to avoid duplicate")
+                            continue
 
                         add_activity_log(lead_id, "AUTO_FOLLOWUP_SENT", f"Stage {next_stage} auto-sent", "system", uid)
                         sent_count += 1

@@ -174,7 +174,7 @@ from fastapi.staticfiles import StaticFiles
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/assets", StaticFiles(directory="assets"), name="assets")
 
-from app.api import ingest, drafts, dashboard, leads, auth, family_offices, campaigns, metrics, users, prompts, admin, companies, rocketreach, gmail, intelligence, admin_dashboard
+from app.api import ingest, drafts, dashboard, leads, auth, family_offices, campaigns, metrics, users, prompts, admin, companies, rocketreach, gmail, intelligence, admin_dashboard, tracking
 
 app.include_router(ingest.router, prefix="/api")
 app.include_router(drafts.router, prefix="/api")
@@ -191,4 +191,5 @@ app.include_router(companies.router, prefix="/api", tags=["companies"])
 app.include_router(rocketreach.router, prefix="/api", tags=["rocketreach"])
 app.include_router(gmail.router, prefix="/api", tags=["gmail"])
 app.include_router(intelligence.router, prefix="/api/intelligence", tags=["intelligence"])
+app.include_router(tracking.router, prefix="/api", tags=["tracking"])
 app.include_router(admin_dashboard.router, prefix="/api/admin", tags=["admin_dashboard"])

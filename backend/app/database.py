@@ -109,7 +109,8 @@ def create_tables():
         ("first_outreach_subject", "TEXT"),
         ("cc_email", "TEXT"),
         ("gmail_draft_id", "TEXT"),
-        ("draft_template_used", "TEXT")
+        ("draft_template_used", "TEXT"),
+        ("tracking_token", "TEXT")
     ]
     # Skip ALTER TABLEs if all columns already exist (saves ~11s on Neon)
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'leads_raw'")

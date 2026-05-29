@@ -270,6 +270,28 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                     clean_cc = cc.replace('\n', ', ').replace('\r', '').strip()
                     msg['Cc'] = clean_cc
                 
+                # Generate tracking token & inject tracking pixel
+                if lead_id:
+                    import uuid
+                    tracking_token = str(uuid.uuid4())
+                    try:
+                        track_conn = get_db_connection()
+                        track_cur = track_conn.cursor()
+                        track_cur.execute("UPDATE leads_raw SET tracking_token = %s, updated_at = NOW() WHERE id = %s", (tracking_token, lead_id))
+                        track_conn.commit()
+                        track_cur.close()
+                        track_conn.close()
+                    except Exception as track_err:
+                        logger.warning(f"Failed to save tracking token for lead {lead_id}: {track_err}")
+                        tracking_token = None
+
+                    if tracking_token:
+                        from urllib.parse import urljoin
+                        backend_url = os.getenv("BACKEND_URL", "https://lead-backend-g9de.onrender.com")
+                        pixel_url = urljoin(backend_url.rstrip("/") + "/", f"api/track/open/{tracking_token}")
+                        pixel_html = f'<img src="{pixel_url}" width="1" height="1" style="display:none" />'
+                        html_content = html_content + pixel_html
+
                 # Attach the HTML body using an 'alternative' container
                 msg_body = MIMEMultipart('alternative')
                 msg_body.attach(MIMEText(html_content, 'html'))
