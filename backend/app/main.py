@@ -52,6 +52,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Root health check — keeps cron jobs from getting 404
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "LeadStreamAI Backend is running"}
+
 # ---------------------------------------------------------------------------
 # CORS — robust multi-origin setup that works on Render with credentials
 # ---------------------------------------------------------------------------
