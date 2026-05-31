@@ -17,7 +17,7 @@ import {
 
 const AdminDashboard = () => {
   const parseUtcDate = (dateStr) => {
-    if (!dateStr) return new Date();
+    if (!dateStr) return null;
     let cleanStr = dateStr;
     if (!cleanStr.endsWith('Z') && !cleanStr.includes('+') && !/-[0-9]{2}:[0-9]{2}$/.test(cleanStr)) {
       cleanStr = cleanStr.replace(' ', 'T') + 'Z';
@@ -200,13 +200,14 @@ const AdminDashboard = () => {
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#0a0c10] p-2 lg:p-4 overflow-x-hidden">
+    <>
       {notification && (
-        <div className={`fixed top-8 right-8 z-[100] flex items-center gap-3 px-6 py-4 rounded-2xl shadow-2xl animate-in slide-in-from-right-8 ${notification.type === 'success' ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border border-rose-500/20 text-rose-400'}`}>
-          {notification.type === 'success' ? <CheckCircle2 className="w-4 h-4 font-black" /> : <AlertCircle className="w-4 h-4 font-black" />}
-          <span className="font-black text-[11px] uppercase tracking-widest">{notification.message}</span>
+        <div className="fixed top-4 right-4 z-[9999] flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-2xl animate-in slide-in-from-right-8 pointer-events-auto text-[10px]" style={{ background: notification.type === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(244,63,94,0.12)', border: notification.type === 'success' ? '1px solid rgba(16,185,129,0.2)' : '1px solid rgba(244,63,94,0.2)', color: notification.type === 'success' ? '#34d399' : '#fb7185' }}>
+          {notification.type === 'success' ? <CheckCircle2 className="w-3 h-3 shrink-0" /> : <AlertCircle className="w-3 h-3 shrink-0" />}
+          <span className="font-black uppercase tracking-widest">{notification.message}</span>
         </div>
       )}
+    <div className="flex flex-col min-h-screen bg-[#0a0c10] p-2 lg:p-4 overflow-x-hidden">
       {/* Header Section */}
       <div className="flex justify-between items-end mb-4">
         <div>
@@ -223,7 +224,8 @@ const AdminDashboard = () => {
           <button
             onClick={async () => {
               try {
-                showNotification('success', `Preparing ${exportRange.toLowerCase()} master export...`);
+                const rangeLabel = exportRange === 'ALL' ? 'full' : exportRange.toLowerCase();
+                showNotification('success', `Preparing ${rangeLabel} master export...`);
                 const res = await api.get(`/api/admin/leads/export?range=${exportRange}`);
                 const allLeads = res.data.leads || [];
 
@@ -237,7 +239,6 @@ const AdminDashboard = () => {
                   const clean = (val) => `"${(val || '').toString().replace(/"/g, '""')}"`;
                   const rejectionReason = l.reply_intent === 'NOT_INTERESTED' ? (l.rag_advice?.split('.')[0] || 'No specific reason') : 'N/A';
                   
-                  // Brand derivation logic for export
                   let derivedType = l.lead_type || 'CLIENT';
                   const owner = (l.owner_name || '').toLowerCase();
                   if (owner.includes('yashika')) {
@@ -286,6 +287,7 @@ const AdminDashboard = () => {
                 const a = document.createElement('a');
                 a.setAttribute('hidden', ''); a.setAttribute('href', url); a.setAttribute('download', `FULL_MASTER_DATA_${new Date().toISOString().split('T')[0]}.csv`);
                 document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                showNotification('success', `${rangeLabel === 'full' ? 'Full' : rangeLabel.charAt(0).toUpperCase() + rangeLabel.slice(1)} master export completed successfully!`);
               } catch (err) {
                 console.error('Full export failed', err);
                 showNotification('error', 'Export Failure: Unable to aggregate total workspace data.');
@@ -391,6 +393,34 @@ const AdminDashboard = () => {
           >
             <AlertCircle className="w-3.5 h-3.5" /> Export Rejections
           </button>
+
+          <button
+            onClick={() => {
+              const replies = leads.filter(l => l.email_status === 'REPLIED' || l.is_responded === true || (l.reply_intent && l.reply_intent !== 'NOT_INTERESTED'));
+              const headers = ['Name', 'Company', 'Email', 'Intent', 'Score', 'Check Size', 'Response Summary'].join(',');
+              const rows = replies.map(l => {
+                const clean = (val) => `"${(val || '').toString().replace(/"/g, '""')}"`;
+                return [
+                  clean(`${l.first_name} ${l.last_name}`),
+                  clean(l.company_name || l.family_office_name),
+                  clean(l.email),
+                  clean(l.reply_intent || 'N/A'),
+                  clean(l.sentiment_score),
+                  clean(l.deal_size),
+                  clean(l.rag_advice?.split('.')[0] || 'N/A')
+                ].join(',');
+              });
+              const csv = [headers, ...rows].join('\n');
+              const blob = new Blob([csv], { type: 'text/csv' });
+              const url = window.URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.setAttribute('hidden', ''); a.setAttribute('href', url); a.setAttribute('download', `REPLIES_${new Date().toISOString().split('T')[0]}.csv`);
+              document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            }}
+            className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-xl shadow-emerald-500/20"
+          >
+            <Mail className="w-3.5 h-3.5" /> Export Replies
+          </button>
         </div>
       </div>
 
@@ -398,7 +428,7 @@ const AdminDashboard = () => {
       {/* Analytics Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 mb-4">
         {[
-          { label: 'Total Leads', value: stats.total_leads, icon: Users, color: 'indigo', desc: 'Total records in system', contrib: 'From Database' },
+          { label: 'Total Sent', value: stats.total_leads, icon: Users, color: 'indigo', desc: 'Emails successfully sent', contrib: 'From Database' },
           { label: 'Followups Sent', value: stats.total_followups, icon: Mail, color: 'emerald', desc: 'Total stages sent', contrib: 'Activity Log' },
           { label: 'Engaged', value: stats.engaged, icon: Target, color: 'blue', desc: 'Replied or interested', contrib: 'Email Status & Intent' },
           { label: 'Active Flows', value: stats.active_flows, icon: Zap, color: 'amber', desc: 'Running sequences', contrib: 'Lead Status' },
@@ -435,6 +465,14 @@ const AdminDashboard = () => {
             className="w-full bg-white/[0.03] border border-white/5 rounded-xl py-3 pl-12 pr-4 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/50 transition-all"
           />
         </div>
+
+        <button
+          onClick={() => setFilters({ ...filters, status: filters.status === 'REPLIED' ? 'ALL' : 'REPLIED' })}
+          className={`flex items-center gap-1.5 px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border shrink-0 ${filters.status === 'REPLIED' ? 'bg-blue-500/20 border-blue-500/40 text-blue-400 shadow-lg shadow-blue-500/10' : 'bg-white/[0.03] border-white/5 text-slate-500 hover:text-white hover:bg-white/[0.06]'}`}
+        >
+          <Mail className={`w-3.5 h-3.5 ${filters.status === 'REPLIED' ? 'text-blue-400' : ''}`} />
+          Replies
+        </button>
 
         <div className="flex items-center gap-3">
           <select
@@ -591,73 +629,48 @@ const AdminDashboard = () => {
           </div>
         )}
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-left border-collapse border border-white/5">
             <thead>
               <tr className="bg-white/[0.02] border-b border-white/5 sticky top-0 z-10">
-                <th className="px-3 py-5 w-12">
-                  <input
-                    type="checkbox"
-                    className="w-4 h-4 rounded border-white/10 bg-black/20 accent-indigo-500 cursor-pointer"
-                    checked={selectedLeadIds.size === filteredLeads.length && filteredLeads.length > 0}
-                    onChange={() => {
-                      if (selectedLeadIds.size === filteredLeads.length) {
-                        setSelectedLeadIds(new Set());
-                      } else {
-                        setSelectedLeadIds(new Set(filteredLeads.map(l => l.id)));
-                      }
-                    }}
-                  />
-                </th>
-                  <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Name</th>
-                  <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Company</th>
-                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Email Address</th>
-                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Type</th>
-                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Sector</th>
-<th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Intent</th>
-                  <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">RAG Analysis</th>
-                  <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Check Size</th>
-                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Score</th>
-                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Stage</th>
-                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Followups</th>
-                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Rejection / Reason</th>
-                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Status</th>
-                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Owner</th>
-                <th className="px-2 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Actions</th>
+                  <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Name</th>
+                  <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Company</th>
+                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Email Address</th>
+                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Type</th>
+                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Sector</th>
+<th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Intent</th>
+                  <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">RAG Analysis</th>
+                  <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Check Size</th>
+                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Score</th>
+                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Stage</th>
+                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Followups</th>
+                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Rejection / Reason</th>
+                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Status</th>
+                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Sent/Draft</th>
+                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Owner</th>
+                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
+            <tbody>
               {filteredLeads.map((lead) => (
-                <tr
+                  <tr
                   key={lead.id}
                   onClick={() => setSelectedLead(lead)}
-                  className={`hover:bg-white/[0.02] transition-colors cursor-pointer group ${selectedLeadIds.has(lead.id) ? 'bg-indigo-500/10' : ''}`}
+                  className="hover:bg-white/[0.02] transition-colors cursor-pointer group"
                 >
-                  <td className="px-2 py-2" onClick={e => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      className="w-4 h-4 rounded border-white/10 bg-black/20 accent-indigo-500 cursor-pointer"
-                      checked={selectedLeadIds.has(lead.id)}
-                      onChange={(e) => {
-                        const next = new Set(selectedLeadIds);
-                        if (next.has(lead.id)) next.delete(lead.id);
-                        else next.add(lead.id);
-                        setSelectedLeadIds(next);
-                      }}
-                    />
-                  </td>
-                  <td className="px-2 py-2">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500/20 to-violet-500/10 flex items-center justify-center border border-white/10 group-hover:border-indigo-500/30 transition-all">
-                        <span className="text-[14px] font-black text-indigo-400">
+                   <td className="px-1 py-1 border border-white/5">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500/20 to-violet-500/10 flex items-center justify-center border border-white/10 group-hover:border-indigo-500/30 transition-all shrink-0">
+                        <span className="text-[11px] font-black text-indigo-400">
                           {lead.first_name?.[0]}{lead.last_name?.[0] || lead.first_name?.[1] || ''}
                         </span>
                       </div>
-                      <div className="flex flex-col gap-0.5">
-                        <div className="text-[14px] font-bold text-white group-hover:text-indigo-400 transition-colors truncate max-w-[150px]">{lead.first_name} {lead.last_name}</div>
-                        <div className="flex items-center gap-2">
+                      <div className="flex flex-col gap-0 min-w-0">
+                        <div className="text-[12px] font-bold text-white group-hover:text-indigo-400 transition-colors whitespace-nowrap">{lead.first_name} {lead.last_name}</div>
+                        <div className="flex items-center gap-0.5">
                           {(() => {
                             const sevenDays = 7 * 24 * 60 * 60 * 1000;
-                            const isStalled = (Date.now() - parseUtcDate(lead.updated_at).getTime()) > sevenDays;
+                            const lastAction = parseUtcDate(lead.last_outreach_at);
+                            const isStalled = lastAction && (Date.now() - lastAction.getTime()) > sevenDays;
                             const isFinal = ['Meeting Scheduled', 'REJECTED', 'NOT_INTERESTED'].includes(lead.email_status) || ['MEETING_SCHEDULED', 'NOT_INTERESTED'].includes(lead.reply_intent);
                             if (isStalled && !isFinal) {
                               return (
@@ -677,18 +690,18 @@ const AdminDashboard = () => {
                       </div>
                     </div>
                   </td>
-                  <td className="px-2 py-2">
-                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-tighter truncate max-w-[150px]">
+                  <td className="px-1 py-1 border border-white/5">
+                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-tighter">
                       {(lead.company_name === 'Independent' || !lead.company_name) ? '—' : (lead.company_name || lead.family_office_name || '—')}
                     </div>
                   </td>
-                  <td className="px-2 py-2">
-                    <div className="flex flex-col gap-1">
-                      <div className="text-[13px] font-bold text-white">{lead.email}</div>
-                      {lead.phone && <div className="text-[10px] text-slate-500 font-medium">{lead.phone}</div>}
+                  <td className="px-1 py-1 border border-white/5">
+                    <div>
+                      <div className="text-[12px] font-bold text-white break-words">{lead.email}</div>
+                      {lead.phone && <div className="text-[9px] text-slate-500 font-medium">{lead.phone}</div>}
                     </div>
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-1 py-1 border border-white/5">
                     {(() => {
                       const name = (lead.owner_name || '').toLowerCase();
                       const isInvestorTeam = name.includes('yashika') || name.includes('kajal') || name.includes('ayush');
@@ -732,13 +745,13 @@ const AdminDashboard = () => {
                       );
                     })()}
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-1 py-1 border border-white/5">
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-indigo-500/5 border border-indigo-500/20 text-indigo-400">
                       <Briefcase className="w-3 h-3" />
                       {lead.sector || 'OTHER'}
                     </span>
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-1 py-1 border border-white/5">
                     {lead.reply_intent ? (
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${lead.reply_intent === 'INTERESTED' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : lead.reply_intent === 'NOT_INTERESTED' ? 'bg-rose-500/10 border-rose-500/20 text-rose-400' : 'bg-amber-500/10 border-amber-500/20 text-amber-400'}`}>
                         {lead.reply_intent}
@@ -747,7 +760,7 @@ const AdminDashboard = () => {
                       <span className="text-[10px] font-bold text-slate-700 tracking-widest uppercase italic">Awaiting reply</span>
                     )}
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-1 py-1 border border-white/5">
                     {lead.rag_intelligence?.verdict ? (
                       <div className="flex flex-col gap-1">
                         <span className={`text-[9px] font-black uppercase tracking-widest ${lead.rag_intelligence.verdict === 'POSITIVE' ? 'text-emerald-400' : lead.rag_intelligence.verdict === 'STRONG' ? 'text-blue-400' : 'text-amber-400'}`}>
@@ -759,18 +772,18 @@ const AdminDashboard = () => {
                       <span className="text-[10px] font-bold text-slate-700 uppercase tracking-widest italic">—</span>
                     )}
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-1 py-1 border border-white/5">
                     <div className="flex items-center gap-2">
                       <DollarSign className="w-3.5 h-3.5 text-emerald-500" />
                       <span className="text-[13px] font-black text-white">{lead.deal_size || '—'}</span>
                     </div>
                   </td>
-                  <td className="px-3 py-5 text-center">
+                  <td className="px-1.5 py-1.5 text-center border border-white/5">
                     <div className={`text-[15px] font-black ${(lead.rag_intelligence?.sentiment_score || lead.sentiment_score) >= 80 ? 'text-emerald-400' : (lead.rag_intelligence?.sentiment_score || lead.sentiment_score) >= 50 ? 'text-amber-400' : 'text-slate-400'}`}>
                       {lead.rag_intelligence?.sentiment_score || lead.sentiment_score || '—'}
                     </div>
                   </td>
-                  <td className="px-3 py-5 text-center">
+                  <td className="px-1.5 py-1.5 text-center border border-white/5">
                     {(() => {
                       const stageNum = parseInt(lead.followup_stage, 10) || 0;
                       return (
@@ -787,7 +800,7 @@ const AdminDashboard = () => {
                       );
                     })()}
                   </td>
-                  <td className="px-3 py-5 text-center">
+                  <td className="px-1.5 py-1.5 text-center border border-white/5">
                     {(() => {
                       const stageNum = parseInt(lead.followup_stage, 10) || 0;
                       return (
@@ -812,22 +825,22 @@ const AdminDashboard = () => {
                       );
                     })()}
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-1 py-1 border border-white/5">
                     {lead.reply_intent === 'NOT_INTERESTED' ? (
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-1.5 px-2 py-0.5 bg-rose-500/10 border border-rose-500/20 rounded-md w-fit">
                           <AlertCircle className="w-2.5 h-2.5 text-rose-400" />
                           <span className="text-[9px] font-black text-rose-400 uppercase tracking-widest">Rejected ({lead.deal_size || 'N/A'})</span>
                         </div>
-                        <div className="text-[10px] font-medium text-slate-400 max-w-[200px] line-clamp-2 italic">
-                          "{stripHtml(lead.rag_advice).split('.')[0].substring(0, 80)}..."
+                        <div className="text-[10px] font-medium text-slate-400 italic break-words">
+                          "{stripHtml(lead.rag_advice).split('.')[0]}"
                         </div>
                       </div>
                     ) : (
                       <span className="text-[10px] font-bold text-slate-700 uppercase tracking-widest">N/A</span>
                     )}
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-1 py-1 border border-white/5">
                     <div className="flex flex-col gap-1">
                       <div className="text-[11px] font-black text-white uppercase tracking-wider">{lead.email_status || 'NEW'}</div>
                       {lead.followup_status === 'ACTIVE' && (
@@ -837,7 +850,19 @@ const AdminDashboard = () => {
                       )}
                     </div>
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-1 py-1 border border-white/5">
+                    {(() => {
+                      const st = (lead.email_status || '').toUpperCase();
+                      if (st === 'SENT' || (st === '' && lead.last_outreach_at)) return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">Sent</span>;
+                      if (st === 'PENDING_APPROVAL' || st === 'APPROVED') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-amber-500/10 border border-amber-500/20 text-amber-400">Draft</span>;
+                      if (st === 'REJECTED') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-rose-500/10 border border-rose-500/20 text-rose-400">Rejected</span>;
+                      if (st === 'BOUNCED') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-red-500/10 border border-red-500/20 text-red-400">Bounced</span>;
+                      if (st === 'REPLIED') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-blue-500/10 border border-blue-500/20 text-blue-400">Replied</span>;
+                      if (lead.email_draft) return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-amber-500/10 border border-amber-500/20 text-amber-400">Draft</span>;
+                      return <span className="text-[10px] font-bold text-slate-700 italic">—</span>;
+                    })()}
+                  </td>
+                  <td className="px-1 py-1 border border-white/5">
                     <div className="flex items-center gap-2">
                       <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center border border-white/5">
                         <Users className="w-3 h-3 text-slate-500" />
@@ -845,18 +870,24 @@ const AdminDashboard = () => {
                       <span className="text-[11px] font-bold text-slate-400">{lead.owner_name}</span>
                     </div>
                   </td>
-                  <td className="px-2 py-2">
-                    <div className="flex flex-col items-end gap-0.5 text-slate-500">
-                      <div className="flex items-center gap-1.5">
-                        <Clock className="w-3.5 h-3.5 text-slate-600" />
-                        <span className="text-[11px] font-black text-slate-400 uppercase">{parseUtcDate(lead.updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</span>
-                      </div>
-                      <span className="text-[9px] font-bold text-slate-600 tracking-tighter">
-                        {parseUtcDate(lead.updated_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
-                      </span>
-                    </div>
+                  <td className="px-1 py-1 border border-white/5">
+                    {(() => {
+                      const d = parseUtcDate(lead.last_outreach_at);
+                      if (!d) return <span className="text-[11px] text-slate-600">—</span>;
+                      return (
+                        <div className="flex flex-col items-end gap-0.5 text-slate-500">
+                          <div className="flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-slate-600" />
+                            <span className="text-[11px] font-black text-slate-400 uppercase">{d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' })}</span>
+                          </div>
+                          <span className="text-[9px] font-bold text-slate-600 tracking-tighter">
+                            {d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </td>
-                  <td className="px-3 py-5 text-right">
+                  <td className="px-1.5 py-1.5 text-right border border-white/5">
                     <div className="flex items-center justify-end gap-1">
                       <button 
                         onClick={async (e) => {
@@ -1356,6 +1387,7 @@ const AdminDashboard = () => {
         }
       `}} />
     </div>
+    </>
   );
 };
 

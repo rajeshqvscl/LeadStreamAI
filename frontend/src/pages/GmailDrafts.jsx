@@ -60,7 +60,7 @@ const GmailDrafts = () => {
     else setIsRefreshing(true);
     
     try {
-      const res = await api.get('/api/gmail/sync-drafts');
+      const res = await api.get(`/api/gmail/sync-drafts${quiet ? '?refresh=true' : ''}`);
       setDrafts(res.data);
     } catch (err) {
       console.error('Failed to fetch Gmail drafts:', err);

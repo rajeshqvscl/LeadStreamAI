@@ -95,7 +95,7 @@ def get_all_leads_admin(
         offset = (page - 1) * limit
         
         # 2. Build Dynamic WHERE Clause
-        where_clauses = []
+        where_clauses = ["(l.email_draft IS NOT NULL OR l.email_status IS NOT NULL)"]
         params = []
         
         if type and type != 'ALL':
@@ -137,7 +137,7 @@ def get_all_leads_admin(
             SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.company_name, l.designation, 
                    l.sector, l.lead_type, l.reply_intent, l.sentiment_score, l.deal_size,
                    l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
-                   l.followup_stage, l.followup_status, l.last_outreach_at,
+                   l.followup_stage, l.followup_status, l.last_outreach_at, l.email_status,
                    u.username as owner_name
             FROM leads_raw l
             LEFT JOIN users u ON l.user_id = u.id
@@ -172,6 +172,8 @@ def get_all_leads_admin(
             }
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("admin_all_leads_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -199,18 +201,18 @@ def export_all_leads_admin(
              if user_id != 'admin':
                 raise HTTPException(status_code=403, detail="Admin access required")
 
-        # 2. Build Range Filter
+        # 2. Build Range Filter (IST timezone — filter by updated_at)
         range_clause = ""
         if range == 'DAILY':
-            range_clause = "AND l.created_at >= NOW() - INTERVAL '1 day'"
+            range_clause = "AND l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date"
         elif range == 'WEEKLY':
-            range_clause = "AND l.created_at >= NOW() - INTERVAL '7 days'"
+            range_clause = "AND l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '6 days'"
         elif range == 'MONTHLY':
-            range_clause = "AND l.created_at >= NOW() - INTERVAL '30 days'"
+            range_clause = "AND l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '29 days'"
         elif range == 'QUARTERLY':
-            range_clause = "AND l.created_at >= NOW() - INTERVAL '90 days'"
+            range_clause = "AND l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '89 days'"
         elif range == 'YEARLY':
-            range_clause = "AND l.created_at >= NOW() - INTERVAL '365 days'"
+            range_clause = "AND l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '364 days'"
 
         # 3. Fetch leads
         query = f"""
@@ -221,7 +223,7 @@ def export_all_leads_admin(
                    u.username as owner_name
             FROM leads_raw l
             LEFT JOIN users u ON l.user_id = u.id
-            WHERE 1=1 {range_clause}
+            WHERE (l.email_draft IS NOT NULL OR l.email_status IS NOT NULL) {range_clause}
             ORDER BY l.created_at DESC
         """
         cur.execute(query)
@@ -229,6 +231,8 @@ def export_all_leads_admin(
         
         return {"leads": [dict(l) for l in leads]}
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("admin_export_leads_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -267,8 +271,8 @@ def get_global_stats(user_id: Any = Header(None, alias="X-User-Id"), _t: Any = N
             else:
                 return {"total_leads": 0, "interested": 0, "meetings": 0, "active_flows": 0, "avg_score": 0, "total_followups": 0, "engaged": 0}
 
-        # Total leads
-        cur.execute(f"SELECT COUNT(*) FROM leads_raw {base_filter}", tuple(params))
+        # Total leads (only sent, not all records)
+        cur.execute(f"SELECT COUNT(*) FROM leads_raw {base_filter} {'AND' if base_filter else 'WHERE'} email_status = 'SENT'", tuple(params))
         total_leads = cur.fetchone()[0]
         
         # Interested (Intent)

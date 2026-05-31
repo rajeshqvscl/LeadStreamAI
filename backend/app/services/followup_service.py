@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 import json
 import psycopg2.extras
@@ -127,7 +127,27 @@ def get_template_followup(lead: dict, stage: int) -> str:
     """Returns the standardized, high-performance follow-up template for the lead's sector and stage."""
     lead_name = f"{lead.get('first_name') or ''}".strip() or "there"
     
-    # Check draft_template_used FIRST — this overrides lead_type classification
+    # CUSTOM TEMPLATE FOLLOW-UPS: If the lead used a custom draft template that has follow-up content,
+    # use that instead of hardcoded templates
+    draft_template = str(lead.get('draft_template_used') or '').strip()
+    if draft_template:
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cur.execute("SELECT followup_1, followup_2, followup_3 FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE", (draft_template,))
+            tpl = cur.fetchone()
+            cur.close()
+            conn.close()
+            if tpl:
+                custom_body = tpl.get(f'followup_{stage}')
+                if custom_body:
+                    # Replace placeholders
+                    custom_body = custom_body.replace("{{First Name}}", lead_name)
+                    return custom_body
+        except Exception:
+            pass
+    
+    # Fallback: Check draft_template_used for known campaign overrides
     draft_template = str(lead.get('draft_template_used') or '').strip()
     
     # Also check subject as fallback (some leads may not have draft_template_used saved)
@@ -282,10 +302,9 @@ def generate_followup_preview(lead_id: int, user_id: int):
         name = profile.get('full_name') or profile.get('username') or 'Team'
         name = " ".join([p.capitalize() for p in name.split()])
         
-        # Convert plain text template to premium HTML
-        body_html = markdown_to_html(body)
-        sig = f"\n\n--\nRegards,\n{name}"
-        full_body = body_html + sig
+        # Convert plain text to HTML with proper signature spacing
+        body_with_sig = body + f"\n\n--\nRegards,\n{name}"
+        full_body = markdown_to_html(body_with_sig)
 
         return {
             "lead_id": lead_id,
@@ -299,6 +318,26 @@ def generate_followup_preview(lead_id: int, user_id: int):
         conn.close()
 
 
+def _is_working_hours():
+    """Returns True if current IST time is Mon-Fri 10AM-5PM."""
+    IST = timezone(timedelta(hours=5, minutes=30))
+    now = datetime.now(IST).replace(tzinfo=None)
+    if now.weekday() >= 5:
+        return False
+    if now.hour < 10 or now.hour >= 17:
+        return False
+    return True
+
+def _recheck_working_hours():
+    """Same check but returns an early-stop reason string if outside hours/weekend."""
+    IST = timezone(timedelta(hours=5, minutes=30))
+    now = datetime.now(IST).replace(tzinfo=None)
+    if now.weekday() >= 5:
+        return f"Weekend — {now.strftime('%A %Y-%m-%d %H:%M:%S IST')}"
+    if now.hour < 10 or now.hour >= 17:
+        return f"Outside hours — {now.strftime('%Y-%m-%d %H:%M:%S IST')}"
+    return None
+
 def process_outreach_sequences():
     """
     Background worker that identifies leads due for follow-ups.
@@ -306,12 +345,10 @@ def process_outreach_sequences():
     and enforces a daily limit per user (default 200) to prevent spam flagging.
     """
     try:
-        from datetime import timezone, timedelta
-        IST = timezone(timedelta(hours=5, minutes=30))
-        now = datetime.now(IST).replace(tzinfo=None)
-
-        if now.weekday() >= 5:
-            logger.info(f"Outreach paused: Weekend protection active in Indian timezone (IST). Current India Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+        if not _is_working_hours():
+            IST = timezone(timedelta(hours=5, minutes=30))
+            now = datetime.now(IST).replace(tzinfo=None)
+            logger.info(f"Outreach paused: Weekend/hours protection active (IST). Current: {now.strftime('%A %Y-%m-%d %H:%M:%S')}")
             return
 
         conn = get_db_connection()
@@ -346,6 +383,8 @@ def process_outreach_sequences():
                 user_leads[uid] = []
             user_leads[uid].append(lead)
 
+        IST = timezone(timedelta(hours=5, minutes=30))
+
         for uid, group in user_leads.items():
             first_lead = group[0]
             logger.info(f"Auto-pilot checking user {uid} ({first_lead['sender_name']} / {first_lead['sender_email']}): auto_followup={first_lead['auto_followup']}, has_token={bool(first_lead['google_refresh_token'])}")
@@ -375,6 +414,12 @@ def process_outreach_sequences():
 
             sent_count = 0
             for lead in group:
+                # Re-check working hours before EVERY send to prevent weekend/hour bleed
+                reason = _recheck_working_hours()
+                if reason:
+                    logger.info(f"Outreach paused mid-batch: {reason}")
+                    break
+
                 if sent_count >= remaining_allowance:
                     logger.info(f"Daily quota reached for user {uid} during sequence run.")
                     break
@@ -392,6 +437,7 @@ def process_outreach_sequences():
                     else:
                         last_sent_ist = last_sent.replace(tzinfo=timezone.utc).astimezone(IST).replace(tzinfo=None)
 
+                    now = datetime.now(IST).replace(tzinfo=None)
                     lead_type_raw = str(lead.get('lead_type') or lead.get('company_name') or lead.get('sector') or lead.get('persona') or '').upper()
                     investor_kw = ["VENTURE", "CAPITAL", "EQUITY", "INVEST", "PARTNER", "ASSET", "FAMILY OFFICE", "ANGEL", "CIRCLE", "NETWORK", "FUND", "VC", "PE"]
                     is_investor = any(kw in lead_type_raw for kw in investor_kw) or not ('CLIENT' in lead_type_raw or 'CUSTOMER' in lead_type_raw)
@@ -401,10 +447,10 @@ def process_outreach_sequences():
                     next_stage = stage + 1
 
                     if is_investor:
-                        if (stage == 0 and days_since_last >= 7) or (stage == 1 and days_since_last >= 7) or (stage == 2 and days_since_last >= 16):
+                        if (stage == 0 and days_since_last >= 7) or (stage == 1 and days_since_last >= 14) or (stage == 2 and days_since_last >= 30):
                             should_action = True
                     else:
-                        if (stage == 0 and days_since_last >= 2) or (stage == 1 and days_since_last >= 2) or (stage == 2 and days_since_last >= 6):
+                        if (stage == 0 and days_since_last >= 2) or (stage == 1 and days_since_last >= 4) or (stage == 2 and days_since_last >= 10):
                             should_action = True
 
                     if not should_action:
@@ -478,6 +524,23 @@ def process_outreach_sequences():
                         except Exception as heal_err:
                             logger.warning(f"On-the-fly thread heal failed for lead {lead_id}: {heal_err}")
 
+                    # Final duplicate guard: check activity_log for existing follow-up at this stage
+                    try:
+                        dup_conn = get_db_connection()
+                        dup_cur = dup_conn.cursor()
+                        dup_cur.execute(
+                            "SELECT COUNT(*) FROM activity_log WHERE lead_id = %s AND action = 'AUTO_FOLLOWUP_SENT' AND details LIKE %s",
+                            (lead_id, f"Stage {next_stage}%")
+                        )
+                        dup_count = list(dup_cur.fetchone().values())[0]
+                        dup_cur.close()
+                        dup_conn.close()
+                        if dup_count > 0:
+                            logger.info(f"Lead {lead_id}: Stage {next_stage} already sent ({dup_count}x in log) — skipping duplicate")
+                            continue
+                    except Exception as dup_err:
+                        logger.warning(f"Duplicate check failed for lead {lead_id}: {dup_err}")
+
                     orig_subject = get_original_outreach_subject(lead)
                     subject = f"Re: {orig_subject}"
 
@@ -489,9 +552,8 @@ def process_outreach_sequences():
                     name = " ".join([p.capitalize() for p in name.split()])
                     first_name = name.split()[0] if name else name
 
-                    body_html = markdown_to_html(body)
-                    sig = f"<br>--<br>Regards,<br>{first_name}"
-                    full_body = body_html + sig
+                    body_with_sig = body + f"\n\n--\nRegards,\n{first_name}"
+                    full_body = markdown_to_html(body_with_sig)
 
                     success, msg, new_thread_id, new_rfc_msg_id = send_email(
                         to_email=lead['email'],
@@ -528,7 +590,7 @@ def process_outreach_sequences():
                         add_activity_log(lead_id, "AUTO_FOLLOWUP_SENT", f"Stage {next_stage} auto-sent", "system", uid)
                         sent_count += 1
 
-                        logger.info(f"✅ Auto-followup sent from {first_lead['sender_name']} ({first_lead['sender_email']}) to {lead['email']}. Enforcing 30s cool-down...")
+                        logger.info(f"Auto-followup sent from {first_lead['sender_name']} ({first_lead['sender_email']}) to {lead['email']}. Enforcing 30s cool-down...")
                         time.sleep(30)
                     else:
                         logger.error(f"Auto-Pilot failed for {lead['email']}: {msg}")

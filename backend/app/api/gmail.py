@@ -365,6 +365,11 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         if intent == 'NOT_INTERESTED':
             final_status = 'CLOSED'
             
+        # EXTRA SAFEGUARD: Never set deal_size from LLM hallucination.
+        # Only keep it if it came from actual PDF analysis.
+        if not pdf_attachment:
+            deal_size = None
+
         rag_intel_json = json.dumps(rag_intel) if rag_intel else None
 
         cur.execute("""
@@ -490,7 +495,11 @@ def get_inbound_deals(
             total = count_result['count'] if count_result else 0
             
             query = """
-                SELECT * FROM leads_raw 
+                SELECT id, first_name, last_name, email, company_name, persona, fit_score,
+                       email_status, is_responded, reply_intent, deal_size, pitch_deck_url,
+                       meeting_time, meeting_link, updated_at, created_at,
+                       rag_intelligence, remarks, phone, linkedin_url, source, user_id
+                FROM leads_raw 
                 WHERE meeting_time IS NOT NULL 
                 OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED'))
                 ORDER BY updated_at DESC LIMIT %s OFFSET %s
@@ -504,7 +513,11 @@ def get_inbound_deals(
             total = count_result['count'] if count_result else 0
             
             query = """
-                SELECT * FROM leads_raw 
+                SELECT id, first_name, last_name, email, company_name, persona, fit_score,
+                       email_status, is_responded, reply_intent, deal_size, pitch_deck_url,
+                       meeting_time, meeting_link, updated_at, created_at,
+                       rag_intelligence, remarks, phone, linkedin_url, source, user_id
+                FROM leads_raw 
                 WHERE user_id = %s 
                 AND (meeting_time IS NOT NULL OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED')))
                 ORDER BY updated_at DESC LIMIT %s OFFSET %s
@@ -631,16 +644,19 @@ def force_sync_inbound(user_id: Optional[str] = Header(None, alias="X-User-Id"))
         finally:
             cur.close()
             conn.close()
-            conn.close()
     except Exception as e:
         print(f"Error in manual sync-inbound: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/gmail/sync-drafts")
-def get_gmail_sync_drafts(user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Fetches real-time drafts directly from the user's Gmail account."""
+def get_gmail_sync_drafts(user_id: Optional[str] = Header(None, alias="X-User-Id"), refresh: bool = False):
+    """Fetches real-time drafts directly from the user's Gmail account.
+    Results are cached for 2 minutes; pass ?refresh=true to force a fresh fetch."""
     uid = normalize_user_id(user_id)
     try:
+        if refresh:
+            from app.services.google_service import _drafts_cache
+            _drafts_cache.pop(int(uid), None)
         drafts = list_gmail_drafts(int(uid))
         return drafts
     except Exception as e:
@@ -648,10 +664,14 @@ def get_gmail_sync_drafts(user_id: Optional[str] = Header(None, alias="X-User-Id
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/gmail/sync-sent")
-def get_gmail_sync_sent(user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Fetches real-time sent messages directly from the user's Gmail account."""
+def get_gmail_sync_sent(user_id: Optional[str] = Header(None, alias="X-User-Id"), refresh: bool = False):
+    """Fetches real-time sent messages directly from the user's Gmail account.
+    Results are cached for 2 minutes; pass ?refresh=true to force a fresh fetch."""
     uid = normalize_user_id(user_id)
     try:
+        if refresh:
+            from app.services.google_service import _sent_cache
+            _sent_cache.pop(int(uid), None)
         sent = list_gmail_sent(int(uid))
         return sent
     except Exception as e:
@@ -928,15 +948,20 @@ def bulk_cancel_meetings(req: BulkMeetingActionRequest, user_id: Optional[str] =
         cur.close()
         conn.close()
 
-# Global cache to prevent redundant API calls
+# Global cache to prevent redundant Gmail API calls
 INBOX_CACHE = {}
-CACHE_EXPIRY = 30 # seconds
+CACHE_EXPIRY = 60 # seconds
 
 @router.get("/gmail/inbox")
-def get_unified_inbox(user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Fetches a list of the latest replies/messages with 30s caching for speed."""
+def get_unified_inbox(user_id: Optional[str] = Header(None, alias="X-User-Id"), refresh: bool = False):
+    """Fetches a list of the latest replies/messages with 60s caching for speed.
+    Pass ?refresh=true to bypass cache and force a fresh fetch."""
     from app.services.google_service import get_gmail_service
     uid = normalize_user_id(user_id)
+    
+    # Bypass cache if refresh requested
+    if refresh:
+        INBOX_CACHE.pop(uid, None)
     
     # Check Cache
     now = datetime.datetime.now()
@@ -1067,7 +1092,45 @@ def poll_all_users_for_replies():
                         email_match = re.search(r'[\w\.-]+@[\w\.-]+', sender)
                         if email_match:
                             sender_email = email_match.group(0).lower()
-                            
+                            subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), "")
+
+                            # BOUNCE DETECTION: mailer-daemon, postmaster, or "Undeliverable" subject
+                            is_bounce = any(x in sender.lower() for x in ['mailer-daemon', 'mailer.daemon', 'postmaster'])
+                            is_bounce = is_bounce or 'undeliverable' in subject.lower()
+                            if is_bounce:
+                                try:
+                                    # Use snippet from Gmail API (text preview) to extract failed recipient
+                                    snippet = msg.get('snippet', '')
+                                    failed_email_raw = re.search(r'[\w\.-]+@[\w\.-]+', snippet)
+                                    if not failed_email_raw:
+                                        # Fallback: fetch full message and extract from parts
+                                        full_bounce = service.users().messages().get(userId='me', id=m_id, format='full').execute()
+                                        for part in full_bounce.get('payload', {}).get('parts', []):
+                                            if part.get('mimeType') == 'text/plain':
+                                                import base64
+                                                body_text = base64.urlsafe_b64decode(part.get('body', {}).get('data', '') + '==').decode('utf-8', errors='ignore')
+                                                failed_email_raw = re.search(r'[\w\.-]+@[\w\.-]+', body_text)
+                                                break
+                                    if failed_email_raw:
+                                        failed_email = failed_email_raw.group(0).lower()
+                                        cur.execute("""
+                                            SELECT id, email_status FROM leads_raw 
+                                            WHERE LOWER(email) = %s AND email_status != 'BOUNCED'
+                                            LIMIT 1
+                                        """, (failed_email,))
+                                        bounced_lead = cur.fetchone()
+                                        if bounced_lead:
+                                            cur.execute("UPDATE leads_raw SET email_status = 'BOUNCED', followup_status = 'STOPPED', updated_at = NOW() WHERE id = %s", (bounced_lead['id'],))
+                                            conn.commit()
+                                            from app.models.lead import add_activity_log
+                                            add_activity_log(bounced_lead['id'], 'BOUNCED', f'Email bounced — invalid address: {failed_email}', 'system')
+                                            logger.info(f"Marked lead {bounced_lead['id']} ({failed_email}) as BOUNCED")
+                                except Exception as bounce_err:
+                                    logger.warning(f"Bounce processing failed for msg {m_id}: {bounce_err}")
+                                cur.execute("INSERT INTO gmail_processed_messages (message_id, user_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (m_id, uid))
+                                conn.commit()
+                                continue
+
                             # Check if this email exists as a lead (regardless of owner) and hasn't responded yet
                             cur.execute("""
                                 SELECT id, user_id FROM leads_raw 

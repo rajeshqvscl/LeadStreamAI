@@ -283,8 +283,19 @@ def fetch_thread_messages(user_id: int, thread_id: str):
         print(f"Error fetching thread {thread_id}: {e}")
         return []
 
+# Simple in-memory cache for Gmail drafts
+_drafts_cache = {}
+_drafts_cache_ttl = 120  # 2 minutes
+
 def list_gmail_drafts(user_id: int):
-    """Fetches all drafts directly from the user's linked Gmail account."""
+    """Fetches all drafts directly from the user's linked Gmail account.
+    Results are cached for 2 minutes."""
+    import time
+    now = time.time()
+    cached = _drafts_cache.get(user_id)
+    if cached and (now - cached['ts']) < _drafts_cache_ttl:
+        return cached['data']
+
     service = get_gmail_service(user_id)
     if not service:
         return []
@@ -297,22 +308,13 @@ def list_gmail_drafts(user_id: int):
         for d in drafts_list:
             try:
                 # Use metadata format to avoid scope restrictions for the list view
-                draft = service.users().drafts().get(userId='me', id=d['id'], format='metadata').execute()
-                msg = draft.get('message', {})
-                payload = msg.get('payload', {})
-                headers = payload.get('headers', [])
+                draft_obj = service.users().drafts().get(userId='me', id=d['id'], format='metadata').execute()
+                msg = draft_obj.get('message', {})
+                headers = msg.get('payload', {}).get('headers', [])
                 
                 subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), "No Subject")
                 to_email = next((h['value'] for h in headers if h['name'].lower() == 'to'), "No Recipient")
                 date = next((h['value'] for h in headers if h['name'].lower() == 'date'), "")
-                
-                # Fetch full body if possible, otherwise use snippet
-                body_content = ""
-                try:
-                    # Attempt to get full content if needed, but for list we can stick to snippet
-                    body_content = msg.get('snippet', '')
-                except:
-                    pass
 
                 full_drafts.append({
                     'id': d['id'],
@@ -321,35 +323,41 @@ def list_gmail_drafts(user_id: int):
                     'to': to_email,
                     'date': date,
                     'snippet': msg.get('snippet', ''),
-                    'body': body_content
+                    'body': msg.get('snippet', '')
                 })
             except Exception as inner_e:
                 print(f"Error fetching detail for draft {d['id']}: {inner_e}")
                 continue
-                
+        
+        _drafts_cache[user_id] = {'data': full_drafts, 'ts': now}
         return full_drafts
     except Exception as e:
         print(f"Error listing Gmail drafts for user {user_id}: {e}")
         return []
 
+# Simple in-memory cache for Gmail sent messages
+_sent_cache = {}
+_sent_cache_ttl = 120  # 2 minutes
+
 def list_gmail_sent(user_id: int):
-    """Fetches all sent emails directly from the user's linked Gmail account."""
+    """Fetches sent emails from Gmail with in-memory caching (2 min TTL)."""
+    import time
+    now = time.time()
+    cached = _sent_cache.get(user_id)
+    if cached and (now - cached['ts']) < _sent_cache_ttl:
+        return cached['data']
+
     service = get_gmail_service(user_id)
     if not service:
         return []
     
     try:
-        # Fetch messages with 'SENT' label - using labelIds for maximum robustness
-        print(f"DEBUG: Fetching sent messages for user {user_id} using labelIds=['SENT']")
         results = service.users().messages().list(userId='me', labelIds=['SENT']).execute()
-        print(f"DEBUG: Raw Results from Google: {results.keys()}")
         messages_list = results.get('messages', [])
-        print(f"DEBUG: Found {len(messages_list)} sent messages for user {user_id}")
         
         full_messages = []
-        for m in messages_list[:30]: # Limit to last 30 for performance
+        for m in messages_list[:30]:
             try:
-                # Use metadata format to ensure headers are available even on restricted scopes
                 msg = service.users().messages().get(userId='me', id=m['id'], format='metadata').execute()
                 payload = msg.get('payload', {})
                 headers = payload.get('headers', [])
@@ -358,20 +366,19 @@ def list_gmail_sent(user_id: int):
                 to_email = next((h['value'] for h in headers if h['name'].lower() == 'to'), "No Recipient")
                 date = next((h['value'] for h in headers if h['name'].lower() == 'date'), "")
                 
-                # For the list view, the snippet is usually enough. 
-                # We only fetch full body if explicitly requested or if scope allows.
                 full_messages.append({
                     'id': m['id'],
                     'subject': subject,
                     'to': to_email,
                     'date': date,
                     'snippet': msg.get('snippet', ''),
-                    'body': msg.get('snippet', '') # Default to snippet for list view
+                    'body': msg.get('snippet', '')
                 })
             except Exception as inner_e:
                 print(f"Error fetching detail for message {m['id']}: {inner_e}")
                 continue
-                
+        
+        _sent_cache[user_id] = {'data': full_messages, 'ts': now}
         return full_messages
     except Exception as e:
         print(f"Error listing Gmail sent messages for user {user_id}: {e}")

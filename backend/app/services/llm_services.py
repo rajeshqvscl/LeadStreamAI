@@ -325,6 +325,8 @@ Looking forward to your response.
         1. Identify the new response/reply at the very beginning/top of the text. Ignore any quoted historical thread or original outreach text trailing after it (e.g., descriptions of QVSCL, the climate agritech project, traction, etc.).
         2. If the lead declines the opportunity in the new reply—even in a short sentence like "Pass from us", "Pass for now", "Not interested", "Not within our mandate", "Too early for us", "No thank you"—you MUST classify the intent as "NOT_INTERESTED" and set the sentiment_score between 0 and 20.
         3. Do NOT let the details of the original outreach email (which is positive) confuse you. Focus 100% on the lead's new reply at the top.
+        4. CRITICAL — deal_size: ONLY extract a deal size if it is EXPLICITLY mentioned in the lead's NEW reply (the top part). If the reply says "Pass from us", "Not interested", or any short decline, deal_size MUST be null. Do NOT infer, guess, or copy deal sizes from the quoted original email thread below. If in doubt, set null.
+        5. CRITICAL — pitch_deck_url: ONLY set if the lead's NEW reply explicitly includes a URL or attachment reference. Do not fabricate or copy from the quoted thread.
         
         REPLY TEXT:
         {text}
@@ -332,9 +334,9 @@ Looking forward to your response.
         JSON STRUCTURE:
         {{
           "intent": "MEETING_REQUESTED" | "INTERESTED" | "NEEDS_MORE_INFO" | "NOT_INTERESTED",
-          "deal_size": "string or null",
+          "deal_size": null if not explicitly mentioned in the lead's own reply,
           "has_pitch_deck": boolean,
-          "pitch_deck_url": "string or null",
+          "pitch_deck_url": null if not explicitly shared by the lead,
           "sentiment_score": integer (0-100),
           "urgency_level": "HIGH" | "MEDIUM" | "LOW"
         }}

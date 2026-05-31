@@ -403,19 +403,15 @@ def list_followups(
         # 1. Multi-user Segregation
         uid = normalize_user_id(user_id)
         
-        # SECURE ADMIN CHECK: Verify role in DB
+        # SECURE ADMIN CHECK using existing connection
         is_admin = False
         if uid:
-            conn_admin = get_db_connection()
-            cur_admin = conn_admin.cursor()
-            cur_admin.execute("SELECT role FROM users WHERE id = %s", (uid,))
-            role_row = cur_admin.fetchone()
+            cur.execute("SELECT role FROM users WHERE id = %s", (uid,))
+            role_row = cur.fetchone()
             if role_row:
                 role_val = role_row['role'] if isinstance(role_row, dict) else role_row[0]
                 if role_val and str(role_val).upper() == 'ADMIN':
                     is_admin = True
-            cur_admin.close()
-            conn_admin.close()
 
         # LOG FOR DEBUGGING PRIVACY
         logger.info(f"FETCH_FOLLOWUPS: header_user_id={user_id}, normalized_uid={uid}, is_admin={is_admin}")
@@ -495,23 +491,38 @@ def list_followups(
         except:
             page_val, per_page_val = 1, 100
 
-        # Fetch paginated results
-        query = f"SELECT * {base_query} ORDER BY COALESCE(scheduled_at, last_outreach_at) DESC LIMIT %s OFFSET %s"
+        # Fetch paginated results with first outreach and last activity in subqueries
+        query = f"""
+            SELECT lr.id, lr.first_name, lr.last_name, lr.email, lr.company_name, lr.persona,
+                   lr.email_status, lr.followup_status, lr.followup_stage, lr.followup_draft,
+                   lr.followup_approved, lr.is_responded, lr.reply_intent, lr.deal_size,
+                   lr.last_outreach_at, lr.last_outreach_subject, lr.scheduled_at,
+                   lr.updated_at, lr.created_at, lr.lead_type, lr.sector,
+                   lr.phone, lr.linkedin_url, lr.source, lr.user_id,
+                   lr.meeting_time, lr.meeting_link, lr.remarks, lr.pitch_deck_url,
+                   lr.tracking_token, lr.draft_template_used,
+                   lr.first_outreach_at, lr.first_outreach_subject,
+                   lr.email_draft, lr.email_approved_by, lr.cc_email,
+                   (SELECT created_at FROM activity_log WHERE lead_id = lr.id AND action = 'EMAIL_SENT' ORDER BY created_at ASC LIMIT 1) as first_outreach_fallback,
+                   (SELECT action || '||' || COALESCE(details, '') FROM activity_log WHERE lead_id = lr.id ORDER BY created_at DESC LIMIT 1) as last_action_raw
+            {base_query}
+            ORDER BY COALESCE(lr.scheduled_at, lr.last_outreach_at) DESC NULLS LAST
+            LIMIT %s OFFSET %s
+        """
         cur.execute(query, tuple(params + [per_page_val, (page_val - 1) * per_page_val]))
         rows = cur.fetchall()
         
         results = []
         for r in rows:
             lead_dict = dict(r)
-            # Fetch first outreach date if first_outreach_at is null
-            if not lead_dict.get('first_outreach_at'):
-                cur.execute("SELECT created_at FROM activity_log WHERE lead_id = %s AND action = 'EMAIL_SENT' ORDER BY created_at ASC LIMIT 1", (lead_dict['id'],))
-                first_act = cur.fetchone()
-                if first_act:
-                    lead_dict['first_outreach_at'] = first_act['created_at']
-            # Fetch latest significant activity
-            cur.execute("SELECT action, details FROM activity_log WHERE lead_id = %s ORDER BY created_at DESC LIMIT 1", (lead_dict['id'],))
-            last_act = cur.fetchone()
+            # Use pre-fetched fallback if first_outreach_at is null
+            fallback = lead_dict.pop('first_outreach_fallback', None)
+            if not lead_dict.get('first_outreach_at') and fallback:
+                lead_dict['first_outreach_at'] = fallback
+            # Parse last action from pre-fetched subquery
+            last_action_str = lead_dict.pop('last_action_raw', None) or ''
+            last_act_parts = last_action_str.split('||', 1)
+            last_act = {'action': last_act_parts[0], 'details': last_act_parts[1] if len(last_act_parts) > 1 else ''} if last_act_parts[0] else None
             if last_act:
                 act = last_act['action'].upper()
                 det = (last_act['details'] or "").upper()

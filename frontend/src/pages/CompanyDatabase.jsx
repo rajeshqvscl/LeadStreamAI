@@ -103,6 +103,15 @@ const CompanyDatabase = () => {
     fetchTabs();
   }, []);
 
+  // Auto-load sheet tabs from localStorage URL on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('gsheet_sync_url');
+    if (saved && gsheetUrl && sheetTabs.length === 0) {
+      const timer = setTimeout(() => handleLoadTabs(), 300);
+      return () => clearTimeout(timer);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Handle manual page changes
   const handlePageChange = (newPage) => {
     if (newPage < 1 || newPage > totalPages) return;
@@ -508,22 +517,24 @@ const CompanyDatabase = () => {
   };
 
   const headers = React.useMemo(() => {
-    // If we have no data, show default columns
     if (companies.length === 0) return ["Name", "Company", "Email", "LinkedIn Profile", "Designation", "Mobile", "Sector"];
     
-    // Collect all unique keys from CURRENT companies in this view
-    const allKeys = new Set();
+    // Only keep columns that have at least one non-empty value
+    const colHasData = {};
     companies.forEach(c => {
       Object.keys(c).forEach(key => {
-        if (key !== 'id' && key !== '_is_generated' && !key.startsWith('_')) {
-          allKeys.add(key);
+        if (key === 'id' || key === '_is_generated' || key.startsWith('_')) return;
+        const val = c[key];
+        if (val !== null && val !== undefined && String(val).trim()) {
+          colHasData[key] = true;
         }
       });
     });
     
-    // Priority ordering for a clean "Spreadsheet" look
     const priority = ["Company Name", "Name", "Person Name", "Email", "Mobile", "LinkedIn Profile", "LinkedIn URL", "Designation", "Domain", "Website"];
-    return Array.from(allKeys).sort((a, b) => {
+    const keys = Object.keys(colHasData);
+    
+    return keys.sort((a, b) => {
       const aIdx = priority.findIndex(p => a.toLowerCase().includes(p.toLowerCase()));
       const bIdx = priority.findIndex(p => b.toLowerCase().includes(p.toLowerCase()));
       if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
@@ -861,7 +872,9 @@ const CompanyDatabase = () => {
                     />
                   </td>
                   {headers.map((header) => {
-                    const val = company[header] || '';
+                    const raw = company[header];
+                    const val = raw !== null && raw !== undefined ? String(raw) : '';
+                    const displayVal = val.trim() ? val : '-';
                     const isLink = (/linkedin|url|website|link/i.test(header) || (val && (val.includes('linkedin.com') || val.includes('http://') || val.includes('https://')))) && val;
                     return (
                       <td key={header} className="p-0 border-r border-white/5 last:border-0">
@@ -882,8 +895,8 @@ const CompanyDatabase = () => {
                         ) : (
                           <input
                             type="text"
-                            defaultValue={val}
-                            onBlur={(e) => handleCellUpdate(company.id, header, e.target.value)}
+                            defaultValue={displayVal}
+                            onBlur={(e) => { const v = e.target.value.trim(); handleCellUpdate(company.id, header, v === '-' ? '' : v); }}
                             className="w-full h-full bg-transparent border-none px-5 py-3.5 text-slate-300 focus:outline-none focus:bg-white/[0.02] focus:text-white text-xs font-medium transition-all"
                           />
                         )}

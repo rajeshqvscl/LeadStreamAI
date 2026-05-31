@@ -1125,6 +1125,7 @@ def generate_draft_endpoint(req: DraftRequest, user_id: Optional[str] = Header(N
     return generate_email_internal(req, user_id)
 
 def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
+    conn = None
     try:
         uid = normalize_user_id(user_id)
         conn = get_db_connection()
@@ -1138,10 +1139,9 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
             cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (req.lead_id,))
             
         lead = cur.fetchone()
-        cur.close()
-        conn.close()
 
         if not lead:
+            cur.close()
             return {"error": "Lead not found"}
         lead = normalize_lead(lead)
         
@@ -1150,16 +1150,10 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         
         # Select template
         if req.template_type == 'palak':
-            # Load Palak's template from DB for deterministic name replacement
-            # (avoids AI generating "Dear Dr.," without a full name)
-            conn_p = get_db_connection()
-            cur_p = conn_p.cursor(cursor_factory=psycopg2.extras.DictCursor)
-            cur_p.execute("SELECT content FROM prompts WHERE name = 'palak_mam_Draft_1' AND is_active = TRUE")
-            palak_row = cur_p.fetchone()
-            cur_p.close()
-            conn_p.close()
+            cur.execute("SELECT content FROM prompts WHERE name = 'palak_mam_Draft_1' AND is_active = TRUE")
+            palak_row = cur.fetchone()
 
-            f_name = clean_first_name(lead)  # strips Dr./Mr./Mrs. etc.
+            f_name = clean_first_name(lead)
             l_name = (lead.get("last_name") or "").strip()
             full_name = f"{f_name} {l_name}".strip()
             company = (lead.get("company_name") or lead.get("family_office_name") or "your organization").strip()
@@ -1176,7 +1170,6 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 body = body.replace("***{{Sender Name}}***", sender_full_name).replace("{{Sender Title}}", sender_title).replace("{{Sender Phone}}", sender_phone).replace("{{Sender LinkedIn}}", sender_linkedin).replace("{{Sender Linkedin}}", sender_linkedin)
                 subject = f"Strategic Investment/Partnership Opportunity | QVSCL × {company}"
             else:
-                # Fallback to AI only if DB template is missing
                 email_data = generator.generate_palak_email(
                     lead,
                     sender_name=sender_full_name,
@@ -1185,26 +1178,18 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 subject = email_data.get("subject", "Following up")
                 body = email_data.get("body", "")
         elif req.template_type != 'standard':
-            # Check if it's a custom template name from DB
-            conn_t = get_db_connection()
-            cur_t = conn_t.cursor(cursor_factory=psycopg2.extras.DictCursor)
-            cur_t.execute("SELECT content FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE", (req.template_type,))
-            row_t = cur_t.fetchone()
-            cur_t.close()
-            conn_t.close()
+            cur.execute("SELECT content FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE", (req.template_type,))
+            row_t = cur.fetchone()
             
             if row_t:
-                # FIXED replacement (No AI)
                 template_body = row_t["content"]
-                f_name = clean_first_name(lead)  # strips Dr./Mr./Mrs. etc.
+                f_name = clean_first_name(lead)
 
-                # Resolving Lead fields
                 l_name = (lead.get("last_name") or "").strip()
                 full_name = f"{f_name} {l_name}".strip()
                 company = (lead.get("company_name") or lead.get("family_office_name") or "your organization").strip()
                 designation = (lead.get("designation") or "").strip()
 
-                # Resolving Sender fields
                 sender_full_name = profile.get('full_name') or profile.get('username') or "the team"
                 sender_first_name = sender_full_name.split()[0] if sender_full_name else "Team"
                 sender_title = (profile.get('job_title') or "").strip() or "Analyst"
@@ -1222,7 +1207,6 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                     ("{{company_name}}", company),
                     ("{{Company}}", company),
                     ("{{Designation}}", designation),
-                    # Sender placeholders
                     ("***{{Sender Name}}***", sender_full_name),
                     ("{{Sender Full Name}}", sender_full_name),
                     ("{{Sender First Name}}", sender_first_name),
@@ -1230,7 +1214,6 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                     ("{{Sender Phone}}", sender_phone),
                     ("{{Sender LinkedIn}}", sender_linkedin),
                     ("{{Sender Linkedin}}", sender_linkedin),
-                    # Dynamic Backend URL for images/assets
                     ("[[BACKEND_URL]]", os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")),
                 ]
                 
@@ -1240,7 +1223,6 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
 
                 subject = f"Strategic Partnership Opportunity | QVSCL × {company}"
             else:
-                # Fallback to standard fixed
                 email_data = generator.generate_email(
                     lead, 
                     sender_name=profile.get('full_name') or profile.get('username'),
@@ -1249,7 +1231,6 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 subject = email_data.get("subject")
                 body = email_data.get("body")
         else:
-            # Standard FIXED template
             email_data = generator.generate_email(
                 lead, 
                 sender_name=profile.get('full_name') or profile.get('username'),
@@ -1258,27 +1239,21 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
             subject = email_data.get("subject")
             body = email_data.get("body")
         
-        # Inject professional signature (unless custom template handled it)
         if "SIG_START" in body or "SIG_END" in body:
             body_with_sig = body
         else:
-            # Check if AI already added a signature (rare but possible)
             body_lower = body.lower()
             if "thanks & regards" in body_lower or "best regards" in body_lower:
                 body_with_sig = body
             else:
                 body_with_sig = inject_signature(body, profile, req.lead_id)
 
-        # --- NEW: Deduplicate Subject Lines ---
-        # If the template body has a "Subject:" line (even if not on the first line), use it as the official subject
-        # and REMOVE it from the body to prevent double-subject issues.
         body_lines = body_with_sig.split("\n")
         subject_found = False
         new_body_lines = []
         
         for line in body_lines:
             if not subject_found and "subject:" in line.lower():
-                # Extract the subject (skip "Subject: " part)
                 if ":" in line:
                     subject = line.split(":", 1)[1].strip()
                 else:
@@ -1290,11 +1265,9 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         if subject_found:
             body_with_sig = "\n".join(new_body_lines).strip()
         
-        # RE-GENERATE html_body AFTER deduplication
         html_body = markdown_to_html(body_with_sig)
         email_content = f"Subject: {subject}\n\n{body_with_sig}"
         
-        # --- Delete OLD Gmail Draft if it exists ---
         old_gmail_id = lead.get('gmail_draft_id')
         uid_int = int(normalize_user_id(user_id))
         if old_gmail_id:
@@ -1303,15 +1276,14 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 service = get_gmail_service(uid_int)
                 if service:
                     service.users().drafts().delete(userId='me', id=old_gmail_id).execute()
-                    logger.info(f"🗑️ Deleted old Gmail draft {old_gmail_id}")
+                    logger.info(f"Deleted old Gmail draft {old_gmail_id}")
             except:
                 pass
 
-        # --- Step 1: Create Gmail Draft ---
         gmail_draft_id = None
         draft_to_email = lead.get('email', '')
         if not draft_to_email:
-            logger.warning(f"⚠️ Skipping Gmail draft — lead {req.lead_id} has no email")
+            logger.warning(f"Skipping Gmail draft — lead {req.lead_id} has no email")
         try:
             from app.services.google_service import get_gmail_service
             import base64
@@ -1326,24 +1298,18 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 draft_body = {'message': {'raw': raw_message}}
                 created_draft = service.users().drafts().create(userId='me', body=draft_body).execute()
                 gmail_draft_id = created_draft.get('id')
-                logger.info(f"✅ Created NEW Gmail draft {gmail_draft_id} for Lead {req.lead_id}")
+                logger.info(f"Created NEW Gmail draft {gmail_draft_id} for Lead {req.lead_id}")
         except Exception as ge:
-            logger.warning(f"⚠️  Gmail draft sync failed: {ge}")
+            logger.warning(f"Gmail draft sync failed: {ge}")
             gmail_draft_id = None
 
-        # --- Step 2: Save to DB ---
-        conn2 = get_db_connection()
-        cur2 = conn2.cursor()
-        cur2.execute("""
+        cur.execute("""
             UPDATE leads_raw 
             SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW(), gmail_draft_id = %s
             WHERE id = %s
         """, (email_content, gmail_draft_id, req.lead_id))
-        conn2.commit()
-        cur2.close()
-        conn2.close()
-        
-        # Log activity
+        conn.commit()
+
         invalidate_pending_drafts_cache(str(uid) if uid else None)
 
         try:
@@ -1361,7 +1327,13 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
             "gmail_synced": gmail_draft_id is not None
         }
     except Exception as e:
-        pass
+        return {"error": str(e)}
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
 # --- List Custom Draft Templates (for template picker modal) ---
 @router.get("/custom-draft-templates")
 def list_custom_draft_templates(user_id: Optional[str] = Header(None, alias="X-User-Id")):
@@ -2221,10 +2193,10 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
     try:
         uid = normalize_user_id(user_id) if user_id else None
 
-        # Try Redis cache first (only for simple page 1 with no filters to keep it efficient)
+        # Try Redis cache first
         cache_key = None
-        if redis_available and redis_client and not any([region, geo, company, status, name]):
-            cache_key = f"pending_drafts:{uid or 'all'}:{page}:{per_page}"
+        if redis_available and redis_client and not any([region, geo, company, name]):
+            cache_key = f"pending_drafts:{uid or 'all'}:{status or 'all'}:{page}:{per_page}"
             try:
                 cached = redis_client.get(cache_key)
                 if cached:

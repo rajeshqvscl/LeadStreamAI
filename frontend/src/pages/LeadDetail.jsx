@@ -180,30 +180,29 @@ const LeadDetail = () => {
 
   const [statusModal, setStatusModal] = useState({ show: false, title: '', subtitle: '', type: 'default', progress: 0 });
 
-  const ActionLoader = ({ show, title, subtitle, progress, type }) => {
+  const ActionLoader = ({ show, title, progress, type }) => {
     if (!show) return null;
     return (
-      <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#0a0f1a]/80 backdrop-blur-xl animate-in fade-in duration-300">
-        <div className="w-[380px] bg-[#131722] border border-[#ffffff10] rounded-[24px] p-8 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.5)] flex flex-col items-center text-center">
-          <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-6 ${
+      <div className="mt-3 bg-[#0f121b] border border-[#ffffff10] rounded-xl p-4 animate-in fade-in slide-in-from-top-2">
+        <div className="flex items-center gap-3 mb-3">
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
             type === 'success' ? 'bg-emerald-500/10 text-emerald-500' : 
-            type === 'generating' ? 'bg-amber-500/10 text-amber-500' :
-            'bg-blue-500/10 text-blue-500'
+            'bg-amber-500/10 text-amber-500'
           }`}>
-            {type === 'generating' ? <Sparkles className="w-8 h-8 animate-pulse" /> : <Save className="w-8 h-8 animate-bounce" />}
+            {type === 'generating' ? <Sparkles className="w-4 h-4 animate-pulse" /> : <Save className="w-4 h-4" />}
           </div>
-          
-          <h2 className="text-white text-[20px] font-bold tracking-tight mb-2">{title}</h2>
-          <p className="text-[#64748b] text-[10px] font-black uppercase tracking-[2px] mb-8">{subtitle}</p>
-          
-          <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-            <div 
-              className={`h-full transition-all duration-500 ease-out ${
-                type === 'generating' ? 'bg-gradient-to-r from-amber-500 to-orange-500' : 'bg-gradient-to-r from-emerald-500 to-blue-500'
-              }`}
-              style={{ width: `${progress}%` }}
-            />
+          <div className="flex-1 min-w-0">
+            <p className="text-white text-[12px] font-bold truncate">{title}</p>
+            <p className="text-[#64748b] text-[9px] font-bold uppercase tracking-wider">{type === 'generating' ? 'Processing...' : 'Complete'}</p>
           </div>
+        </div>
+        <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+          <div 
+            className={`h-full transition-all duration-500 ease-out ${
+              type === 'generating' ? 'bg-gradient-to-r from-amber-500 to-orange-500 animate-pulse' : 'bg-gradient-to-r from-emerald-500 to-blue-500'
+            }`}
+            style={{ width: `${progress}%` }}
+          />
         </div>
       </div>
     );
@@ -396,7 +395,6 @@ const LeadDetail = () => {
 
   return (
     <div className="animate-in fade-in duration-500 pb-20">
-      <ActionLoader {...statusModal} />
       {/* Header */}
       <div className="flex justify-between items-center mb-8">
         <div className="flex items-center gap-5">
@@ -743,6 +741,46 @@ const LeadDetail = () => {
 
         {/* Right: Details Sidebar */}
         <div className="space-y-6">
+          {/* Actions */}
+          <div className="bg-[#131722] border border-[#ffffff08] rounded-[16px] relative">
+            <div className="px-6 py-5 flex items-center gap-2 border-b border-[#ffffff08]">
+              <Zap className="w-4 h-4 text-amber-500" />
+              <h3 className="text-[13px] font-bold text-white tracking-wide">Actions</h3>
+            </div>
+            <div className="p-6">
+              <div className="relative">
+                <button 
+                  onClick={() => setShowDraftOptions(!showDraftOptions)} 
+                  disabled={isGenerating} 
+                  className="w-full bg-[#2563eb] hover:bg-blue-600 text-white text-[11px] font-extrabold px-4 py-3 rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  {isGenerating ? 'Generating...' : 'Draft AI Email'}
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </button>
+                
+                {showDraftOptions && (
+                  <>
+                    <div className="fixed inset-0 z-[100]" onClick={() => setShowDraftOptions(false)} />
+                    <div className="absolute left-0 right-0 mt-2 bg-[#0f121b] border border-[#ffffff15] rounded-xl shadow-2xl z-[101] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                      <div className="p-1">
+                        <button onClick={() => handleGenerateDraft('standard')} className="w-full text-left px-3 py-2.5 text-[10px] font-bold text-slate-300 hover:bg-white/5 hover:text-white rounded-lg transition-colors flex items-center gap-2 cursor-pointer">
+                          <div className="w-1.5 h-1.5 rounded-full bg-blue-500" /> Standard Template (AI)
+                        </button>
+                        {customTemplates.map(tpl => (
+                          <button key={tpl.name} onClick={() => handleGenerateDraft(tpl.name)} className="w-full text-left px-3 py-2.5 text-[10px] font-bold text-slate-300 hover:bg-white/5 hover:text-white rounded-lg transition-colors flex items-center gap-2 cursor-pointer">
+                            <div className="w-1.5 h-1.5 rounded-full bg-purple-500" /> {tpl.name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+              <ActionLoader {...statusModal} />
+            </div>
+          </div>
+
           {/* Classification Details */}
           <div className="bg-[#131722] border border-[#ffffff08] rounded-[16px] overflow-hidden">
             <div className="px-6 py-5 flex items-center gap-2 border-b border-[#ffffff08]">
@@ -805,48 +843,9 @@ const LeadDetail = () => {
 
           {/* Email Drafts */}
           <div className="bg-[#131722] border border-[#ffffff08] rounded-[16px] overflow-hidden">
-            <div className="px-6 py-5 flex items-center justify-between border-b border-[#ffffff08]">
-              <div className="flex items-center gap-2">
-                <span className="text-white text-sm">✉️</span>
-                <h3 className="text-[13px] font-bold text-white tracking-wide">Email Drafts</h3>
-              </div>
-              <div className="relative">
-                <button 
-                  onClick={() => setShowDraftOptions(!showDraftOptions)} 
-                  disabled={isGenerating} 
-                  className="bg-[#2563eb] hover:bg-blue-600 text-white text-[10px] font-extrabold px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
-                >
-                  {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                  {isGenerating ? 'Generating...' : 'Draft AI Email'}
-                  <ChevronDown className="w-3 h-3" />
-                </button>
-                
-                {showDraftOptions && (
-                  <>
-                    <div className="fixed inset-0 z-[100]" onClick={() => setShowDraftOptions(false)} />
-                    <div className="absolute right-0 mt-2 w-48 bg-[#0f121b] border border-[#ffffff15] rounded-xl shadow-2xl z-[101] overflow-hidden animate-in fade-in slide-in-from-top-2">
-                      <div className="p-1">
-                        <button 
-                          onClick={() => handleGenerateDraft('standard')}
-                          className="w-full text-left px-3 py-2.5 text-[10px] font-bold text-slate-300 hover:bg-white/5 hover:text-white rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
-                        >
-                          <div className="w-1.5 h-1.5 rounded-full bg-blue-500" /> Standard Template (AI)
-                        </button>
-
-                        {customTemplates.map(tpl => (
-                          <button 
-                            key={tpl.name}
-                            onClick={() => handleGenerateDraft(tpl.name)}
-                            className="w-full text-left px-3 py-2.5 text-[10px] font-bold text-slate-300 hover:bg-white/5 hover:text-white rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
-                          >
-                            <div className="w-1.5 h-1.5 rounded-full bg-purple-500" /> {tpl.name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
+            <div className="px-6 py-5 flex items-center gap-2 border-b border-[#ffffff08]">
+              <span className="text-white text-sm">✉️</span>
+              <h3 className="text-[13px] font-bold text-white tracking-wide">Email Drafts</h3>
             </div>
             <div className="p-6">
               {drafts.length > 0 ? (

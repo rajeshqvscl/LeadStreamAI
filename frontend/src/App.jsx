@@ -29,7 +29,6 @@ import Inbox from './pages/Inbox';
 import InboundDeals from './pages/InboundDeals';
 import DealIntelligence from './pages/DealIntelligence';
 import Meetings from './pages/Meetings';
-import SectorFAQ from './pages/SectorFAQ';
 import GmailDrafts from './pages/GmailDrafts';
 import GmailSent from './pages/GmailSent';
 import AdminDashboard from './pages/AdminDashboard';
@@ -117,7 +116,6 @@ function App() {
           <Route path="deals" element={<InboundDeals />} />
           <Route path="intelligence" element={<DealIntelligence />} />
           <Route path="meetings" element={<Meetings />} />
-          <Route path="sector-faq" element={<SectorFAQ />} />
           <Route path="gmail-drafts" element={<GmailDrafts />} />
           <Route path="gmail-sent" element={<GmailSent />} />
           <Route path="admin-intelligence" element={<AdminRoute><AdminDashboard /></AdminRoute>} />

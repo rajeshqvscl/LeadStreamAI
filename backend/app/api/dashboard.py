@@ -10,77 +10,54 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    # Base condition for data isolation
-    # 'admin' literal header → sees ALL data (no user filter)
     is_admin = (str(user_id or '').lower() == 'admin')
 
     if is_admin:
-        where_clause = "WHERE 1=1"
-        params = ()
+        user_cond = "1=1"
+        user_params = []
     elif user_id and user_id.strip():
-        where_clause = "WHERE user_id = %s"
-        params = (user_id,)
+        user_cond = "user_id = %s"
+        user_params = [user_id]
     else:
-        where_clause = "WHERE user_id IS NULL"
-        params = ()
+        user_cond = "user_id IS NULL"
+        user_params = []
 
-    # Include ALL sources for total dashboard counts
-    leads_filter = "AND 1=1"
+    # Single query for all counts
+    company_count_sql = "1=1" if is_admin else user_cond
+    cur.execute(f"""
+        SELECT
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND (is_responded = TRUE OR email_status IN ('REPLIED','INTERESTED','MEETING SCHEDULED') OR reply_intent = 'INTERESTED')) AS total_leads,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND validation_status = 'VALID') AS valid_leads,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND persona IS NOT NULL AND persona != '') AS classified,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND (email_status = 'PENDING_APPROVAL' OR email_status = 'pending')) AS pending,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND email_status = 'SENT') AS sent,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND email_draft IS NOT NULL) AS refined,
+            (SELECT COUNT(*) FROM company_registry WHERE {company_count_sql}) AS total_companies,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND email_status = 'OPENED') AS unique_opens,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND email_status = 'CLICKED') AS unique_clicks,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND email_status = 'BOUNCED') AS total_bounces,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND email IS NOT NULL AND email != '') AS with_email,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND linkedin_url IS NOT NULL AND linkedin_url != '') AS with_linkedin
+    """, user_params * 12 if user_params else [])
     
-    cur.execute(f"SELECT COUNT(*) as total FROM leads_raw {where_clause} AND (is_responded = TRUE OR email_status IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED') OR reply_intent = 'INTERESTED')", params)
-    total_leads = cur.fetchone()['total']
+    row = cur.fetchone()
     
-    cur.execute(f"SELECT COUNT(*) as valid FROM leads_raw {where_clause} AND validation_status = 'VALID' {leads_filter}", params)
-    valid_leads = cur.fetchone()['valid']
-    
-    cur.execute(f"SELECT COUNT(*) as classified FROM leads_raw {where_clause} AND persona IS NOT NULL AND persona != '' {leads_filter}", params)
-    classified = cur.fetchone()['classified']
-    
-    cur.execute(f"SELECT COUNT(*) as pending FROM leads_raw {where_clause} AND (email_status = 'PENDING_APPROVAL' OR email_status = 'pending') {leads_filter}", params)
-    pending = cur.fetchone()['pending']
-    
-    cur.execute(f"SELECT COUNT(*) as sent FROM leads_raw {where_clause} AND email_status = 'SENT' {leads_filter}", params)
-    sent = cur.fetchone()['sent'] or 0
-    
-    cur.execute(f"SELECT COUNT(*) as refined FROM leads_raw {where_clause} AND email_draft IS NOT NULL {leads_filter}", params)
-    refined = cur.fetchone()['refined'] or 0
+    total_leads = row['total_leads'] or 0
+    valid_leads = row['valid_leads'] or 0
+    classified = row['classified'] or 0
+    pending = row['pending'] or 0
+    sent = row['sent'] or 0
+    refined = row['refined'] or 0
+    total_companies = row['total_companies'] or 0
+    unique_opens = row['unique_opens'] or 0
+    unique_clicks = row['unique_clicks'] or 0
+    total_bounces = row['total_bounces'] or 0
+    with_email = row['with_email'] or 0
+    with_linkedin = row['with_linkedin'] or 0
 
-    # Company Registry Count — scoped to the logged-in user
-    if is_admin:
-        cur.execute("SELECT COUNT(*) as total FROM company_registry")
-    elif user_id and user_id.strip():
-        cur.execute("SELECT COUNT(*) as total FROM company_registry WHERE user_id = %s", (user_id,))
-    else:
-        cur.execute("SELECT COUNT(*) as total FROM company_registry WHERE user_id IS NULL")
-    total_companies = cur.fetchone()['total'] or 0
-    
-    # Engagement Pulse - Joining with leads_raw to ensure user-isolation
-    events_join = "JOIN leads_raw l ON ce.recipient_id = l.id"
-    if is_admin:
-        events_where = "WHERE 1=1"
-    elif user_id and user_id.strip():
-        events_where = "WHERE l.user_id = %s"
-    else:
-        events_where = "WHERE l.user_id IS NULL"
-    
-    cur.execute(f"SELECT COUNT(DISTINCT ce.recipient_id) as opens FROM campaign_events ce {events_join} {events_where} AND ce.event_type = 'OPEN'", params)
-    unique_opens = cur.fetchone()['opens'] or 0
-    
-    cur.execute(f"SELECT COUNT(DISTINCT ce.recipient_id) as clicks FROM campaign_events ce {events_join} {events_where} AND ce.event_type = 'CLICK'", params)
-    unique_clicks = cur.fetchone()['clicks'] or 0
-    
-    cur.execute(f"SELECT COUNT(*) as bounces FROM campaign_events ce {events_join} {events_where} AND ce.event_type = 'BOUNCE'", params)
-    total_bounces = cur.fetchone()['bounces'] or 0
-    
-    # Unsubscribes (matching emails belonging to the user)
-    cur.execute(f"SELECT COUNT(*) as unsubs FROM unsubscribe_list WHERE email IN (SELECT email FROM leads_raw {where_clause})", params)
+    # Get unsubscribes count
+    cur.execute(f"SELECT COUNT(*) as unsubs FROM unsubscribe_list WHERE email IN (SELECT email FROM leads_raw WHERE {user_cond})", user_params)
     total_unsubs = cur.fetchone()['unsubs'] or 0
-
-    # Data discovery metrics for pulse fallback
-    cur.execute(f"SELECT COUNT(*) as with_email FROM leads_raw {where_clause} AND email IS NOT NULL AND email != ''", params)
-    with_email = cur.fetchone()['with_email'] or 0
-    cur.execute(f"SELECT COUNT(*) as with_linkedin FROM leads_raw {where_clause} AND linkedin_url IS NOT NULL AND linkedin_url != ''", params)
-    with_linkedin = cur.fetchone()['with_linkedin'] or 0
 
     # Rate Calculations (using lead enrichment as fallback for pulse when no emails are sent)
     if sent > 0:
@@ -105,7 +82,7 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         bounce_rate = 0.0
         unsub_rate = float(f"{(total_unsubs / total_leads * 100):.1f}") if total_leads > 0 else 0.0
 
-    cur.execute(f"SELECT persona, COUNT(*) as count FROM leads_raw {where_clause} AND persona IS NOT NULL GROUP BY persona", params)
+    cur.execute(f"SELECT persona, COUNT(*) as count FROM leads_raw WHERE {user_cond} AND persona IS NOT NULL GROUP BY persona", user_params)
 
     persona_rows = cur.fetchall()
     persona_data = {}
@@ -113,7 +90,7 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         if r['persona']:
             persona_data[r['persona']] = r['count']
         
-    cur.execute(f"SELECT * FROM activity_log {where_clause} ORDER BY created_at DESC LIMIT 7", params)
+    cur.execute(f"SELECT * FROM activity_log WHERE {user_cond} ORDER BY created_at DESC LIMIT 7", user_params)
     logs_rows = cur.fetchall()
     recent_logs = []
     for row in logs_rows:
@@ -122,21 +99,15 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         
     # Count of emails sent today (using activity_log for accuracy, IST timezone)
     ist_date = "(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date"
-    if is_admin:
-        cur.execute(f"SELECT COUNT(*) as sent_today FROM activity_log WHERE action = 'EMAIL_SENT' AND {ist_date} = (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
-        sent_today = cur.fetchone()['sent_today'] or 0
-        cur.execute(f"SELECT COUNT(*) as fup_today FROM activity_log WHERE action IN ('FOLLOWUP_SENT','AUTO_FOLLOWUP_SENT') AND {ist_date} = (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
-        fup_today = cur.fetchone()['fup_today'] or 0
-    elif user_id and user_id.strip():
-        cur.execute(f"SELECT COUNT(*) as sent_today FROM activity_log WHERE action = 'EMAIL_SENT' AND user_id = %s AND {ist_date} = (NOW() AT TIME ZONE 'Asia/Kolkata')::date", (user_id,))
-        sent_today = cur.fetchone()['sent_today'] or 0
-        cur.execute(f"SELECT COUNT(*) as fup_today FROM activity_log WHERE action IN ('FOLLOWUP_SENT','AUTO_FOLLOWUP_SENT') AND user_id = %s AND {ist_date} = (NOW() AT TIME ZONE 'Asia/Kolkata')::date", (user_id,))
-        fup_today = cur.fetchone()['fup_today'] or 0
-    else:
-        cur.execute(f"SELECT COUNT(*) as sent_today FROM activity_log WHERE action = 'EMAIL_SENT' AND user_id IS NULL AND {ist_date} = (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
-        sent_today = cur.fetchone()['sent_today'] or 0
-        cur.execute(f"SELECT COUNT(*) as fup_today FROM activity_log WHERE action IN ('FOLLOWUP_SENT','AUTO_FOLLOWUP_SENT') AND user_id IS NULL AND {ist_date} = (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
-        fup_today = cur.fetchone()['fup_today'] or 0
+    today_str = "(NOW() AT TIME ZONE 'Asia/Kolkata')::date"
+    cur.execute(f"""
+        SELECT
+            (SELECT COUNT(*) FROM activity_log WHERE action = 'EMAIL_SENT' AND {user_cond} AND {ist_date} = {today_str}) AS sent_today,
+            (SELECT COUNT(*) FROM activity_log WHERE action IN ('FOLLOWUP_SENT','AUTO_FOLLOWUP_SENT') AND {user_cond} AND {ist_date} = {today_str}) AS fup_today
+    """, user_params * 2 if user_params else [])
+    today_row = cur.fetchone()
+    sent_today = today_row['sent_today'] or 0
+    fup_today = today_row['fup_today'] or 0
 
     cur.close()
     conn.close()

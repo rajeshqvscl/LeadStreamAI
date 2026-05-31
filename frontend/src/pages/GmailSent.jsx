@@ -37,7 +37,7 @@ const GmailSent = () => {
     
     try {
       setError(null);
-      const res = await api.get('/api/gmail/sync-sent');
+      const res = await api.get(`/api/gmail/sync-sent${quiet ? '?refresh=true' : ''}`);
       if (Array.isArray(res.data)) {
         setMessages(res.data);
       } else {

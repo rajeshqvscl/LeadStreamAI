@@ -54,10 +54,10 @@ const Inbox = () => {
         });
     };
 
-    const fetchInbox = async (isMounted = { current: true }) => {
+    const fetchInbox = async (isMounted = { current: true }, forceRefresh = false) => {
         setLoading(true);
         try {
-            const { data } = await api.get('/api/gmail/inbox');
+            const { data } = await api.get(`/api/gmail/inbox${forceRefresh ? '?refresh=true' : ''}`);
             if (!isMounted.current) return;
             setMessages(data.messages || []);
             setConnected(data.connected !== false);
@@ -190,7 +190,7 @@ const Inbox = () => {
                         />
                     </div>
                     <button 
-                        onClick={fetchInbox}
+                        onClick={() => fetchInbox({ current: true }, true)}
                         className="flex items-center gap-2 px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-[11px] font-black uppercase tracking-widest text-white transition-all active:scale-95 shadow-xl cursor-pointer"
                     >
                         <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />

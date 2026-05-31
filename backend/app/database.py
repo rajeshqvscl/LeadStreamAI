@@ -152,7 +152,70 @@ def create_tables():
         conn.commit()
     except psycopg2.Error:
         conn.rollback()
-    
+
+    try:
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_leads_raw_email_status
+            ON leads_raw (email_status);
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
+    try:
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_leads_raw_email_status_user
+            ON leads_raw (email_status, user_id);
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
+    try:
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_leads_raw_user_id
+            ON leads_raw (user_id);
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
+    try:
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_leads_raw_updated_at
+            ON leads_raw (updated_at DESC);
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
+    try:
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_leads_raw_last_outreach
+            ON leads_raw (last_outreach_at DESC);
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
+    try:
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_leads_raw_followup_status
+            ON leads_raw (followup_status);
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
+    try:
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_leads_raw_email_draft
+            ON leads_raw (email_draft) WHERE email_draft IS NOT NULL;
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
     cur.execute("""
     CREATE TABLE IF NOT EXISTS activity_log (
         id SERIAL PRIMARY KEY,
@@ -164,6 +227,33 @@ def create_tables():
         created_at TIMESTAMP DEFAULT NOW()
     );
     """)
+
+    try:
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_activity_log_action_user
+            ON activity_log (action, user_id, created_at DESC);
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
+    try:
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_activity_log_lead_id
+            ON activity_log (lead_id);
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
+    try:
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_activity_log_created_at
+            ON activity_log (created_at DESC);
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS gmail_processed_messages (
@@ -338,10 +428,10 @@ def create_tables():
     );
     """)
 
-    # Ensure owner_username column exists on prompts table for template ownership
-    for prompts_col in [("owner_username", "TEXT")]:
+    # Ensure owner_username + followup columns exist on prompts table
+    for prompts_col in [("owner_username", "TEXT"), ("followup_1", "TEXT"), ("followup_2", "TEXT"), ("followup_3", "TEXT")]:
         try:
-            cur.execute(f"ALTER TABLE prompts ADD COLUMN {prompts_col[0]} {prompts_col[1]};")
+            cur.execute(f"ALTER TABLE prompts ADD COLUMN IF NOT EXISTS {prompts_col[0]} {prompts_col[1]};")
             conn.commit()
         except psycopg2.Error:
             conn.rollback()

@@ -3,7 +3,7 @@ import axios from '../services/api';
 import { Link } from 'react-router-dom';
 import {
   Users, CheckSquare, Rocket, BarChart3, Sparkles, Activity,
-  ShieldAlert, Mail, Loader2, Zap, Clock, Globe, Target, CheckCircle2, XCircle, X, RefreshCw
+  ShieldAlert, Mail, Loader2, Zap, Clock, Globe, Target, CheckCircle2, XCircle, X, RefreshCw, FileText
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -378,11 +378,10 @@ const Dashboard = () => {
             </h3>
             <Link to="/dashboard/metrics" className="text-[11px] font-black text-blue-500 uppercase tracking-widest hover:text-white transition-colors">Full Intelligence Dashboard →</Link>
           </div>
-          <div className="p-8 grid grid-cols-2 md:grid-cols-5 gap-8">
+          <div className="p-8 grid grid-cols-2 md:grid-cols-4 gap-8">
             {[
               { label: 'Open Rate', val: `${data.open_rate}%`, sub: `${data.unique_opens} unique`, color: 'text-blue-500' },
               { label: 'Click Rate', val: `${data.click_rate}%`, sub: `${data.unique_clicks} unique`, color: 'text-emerald-500' },
-              { label: 'Heat Delta', val: `${data.engagement_rate}%`, sub: 'System Reach', color: 'text-purple-500' },
               { label: 'Bounce', val: `${data.bounce_rate}%`, sub: `${data.total_bounces} events`, color: 'text-orange-500' },
               { label: 'Opt-outs', val: data.total_unsubs, sub: `${data.unsub_rate.toFixed(1)}% volatility`, color: 'text-red-500' }
             ].map((p, i) => (
@@ -486,32 +485,22 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Mission Orchestra Hub */}
+      {/* Reports Section */}
       <div className="bg-[#131722] border border-white/10 rounded-[32px] overflow-hidden shadow-2xl shadow-blue-500/5">
         <div className="px-10 py-8 border-b border-white/5 flex items-center gap-3">
-          <Sparkles className="w-5 h-5 text-rose-500" />
-          <h3 className="text-sm font-black text-white uppercase tracking-[4px]">Mission Orchestra</h3>
+          <BarChart3 className="w-5 h-5 text-amber-500" />
+          <h3 className="text-sm font-black text-white uppercase tracking-[4px]">Reports</h3>
         </div>
-        <div className="p-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-          <Link to="/dashboard/leads" className="group p-8 bg-white/2 hover:bg-blue-600/10 border border-white/5 rounded-[24px] transition-all">
-            <div className="w-14 h-14 bg-blue-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><Users className="w-7 h-7 text-blue-500" /></div>
-            <h4 className="text-white font-black text-lg mb-2">Lead Pipeline</h4>
-            <p className="text-slate-500 text-xs font-bold leading-relaxed uppercase tracking-tighter">Ingest, discover, and prune high-fit prospects.</p>
+        <div className="p-10 grid grid-cols-1 md:grid-cols-2 gap-8">
+          <Link to="/dashboard/mis-report" className="group p-8 bg-white/2 hover:bg-amber-600/10 border border-white/5 rounded-[24px] transition-all">
+            <div className="w-14 h-14 bg-amber-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><FileText className="w-7 h-7 text-amber-500" /></div>
+            <h4 className="text-white font-black text-lg mb-2">MIS Report</h4>
+            <p className="text-slate-500 text-xs font-bold leading-relaxed uppercase tracking-tighter">Generate 5–8 page PDF report for management presentation.</p>
           </Link>
-          <Link to="/dashboard/emails" className="group p-8 bg-white/2 hover:bg-emerald-600/10 border border-white/5 rounded-[24px] transition-all">
-            <div className="w-14 h-14 bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><CheckSquare className="w-7 h-7 text-emerald-500" /></div>
-            <h4 className="text-white font-black text-lg mb-2">Approval Queue</h4>
-            <p className="text-slate-500 text-xs font-bold leading-relaxed uppercase tracking-tighter">Audit and authorize AI-generated outreach sequences.</p>
-          </Link>
-          <Link to="/dashboard/campaigns" className="group p-8 bg-white/2 hover:bg-rose-600/10 border border-white/5 rounded-[24px] transition-all">
-            <div className="w-14 h-14 bg-rose-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><Rocket className="w-7 h-7 text-rose-500" /></div>
-            <h4 className="text-white font-black text-lg mb-2">Campaign Hub</h4>
-            <p className="text-slate-500 text-xs font-bold leading-relaxed uppercase tracking-tighter">Calibrate high-performance outreach experiments.</p>
-          </Link>
-          <Link to="/dashboard/metrics" className="group p-8 bg-white/2 hover:bg-amber-600/10 border border-white/5 rounded-[24px] transition-all">
-            <div className="w-14 h-14 bg-amber-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><BarChart3 className="w-7 h-7 text-amber-500" /></div>
-            <h4 className="text-white font-black text-lg mb-2">BI Reports</h4>
-            <p className="text-slate-500 text-xs font-bold leading-relaxed uppercase tracking-tighter">Deep-dive into industry and region performance.</p>
+          <Link to="/dashboard/metrics" className="group p-8 bg-white/2 hover:bg-blue-600/10 border border-white/5 rounded-[24px] transition-all">
+            <div className="w-14 h-14 bg-blue-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><BarChart3 className="w-7 h-7 text-blue-500" /></div>
+            <h4 className="text-white font-black text-lg mb-2">Analytics</h4>
+            <p className="text-slate-500 text-xs font-bold leading-relaxed uppercase tracking-tighter">Deep-dive into open rates, bounce rates, and engagement trends.</p>
           </Link>
         </div>
       </div>

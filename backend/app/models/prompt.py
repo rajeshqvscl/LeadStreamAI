@@ -19,13 +19,13 @@ def get_active_prompt_by_type(prompt_type):
     conn.close()
     return prompt
 
-def create_prompt(name, prompt_type, content, description=None, is_active=True):
+def create_prompt(name, prompt_type, content, description=None, is_active=True, owner_username=None, followup_1=None, followup_2=None, followup_3=None):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO prompts (name, prompt_type, content, description, is_active)
-        VALUES (%s, %s, %s, %s, %s) RETURNING id
-    """, (name, prompt_type, content, description, is_active))
+        INSERT INTO prompts (name, prompt_type, content, description, is_active, owner_username, followup_1, followup_2, followup_3)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+    """, (name, prompt_type, content, description, is_active, owner_username, followup_1, followup_2, followup_3))
     prompt_id = cur.fetchone()['id']
     conn.commit()
     cur.close()
@@ -37,8 +37,9 @@ def update_prompt(prompt_id, data):
     cur = conn.cursor()
     fields = []
     values = []
+    allowed = ['name', 'content', 'description', 'is_active', 'prompt_type', 'followup_1', 'followup_2', 'followup_3']
     for k, v in data.items():
-        if k in ['name', 'content', 'description', 'is_active', 'prompt_type']:
+        if k in allowed:
             fields.append(f"{k} = %s")
             values.append(v)
     

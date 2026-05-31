@@ -287,7 +287,11 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
 
                     if tracking_token:
                         from urllib.parse import urljoin
+                        from app.api.tracking import inject_click_tracking
                         backend_url = os.getenv("BACKEND_URL", "https://lead-backend-g9de.onrender.com")
+                        # Inject click tracking — replaces link hrefs with tracking redirect URLs
+                        html_content = inject_click_tracking(html_content, tracking_token, backend_url.rstrip("/"))
+                        # Inject open tracking pixel
                         pixel_url = urljoin(backend_url.rstrip("/") + "/", f"api/track/open/{tracking_token}")
                         pixel_html = f'<img src="{pixel_url}" width="1" height="1" style="display:none" />'
                         html_content = html_content + pixel_html

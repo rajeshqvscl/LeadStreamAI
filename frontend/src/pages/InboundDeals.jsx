@@ -32,6 +32,32 @@ const InboundDeals = () => {
     return clean;
   };
 
+  const extractReply = (text) => {
+    if (!text) return "";
+    const cleaned = stripHtml(text);
+    // Split on common email quote patterns — take only the lead's actual reply before the quoted thread
+    const patterns = [
+      /\n-+\s*Original Message\s*-+\s*\n/i,
+      /\nOn\s+.*?\d{4},\s+at\s+.*?\d{2}:\d{2}.*?wrote:\s*\n/i,
+      /\nOn\s+.*?\d{4}.*?\d{1,2}:\d{2}.*?wrote:\s*\n/i,
+      /\n-+\s*Forwarded message\s*-+\s*\n/i,
+      /\nFrom:.*?\nSent:.*?\nTo:.*?\n/i,
+      /\n>+\s/,
+    ];
+    let result = cleaned;
+    for (const p of patterns) {
+      const match = result.match(p);
+      if (match) {
+        result = result.substring(0, match.index).trim();
+        break;
+      }
+    }
+    // Also trim any quoted lines (starting with >)
+    const lines = result.split('\n').filter(l => !l.trim().startsWith('>'));
+    result = lines.join('\n').trim();
+    return result || cleaned;
+  };
+
   const fetchDeals = async (isMounted = { current: true }, silent = false) => {
     try {
       const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -304,7 +330,7 @@ const InboundDeals = () => {
                         )}
                       </div>
                       <p className="text-slate-400 text-sm line-clamp-2 italic font-medium">
-                        "{stripHtml(deal.remarks || deal.rag_advice).substring(0, 180) || 'Analyzing communication patterns...'}"
+                        "{extractReply(deal.remarks || deal.rag_advice).substring(0, 180) || 'Analyzing communication patterns...'}"
                       </p>
                     </div>
 
@@ -428,7 +454,7 @@ const InboundDeals = () => {
                       "{selectedDeal.meeting_time ? 'Prepare for Strategy Session.' : selectedDeal.reply_intent === 'MEETING_REQUESTED' ? 'Schedule discovery session within 24 hours.' : 'Execute personalized follow-up with traction metrics.'}"
                    </div>
                    <p className="text-slate-400 font-medium leading-relaxed">
-                     {stripHtml(selectedDeal.remarks || selectedDeal.rag_advice)}
+                      {extractReply(selectedDeal.remarks || selectedDeal.rag_advice)}
                    </p>
                 </div>
 

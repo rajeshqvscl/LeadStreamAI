@@ -247,7 +247,7 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
         import psycopg2.extras
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
-        cur.execute("SELECT * FROM leads_raw WHERE id = %s", (lead_id,))
+        cur.execute("SELECT id, first_name, last_name, email, company_name, persona, sector, lead_type, pitch_deck_url, remarks, email_draft FROM leads_raw WHERE id = %s", (lead_id,))
         lead = cur.fetchone()
         
         if not lead:

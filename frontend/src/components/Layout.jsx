@@ -157,9 +157,6 @@ const Layout = () => {
           <Link to="/dashboard/campaigns" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'campaigns' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'campaigns' ? 'text-white' : 'text-[#94a3b8]'}`}>🎯</span> Campaigns
           </Link>
-          <Link to="/dashboard/sector-faq" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'sector-faq' ? 'bg-indigo-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
-            <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'sector-faq' ? 'text-white' : 'text-[#94a3b8]'}`}>📚</span> FAQ
-          </Link>
         </div>
 
         {user.google_linked_at && (
