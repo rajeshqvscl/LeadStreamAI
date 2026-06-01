@@ -430,6 +430,7 @@ def list_followups(
 
         # FORCE INVESTOR FOR YASHIKA / GUPTA: Scoped check
         is_yashika = False
+        is_palak = False
         if uid:
             cur.execute("SELECT username, full_name FROM users WHERE id = %s", (uid,))
             user_row = cur.fetchone()
@@ -438,6 +439,8 @@ def list_followups(
                 fname = str(user_row.get('full_name') or '').lower()
                 if 'yashika' in uname or 'yashika' in fname or 'gupta' in uname or 'gupta' in fname:
                     is_yashika = True
+                if 'palak' in uname or 'palak' in fname:
+                    is_palak = True
 
         if type:
             t_upper = type.upper()
@@ -535,6 +538,7 @@ def list_followups(
             else:
                 lead_dict['last_milestone'] = 'Initial Outreach'
                 lead_dict['last_action_type'] = 'Outreach'
+            lead_dict['max_followup_stage'] = 2 if is_palak else 3
             results.append(lead_dict)
             
         return {"leads": results, "total": total}

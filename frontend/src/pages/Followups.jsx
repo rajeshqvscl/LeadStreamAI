@@ -623,11 +623,11 @@ const Followups = () => {
                             {lt}
                           </span>
                           <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-md border ${getStageColor(statusFilter === 'SENT' ? Math.max(0, lead.followup_stage - 1) : lead.followup_stage)}`}>
-                            {statusFilter === 'IN_PROGRESS' ? `Stage ${lead.followup_stage}/3` : getStageLabel(lead.followup_stage, lead, statusFilter)}
+                            {statusFilter === 'IN_PROGRESS' ? `Stage ${lead.followup_stage}/${lead.max_followup_stage || 3}` : getStageLabel(lead.followup_stage, lead, statusFilter)}
                           </span>
                           {statusFilter === 'IN_PROGRESS' && (
                             <>
-                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border ${lead.followup_stage >= 3 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}`}>
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border ${lead.followup_stage >= (lead.max_followup_stage || 3) ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}`}>
                                 {lead.followup_stage}x sent
                               </span>
                               {(lead.first_outreach_at || lead.last_outreach_at) && (
@@ -675,14 +675,14 @@ const Followups = () => {
                       {statusFilter === 'IN_PROGRESS' && (
                         <div className="flex flex-col items-end gap-1">
                           <div className="flex items-center gap-1">
-                            {[1,2,3].map(s => (
+                            {[...Array(lead.max_followup_stage || 3)].map((_, i) => { const s = i + 1; return (
                               <div key={s} className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black border transition-all ${lead.followup_stage >= s ? 'bg-indigo-500/30 border-indigo-500/60 text-indigo-300' : 'bg-white/5 border-white/10 text-slate-600'}`}>
                                 {s}
                               </div>
-                            ))}
+                            )})}
                           </div>
-                          <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md ${lead.followup_stage >= 3 ? 'bg-emerald-500/10 text-emerald-400' : lead.followup_stage >= 2 ? 'bg-amber-500/10 text-amber-400' : 'bg-indigo-500/10 text-indigo-400'}`}>
-                            Stage {lead.followup_stage}/3
+                          <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md ${lead.followup_stage >= (lead.max_followup_stage || 3) ? 'bg-emerald-500/10 text-emerald-400' : lead.followup_stage >= 2 ? 'bg-amber-500/10 text-amber-400' : 'bg-indigo-500/10 text-indigo-400'}`}>
+                            Stage {lead.followup_stage}/{lead.max_followup_stage || 3}
                           </span>
                         </div>
                       )}

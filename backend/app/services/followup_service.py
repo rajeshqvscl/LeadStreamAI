@@ -454,6 +454,12 @@ def process_outreach_sequences():
                     should_action = False
                     next_stage = stage + 1
 
+                    # Per-user max follow-up override (Palak sirf 2 followups)
+                    _max_stage = 2 if "palak" in (lead.get('sender_name') or "").lower() else 3
+                    if stage >= _max_stage:
+                        logger.info(f"Lead {lead_id} at stage {stage} >= max {_max_stage} for {lead.get('sender_name')} — skipping")
+                        continue
+
                     if is_investor:
                         if (stage == 0 and days_since_last >= 7) or (stage == 1 and days_since_last >= 14) or (stage == 2 and days_since_last >= 30):
                             should_action = True
