@@ -25,6 +25,12 @@ def is_generic_followup(body: Optional[str]) -> bool:
     if not cleaned:
         return True
     
+    # Check if this is an original email draft (has Subject: line or is too long)
+    if "subject:" in cleaned:
+        return True
+    if len(cleaned) > 500:
+        return True
+    
     # Check for known generic fallback variations
     if "just following up on my previous email" in cleaned:
         return True
