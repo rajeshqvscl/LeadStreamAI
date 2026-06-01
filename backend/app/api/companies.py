@@ -130,10 +130,9 @@ def list_companies(
 ):
     """Returns company profiles from the internal company registry database with pagination and global search."""
     uid = normalize_user_id(user_id)
-    is_admin = (str(user_id or '').lower() == 'admin')
     
     # Build unique composite cache key for companies list queries
-    cache_key = f"companies:{uid}:{page}:{limit}:{search}:{filters}:{is_admin}"
+    cache_key = f"companies:{uid}:{page}:{limit}:{search}:{filters}"
     
     if redis_available and redis_client:
         try:
@@ -148,15 +147,16 @@ def list_companies(
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     offset = (page - 1) * limit
     
-    # Base query construction
+    # Base query construction - strictly separate data per user
     base_where = ""
     params = []
     
-    if is_admin:
-        base_where = "WHERE 1=1"
-    elif uid:
+    if uid:
         base_where = "WHERE user_id = %s"
-        params.append(uid)
+        try:
+            params.append(int(uid))
+        except:
+            params.append(uid)
     else:
         base_where = "WHERE user_id IS NULL"
         
@@ -240,15 +240,15 @@ def get_unique_tabs(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     cur = conn.cursor()
     
     uid = normalize_user_id(user_id)
-    is_admin = (str(user_id or '').lower() == 'admin')
     
     where_clause = ""
     params = []
-    if is_admin:
-        where_clause = "WHERE row_data->>'_source_tab' IS NOT NULL"
-    elif uid:
+    if uid:
         where_clause = "WHERE user_id = %s AND row_data->>'_source_tab' IS NOT NULL"
-        params.append(uid)
+        try:
+            params.append(int(uid))
+        except:
+            params.append(uid)
     else:
         where_clause = "WHERE user_id IS NULL AND row_data->>'_source_tab' IS NOT NULL"
         
@@ -841,11 +841,13 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
             from app.services.google_service import get_gmail_service
             import base64
             from email.mime.text import MIMEText
+            from app.api.drafts import markdown_to_html
             
             service = get_gmail_service(int(uid))
             if service:
-                # Render body as plain text (converts \n to \r\n for MIME)
-                message = MIMEText(body, 'plain')
+                # Use HTML for better consistency
+                html_body = markdown_to_html(body)
+                message = MIMEText(html_body, 'html')
                 message['to'] = email
                 message['subject'] = subject
                 raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')

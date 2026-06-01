@@ -211,16 +211,24 @@ At a time when institutional investors and strategic healthcare operators are ac
 
 **Investment Snapshot**
 
-| Particulars | Current Metrics |
-| --- | --- |
-| Net Revenue | ~₹49.2 Cr |
-| EBITDA | ~₹16.8 Cr |
-| EBITDA Margin | ~34.2% |
-| PAT | ~₹8.4 Cr |
-| Installed Capacity | 225 Beds |
-| ARPOB / RPOB | ~₹26,000 |
-| Average Length of Stay | 3.8 Days |
-| Blended Occupancy | ~28.3% |
+<table style="width: auto; border-collapse: collapse; border: 1.5px solid #000000; margin-top: 10px; margin-bottom: 10px;">
+<thead>
+<tr>
+<th style="padding: 4px 8px; border: 1.5px solid #000000; text-align: left; font-size: 13px; font-weight: bold; color: #000000;">Particulars</th>
+<th style="padding: 4px 8px; border: 1.5px solid #000000; text-align: left; font-size: 13px; font-weight: bold; color: #000000;">Current Metrics</th>
+</tr>
+</thead>
+<tbody>
+<tr><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">Net Revenue</td><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">~₹49.2 Cr</td></tr>
+<tr><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">EBITDA</td><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">~₹16.8 Cr</td></tr>
+<tr><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">EBITDA Margin</td><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">~34.2%</td></tr>
+<tr><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">PAT</td><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">~₹8.4 Cr</td></tr>
+<tr><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">Installed Capacity</td><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">225 Beds</td></tr>
+<tr><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">ARPOB / RPOB</td><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">~₹26,000</td></tr>
+<tr><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">Average Length of Stay</td><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">3.8 Days</td></tr>
+<tr><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">Blended Occupancy</td><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">~28.3%</td></tr>
+</tbody>
+</table>
 
 **Why This Opportunity Stands Out:**
 
@@ -253,11 +261,19 @@ This is a key indicator because it demonstrates that the current opportunity is 
 
 The business benefits from a highly favorable payer mix:
 
-| Revenue Mix | Contribution |
-| --- | --- |
-| Cash | ~58.3% |
-| Corporate | ~39.0% |
-| TPA | Only ~2.7% |
+<table style="width: auto; border-collapse: collapse; border: 1.5px solid #000000; margin-top: 10px; margin-bottom: 10px;">
+<thead>
+<tr>
+<th style="padding: 4px 8px; border: 1.5px solid #000000; text-align: left; font-size: 13px; font-weight: bold; color: #000000;">Revenue Mix</th>
+<th style="padding: 4px 8px; border: 1.5px solid #000000; text-align: left; font-size: 13px; font-weight: bold; color: #000000;">Contribution</th>
+</tr>
+</thead>
+<tbody>
+<tr><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">Cash</td><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">~58.3%</td></tr>
+<tr><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">Corporate</td><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">~39.0%</td></tr>
+<tr><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">TPA</td><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">Only ~2.7%</td></tr>
+</tbody>
+</table>
 
 This significantly **reduces**:
 
@@ -307,11 +323,19 @@ This materially lowers execution and capital deployment risk relative to greenfi
 
 **6. Strong Historical Momentum**
 
-| Metric | Growth |
-| --- | --- |
-| Core Hospital EBITDA Growth | ~9.9% |
-| Occupancy Growth | ~14.3% |
-| ARPOB Growth | ~4.0% |
+<table style="width: auto; border-collapse: collapse; border: 1.5px solid #000000; margin-top: 10px; margin-bottom: 10px;">
+<thead>
+<tr>
+<th style="padding: 4px 8px; border: 1.5px solid #000000; text-align: left; font-size: 13px; font-weight: bold; color: #000000;">Metric</th>
+<th style="padding: 4px 8px; border: 1.5px solid #000000; text-align: left; font-size: 13px; font-weight: bold; color: #000000;">Growth</th>
+</tr>
+</thead>
+<tbody>
+<tr><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">Core Hospital EBITDA Growth</td><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">~9.9%</td></tr>
+<tr><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">Occupancy Growth</td><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">~14.3%</td></tr>
+<tr><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">ARPOB Growth</td><td style="padding: 4px 8px; border: 1.5px solid #000000; font-size: 13px; font-weight: bold;">~4.0%</td></tr>
+</tbody>
+</table>
 
 The simultaneous improvement in occupancy and monetization highlights strengthening operational quality.
 
@@ -362,14 +386,14 @@ I have attached the **QV Strategic Consulting business profile** and **Investmen
 
 SIG_START
 --
-Thanks & Regards,
+<span style="color: #008000; font-weight: bold;">Thanks & Best Regards,</span>
 
 ***{{Sender Name}}***
 {{Sender Title}}
 [Website](https://www.qvscl.com) | [LinkedIn]({{Sender LinkedIn}})
 {{Sender Phone}}
 
-![Investment Opportunity Banner]([[BACKEND_URL]]/assets/PHOTO-2026-05-25-10-33-35.jpg)
+<img src="[[BACKEND_URL]]/assets/PHOTO-2026-05-25-10-33-35.jpg" alt="Investment Opportunity Banner" width="925" height="278" style="display: block; margin-top: 10px;" />
 
 <strong>Strictly Private and Confidential.</strong>
 
@@ -1616,16 +1640,24 @@ At a time when institutional investors and strategic healthcare operators are ac
 
 <strong>Investment Snapshot</strong>
 
-| Particulars | Current Metrics |
-| --- | --- |
-| Net Revenue | ~₹49.2 Cr |
-| EBITDA | ~₹16.8 Cr |
-| EBITDA Margin | ~34.2% |
-| PAT | ~₹8.4 Cr |
-| Installed Capacity | 225 Beds |
-| ARPOB / RPOB | ~₹26,000 |
-| Average Length of Stay | 3.8 Days |
-| Blended Occupancy | ~28.3% |
+<table style="width: 100%; border-collapse: collapse; border: 1px solid #e2e8f0; margin-top: 10px; margin-bottom: 10px;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left; font-size: 12px; font-weight: bold; color: #475569; text-transform: uppercase;">PARTICULARS</th>
+<th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left; font-size: 12px; font-weight: bold; color: #475569; text-transform: uppercase;">CURRENT METRICS</th>
+</tr>
+</thead>
+<tbody>
+<tr><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">Net Revenue</td><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">~₹49.2 Cr</td></tr>
+<tr><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">EBITDA</td><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">~₹16.8 Cr</td></tr>
+<tr><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">EBITDA Margin</td><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">~34.2%</td></tr>
+<tr><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">PAT</td><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">~₹8.4 Cr</td></tr>
+<tr><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">Installed Capacity</td><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">225 Beds</td></tr>
+<tr><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">ARPOB / RPOB</td><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">~₹26,000</td></tr>
+<tr><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">Average Length of Stay</td><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">3.8 Days</td></tr>
+<tr><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">Blended Occupancy</td><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">~28.3%</td></tr>
+</tbody>
+</table>
 
 <strong>Why This Opportunity Stands Out:</strong>
 
@@ -1658,11 +1690,19 @@ This is a key indicator because it demonstrates that the current opportunity is 
 
 The business benefits from a highly favorable payer mix:
 
-| Revenue Mix | Contribution |
-| --- | --- |
-| Cash | ~58.3% |
-| Corporate | ~39.0% |
-| TPA | Only ~2.7% |
+<table style="width: 100%; border-collapse: collapse; border: 1px solid #e2e8f0; margin-top: 10px; margin-bottom: 10px;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left; font-size: 12px; font-weight: bold; color: #475569; text-transform: uppercase;">REVENUE MIX</th>
+<th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left; font-size: 12px; font-weight: bold; color: #475569; text-transform: uppercase;">CONTRIBUTION</th>
+</tr>
+</thead>
+<tbody>
+<tr><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">Cash</td><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">~58.3%</td></tr>
+<tr><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">Corporate</td><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">~39.0%</td></tr>
+<tr><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">TPA</td><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">Only ~2.7%</td></tr>
+</tbody>
+</table>
 
 This significantly <strong>reduces</strong>:
 
@@ -1712,11 +1752,19 @@ This materially lowers execution and capital deployment risk relative to greenfi
 
 <strong>6. Strong Historical Momentum</strong>
 
-| Metric | Growth |
-| --- | --- |
-| Core Hospital EBITDA Growth | ~9.9% |
-| Occupancy Growth | ~14.3% |
-| ARPOB Growth | ~4.0% |
+<table style="width: 100%; border-collapse: collapse; border: 1px solid #e2e8f0; margin-top: 10px; margin-bottom: 10px;">
+<thead>
+<tr style="background-color: #f1f5f9;">
+<th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left; font-size: 12px; font-weight: bold; color: #475569; text-transform: uppercase;">METRIC</th>
+<th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left; font-size: 12px; font-weight: bold; color: #475569; text-transform: uppercase;">GROWTH</th>
+</tr>
+</thead>
+<tbody>
+<tr><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">Core Hospital EBITDA Growth</td><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">~9.9%</td></tr>
+<tr><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">Occupancy Growth</td><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">~14.3%</td></tr>
+<tr><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">ARPOB Growth</td><td style="padding: 8px 10px; border: 1px solid #e2e8f0; font-size: 13px;">~4.0%</td></tr>
+</tbody>
+</table>
 
 The simultaneous improvement in occupancy and monetization highlights strengthening operational quality.
 
@@ -1748,7 +1796,7 @@ The proposed transaction perimeter includes:
 • Owned primary hospital campus
 • Secondary leased campus operations
 
-Currently, the transaction is being discussed at an indicative enterprise valuation of approximately <strong>₹240 Cr</strong> depending on structure and diligence outcomes.
+Currently, the transaction is being discussed at an indicative enterprise valuation of approximately **₹240 Cr** depending on structure and diligence outcomes.
 
 We believe this opportunity represents a compelling combination of:
 
@@ -1774,7 +1822,7 @@ Thanks & Regards,
 [Website](https://www.qvscl.com) | [LinkedIn]({{Sender LinkedIn}})
 {{Sender Phone}}
 
-![Investment Opportunity Banner]([[BACKEND_URL]]/assets/PHOTO-2026-05-25-10-33-35.jpg)
+<img src="[[BACKEND_URL]]/assets/PHOTO-2026-05-25-10-33-35.jpg" alt="Investment Opportunity Banner" style="width: 100%; max-width: 800px; margin-top: 10px; display: block;" />
 
 <strong>Strictly Private and Confidential.</strong>
 
@@ -2317,33 +2365,19 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
-        # Secure admin check using database role
-        is_admin = False
-        if uid:
-            try:
-                cur.execute("SELECT role FROM users WHERE id = %s", (int(uid),))
-                role_row = cur.fetchone()
-                if role_row:
-                    role_val = role_row['role'] if isinstance(role_row, dict) else role_row[0]
-                    if role_val and str(role_val).upper() == 'ADMIN':
-                        is_admin = True
-            except Exception as role_err:
-                logger.warning(f"Role check failed for uid={uid}: {role_err}")
-
-        logger.info(f"GET_PENDING_DRAFTS: header_user_id={user_id}, normalized_uid={uid}, is_admin={is_admin}")
-
         # Base condition
         where_clause = "WHERE email_draft IS NOT NULL"
         params = []
         
-        # Show all drafts for admin users; filter by user_id for regular users
-        if uid and not is_admin:
+        # Show drafts for the specific user if uid is provided and not admin (uid != "1")
+        if uid and uid != "1":
             where_clause += " AND (user_id = %s OR user_id::text = %s)"
             try:
                 params.extend([int(uid), str(uid)])
             except:
                 params.extend([uid, uid])
-        # If user is admin or uid not provided, show all drafts without user filter
+        # If uid is admin ("1") or not provided, show all drafts without additional user filter
+        # No extra clause added
 
         if status:
             where_clause += " AND email_status = %s"
@@ -2532,7 +2566,8 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[s
             uid = normalize_user_id(user_id)
             service = get_gmail_service(int(uid))
             if service:
-                message = MIMEText(full_body, 'plain')
+                html_body = markdown_to_html(full_body)
+                message = MIMEText(html_body, 'html')
                 message['to'] = lead.get('email', '')
                 message['subject'] = refined_data['subject']
                 raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
@@ -3256,13 +3291,26 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
                 gmail_draft_id = None
                 if service:
                     try:
-                        message = MIMEText(body, 'plain')
+                        # --- NEW: Delete OLD Gmail Draft if it exists ---
+                        old_gmail_id = lead_item.get('gmail_draft_id')
+                        if old_gmail_id:
+                            try:
+                                service.users().drafts().delete(userId='me', id=old_gmail_id).execute()
+                                logger.info(f"🗑️ Deleted old Gmail draft {old_gmail_id} for Lead {lead_item['id']}")
+                            except Exception as de:
+                                logger.warning(f"⚠️ Could not delete old draft {old_gmail_id}: {de}")
+
+                        # Use HTML for better consistency with individual drafts
+                        html_body = markdown_to_html(body)
+                        message = MIMEText(html_body, 'html')
                         message['to'] = lead_item.get('email', '')
                         message['subject'] = subject
                         raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+                        
                         draft_body = {'message': {'raw': raw_message}}
                         created_draft = service.users().drafts().create(userId='me', body=draft_body).execute()
                         gmail_draft_id = created_draft.get('id')
+                        logger.info(f"✅ Created NEW Gmail draft {gmail_draft_id} for Lead {lead_item['id']}")
                     except Exception as ge:
                         logger.warning(f"⚠️ Gmail sync failed for lead {lead_item['id']}: {ge}")
 

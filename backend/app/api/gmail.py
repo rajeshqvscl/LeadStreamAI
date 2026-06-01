@@ -1135,15 +1135,28 @@ def poll_all_users_for_replies():
                                     # Use snippet from Gmail API (text preview) to extract failed recipient
                                     snippet = msg.get('snippet', '')
                                     failed_email_raw = re.search(r'[\w\.-]+@[\w\.-]+', snippet)
-                                    if not failed_email_raw:
-                                        # Fallback: fetch full message and extract from parts
-                                        full_bounce = service.users().messages().get(userId='me', id=m_id, format='full').execute()
-                                        for part in full_bounce.get('payload', {}).get('parts', []):
-                                            if part.get('mimeType') == 'text/plain':
-                                                import base64
-                                                body_text = base64.urlsafe_b64decode(part.get('body', {}).get('data', '') + '==').decode('utf-8', errors='ignore')
-                                                failed_email_raw = re.search(r'[\w\.-]+@[\w\.-]+', body_text)
-                                                break
+                                    bounce_reason = "Mail server rejected the message (Undeliverable)"
+                                    
+                                    # Fetch full message to get more details and extract recipient more reliably
+                                    full_bounce = service.users().messages().get(userId='me', id=m_id, format='full').execute()
+                                    from app.services.google_service import extract_message_body
+                                    body_text = extract_message_body(full_bounce.get('payload', {}))
+                                    
+                                    if body_text:
+                                        # Extract failed recipient from body if snippet failed
+                                        if not failed_email_raw:
+                                            failed_email_raw = re.search(r'[\w\.-]+@[\w\.-]+', body_text)
+                                        
+                                        # Extract specific reason if possible (e.g., 550 error codes)
+                                        # Common pattern in Gmail bounces: "The response from the remote server was: 550 ..."
+                                        reason_match = re.search(r'(?:response from the remote server was:|Diagnostic-Code:).*?\n\s*(.*?)(?:\n|$)', body_text, re.IGNORECASE | re.DOTALL)
+                                        if reason_match:
+                                            bounce_reason = f"Server Response: {reason_match.group(1).strip()[:150]}"
+                                        elif "inbox is full" in body_text.lower():
+                                            bounce_reason = "Recipient's inbox is full"
+                                        elif "spam" in body_text.lower() or "blocked" in body_text.lower():
+                                            bounce_reason = "Message blocked by recipient's spam filter"
+
                                     if failed_email_raw:
                                         failed_email = failed_email_raw.group(0).lower()
                                         cur.execute("""
@@ -1156,8 +1169,8 @@ def poll_all_users_for_replies():
                                             cur.execute("UPDATE leads_raw SET email_status = 'BOUNCED', followup_status = 'STOPPED', updated_at = NOW() WHERE id = %s", (bounced_lead['id'],))
                                             conn.commit()
                                             from app.models.lead import add_activity_log
-                                            add_activity_log(bounced_lead['id'], 'BOUNCED', f'Email bounced — invalid address: {failed_email}', 'system')
-                                            logger.info(f"Marked lead {bounced_lead['id']} ({failed_email}) as BOUNCED")
+                                            add_activity_log(bounced_lead['id'], 'BOUNCED', f'Email bounced — {bounce_reason}', 'system')
+                                            logger.info(f"Marked lead {bounced_lead['id']} ({failed_email}) as BOUNCED. Reason: {bounce_reason}")
                                 except Exception as bounce_err:
                                     logger.warning(f"Bounce processing failed for msg {m_id}: {bounce_err}")
                                 cur.execute("INSERT INTO gmail_processed_messages (message_id, user_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (m_id, uid))
