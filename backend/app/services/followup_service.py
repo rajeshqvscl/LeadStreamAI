@@ -597,8 +597,11 @@ def process_outreach_sequences():
                     name = " ".join([p.capitalize() for p in name.split()])
                     first_name = name.split()[0] if name else name
 
-                    body_with_sig = body + f"\n\n--\nRegards,\n{first_name}"
-                    full_body = markdown_to_html(body_with_sig)
+                    body_html = markdown_to_html(body)
+                    sig_html = f'<div style="margin-top: 8px; border-top: 1px solid #f0f0f0; padding-top: 10px; line-height: 1.5;"><span style="color: #666; font-style: italic; display: block; margin-bottom: 2px; font-size: 13px;">--</span><span style="color: #666; font-style: italic; display: block; margin-bottom: 2px; font-size: 13px;">Regards,</span><span style="color: #666; font-style: italic; display: block; margin-bottom: 2px; font-size: 13px;">{first_name}</span></div>'
+                    full_body = body_html + sig_html
+
+                    logger.info(f"PREVIEW [{lead['email']}]: body=\"{body}\"")
 
                     success, msg, new_thread_id, new_rfc_msg_id = send_email(
                         to_email=lead['email'],
