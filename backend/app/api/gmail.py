@@ -401,6 +401,33 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             conn.commit()
             invalidate_inbound_deals_cache(str(user_id))
 
+            # Stop followups for ALL other leads from the same company
+            try:
+                cur.execute("SELECT company_name FROM leads_raw WHERE id = %s", (lead_id,))
+                company_row = cur.fetchone()
+                if company_row:
+                    company_name = company_row['company_name'] if isinstance(company_row, dict) else company_row[0]
+                    if company_name and company_name.strip() and company_name.strip().upper() not in ('', 'INDEPENDENT', 'N/A', 'NONE', '-'):
+                        cur.execute("""
+                            SELECT id, first_name, last_name, email FROM leads_raw
+                            WHERE company_name ILIKE %s AND id != %s
+                            AND followup_status = 'ACTIVE' AND is_responded = FALSE
+                        """, (company_name, lead_id))
+                        same_company_leads = cur.fetchall()
+                        for sc_lead in same_company_leads:
+                            sc_id = sc_lead['id']
+                            sc_name = f"{sc_lead['first_name'] or ''} {sc_lead['last_name'] or ''}".strip() or sc_lead['email']
+                            cur.execute("""
+                                UPDATE leads_raw SET followup_status = 'STOPPED', updated_at = NOW()
+                                WHERE id = %s
+                            """, (sc_id,))
+                            from app.models.lead import add_activity_log
+                            add_activity_log(sc_id, 'FOLLOWUP_STOPPED', f'Reply received from {lead_name} ({sender_email}) at same company — auto-stopped', 'system')
+                            logger.info(f"Stopped followup for {sc_name} ({sc_lead['email']}) — same company as {lead_name} who replied")
+                        conn.commit()
+            except Exception as company_err:
+                logger.warning(f"Company-level followup stop failed: {company_err}")
+
             # Step 3: Auto-Scheduling (Disabled - User will schedule manually)
             if False: # intent in ["INTERESTED", "MEETING_REQUESTED"]:
                 # Schedule for 3 days from now at 10 AM UTC
@@ -573,7 +600,7 @@ def get_inbound_deals(
         if redis_available and redis_client:
             try:
                 # Cache results for 15 seconds so pagination & reloads are instant, but fresh data is fetched frequently
-                redis_client.setex(cache_key, 15, json.dumps(result))
+                redis_client.setex(cache_key, 15, json.dumps(result, cls=DateTimeEncoder))
                 logger.info(f"INFO: Cached inbound deals for user {uid} on page {page}")
             except Exception as ce:
                 logger.warning(f"WARNING: Redis cache write error: {ce}")
@@ -771,7 +798,13 @@ def schedule_manual_meeting(lead_id: int, data: dict = Body(...), user_id: Optio
     """Manually triggers a calendar event creation for a specific lead with a chosen time."""
     from app.services.google_service import create_calendar_event
     from app.services.email_service import send_email
-    import datetime
+import datetime
+
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (datetime.datetime, datetime.date, datetime.time)):
+            return obj.isoformat()
+        return super().default(obj)
     
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)

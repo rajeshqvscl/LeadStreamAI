@@ -353,13 +353,13 @@ def list_followups(
         
         # Base query depends on status
         if status_val == 'SENT':
-            base_query = " FROM leads_raw WHERE email_status = 'SENT' AND COALESCE(followup_stage, 0) > 0 "
+            base_query = " FROM leads_raw lr WHERE email_status = 'SENT' AND COALESCE(followup_stage, 0) > 0 "
         elif status_val == 'REPLIED':
-            base_query = " FROM leads_raw WHERE COALESCE(is_responded, FALSE) = TRUE "
+            base_query = " FROM leads_raw lr WHERE COALESCE(is_responded, FALSE) = TRUE "
         elif status_val == 'IN_PROGRESS':
-            base_query = " FROM leads_raw WHERE followup_status IN ('ACTIVE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED', 'IDLE') AND COALESCE(followup_stage, 0) > 0 AND COALESCE(is_responded, FALSE) = FALSE AND last_outreach_at IS NOT NULL "
+            base_query = " FROM leads_raw lr WHERE followup_status IN ('ACTIVE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED', 'IDLE') AND COALESCE(followup_stage, 0) > 0 AND COALESCE(is_responded, FALSE) = FALSE AND last_outreach_at IS NOT NULL "
         elif status_val == 'STOPPED':
-            base_query = " FROM leads_raw WHERE followup_status = 'STOPPED' AND COALESCE(followup_stage, 0) > 0 "
+            base_query = " FROM leads_raw lr WHERE followup_status = 'STOPPED' AND COALESCE(followup_stage, 0) > 0 "
         else: # DUE
             investor_kw = ["VENTURE", "CAPITAL", "EQUITY", "INVEST", "PARTNER", "ASSET", "FAMILY OFFICE", "ANGEL", "CIRCLE", "NETWORK", "FUND", "VC", "PE", "HOLDING", "SFO", "OFFICE", "ADVISORY", "MANAGEMENT", "PRIVATE", "TRUST", "WEALTH", "ASSOCIATES", "GROUP", "PARTNERS", "ADVISORS", "FOUNDATION"]
             kw_conditions = " OR ".join([f"company_name ILIKE '%%{kw}%%' OR sector ILIKE '%%{kw}%%'" for kw in investor_kw])
@@ -377,7 +377,7 @@ def list_followups(
                         is_yashika_sql = "TRUE"
 
             base_query = f"""
-                FROM leads_raw 
+                FROM leads_raw lr
                 WHERE (followup_status IN ('ACTIVE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED', 'IDLE') OR email_status = 'SENT')
                 AND COALESCE(is_responded, FALSE) = FALSE
                 AND last_outreach_at IS NOT NULL
@@ -554,7 +554,7 @@ def export_all_leads(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     uid = normalize_user_id(user_id)
     is_admin = (str(user_id).lower() == 'admin')
     
-    query = "SELECT * FROM leads_raw WHERE (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)"
+    query = "SELECT * FROM leads_raw lr WHERE (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)"
     params = []
     
     if not is_admin:
@@ -605,11 +605,11 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
     is_admin = (str(user_id).lower() == 'admin')
 
     if is_admin:
-        cur.execute("SELECT * FROM leads_raw WHERE id = %s", (lead_id,))
+        cur.execute("SELECT * FROM leads_raw lr WHERE id = %s", (lead_id,))
     elif uid:
-        cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (lead_id, uid))
+        cur.execute("SELECT * FROM leads_raw lr WHERE id = %s AND user_id = %s", (lead_id, uid))
     else:
-        cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (lead_id,))
+        cur.execute("SELECT * FROM leads_raw lr WHERE id = %s AND user_id IS NULL", (lead_id,))
         
     row = cur.fetchone()
     cur.close()
@@ -739,11 +739,11 @@ def update_lead(lead_id: int, req: UpdateLeadRequest, user_id: Optional[str] = H
 
     # Verify existence and ownership
     if is_admin:
-        cur.execute("SELECT id FROM leads_raw WHERE id = %s", (lead_id,))
+        cur.execute("SELECT id FROM leads_raw lr WHERE id = %s", (lead_id,))
     elif uid:
-        cur.execute("SELECT id FROM leads_raw WHERE id = %s AND user_id = %s", (lead_id, uid))
+        cur.execute("SELECT id FROM leads_raw lr WHERE id = %s AND user_id = %s", (lead_id, uid))
     else:
-        cur.execute("SELECT id FROM leads_raw WHERE id = %s AND user_id IS NULL", (lead_id,))
+        cur.execute("SELECT id FROM leads_raw lr WHERE id = %s AND user_id IS NULL", (lead_id,))
     lead = cur.fetchone()
     if not lead:
         cur.close()
@@ -839,9 +839,9 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
         
         # Verify access
         if is_admin:
-            cur.execute("SELECT * FROM leads_raw WHERE id = %s", (lead_id,))
+            cur.execute("SELECT * FROM leads_raw lr WHERE id = %s", (lead_id,))
         else:
-            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (lead_id, uid))
+            cur.execute("SELECT * FROM leads_raw lr WHERE id = %s AND user_id = %s", (lead_id, uid))
             
         lead = cur.fetchone()
         if not lead:
@@ -1160,7 +1160,7 @@ def process_unsubscribe(lead_id: int):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
-        cur.execute("SELECT email, source FROM leads_raw WHERE id = %s", (lead_id,))
+        cur.execute("SELECT email, source FROM leads_raw lr WHERE id = %s", (lead_id,))
         lead = cur.fetchone()
         if not lead:
             raise HTTPException(status_code=404, detail="Lead not found")
@@ -1197,7 +1197,7 @@ def bulk_delete(req: List[int]):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("DELETE FROM leads_raw WHERE id = ANY(%s)", (req,))
+        cur.execute("DELETE FROM leads_raw lr WHERE id = ANY(%s)", (req,))
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -1214,9 +1214,9 @@ def delete_lead(lead_id: int, user_id: Optional[str] = Header(None, alias="X-Use
     try:
         uid = normalize_user_id(user_id)
         if str(user_id).lower() == 'admin':
-            cur.execute("DELETE FROM leads_raw WHERE id = %s", (lead_id,))
+            cur.execute("DELETE FROM leads_raw lr WHERE id = %s", (lead_id,))
         else:
-            cur.execute("DELETE FROM leads_raw WHERE id = %s AND user_id = %s", (lead_id, uid))
+            cur.execute("DELETE FROM leads_raw lr WHERE id = %s AND user_id = %s", (lead_id, uid))
         conn.commit()
         return {"message": "Lead deleted successfully"}
     except Exception as e:
@@ -1397,7 +1397,7 @@ def get_unique_companies(user_id: Optional[str] = Header(None, alias="X-User-Id"
     cur = conn.cursor()
     
     is_admin = (str(user_id).lower() == 'admin' or str(user_id) == '1')
-    query = "SELECT DISTINCT company_name FROM leads_raw WHERE company_name IS NOT NULL AND company_name != ''"
+    query = "SELECT DISTINCT company_name FROM leads_raw lr WHERE company_name IS NOT NULL AND company_name != ''"
     params = []
     
     if not is_admin:
