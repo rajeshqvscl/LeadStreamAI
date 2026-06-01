@@ -268,10 +268,8 @@ def get_original_outreach_subject(lead: dict) -> str:
                 if subj_parsed and subj_parsed.lower() != "following up":
                     return subj_parsed
                     
-    # 4. Fallback to sector/company custom professional subject line
-    company = lead.get('company_name') or "your company"
-    sector = lead.get('sector') or "investment"
-    return f"investment opportunity - {company}"
+    # 4. No real subject found — don't send follow-up
+    return ""
 
 def generate_followup_preview(lead_id: int, user_id: int):
     """Generates a preview of the next follow-up email for the dashboard using templates."""
@@ -601,6 +599,9 @@ def process_outreach_sequences():
                         logger.warning(f"Duplicate check failed for lead {lead_id}: {dup_err}")
 
                     orig_subject = get_original_outreach_subject(lead)
+                    if not orig_subject:
+                        logger.info(f"Lead {lead_id} has no original subject — skipping follow-up")
+                        continue
                     subject = f"Re: {orig_subject}"
 
                     body = lead.get('followup_draft')
