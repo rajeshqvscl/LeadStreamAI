@@ -456,20 +456,40 @@ def process_outreach_sequences():
                     if not should_action:
                         continue
 
-                    # Re-verify stage hasn't changed (prevents duplicate sends from overlapping runs)
+                    # Re-verify stage, status, and auto-pilot (prevents sends after user stops follow-up)
                     try:
                         verify_conn = get_db_connection()
                         verify_cur = verify_conn.cursor()
-                        verify_cur.execute("SELECT followup_stage FROM leads_raw WHERE id = %s", (lead_id,))
+                        verify_cur.execute("""
+                            SELECT l.followup_stage, l.followup_status, l.is_responded, u.auto_followup
+                            FROM leads_raw l
+                            JOIN users u ON l.user_id = u.id
+                            WHERE l.id = %s
+                        """, (lead_id,))
                         verify_row = verify_cur.fetchone()
-                        current_stage = list(verify_row.values())[0] if verify_row else None
                         verify_cur.close()
                         verify_conn.close()
-                        if current_stage is not None and current_stage != stage:
-                            logger.info(f"Lead {lead_id} stage changed from {stage} to {current_stage} — skipping (already processed)")
-                            continue
+                        
+                        if verify_row:
+                            current_stage = verify_row['followup_stage'] if isinstance(verify_row, dict) else verify_row[0]
+                            current_status = verify_row['followup_status'] if isinstance(verify_row, dict) else verify_row[1]
+                            current_responded = verify_row['is_responded'] if isinstance(verify_row, dict) else verify_row[2]
+                            current_auto = verify_row['auto_followup'] if isinstance(verify_row, dict) else verify_row[3]
+                            
+                            if current_stage is not None and current_stage != stage:
+                                logger.info(f"Lead {lead_id} stage changed from {stage} to {current_stage} — skipping")
+                                continue
+                            if current_status != 'ACTIVE':
+                                logger.info(f"Lead {lead_id} followup_status is '{current_status}' — skipping")
+                                continue
+                            if current_responded:
+                                logger.info(f"Lead {lead_id} already responded — skipping")
+                                continue
+                            if not current_auto:
+                                logger.info(f"Lead {lead_id} auto-pilot turned off — skipping")
+                                continue
                     except Exception as verify_err:
-                        logger.warning(f"Stage re-verify failed for lead {lead_id}: {verify_err}")
+                        logger.warning(f"Re-verify failed for lead {lead_id}: {verify_err}")
 
                     existing_thread_id = lead.get('gmail_thread_id')
                     existing_msg_id = lead.get('gmail_message_id')

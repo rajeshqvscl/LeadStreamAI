@@ -695,7 +695,6 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
                     subject = parts[0].replace("Subject: ", "").strip()
                     body = parts[1].strip() if len(parts) > 1 else ""
                 
-                from app.api.drafts import get_sender_profile, inject_signature
                 profile = get_sender_profile(user_id)
                 repaired_body = inject_signature(body, profile, lead_id)
                 draft_raw = f"Subject: {subject}\n\n{repaired_body}"
@@ -847,7 +846,7 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
         if not lead:
             raise HTTPException(status_code=404, detail="Lead not found.")
             
-        from app.api.drafts import get_sender_profile, inject_signature
+        from app.api.drafts import get_sender_profile, inject_signature, markdown_to_html
         profile = get_sender_profile(user_id)
         
         # If custom body provided, use it. Otherwise use DB draft.
@@ -891,7 +890,7 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
         success, msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=lead['email'],
             subject=saved_subject,
-            html_content=body.replace("\n", "<br>"),
+            html_content=markdown_to_html(body),
             from_email=profile.get('sender_email') or profile.get('username'),
             from_name=profile.get('full_name') or profile.get('username'),
             user_id=uid,

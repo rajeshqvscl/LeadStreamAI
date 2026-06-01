@@ -1014,6 +1014,7 @@ def send_company_email(row_id: int, user_id: Optional[str] = Header(None, alias=
         raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this email would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
         
     from app.services.email_service import send_email
+    from app.api.drafts import markdown_to_html
     
     # 1. Generate the draft and lead record
     res = generate_company_draft(row_id, user_id)
@@ -1049,7 +1050,7 @@ def send_company_email(row_id: int, user_id: Optional[str] = Header(None, alias=
         success, error_msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=lead['email'],
             subject=subject,
-            html_content=body.replace("\n", "<br>"),
+            html_content=markdown_to_html(body),
             from_email=sender_email,
             from_name=sender_name,
             user_id=uid

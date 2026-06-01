@@ -160,16 +160,26 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     
     import markdown
     # Convert markdown to HTML for a premium look
-    # Skip if content already appears to be HTML (starts with a block-level tag)
-    if not html_content.strip().startswith('<') and any(marker in html_content for marker in ['**', '###', '[', '\n*', '|']):
-        html_content = markdown.markdown(html_content, extensions=['extra', 'nl2br'])
-        # Add a professional wrapper for high-impact outreach
-        html_content = f"""
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1a202c; max-width: 600px;">
-            {html_content}
-        </div>
-        """
-    
+    if not html_content.strip().startswith('<'):
+        if any(marker in html_content for marker in ['**', '###', '[', '\n*', '|']):
+            html_content = markdown.markdown(html_content, extensions=['extra', 'nl2br'])
+        else:
+            # Plain text: wrap each paragraph in <p> tags
+            paragraphs = [p.strip() for p in html_content.split('\n\n') if p.strip()]
+            html_paragraphs = []
+            for p in paragraphs:
+                lines = p.split('\n')
+                if len(lines) == 1:
+                    html_paragraphs.append(f'<p style="margin: 0 0 14px 0; line-height: 1.7;">{lines[0]}</p>')
+                else:
+                    # Handle line breaks within paragraph
+                    for line in lines:
+                        line = line.strip()
+                        if line == '--':
+                            html_paragraphs.append('<hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">')
+                        elif line:
+                            html_paragraphs.append(f'<p style="margin: 0 0 14px 0; line-height: 1.7;">{line}</p>')
+            html_content = '\n'.join(html_paragraphs)
     # 1. Prepare default attachments (used by both Gmail and Resend)
     # CRITICAL: Do NOT attach PDFs to follow-up emails! Only attach to the very first email in the sequence.
     # Detect follow-up by thread_id OR by Re: prefix in subject (handles case where thread_id is NULL in DB)
@@ -295,6 +305,13 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                         pixel_url = urljoin(backend_url.rstrip("/") + "/", f"api/track/open/{tracking_token}")
                         pixel_html = f'<img src="{pixel_url}" width="1" height="1" style="display:none" />'
                         html_content = html_content + pixel_html
+
+                # Wrap in professional email template for consistent branding
+                html_content = f"""
+                <div style="font-family: 'Segoe UI', Roboto, -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1a202c; max-width: 600px; margin: 0 auto;">
+                    {html_content}
+                </div>
+                """
 
                 # Attach the HTML body using an 'alternative' container
                 msg_body = MIMEMultipart('alternative')
@@ -537,10 +554,11 @@ def check_scheduled_emails():
             
             # Fetch user ID to enable Gmail dispatch
             user_id = lead['user_id']
+            from app.api.drafts import markdown_to_html
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=to_email,
                 subject=subject,
-                html_content=body.replace("\n", "<br>"),
+                html_content=markdown_to_html(body),
                 from_email=sender_email,
                 from_name=sender_name,
                 lead_id=lead_id,

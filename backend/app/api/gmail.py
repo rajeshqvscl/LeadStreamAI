@@ -12,6 +12,7 @@ from app.services.google_service import (
 )
 from app.services.llm_services import EmailGenerator
 from app.services.email_service import send_email
+from app.api.drafts import markdown_to_html
 import datetime
 import urllib3
 import logging
@@ -481,7 +482,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                     send_email(
                         to_email=sender_email,
                         subject=f"Meeting Scheduled: {lead_name} x LeadStream",
-                        html_content=lead_confirm_body.replace("\n", "<br>"),
+                        html_content=markdown_to_html(lead_confirm_body),
                         from_email=sender_user['email'],
                         from_name=sender_user['full_name'],
                         is_system_email=True
@@ -858,7 +859,7 @@ def schedule_manual_meeting(lead_id: int, data: dict = Body(...), user_id: Optio
         res = send_email(
             to_email=lead['email'],
             subject=f"Meeting Scheduled: {lead_name} x LeadStream",
-            html_content=confirm_body.replace("\n", "<br>"),
+            html_content=markdown_to_html(confirm_body),
             from_email=sender_user['email'],
             from_name=sender_user['full_name'],
             is_system_email=False,
@@ -939,7 +940,7 @@ LeadStream Strategy Division
             send_email(
                 to_email=updated_lead['email'],
                 subject=f"Confirmed: Rescheduled Strategy Session - {updated_lead['first_name'] or ''}",
-                html_content=reschedule_body,
+                html_content=markdown_to_html(reschedule_body),
                 from_email=sender_email,
                 from_name=sender_user['full_name'] if sender_user else "LeadStream Team",
                 is_system_email=False,

@@ -215,7 +215,7 @@ def extract_message_body(payload: Dict[str, Any]) -> str:
                 walk(p['parts'])
 
     walk(parts)
-    return plain or html or ""
+    return html or plain or ""
 
 def extract_attachments(service, message_id: str, payload: dict) -> list:
     """
