@@ -44,7 +44,19 @@ def send_smtp_fallback(to_email: str, subject: str, html_content: str, from_emai
         else:
             msg['Reply-To'] = from_email
             
-        msg.attach(MIMEText(html_content, 'html'))
+        import re as _re2
+        _plain_text = _re2.sub(r'<br\s*/?>', '\n', html_content)
+        _plain_text = _re2.sub(r'<p[^>]*>', '\n', _plain_text)
+        _plain_text = _re2.sub(r'<[^>]+>', '', _plain_text)
+        _plain_text = _re2.sub(r'&nbsp;', ' ', _plain_text)
+        _plain_text = _re2.sub(r'&amp;', '&', _plain_text)
+        _plain_text = _re2.sub(r'&lt;', '<', _plain_text)
+        _plain_text = _re2.sub(r'&gt;', '>', _plain_text)
+        _plain_text = _re2.sub(r'\n{3,}', '\n\n', _plain_text).strip()
+        alt_body = MIMEMultipart('alternative')
+        alt_body.attach(MIMEText(_plain_text, 'plain'))
+        alt_body.attach(MIMEText(html_content, 'html'))
+        msg.attach(alt_body)
 
         # Prepare recipient list
         recipients = [to_email]
@@ -313,8 +325,20 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 </div>
                 """
 
-                # Attach the HTML body using an 'alternative' container
+                # Build a plain-text fallback by stripping HTML tags
+                import re as _re
+                plain_text = _re.sub(r'<br\s*/?>', '\n', html_content)
+                plain_text = _re.sub(r'<p[^>]*>', '\n', plain_text)
+                plain_text = _re.sub(r'<[^>]+>', '', plain_text)
+                plain_text = _re.sub(r'&nbsp;', ' ', plain_text)
+                plain_text = _re.sub(r'&amp;', '&', plain_text)
+                plain_text = _re.sub(r'&lt;', '<', plain_text)
+                plain_text = _re.sub(r'&gt;', '>', plain_text)
+                plain_text = _re.sub(r'\n{3,}', '\n\n', plain_text).strip()
+
+                # Attach both text/plain and text/html in an 'alternative' container
                 msg_body = MIMEMultipart('alternative')
+                msg_body.attach(MIMEText(plain_text, 'plain'))
                 msg_body.attach(MIMEText(html_content, 'html'))
                 msg.attach(msg_body)
                 
