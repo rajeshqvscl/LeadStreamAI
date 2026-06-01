@@ -4,6 +4,7 @@ from typing import List, Optional
 import json
 import psycopg2.extras
 import re
+import threading
 
 from app.database import get_db_connection
 from app.services.email_service import send_email
@@ -12,6 +13,8 @@ from app.services.llm_services import LLMService
 from app.models.lead import add_activity_log
 
 logger = logging.getLogger(__name__)
+
+_followup_lock = threading.Lock()
 
 def is_generic_followup(body: Optional[str]) -> bool:
     """Detects legacy, standard, or HTML-wrapped default placeholder follow-ups to allow dynamic healing."""
@@ -344,6 +347,9 @@ def process_outreach_sequences():
     Enforces 'Working Days Only' and sequential 'Drip Sending' with a 30-second gap
     and enforces a daily limit per user (default 200) to prevent spam flagging.
     """
+    if not _followup_lock.acquire(blocking=False):
+        logger.info("process_outreach_sequences already running — skipping overlapping run")
+        return
     try:
         if not _is_working_hours():
             IST = timezone(timedelta(hours=5, minutes=30))
@@ -454,6 +460,25 @@ def process_outreach_sequences():
                             should_action = True
 
                     if not should_action:
+                        continue
+
+                    # Skip Defence leads (user explicitly doesn't want follow-ups for Defence)
+                    orig_subj = get_original_outreach_subject(lead) or ""
+                    draft_text = lead.get('email_draft') or ""
+                    persona_text = lead.get('persona') or ""
+                    sector_text = lead.get('sector') or ""
+                    is_defence = (
+                        "defence" in orig_subj.lower()
+                        or "defence" in draft_text.lower()
+                        or "defence" in persona_text.lower()
+                        or "defence" in sector_text.lower()
+                        or "deeptech" in orig_subj.lower()
+                        or "deeptech" in draft_text.lower()
+                        or "idex" in orig_subj.lower()
+                        or "idex" in draft_text.lower()
+                    )
+                    if is_defence:
+                        logger.info(f"Lead {lead_id} is Defence — skipping per user request")
                         continue
 
                     # Re-verify stage, status, and auto-pilot (prevents sends after user stops follow-up)
@@ -618,3 +643,5 @@ def process_outreach_sequences():
                     logger.error(f"Error dispatching auto-followup for lead {lead.get('id')}: {ex}")
     except Exception as e:
         logger.error(f"Error in process_outreach_sequences: {e}")
+    finally:
+        _followup_lock.release()

@@ -744,7 +744,7 @@ def markdown_to_html(text):
             formatted_sig_lines.append(line)
         
         signature_html = '<div style="margin-top: 8px; border-top: 1px solid #f0f0f0; padding-top: 10px; line-height: 1.5;">' + "".join(formatted_sig_lines) + '</div>'
-        text = main_text.rstrip() + "\n[[SIG_BLOCK_PLACEHOLDER]]"
+        text = main_text.rstrip() + "\n\n[[SIG_BLOCK_PLACEHOLDER]]"
 
     # 4. Handle remaining keywords if they weren't in markdown format
     if "Website" in text and "<a" not in text:

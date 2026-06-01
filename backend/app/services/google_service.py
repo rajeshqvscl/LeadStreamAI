@@ -407,9 +407,12 @@ def get_gmail_message(user_id: int, message_id: str):
                 msg_obj = email.message_from_string(raw_data)
                 if msg_obj.is_multipart():
                     for part in msg_obj.walk():
-                        if part.get_content_type() == 'text/plain':
+                        ct = part.get_content_type()
+                        if ct == 'text/plain':
                             body = part.get_payload(decode=True).decode('utf-8', errors='replace')
                             break
+                        elif ct == 'text/html' and not body:
+                            body = part.get_payload(decode=True).decode('utf-8', errors='replace')
                 else:
                     body = msg_obj.get_payload(decode=True).decode('utf-8', errors='replace')
 
