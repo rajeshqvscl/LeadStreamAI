@@ -803,20 +803,22 @@ const AdminDashboard = () => {
                   <td className="px-1.5 py-1.5 text-center border border-white/5">
                     {(() => {
                       const stageNum = parseInt(lead.followup_stage, 10) || 0;
+                      const isPalak = (lead.owner_name || '').toLowerCase().includes('palak');
+                      const maxStage = isPalak ? 2 : 3;
                       return (
                         <div className="flex flex-col items-center">
                           <span className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider border ${
                             stageNum === 1 ? 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400' :
                             stageNum === 2 ? 'bg-purple-500/10 border-purple-500/20 text-purple-400' :
-                            stageNum === 3 ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' :
+                            stageNum >= maxStage ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' :
                             'bg-white/5 border-white/10 text-slate-400'
                           }`}>
-                            {stageNum === 0 ? '0 / 3 Sent' :
-                             stageNum === 1 ? '1 / 3 Sent' :
-                             stageNum === 2 ? '2 / 3 Sent' :
-                             stageNum === 3 ? '3 / 3 Sent' : '0 / 3 Sent'}
+                            {stageNum === 0 ? `0 / ${maxStage} Sent` :
+                             stageNum === 1 ? `1 / ${maxStage} Sent` :
+                             stageNum === 2 ? `2 / ${maxStage} Sent` :
+                             stageNum >= maxStage ? `${maxStage} / ${maxStage} Sent` : `0 / ${maxStage} Sent`}
                           </span>
-                          {lead.followup_status === 'ACTIVE' && stageNum < 3 && (
+                          {lead.followup_status === 'ACTIVE' && stageNum < maxStage && (
                             <span className="text-[8px] text-indigo-400/90 font-black uppercase tracking-widest mt-1 animate-pulse">
                               ● Active
                             </span>
