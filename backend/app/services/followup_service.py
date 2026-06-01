@@ -600,6 +600,12 @@ def process_outreach_sequences():
                     body = lead.get('followup_draft')
                     if is_generic_followup(body):
                         body = get_template_followup(lead, next_stage)
+
+                    # Final Defence check on actual body (catches template content even when email_draft/persona/sector don't have it)
+                    if any(kw in body.lower() for kw in ("defence", "deeptech", "idex")):
+                        logger.info(f"Lead {lead_id} is Defence (found in body) — skipping")
+                        continue
+
                     profile = get_sender_profile(str(uid))
                     name = profile.get('full_name') or profile.get('username') or 'Team'
                     name = " ".join([p.capitalize() for p in name.split()])
