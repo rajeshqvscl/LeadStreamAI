@@ -516,7 +516,8 @@ def process_outreach_sequences():
                                 logger.info(f"Lead {lead_id} auto-pilot turned off — skipping")
                                 continue
                     except Exception as verify_err:
-                        logger.warning(f"Re-verify failed for lead {lead_id}: {verify_err}")
+                        logger.warning(f"Re-verify failed for lead {lead_id}: {verify_err} — skipping to be safe")
+                        continue
 
                     existing_thread_id = lead.get('gmail_thread_id')
                     existing_msg_id = lead.get('gmail_message_id')
