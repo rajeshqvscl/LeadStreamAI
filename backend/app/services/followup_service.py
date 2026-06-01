@@ -607,6 +607,9 @@ def process_outreach_sequences():
                     if is_generic_followup(body):
                         body = get_template_followup(lead, next_stage)
 
+                    # Strip any existing signature from body (we append our own)
+                    body = re.split(r'\s*--\s*', body, maxsplit=1)[0].strip()
+
                     # Final Defence check on actual body (catches template content even when email_draft/persona/sector don't have it)
                     if any(kw in body.lower() for kw in ("defence", "deeptech", "idex")):
                         logger.info(f"Lead {lead_id} is Defence (found in body) — skipping")

@@ -152,6 +152,21 @@ def get_metrics(
     dte_report = _date_clause_report(date_from, date_to)
     report_params = []
     report_where = []
+
+    # Detect Palak for 2-followup display
+    _palak_user = False
+    if user_id and user_id != 'all':
+        try:
+            cur.execute("SELECT username, full_name FROM users WHERE id = %s", (user_id,))
+            _u = cur.fetchone()
+            if _u:
+                _un = str(_u.get('username') or '').lower()
+                _fn = str(_u.get('full_name') or '').lower()
+                if 'palak' in _un or 'palak' in _fn:
+                    _palak_user = True
+        except:
+            pass
+
     if user_id and user_id != 'all':
         report_where.append("l.user_id = %s")
         report_params.append(user_id)
@@ -198,12 +213,13 @@ def get_metrics(
 
         fs = (r['followup_status'] or '').upper()
         stage = r['followup_stage'] or 0
+        _ms = 2 if _palak_user else 3
         if fs == 'ACTIVE':
-            followup_display = f"Active ({stage}/3)"
-        elif fs == 'COMPLETED' or stage >= 3:
-            followup_display = f"Completed ({stage}/3)"
+            followup_display = f"Active ({stage}/{_ms})"
+        elif fs == 'COMPLETED' or stage >= _ms:
+            followup_display = f"Completed ({stage}/{_ms})"
         elif stage > 0:
-            followup_display = f"Stage {stage}/3"
+            followup_display = f"Stage {stage}/{_ms}"
         else:
             followup_display = 'Not started'
 
