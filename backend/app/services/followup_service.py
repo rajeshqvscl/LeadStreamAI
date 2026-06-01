@@ -565,6 +565,11 @@ def process_outreach_sequences():
                         except Exception as heal_err:
                             logger.warning(f"On-the-fly thread heal failed for lead {lead_id}: {heal_err}")
 
+                    # Skip if no real email was ever sent from this platform (imported/ghost leads)
+                    if not existing_thread_id or not existing_msg_id:
+                        logger.info(f"Lead {lead_id} has no Gmail thread — never sent from this platform, skipping")
+                        continue
+
                     # Final duplicate guard: check activity_log for existing follow-up at this stage
                     try:
                         dup_conn = get_db_connection()
