@@ -161,75 +161,71 @@ def get_template_followup(lead: dict, stage: int) -> str:
     elif draft_template == 'kajal_mam_health_ecosystem':
         campaign_key = "INVESTOR_KAJAL_HEALTH_ECOSYSTEM"
     else:
-        lead_type_raw = str(lead.get('lead_type') or lead.get('sector') or lead.get('persona') or '').upper()
-        type_key = "CLIENT" if ('CLIENT' in lead_type_raw or 'CUSTOMER' in lead_type_raw) else "INVESTOR"
+        # Dynamic campaign detection based on subject/draft/persona/sector (not lead_type)
+        original_subject = get_original_outreach_subject(lead) or ""
+        draft_text = lead.get('email_draft') or ""
+        persona_text = lead.get('persona') or ""
+        sector_text = lead.get('sector') or ""
         
-        if type_key == "INVESTOR":
-            # Dynamic campaign detection (AI Hiring vs HealthTech vs Agritech vs Defence vs Generic)
-            original_subject = get_original_outreach_subject(lead) or ""
-            draft_text = lead.get('email_draft') or ""
-            persona_text = lead.get('persona') or ""
-            sector_text = lead.get('sector') or ""
-            
-            is_ai_hiring = (
-                "hiring" in original_subject.lower() or 
-                "hiring" in draft_text.lower() or 
-                "hiring" in persona_text.lower() or 
-                "hiring" in sector_text.lower() or
-                "recruitment" in original_subject.lower() or 
-                "recruitment" in draft_text.lower()
-            )
+        is_ai_hiring = (
+            "hiring" in original_subject.lower() or 
+            "hiring" in draft_text.lower() or 
+            "hiring" in persona_text.lower() or 
+            "hiring" in sector_text.lower() or
+            "recruitment" in original_subject.lower() or 
+            "recruitment" in draft_text.lower()
+        )
 
-            is_healthtech = (
-                "health" in original_subject.lower() or
-                "health" in draft_text.lower() or
-                "health" in persona_text.lower() or
-                "health" in sector_text.lower() or
-                "diagnostic" in original_subject.lower() or
-                "diagnostic" in draft_text.lower()
+        is_healthtech = (
+            "health" in original_subject.lower() or
+            "health" in draft_text.lower() or
+            "health" in persona_text.lower() or
+            "health" in sector_text.lower() or
+            "diagnostic" in original_subject.lower() or
+            "diagnostic" in draft_text.lower()
+        )
+        
+        is_defence = (
+            "defence" in original_subject.lower() or
+            "defence" in draft_text.lower() or
+            "defence" in persona_text.lower() or
+            "defence" in sector_text.lower() or
+            "deeptech" in original_subject.lower() or
+            "deeptech" in draft_text.lower() or
+            "idex" in original_subject.lower() or
+            "idex" in draft_text.lower()
+        )
+        
+        is_agritech = (
+            "agritech" in original_subject.lower() or
+            "agritech" in draft_text.lower() or
+            "agritech" in persona_text.lower() or
+            "agritech" in sector_text.lower() or
+            "climate" in original_subject.lower() or
+            "climate" in draft_text.lower()
+        )
+        
+        is_palak_advisory = (
+            not draft_template and (
+                "corporate advisory" in original_subject.lower() or
+                ("corporate advisory" in draft_text.lower() and "m&a" not in draft_text.lower() and "partnership" not in draft_text.lower())
             )
-            
-            is_defence = (
-                "defence" in original_subject.lower() or
-                "defence" in draft_text.lower() or
-                "defence" in persona_text.lower() or
-                "defence" in sector_text.lower() or
-                "deeptech" in original_subject.lower() or
-                "deeptech" in draft_text.lower() or
-                "idex" in original_subject.lower() or
-                "idex" in draft_text.lower()
-            )
-            
-            is_agritech = (
-                "agritech" in original_subject.lower() or
-                "agritech" in draft_text.lower() or
-                "agritech" in persona_text.lower() or
-                "agritech" in sector_text.lower() or
-                "climate" in original_subject.lower() or
-                "climate" in draft_text.lower()
-            )
-            
-            is_palak_advisory = (
-                not draft_template and (
-                    "corporate advisory" in original_subject.lower() or
-                    ("corporate advisory" in draft_text.lower() and "m&a" not in draft_text.lower() and "partnership" not in draft_text.lower())
-                )
-            )
+        )
 
-            if is_palak_advisory:
-                campaign_key = "INVESTOR_PALAK_ADVISORY"
-            elif is_ai_hiring:
-                campaign_key = "INVESTOR_AI_HIRING"
-            elif is_healthtech:
-                campaign_key = "INVESTOR_HEALTHTECH"
-            elif is_defence:
-                campaign_key = "INVESTOR_DEFENCE"
-            elif is_agritech:
-                campaign_key = "INVESTOR_AGRITECH"
-            else:
-                campaign_key = "INVESTOR_GENERIC"
+        if is_palak_advisory:
+            campaign_key = "INVESTOR_PALAK_ADVISORY"
+        elif is_ai_hiring:
+            campaign_key = "INVESTOR_AI_HIRING"
+        elif is_healthtech:
+            campaign_key = "INVESTOR_HEALTHTECH"
+        elif is_defence:
+            campaign_key = "INVESTOR_DEFENCE"
+        elif is_agritech:
+            campaign_key = "INVESTOR_AGRITECH"
         else:
-            campaign_key = "CLIENT"
+            lead_type_raw = str(lead.get('lead_type') or lead.get('sector') or lead.get('persona') or '').upper()
+            type_key = "CLIENT" if ('CLIENT' in lead_type_raw or 'CUSTOMER' in lead_type_raw) else "INVESTOR"
+            campaign_key = "CLIENT" if type_key == "CLIENT" else "INVESTOR_GENERIC"
         
     template = FOLLOWUP_TEMPLATES[campaign_key].get(stage, "Hi {name},\n\nFollowing up on my previous email.\n\nBest regards,")
     return template.format(name=lead_name)
