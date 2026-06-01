@@ -1124,6 +1124,64 @@ const AdminDashboard = () => {
                 </div>
               </div>
 
+              {/* Pre-Meeting Brief */}
+              <div className="mb-12">
+                <div className="flex items-center gap-3 mb-6">
+                  <FileText className="w-5 h-5 text-amber-400" />
+                  <h3 className="text-[12px] font-black text-white uppercase tracking-[0.2em]">Pre-Meeting Brief</h3>
+                </div>
+                <div className="bg-amber-500/5 border border-amber-500/15 rounded-3xl p-6">
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <div className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">Company</div>
+                      <div className="text-[13px] font-bold text-white">{selectedLead.company_name || '—'}</div>
+                    </div>
+                    <div>
+                      <div className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">Sector</div>
+                      <div className="text-[13px] font-bold text-white">{selectedLead.sector || '—'}</div>
+                    </div>
+                    <div>
+                      <div className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">Deal Size</div>
+                      <div className="text-[13px] font-bold text-emerald-400">{selectedLead.deal_size || 'TBD'}</div>
+                    </div>
+                    <div>
+                      <div className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">Lead Score</div>
+                      <div className={`text-[13px] font-bold ${(selectedLead.rag_intelligence?.sentiment_score || selectedLead.sentiment_score) >= 80 ? 'text-emerald-400' : (selectedLead.rag_intelligence?.sentiment_score || selectedLead.sentiment_score) >= 50 ? 'text-amber-400' : 'text-slate-400'}`}>
+                        {selectedLead.rag_intelligence?.sentiment_score || selectedLead.sentiment_score || '—'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">Intent</div>
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${selectedLead.reply_intent === 'INTERESTED' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : selectedLead.reply_intent === 'NOT_INTERESTED' ? 'bg-rose-500/10 border-rose-500/20 text-rose-400' : 'bg-amber-500/10 border-amber-500/20 text-amber-400'}`}>
+                        {selectedLead.reply_intent || 'Awaiting'}
+                      </span>
+                    </div>
+                    <div>
+                      <div className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">Status</div>
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${selectedLead.email_status === 'SENT' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : selectedLead.email_status === 'REPLIED' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : 'bg-white/5 border-white/10 text-slate-400'}`}>
+                        {selectedLead.email_status || 'NEW'}
+                      </span>
+                    </div>
+                  </div>
+                  {selectedLead.rag_intelligence?.signals && (
+                    <div className="border-t border-amber-500/10 pt-4 mt-2">
+                      <div className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-2">Key Signals</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(Array.isArray(selectedLead.rag_intelligence.signals) ? selectedLead.rag_intelligence.signals : [selectedLead.rag_intelligence.signals]).map((s, i) => (
+                          <span key={i} className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded text-[9px] font-bold text-amber-400/90">{s}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {selectedLead.rag_intelligence?.strategy && (
+                    <div className="border-t border-amber-500/10 pt-4 mt-2">
+                      <div className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">Strategy</div>
+                      <div className="text-[12px] font-medium text-slate-300 italic">"{selectedLead.rag_intelligence.strategy}"</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Follow-up Sequence (NEW) */}
               <div className="mb-12">
                 <div className="flex items-center gap-3 mb-6">

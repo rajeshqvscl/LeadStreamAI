@@ -17,6 +17,12 @@ import urllib3
 import logging
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (datetime.datetime, datetime.date, datetime.time)):
+            return obj.isoformat()
+        return super().default(obj)
+
 # LAST SYNC: 2026-05-01 21:38 (Force Reload)
 RAG_TIMEOUT = 300
 RAG_URL = "https://rag-sys-gz59.onrender.com"
@@ -798,14 +804,7 @@ def schedule_manual_meeting(lead_id: int, data: dict = Body(...), user_id: Optio
     """Manually triggers a calendar event creation for a specific lead with a chosen time."""
     from app.services.google_service import create_calendar_event
     from app.services.email_service import send_email
-import datetime
-
-class DateTimeEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, (datetime.datetime, datetime.date, datetime.time)):
-            return obj.isoformat()
-        return super().default(obj)
-    
+    import datetime
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     uid = normalize_user_id(user_id)
