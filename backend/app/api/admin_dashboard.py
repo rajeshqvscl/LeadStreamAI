@@ -135,9 +135,10 @@ def get_all_leads_admin(
         # 3. Fetch leads
         query = f"""
             SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.company_name, l.designation, 
-                   l.sector, l.lead_type, l.reply_intent, l.sentiment_score, l.deal_size,
+                   l.sector, l.lead_type, l.reply_intent, l.sentiment_score, l.deal_size, l.source,
                    l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
                    l.followup_stage, l.followup_status, l.last_outreach_at, l.email_status,
+                   l.persona, l.email_draft, l.first_outreach_subject, l.last_outreach_subject,
                    u.username as owner_name
             FROM leads_raw l
             LEFT JOIN users u ON l.user_id = u.id
@@ -220,6 +221,7 @@ def export_all_leads_admin(
                    l.sector, l.lead_type, l.reply_intent, l.sentiment_score, l.deal_size,
                    l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
                    l.email_status, l.followup_status,
+                   l.persona, l.email_draft, l.first_outreach_subject, l.last_outreach_subject,
                    u.username as owner_name
             FROM leads_raw l
             LEFT JOIN users u ON l.user_id = u.id
@@ -443,6 +445,114 @@ def get_global_stats(user_id: Any = Header(None, alias="X-User-Id"), _t: Any = N
         
     except Exception as e:
         logger.error("admin_global_stats_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'cur' in locals(): cur.close()
+        if 'conn' in locals(): conn.close()
+
+@router.get("/stats/breakdown")
+def get_filtered_breakdowns(
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    type: Optional[str] = None,
+    status: Optional[str] = None,
+    owner: Optional[str] = None,
+    sector: Optional[str] = None,
+    _t: Any = None
+):
+    """
+    Returns chart breakdowns filtered by type/status/owner/sector.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        uid = normalize_user_id(user_id)
+        
+        is_admin = False
+        if uid:
+            cur.execute("SELECT role FROM users WHERE id = %s", (uid,))
+            role_row = cur.fetchone()
+            if role_row:
+                role_val = role_row['role'] if isinstance(role_row, dict) else role_row[0]
+                if role_val and str(role_val).upper() == 'ADMIN':
+                    is_admin = True
+        
+        clauses = []
+        params = []
+        
+        if not is_admin and uid:
+            clauses.append("l.user_id = %s")
+            params.append(uid)
+        
+        if type and type != 'ALL':
+            t_upper = type.upper()
+            if t_upper == 'GIGIN AI':
+                clauses.append("u.username ILIKE '%%yashika%%' AND (l.sector NOT ILIKE '%%agri%%' OR l.sector IS NULL)")
+            elif t_upper == 'AGRIVIJAY':
+                clauses.append("u.username ILIKE '%%yashika%%' AND l.sector ILIKE '%%agri%%'")
+            else:
+                clauses.append("l.lead_type ILIKE %s")
+                params.append(type)
+        if status and status != 'ALL':
+            clauses.append("l.email_status ILIKE %s")
+            params.append(status)
+        if owner and owner != 'ALL':
+            clauses.append("u.username ILIKE %s")
+            params.append(owner)
+        if sector and sector != 'ALL':
+            clauses.append("l.sector ILIKE %s")
+            params.append(sector)
+        
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        
+        from_clause = "FROM leads_raw l LEFT JOIN users u ON l.user_id = u.id"
+        
+        # Intent Breakdown
+        cur.execute(f"""
+            SELECT COALESCE(l.reply_intent, 'UNKNOWN') as label, COUNT(*) as value
+            {from_clause} {where_sql}
+            GROUP BY 1 ORDER BY 2 DESC
+        """, tuple(params))
+        intent_breakdown = [dict(r) for r in cur.fetchall()]
+        
+        # Type Breakdown
+        cur.execute(f"""
+            SELECT 
+                CASE 
+                    WHEN u.username ILIKE '%%yashika%%' AND l.sector ILIKE '%%agri%%' THEN 'Agrivijay'
+                    WHEN u.username ILIKE '%%yashika%%' THEN 'Gigin AI'
+                    ELSE UPPER(COALESCE(l.lead_type, 'CLIENT'))
+                END as label, 
+                COUNT(*) as value
+            {from_clause} {where_sql}
+            GROUP BY 1 ORDER BY 2 DESC
+        """, tuple(params))
+        type_breakdown = [dict(r) for r in cur.fetchall()]
+        
+        # Sector Breakdown
+        cur.execute(f"""
+            SELECT COALESCE(l.sector, 'Other') as label, COUNT(*) as value
+            {from_clause} {where_sql}
+            GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+        """, tuple(params))
+        sector_breakdown = [dict(r) for r in cur.fetchall()]
+        
+        # Source Breakdown
+        cur.execute(f"""
+            SELECT COALESCE(l.source, 'Direct') as label, COUNT(*) as value
+            {from_clause} {where_sql}
+            GROUP BY 1 ORDER BY 2 DESC
+        """, tuple(params))
+        source_breakdown = [dict(r) for r in cur.fetchall()]
+        
+        return {
+            "intent_breakdown": intent_breakdown,
+            "type_breakdown": type_breakdown,
+            "sector_breakdown": sector_breakdown,
+            "source_breakdown": source_breakdown
+        }
+        
+    except Exception as e:
+        logger.error("admin_filtered_breakdown_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if 'cur' in locals(): cur.close()

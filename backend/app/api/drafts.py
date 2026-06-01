@@ -566,6 +566,98 @@ SIG_END
         )
     conn.commit()
 
+    # 5. Kajal Mam QVSCL Introduction Template
+    kajal_qvscl_description = "QVSCL Capital & Growth Solutions for Portfolio Companies"
+    kajal_qvscl_content = """Subject: QVSCL: Capital & Growth Solutions for Portfolio Companies
+
+Dear {{First Name}},
+
+I am reaching out to introduce QVSCL, a strategic advisory and capital-raising firm focused on helping businesses scale, optimize operations, and access growth capital.
+
+We work closely with founders, portfolio companies, family offices, and investors across sectors including Agritech, Healthcare, Deep Tech, Retail, Engineering, and Automobiles.
+
+**Our key areas of expertise include:**
+
+• Secondary fundraising for portfolio companies
+• Strategic partnerships, joint ventures, mergers & acquisitions
+• Business strategy and advisory, including business plans, competitor analysis, benchmarking, and financial modeling
+• Succession planning and family office structuring for family-owned businesses
+• Turnaround management, organizational restructuring, and profitability optimization
+• Advanced Data Analytics, Data Science, and HR Dashboard solutions
+
+We would welcome the opportunity to explore how QVSCL can support your portfolio companies and strategic initiatives.
+
+Additionally, if you could share your investment thesis, sector focus, and preferred investment stage, we would be pleased to share relevant deal flow opportunities aligned with your mandate.
+
+Please find attached the QVSCL company profile and founder profile for your reference.
+
+**For more information:**
+[Website](https://qvscl.com/) | [LinkedIn](https://www.linkedin.com/company/qvscl/)
+
+I would be happy to schedule a brief call at your convenience and discuss potential areas of collaboration.
+
+Looking forward to connecting."""
+
+    cur.execute(
+        "UPDATE prompts SET content = %s, description = %s WHERE name = 'kajal_mam_qvscl_intro'",
+        (kajal_qvscl_content, kajal_qvscl_description)
+    )
+    if cur.rowcount == 0:
+        cur.execute(
+            "INSERT INTO prompts (name, description, content, prompt_type, owner_username) VALUES ('kajal_mam_qvscl_intro', %s, %s, 'CUSTOM_DRAFT', 'kajal')",
+            (kajal_qvscl_description, kajal_qvscl_content)
+        )
+    conn.commit()
+
+    # 6. Palak Mam M&A and Fundraising Template
+    palak_mna_description = "Supporting Growth Through M&A and Fundraising"
+    palak_mna_content = """Subject: Supporting Growth Through M&A and Fundraising.
+
+Dear {{First Name}},
+
+Greetings from QVSCL.
+
+We're pleased to introduce QV Strategic Consulting, your trusted partner for driving sustainable growth and value creation. With extensive experience across diverse industries, we help businesses achieve their growth objectives through fundraising, mergers & acquisitions, and strategic partnerships.
+
+In M&A Advisory, we support:
+• Acquisitions to expand capabilities, market presence, or product offerings
+• Strategic mergers, joint ventures, and partnerships
+• Target identification, valuation, due diligence, negotiation, and transaction execution
+
+In Fundraising Advisory we help with:
+• Equity fundraising from VC, PE, Family Offices, and Strategic Investors
+• Debt fundraising for growth, working capital, and expansion requirements
+
+If this aligns with your needs, we would be glad to connect and discuss how we can support your strategic objectives. Could we schedule a short video call at your convenience?
+
+Please find our Company Profile attached.
+
+Looking forward to connecting."""
+
+    palak_mna_followup1 = """Dear {{First Name}},
+
+I wanted to follow up on my previous email regarding QV Strategic Consulting's M&A and fundraising advisory services.
+
+I thought it would be worthwhile to connect and understand whether any such initiatives are currently being considered within your organization.
+
+Would you be available for a brief 15-minute discussion sometime in this week or next week?
+
+Looking forward to hearing from you.
+
+Thanks and regards,
+Palak"""
+
+    cur.execute(
+        "UPDATE prompts SET content = %s, description = %s, followup_1 = %s WHERE name = 'palak_mam_mna_fundraising'",
+        (palak_mna_content, palak_mna_description, palak_mna_followup1)
+    )
+    if cur.rowcount == 0:
+        cur.execute(
+            "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1) VALUES ('palak_mam_mna_fundraising', %s, %s, 'CUSTOM_DRAFT', 'palak', %s)",
+            (palak_mna_description, palak_mna_content, palak_mna_followup1)
+        )
+    conn.commit()
+
     cur.close()
     conn.close()
     logger.info("🚀 Startup templates creation/verification completed successfully!")
@@ -715,7 +807,7 @@ def markdown_to_html(text):
         for line in sig_lines:
             line = line.strip()
             if not line:
-                formatted_sig_lines.append('<div style="height: 8px;"></div>')
+                formatted_sig_lines.append('<div style="height: 3px;"></div>')
                 continue
                 
             disclaimer_text = "Important: This message and its attachments"
@@ -739,11 +831,11 @@ def markdown_to_html(text):
             else:
                 # Handle names/titles in signature (bold them if they are in ***)
                 line = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong>\1</strong>', line)
-                line = f'<span style="color: #666; font-style: italic; display: block; margin-bottom: 2px; font-size: 13px;">{line}</span>'
+                line = f'<span style="color: #666; font-style: italic; display: block; margin-bottom: 0px; font-size: 13px;">{line}</span>'
             
             formatted_sig_lines.append(line)
         
-        signature_html = '<div style="margin-top: 8px; border-top: 1px solid #f0f0f0; padding-top: 10px; line-height: 1.5;">' + "".join(formatted_sig_lines) + '</div>'
+        signature_html = '<div style="margin-top: 4px; border-top: 1px solid #f0f0f0; padding-top: 6px; line-height: 1.4;">' + "".join(formatted_sig_lines) + '</div>'
         text = main_text.rstrip() + "\n\n[[SIG_BLOCK_PLACEHOLDER]]"
 
     # 4. Handle remaining keywords if they weren't in markdown format
@@ -819,7 +911,7 @@ def markdown_to_html(text):
                     html_parts.append(p.strip())
                 else:
                     content = p.replace("\n", "<br>")
-                    html_parts.append(f"<p style='margin-top: 0; margin-bottom: 18px; line-height: 1.6; font-family: Arial, sans-serif;'>{content}</p>")
+                    html_parts.append(f"<p style='margin-top: 0; margin-bottom: 8px; line-height: 1.4; font-family: Arial, sans-serif;'>{content}</p>")
     
     return "".join(html_parts)
 
@@ -1104,15 +1196,15 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     
     # Standardized signature in grey (fully left-aligned with no leading spaces)
     sig_html = f"""
-<div style="color: #666666; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.5; text-align: left; margin-top: 4px;">
-<a href="{unsub_link}" style="color: #666666; text-decoration: underline;">Click here to unsubscribe</a><br><br>
+<div style="color: #666666; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
+<a href="{unsub_link}" style="color: #666666; text-decoration: underline;">Click here to unsubscribe</a><br>
 --<br>
 <i>Thanks &amp; Regards,</i><br>
 <i><strong>{name}</strong></i><br>
 <i>{title}</i><br>
 <i><a href="https://qvscl.com" style="color: #0077b5; text-decoration: none;">Website</a> | <a href="{linkedin}" style="color: #0077b5; text-decoration: none;">LinkedIn</a></i><br>
-<i>{phone}</i><br><br>
-<div style="font-size: 10px; color: #999999; line-height: 1.2;">
+<i>{phone}</i><br>
+<div style="font-size: 10px; color: #999999; line-height: 1.2; margin-top: 6px;">
 {disclaimer}
 </div>
 </div>
@@ -1346,6 +1438,7 @@ def list_custom_draft_templates(user_id: Optional[str] = Header(None, alias="X-U
         owner_seed = {
             "palak_mam_Draft_1": "palak",
             "palak_mam_corporate_advisory": "palak",
+            "palak_mam_mna_fundraising": "palak",
             "yashika_draft_agritech": "yashika",
             "yashika_draft_ai_tech": "yashika",
             "ayush_sir_hospital_draft": "ayush",
@@ -1353,6 +1446,7 @@ def list_custom_draft_templates(user_id: Optional[str] = Header(None, alias="X-U
             "kajal_mam_jv": "kajal",
             "kajal_mam_health_ecosystem": "kajal",
             "kajal_mam_agritech": "kajal",
+            "kajal_mam_qvscl_intro": "kajal",
         }
         for tpl_name, owner in owner_seed.items():
             cur.execute("UPDATE prompts SET owner_username = %s WHERE name = %s AND (owner_username IS NULL OR owner_username != %s)", (owner, tpl_name, owner))
@@ -1841,24 +1935,32 @@ SIG_END"""
         conn.commit()
             
         # Filter by owner_username so each user only sees their own templates
+        # ADMIN users see ALL templates
         owner_filter = None
+        is_admin = False
         if user_id:
             try:
-                cur.execute("SELECT username, full_name FROM users WHERE id = %s", (int(user_id),))
+                cur.execute("SELECT username, full_name, role FROM users WHERE id = %s", (int(user_id),))
                 user_row = cur.fetchone()
                 if user_row:
+                    role_val = user_row['role'] if isinstance(user_row, dict) else user_row[2]
+                    if role_val and str(role_val).upper() == 'ADMIN':
+                        is_admin = True
                     uname = str(user_row['username'] or '').lower()
                     fname = str(user_row['full_name'] or '').lower()
                     owner_filter = uname.split('.')[0] or fname.split()[0] if fname else uname
             except Exception:
                 pass
 
-        if owner_filter:
+        if is_admin:
+            # Admin sees all custom templates
+            cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
+        elif owner_filter:
             cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND owner_username = %s ORDER BY id ASC", (owner_filter,))
         else:
             cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND owner_username IS NULL ORDER BY id ASC")
         rows = cur.fetchall()
-        logger.info(f"{len(rows)} templates found for user_id={user_id} (owner_filter={owner_filter})")
+        logger.info(f"{len(rows)} templates found for user_id={user_id} (owner_filter={owner_filter}, is_admin={is_admin})")
         cur.close()
         conn.close()
         return [dict(r) for r in rows]
@@ -2170,8 +2272,16 @@ TEMPLATE_ATTACHMENT_MAP = {
         {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
         {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
     ],
+    "kajal_mam_qvscl_intro": [
+        {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
+        {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
+    ],
     "palak_mam_corporate_advisory": [
         {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
+    ],
+    "palak_mam_mna_fundraising": [
+        {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
+        {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
     ],
 }
 
@@ -2207,19 +2317,33 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
+        # Secure admin check using database role
+        is_admin = False
+        if uid:
+            try:
+                cur.execute("SELECT role FROM users WHERE id = %s", (int(uid),))
+                role_row = cur.fetchone()
+                if role_row:
+                    role_val = role_row['role'] if isinstance(role_row, dict) else role_row[0]
+                    if role_val and str(role_val).upper() == 'ADMIN':
+                        is_admin = True
+            except Exception as role_err:
+                logger.warning(f"Role check failed for uid={uid}: {role_err}")
+
+        logger.info(f"GET_PENDING_DRAFTS: header_user_id={user_id}, normalized_uid={uid}, is_admin={is_admin}")
+
         # Base condition
         where_clause = "WHERE email_draft IS NOT NULL"
         params = []
         
-        # Show drafts for the specific user if uid is provided and not admin (uid != "1")
-        if uid and uid != "1":
+        # Show all drafts for admin users; filter by user_id for regular users
+        if uid and not is_admin:
             where_clause += " AND (user_id = %s OR user_id::text = %s)"
             try:
                 params.extend([int(uid), str(uid)])
             except:
                 params.extend([uid, uid])
-        # If uid is admin ("1") or not provided, show all drafts without additional user filter
-        # No extra clause added
+        # If user is admin or uid not provided, show all drafts without user filter
 
         if status:
             where_clause += " AND email_status = %s"

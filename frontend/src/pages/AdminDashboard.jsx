@@ -73,6 +73,7 @@ const AdminDashboard = () => {
     owner: 'ALL',
     sector: 'ALL'
   });
+  const [chartBreakdowns, setChartBreakdowns] = useState(null);
   const [selectedLeadIds, setSelectedLeadIds] = useState(new Set());
   const [isBulkActionLoading, setIsBulkActionLoading] = useState(false);
   const [notification, setNotification] = useState(null);
@@ -160,6 +161,23 @@ const AdminDashboard = () => {
   }, []);
 
   useEffect(() => {
+    const fetchChartBreakdowns = async () => {
+      try {
+        const params = new URLSearchParams({ _t: Date.now() });
+        if (filters.type !== 'ALL') params.set('type', filters.type);
+        if (filters.status !== 'ALL') params.set('status', filters.status);
+        if (filters.owner !== 'ALL') params.set('owner', filters.owner);
+        if (filters.sector !== 'ALL') params.set('sector', filters.sector);
+        const res = await api.get(`/api/admin/stats/breakdown?${params.toString()}`);
+        setChartBreakdowns(res.data);
+      } catch (err) {
+        console.error('Failed to fetch chart breakdowns', err);
+      }
+    };
+    fetchChartBreakdowns();
+  }, [filters]);
+
+  useEffect(() => {
     setCurrentPage(1);
   }, [filters, debouncedSearch]);
 
@@ -170,6 +188,13 @@ const AdminDashboard = () => {
     const pollId = setInterval(() => {
       fetchData(currentPage, true);
       fetchGlobalStats();
+      // Also refresh chart breakdowns silently
+      const params = new URLSearchParams({ _t: Date.now() });
+      if (filters.type !== 'ALL') params.set('type', filters.type);
+      if (filters.status !== 'ALL') params.set('status', filters.status);
+      if (filters.owner !== 'ALL') params.set('owner', filters.owner);
+      if (filters.sector !== 'ALL') params.set('sector', filters.sector);
+      api.get(`/api/admin/stats/breakdown?${params.toString()}`).then(res => setChartBreakdowns(res.data)).catch(() => {});
     }, 20000);
 
     return () => clearInterval(pollId);
@@ -187,6 +212,67 @@ const AdminDashboard = () => {
   const sectors = useMemo(() => {
     return ['ALL', ...availableSectors];
   }, [availableSectors]);
+
+  const deriveType = (lead) => {
+    const name = (lead.owner_name || '').toLowerCase();
+    if (name.includes('yashika')) {
+      const sectorLower = (lead.sector || '').toLowerCase();
+      const draftLower = (lead.email_draft || '').toLowerCase();
+      const personaLower = (lead.persona || '').toLowerCase();
+      const subjLower = (lead.first_outreach_subject || lead.last_outreach_subject || '').toLowerCase();
+      const isAiHiring = sectorLower.includes('hiring') ||
+        draftLower.includes('hiring') ||
+        personaLower.includes('hiring') ||
+        subjLower.includes('hiring') ||
+        sectorLower.includes('recruitment') ||
+        draftLower.includes('recruitment') ||
+        draftLower.includes('gigin');
+      return isAiHiring ? 'Gigin AI' : 'Agrivijay';
+    }
+    const isInvestorTeam = name.includes('yashika') || name.includes('kajal') || name.includes('ayush');
+    const isClientTeam = name.includes('palak');
+    return isInvestorTeam ? 'INVESTOR' : isClientTeam ? 'CLIENT' : (lead.lead_type || 'CLIENT');
+  };
+
+  const chartIntentData = useMemo(() => {
+    if (chartBreakdowns?.intent_breakdown) return chartBreakdowns.intent_breakdown.map(d => ({ name: d.label, value: d.value }));
+    const counts = {};
+    leads.forEach(l => {
+      const k = l.reply_intent || 'UNKNOWN';
+      counts[k] = (counts[k] || 0) + 1;
+    });
+    return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+  }, [leads, chartBreakdowns]);
+
+  const chartSectorData = useMemo(() => {
+    if (chartBreakdowns?.sector_breakdown) return chartBreakdowns.sector_breakdown.map(d => ({ label: d.label, value: d.value }));
+    const counts = {};
+    leads.forEach(l => {
+      const k = l.sector || 'Other';
+      counts[k] = (counts[k] || 0) + 1;
+    });
+    return Object.entries(counts).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+  }, [leads, chartBreakdowns]);
+
+  const chartSourceData = useMemo(() => {
+    if (chartBreakdowns?.source_breakdown) return chartBreakdowns.source_breakdown.map(d => ({ name: d.label, value: d.value }));
+    const counts = {};
+    leads.forEach(l => {
+      const k = l.source || 'Direct';
+      counts[k] = (counts[k] || 0) + 1;
+    });
+    return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+  }, [leads, chartBreakdowns]);
+
+  const chartTypeData = useMemo(() => {
+    if (chartBreakdowns?.type_breakdown) return chartBreakdowns.type_breakdown.map(d => ({ name: d.label, value: d.value }));
+    const counts = {};
+    leads.forEach(l => {
+      const k = deriveType(l);
+      counts[k] = (counts[k] || 0) + 1;
+    });
+    return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+  }, [leads, chartBreakdowns]);
 
   if (loading && leads.length === 0) {
     return (
@@ -525,10 +611,10 @@ const AdminDashboard = () => {
       {/* Visual Analytics Section */}
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-3 mb-6">
         {[
-          { title: 'Lead Intent', sub: 'Pipeline State', icon: PieIcon, color: 'indigo', data: stats.intent_breakdown, type: 'pie', desc: 'Sentiment of lead replies', contrib: 'AI Sentiment Analysis' },
-          { title: 'Sectors', sub: 'Industry Volume', icon: Globe, color: 'purple', data: stats.sector_breakdown, type: 'bar', desc: 'Lead volume by industry', contrib: 'Registry Classification' },
-          { title: 'Sources', sub: 'Acquisition', icon: Database, color: 'blue', data: stats.source_breakdown, type: 'pie', desc: 'Where leads were imported', contrib: 'Ingestion Metadata' },
-          { title: 'Lead Type', sub: 'Investor/Client', icon: Users, color: 'emerald', data: stats.type_breakdown, type: 'pie', desc: 'Investors vs Clients split', contrib: 'Team Ownership Logic' }
+          { title: 'Lead Intent', sub: 'Pipeline State', icon: PieIcon, color: 'indigo', data: chartIntentData, type: 'pie', desc: 'Sentiment of lead replies', contrib: 'AI Sentiment Analysis' },
+          { title: 'Sectors', sub: 'Industry Volume', icon: Globe, color: 'purple', data: chartSectorData, type: 'bar', desc: 'Lead volume by industry', contrib: 'Registry Classification' },
+          { title: 'Sources', sub: 'Acquisition', icon: Database, color: 'blue', data: chartSourceData, type: 'pie', desc: 'Where leads were imported', contrib: 'Ingestion Metadata' },
+          { title: 'Lead Type', sub: 'Investor/Client', icon: Users, color: 'emerald', data: chartTypeData, type: 'pie', desc: 'Investors vs Clients split', contrib: 'Team Ownership Logic' }
         ].map((item, i) => (
           <div key={i} className="bg-[#111521] border border-white/5 rounded-xl p-3 flex flex-col">
             <div className="flex items-center justify-between mb-2">

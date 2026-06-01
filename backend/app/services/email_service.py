@@ -151,6 +151,14 @@ _TEMPLATE_ATTACHMENT_MAP = {
     "palak_mam_corporate_advisory": [
         "QVSCL Company Profile.pdf",
     ],
+    "palak_mam_mna_fundraising": [
+        "QVSCL Company Profile.pdf",
+        "Lalit_Huria_Profile.pdf",
+    ],
+    "kajal_mam_qvscl_intro": [
+        "QVSCL Company Profile.pdf",
+        "Lalit_Huria_Profile.pdf",
+    ],
 }
 
 def _get_attachment_files_for_subject(subject: str, template_name: Optional[str] = None) -> list:
@@ -320,7 +328,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
 
                 # Wrap in professional email template for consistent branding
                 html_content = f"""
-                <div style="font-family: 'Segoe UI', Roboto, -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1a202c; max-width: 600px; margin: 0 auto;">
+                <div style="font-family: 'Segoe UI', Roboto, -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1a202c;">
                     {html_content}
                 </div>
                 """

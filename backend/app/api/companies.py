@@ -65,9 +65,35 @@ def invalidate_companies_cache(user_id: str = "*"):
 router = APIRouter()
 
 def normalize_user_id(user_id: Optional[str]) -> str:
+    """Normalizes the user ID from the header to a valid numeric database ID string.
+    Handles 'admin' or string usernames by resolving them to their numeric database ID.
+    """
     if not user_id or user_id.strip() == "":
         return None
-    return user_id
+    
+    u_str = str(user_id).strip()
+    if u_str.lower() == "admin":
+        return "1"
+    
+    if u_str.isdigit():
+        return u_str
+        
+    # If not digits, it's likely a username (e.g. "test"). Resolve to numeric ID.
+    try:
+        from app.database import get_db_connection
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM users WHERE LOWER(username) = LOWER(%s) OR LOWER(email) = LOWER(%s) LIMIT 1", (u_str, u_str))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row:
+            return str(row[0])
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error resolving user_id for '{u_str}': {e}")
+        
+    return "1" # Fallback to admin/system if resolution fails
 
 
 def check_daily_email_limit(user_id: Optional[str], batch_size: int = 1) -> bool:
@@ -693,7 +719,20 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
     uid = normalize_user_id(user_id)
     
     try:
-        cur.execute("SELECT row_data FROM company_registry WHERE id = %s AND user_id = %s", (row_id, uid))
+        # Secure Admin Check
+        is_admin = False
+        if uid:
+            cur.execute("SELECT role FROM users WHERE id = %s", (uid,))
+            role_row = cur.fetchone()
+            if role_row:
+                role_val = role_row['role'] if isinstance(role_row, dict) else role_row[0]
+                if role_val and str(role_val).upper() == 'ADMIN':
+                    is_admin = True
+
+        if is_admin:
+            cur.execute("SELECT row_data FROM company_registry WHERE id = %s", (row_id,))
+        else:
+            cur.execute("SELECT row_data FROM company_registry WHERE id = %s AND user_id = %s", (row_id, uid))
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Company record not found")
@@ -773,7 +812,10 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
             req = DraftRequest(lead_id=lead_id, template_type=template_name or 'standard')
             res = generate_email_internal(req, user_id)
             # Mark as generated in company registry
-            cur.execute("UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = %s AND user_id = %s", (row_id, uid))
+            if is_admin:
+                cur.execute("UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = %s", (row_id,))
+            else:
+                cur.execute("UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = %s AND user_id = %s", (row_id, uid))
             conn.commit()
             invalidate_companies_cache(str(uid))
             return res
@@ -876,10 +918,27 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: Optional
         try:
             conn = get_db_connection()
             cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-            cur.execute(
-                "SELECT id, row_data FROM company_registry WHERE id = ANY(%s) AND user_id = %s",
-                (req.row_ids, uid)
-            )
+            
+            # Secure Admin Check
+            is_admin = False
+            if uid:
+                cur.execute("SELECT role FROM users WHERE id = %s", (uid,))
+                role_row = cur.fetchone()
+                if role_row:
+                    role_val = role_row['role'] if isinstance(role_row, dict) else role_row[0]
+                    if role_val and str(role_val).upper() == 'ADMIN':
+                        is_admin = True
+
+            if is_admin:
+                cur.execute(
+                    "SELECT id, row_data FROM company_registry WHERE id = ANY(%s)",
+                    (req.row_ids,)
+                )
+            else:
+                cur.execute(
+                    "SELECT id, row_data FROM company_registry WHERE id = ANY(%s) AND user_id = %s",
+                    (req.row_ids, uid)
+                )
             rows = cur.fetchall()
             if not rows:
                 _bulk_company_progress[batch_id]["status"] = "done"
@@ -982,10 +1041,16 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: Optional
             if success_ids:
                 conn2 = get_db_connection()
                 cur2 = conn2.cursor()
-                cur2.execute(
-                    "UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = ANY(%s) AND user_id = %s",
-                    (success_ids, uid)
-                )
+                if is_admin:
+                    cur2.execute(
+                        "UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = ANY(%s)",
+                        (success_ids,)
+                    )
+                else:
+                    cur2.execute(
+                        "UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = ANY(%s) AND user_id = %s",
+                        (success_ids, uid)
+                    )
                 conn2.commit()
                 cur2.close(); conn2.close()
 

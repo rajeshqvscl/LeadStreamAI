@@ -162,7 +162,7 @@ def get_template_followup(lead: dict, stage: int) -> str:
     # Also check subject as fallback (some leads may not have draft_template_used saved)
     orig_subj = get_original_outreach_subject(lead) or ""
     
-    if draft_template == 'palak_mam_corporate_advisory' or "corporate advisory" in orig_subj.lower():
+    if draft_template in ('palak_mam_corporate_advisory', 'palak_mam_mna_fundraising') or "corporate advisory" in orig_subj.lower() or "m&a" in orig_subj.lower():
         campaign_key = "INVESTOR_PALAK_ADVISORY"
     elif draft_template == 'kajal_mam_health_ecosystem':
         campaign_key = "INVESTOR_KAJAL_HEALTH_ECOSYSTEM"
@@ -622,7 +622,7 @@ def process_outreach_sequences():
                     first_name = name.split()[0] if name else name
 
                     body_html = markdown_to_html(body)
-                    sig_html = f'<div style="margin-top: 8px; border-top: 1px solid #f0f0f0; padding-top: 10px; line-height: 1.5;"><span style="color: #666; font-style: italic; display: block; margin-bottom: 2px; font-size: 13px;">--</span><span style="color: #666; font-style: italic; display: block; margin-bottom: 2px; font-size: 13px;">Regards,</span><span style="color: #666; font-style: italic; display: block; margin-bottom: 2px; font-size: 13px;">{first_name}</span></div>'
+                    sig_html = f'<p style="margin-top: 4px;">--<br>Regards,<br>{first_name}</p>'
                     full_body = body_html + sig_html
 
                     logger.info(f"PREVIEW [{lead['email']}]: body=\"{body}\"")

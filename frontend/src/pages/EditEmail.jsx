@@ -107,20 +107,20 @@ const EditEmail = () => {
         afterSig = text.substring(sigEndIdx + 8).trim();
         
         const sigLines = sigContent.split('\n').filter(l => l.trim());
-        sigHtml = '<div style="margin-top:24px; border-top:1px solid #ffffff15; padding-top:16px; font-family: sans-serif;">';
+        sigHtml = '<div style="margin-top:10px; border-top:1px solid #ffffff15; padding-top:8px; font-family: sans-serif;">';
         sigLines.forEach(line => {
           const trimmed = line.trim();
           if (trimmed === '--') {
-            sigHtml += '<div style="color:#475569; margin-bottom:8px;">--</div>';
+            sigHtml += '<div style="color:#475569; margin-bottom:4px;">--</div>';
           } else if (trimmed.startsWith('SIG_LINK_LABEL:')) {
             const rest = trimmed.replace('SIG_LINK_LABEL:', '');
             const colonIdx = rest.indexOf(':');
             const label = colonIdx !== -1 ? rest.substring(0, colonIdx).trim() : 'LinkedIn';
             const url = colonIdx !== -1 ? rest.substring(colonIdx + 1).trim() : rest;
-            sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:4px;">${label}</a>`;
+            sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:2px;">${label}</a>`;
           } else if (trimmed.startsWith('SIG_LINK:')) {
             const url = trimmed.replace('SIG_LINK:', '').trim();
-            sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:4px;">LinkedIn</a>`;
+            sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:2px;">LinkedIn</a>`;
           } else if (trimmed) {
             // Apply inline markdown to signature lines too
             let lineHtml = trimmed
@@ -130,7 +130,7 @@ const EditEmail = () => {
               .replace(/\*(.*?)\*/g, '<em>$1</em>')
               .replace(/\[(.*?)\]\((.*?)\)/g, `<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>`);
 
-            sigHtml += `<div style="color:#94a3b8; font-size:12px; line-height:1.6; margin-bottom:2px;">${lineHtml}</div>`;
+            sigHtml += `<div style="color:#94a3b8; font-size:12px; line-height:1.4; margin-bottom:0px;">${lineHtml}</div>`;
           }
         });
         sigHtml += '</div>';
@@ -138,20 +138,20 @@ const EditEmail = () => {
         // No SIG_END — treat everything after SIG_START as sig (backward compat)
         const sigContent = text.substring(sigStartIdx + 9).trim();
         const sigLines = sigContent.split('\n').filter(l => l.trim());
-        sigHtml = '<div style="margin-top:24px; border-top:1px solid #ffffff15; padding-top:16px; font-family: sans-serif;">';
+        sigHtml = '<div style="margin-top:10px; border-top:1px solid #ffffff15; padding-top:8px; font-family: sans-serif;">';
         sigLines.forEach(line => {
           const trimmed = line.trim();
           if (trimmed === '--') {
-            sigHtml += '<div style="color:#475569; margin-bottom:8px;">--</div>';
+            sigHtml += '<div style="color:#475569; margin-bottom:4px;">--</div>';
           } else if (trimmed.startsWith('SIG_LINK_LABEL:')) {
             const rest = trimmed.replace('SIG_LINK_LABEL:', '');
             const colonIdx = rest.indexOf(':');
             const label = colonIdx !== -1 ? rest.substring(0, colonIdx).trim() : 'LinkedIn';
             const url = colonIdx !== -1 ? rest.substring(colonIdx + 1).trim() : rest;
-            sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:4px;">${label}</a>`;
+            sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:2px;">${label}</a>`;
           } else if (trimmed.startsWith('SIG_LINK:')) {
             const url = trimmed.replace('SIG_LINK:', '').trim();
-            sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:4px;">LinkedIn</a>`;
+            sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:2px;">LinkedIn</a>`;
           } else if (trimmed) {
             let lineHtml = trimmed
               .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
@@ -160,7 +160,7 @@ const EditEmail = () => {
               .replace(/\*(.*?)\*/g, '<em>$1</em>')
               .replace(/\[(.*?)\]\((.*?)\)/g, `<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>`);
 
-            sigHtml += `<div style="color:#94a3b8; font-size:12px; line-height:1.6; margin-bottom:2px;">${lineHtml}</div>`;
+            sigHtml += `<div style="color:#94a3b8; font-size:12px; line-height:1.4; margin-bottom:0px;">${lineHtml}</div>`;
           }
         });
         sigHtml += '</div>';
