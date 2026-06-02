@@ -1901,9 +1901,8 @@ I'm {{Sender First Name}} from QVSCL (Gurugram), a strategic advisory firm worki
 
 **Business Overview**
 
-**Sector:** Agritech / Climate / Social Impact
-
-**Stage:** Revenue-generating, growth-stage
+• **Sector:** Agritech / Climate / Social Impact
+• **Stage:** Revenue-generating, growth-stage
 
 **Positioning:** India's first curated marketplace for renewable & green energy products for farmers and rural households
 
