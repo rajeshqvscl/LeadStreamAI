@@ -671,14 +671,27 @@ Looking forward to hearing from you.
 Thanks and regards,
 Palak"""
 
+    palak_mna_followup2 = """Dear {{First Name}},
+
+Just following up on my earlier note.
+
+Given your growth journey, we thought it may be worthwhile to connect and exchange perspectives around future M&A expansion and Funding opportunities.
+
+Please let us know a suitable time for a brief discussion if this would be of interest.
+
+Looking forward to your response.
+
+Best regards,
+Palak"""
+
     cur.execute(
-        "UPDATE prompts SET content = %s, description = %s, followup_1 = %s WHERE name = 'palak_mam_mna_fundraising'",
-        (palak_mna_content, palak_mna_description, palak_mna_followup1)
+        "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s WHERE name = 'palak_mam_mna_fundraising'",
+        (palak_mna_content, palak_mna_description, palak_mna_followup1, palak_mna_followup2)
     )
     if cur.rowcount == 0:
         cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1) VALUES ('palak_mam_mna_fundraising', %s, %s, 'CUSTOM_DRAFT', 'palak', %s)",
-            (palak_mna_description, palak_mna_content, palak_mna_followup1)
+            "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1, followup_2) VALUES ('palak_mam_mna_fundraising', %s, %s, 'CUSTOM_DRAFT', 'palak', %s, %s)",
+            (palak_mna_description, palak_mna_content, palak_mna_followup1, palak_mna_followup2)
         )
     conn.commit()
 
@@ -935,7 +948,7 @@ def markdown_to_html(text):
                     html_parts.append(p.strip())
                 else:
                     content = p.replace("\n", "<br>")
-                    html_parts.append(f"<p style='margin-top: 0; margin-bottom: 8px; line-height: 1.4; font-family: Arial, sans-serif; font-size: 12pt;'>{content}</p>")
+                    html_parts.append(f"<p style='margin: 0; margin-bottom: 4px; line-height: 1.4; font-family: Arial, sans-serif; font-size: 12pt;'>{content}</p>")
     
     return "".join(html_parts)
 

@@ -800,10 +800,10 @@ const Followups = () => {
                   placeholder="Enter your custom message here..."
                 />
               ) : (
-                <div className="bg-slate-950/40 rounded-2xl p-8 border border-white/[0.03] relative overflow-hidden">
+                <div className="bg-slate-950/40 rounded-2xl p-6 border border-white/[0.03] relative overflow-hidden">
                   <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500/40" />
                   <div
-                    className="prose prose-invert prose-sm max-w-none text-slate-300 leading-relaxed text-[14px]"
+                    className="text-slate-300 text-[14px] leading-relaxed"
                     dangerouslySetInnerHTML={{ __html: selectedLead.followup_draft || '<p class="animate-pulse italic text-slate-500">Generating draft...</p>' }}
                   />
                 </div>
