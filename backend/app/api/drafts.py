@@ -67,19 +67,13 @@ I'm {{Sender First Name}} from QVSCL (Gurugram), a strategic advisory firm worki
 
 **Business Overview**
 
-**Headquarters:** Singapore (with India as a 100% owned subsidiary and a US joint venture)
-
-**Founded:** By industry leaders with 20+ years of experience across HR, fintech, and enterprise technology
-
-**Focus:** Building a unified hiring infrastructure platform that automates and optimizes end-to-end recruitment workflows - spanning sourcing, screening, evaluation, and background verification
-
-**Platform Offering:** A full-stack hiring infrastructure platform integrating applicant tracking, multi-channel sourcing, AI-driven screening, and native background verification into a single system
-
-**Technology:** AI-powered vertical agents enabling sourcing, scheduling, interviewing, and verification workflows, supported by a proprietary trust graph that improves candidate matching and reduces fraud over time
-
-**Revenue Model:** Enterprise SaaS with multi-layered monetization across hiring workflows, verification services, and AI-driven automation modules, enabling scalable and recurring revenue streams
-
-**Core Differentiation:** Unlike fragmented HR tech stacks, the platform functions as a **system of intelligence for hiring** - combining workflows, data, and verification into a unified infrastructure layer that improves decision-making over time. Positioned alongside global AI hiring platforms, with differentiated focus on integrated trust infrastructure and verification layers.
+• **Headquarters:** Singapore (with India as a 100% owned subsidiary and a US joint venture)
+• **Founded:** By industry leaders with 20+ years of experience across HR, fintech, and enterprise technology
+• **Focus:** Building a unified hiring infrastructure platform that automates and optimizes end-to-end recruitment workflows - spanning sourcing, screening, evaluation, and background verification
+• **Platform Offering:** A full-stack hiring infrastructure platform integrating applicant tracking, multi-channel sourcing, AI-driven screening, and native background verification into a single system
+• **Technology:** AI-powered vertical agents enabling sourcing, scheduling, interviewing, and verification workflows, supported by a proprietary trust graph that improves candidate matching and reduces fraud over time
+• **Revenue Model:** Enterprise SaaS with multi-layered monetization across hiring workflows, verification services, and AI-driven automation modules, enabling scalable and recurring revenue streams
+• **Core Differentiation:** Unlike fragmented HR tech stacks, the platform functions as a **system of intelligence for hiring** - combining workflows, data, and verification into a unified infrastructure layer that improves decision-making over time. Positioned alongside global AI hiring platforms, with differentiated focus on integrated trust infrastructure and verification layers.
 
 *Designed to become the underlying infrastructure layer for hiring in an era of AI-generated talent and rising trust deficits*
 
@@ -1515,19 +1509,13 @@ I'm {{Sender First Name}} from QVSCL (Gurugram), a strategic advisory firm worki
 
 <strong>Business Overview</strong>
 
-<strong>Headquarters:</strong> Singapore (with India as a 100% owned subsidiary and a US joint venture)
-
-<strong>Founded:</strong> By industry leaders with 20+ years of experience across HR, fintech, and enterprise technology
-
-<strong>Focus:</strong> Building a unified hiring infrastructure platform that automates and optimizes end-to-end recruitment workflows - spanning sourcing, screening, evaluation, and background verification
-
-<strong>Platform Offering:</strong> A full-stack hiring infrastructure platform integrating applicant tracking, multi-channel sourcing, AI-driven screening, and native background verification into a single system
-
-<strong>Technology:</strong> AI-powered vertical agents enabling sourcing, scheduling, interviewing, and verification workflows, supported by a proprietary trust graph that improves candidate matching and reduces fraud over time
-
-<strong>Revenue Model:</strong> Enterprise SaaS with multi-layered monetization across hiring workflows, verification services, and AI-driven automation modules, enabling scalable and recurring revenue streams
-
-<strong>Core Differentiation:</strong> Unlike fragmented HR tech stacks, the platform functions as a <strong>system of intelligence for hiring</strong> - combining workflows, data, and verification into a unified infrastructure layer that improves decision-making over time. Positioned alongside global AI hiring platforms, with differentiated focus on integrated trust infrastructure and verification layers.
+• <strong>Headquarters:</strong> Singapore (with India as a 100% owned subsidiary and a US joint venture)
+• <strong>Founded:</strong> By industry leaders with 20+ years of experience across HR, fintech, and enterprise technology
+• <strong>Focus:</strong> Building a unified hiring infrastructure platform that automates and optimizes end-to-end recruitment workflows - spanning sourcing, screening, evaluation, and background verification
+• <strong>Platform Offering:</strong> A full-stack hiring infrastructure platform integrating applicant tracking, multi-channel sourcing, AI-driven screening, and native background verification into a single system
+• <strong>Technology:</strong> AI-powered vertical agents enabling sourcing, scheduling, interviewing, and verification workflows, supported by a proprietary trust graph that improves candidate matching and reduces fraud over time
+• <strong>Revenue Model:</strong> Enterprise SaaS with multi-layered monetization across hiring workflows, verification services, and AI-driven automation modules, enabling scalable and recurring revenue streams
+• <strong>Core Differentiation:</strong> Unlike fragmented HR tech stacks, the platform functions as a <strong>system of intelligence for hiring</strong> - combining workflows, data, and verification into a unified infrastructure layer that improves decision-making over time. Positioned alongside global AI hiring platforms, with differentiated focus on integrated trust infrastructure and verification layers.
 
 <em>Designed to become the underlying infrastructure layer for hiring in an era of AI-generated talent and rising trust deficits</em>
 
@@ -1619,7 +1607,7 @@ SIG_END"""
         # Select and verify if the database entry needs to be fixed.
         cur.execute("SELECT content FROM prompts WHERE name = 'yashika_draft_ai_tech'")
         row = cur.fetchone()
-        if not row or "Subject:" not in row[0] or "Kajal" in row[0] or "Total capital raised in previous rounds: $3M" not in row[0]:
+        if not row or "Subject:" not in row[0] or "Kajal" in row[0] or "Total capital raised in previous rounds: $3M" not in row[0] or "<strong>Headquarters:</strong>" in row[0] and "• <strong>Headquarters:</strong>" not in row[0]:
             # Perform automatic update to correct placeholder, layout and subject prefix
             cur.execute(
                 "UPDATE prompts SET content = %s, description = %s WHERE name = 'yashika_draft_ai_tech'",
