@@ -1907,11 +1907,13 @@ I'm {{Sender First Name}} from QVSCL (Gurugram), a strategic advisory firm worki
 **Positioning:** India's first curated marketplace for renewable & green energy products for farmers and rural households
 
 **Platform Offering:**
+
 • Multi-brand marketplace with 60+ brands and 200+ SKUs across solar, biogas, and green energy solutions
 • End-to-end solutions spanning product discovery, advisory, deployment, and after-sales service
 • AI-enabled touchpoints including chatbots and localized support
 
 **Business Model:**
+
 • Phygital distribution model combining AI-enabled digital platform + village-level offline stores
 • Asset-light approach with franchise-led last-mile distribution
 • Multiple revenue streams across B2C sales, B2B projects, partnerships, franchise fees, and AMC services
