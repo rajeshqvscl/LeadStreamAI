@@ -759,7 +759,7 @@ def check_daily_email_limit(user_id: Optional[str], batch_size: int = 1) -> bool
 
 _INLINED_IMAGE_CACHE = {}
 
-def markdown_to_html(text):
+def markdown_to_html(text, gmail_style=False):
     import re
     # Normalize newlines
     text = text.replace("\r\n", "\n")
@@ -844,7 +844,7 @@ def markdown_to_html(text):
         for line in sig_lines:
             line = line.strip()
             if not line:
-                formatted_sig_lines.append('<div style="height: 3px;"></div>')
+                formatted_sig_lines.append('<div style="height: 8px;"></div>' if gmail_style else '<div style="height: 3px;"></div>')
                 continue
                 
             disclaimer_text = "Important: This message and its attachments"
@@ -862,8 +862,7 @@ def markdown_to_html(text):
                 if "<strong>" not in line and "strictly private" in line.lower():
                      line = re.sub(r"(?i)(strictly private and confidential)", r"<strong>\1</strong>", line)
                 line = f'<div style="font-size: 13px; color: #444; font-weight: normal; line-height: 1.4; display: block; margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">{line}</div>'
-            elif "<div" in line or "<img" in line or "<span" in line or "<a" in line or "<strong" in line:
-                # Keep raw HTML as-is (like our banner)
+            elif "<div" in line or "<img" in line or (not gmail_style and ("<span" in line or "<a" in line or "<strong" in line)):
                 pass
             else:
                 # Handle names/titles in signature (bold them if they are in ***)
@@ -872,8 +871,9 @@ def markdown_to_html(text):
             
             formatted_sig_lines.append(line)
         
-        signature_html = '<div style="margin-top: 4px; border-top: 1px solid #f0f0f0; padding-top: 6px; line-height: 1.4;">' + "".join(formatted_sig_lines) + '</div>'
-        text = main_text.rstrip() + "\n\n[[SIG_BLOCK_PLACEHOLDER]]"
+        sig_container_style = "margin-top: 8px; border-top: 1px solid #f0f0f0; padding-top: 10px; line-height: 1.5;" if gmail_style else "margin-top: 4px; border-top: 1px solid #f0f0f0; padding-top: 6px; line-height: 1.4;"
+        signature_html = f'<div style="{sig_container_style}">' + "".join(formatted_sig_lines) + '</div>'
+        text = main_text.rstrip() + ("\n[[SIG_BLOCK_PLACEHOLDER]]" if gmail_style else "\n\n[[SIG_BLOCK_PLACEHOLDER]]")
 
     # 4. Handle remaining keywords if they weren't in markdown format
     if "Website" in text and "<a" not in text:
@@ -907,7 +907,7 @@ def markdown_to_html(text):
             for l in lines:
                 l_strip = l.strip()
                 content = re.sub(r'^\s*[◦◦•\-\*]\s+', '', l_strip)
-                list_html += f"<li style='margin-bottom: 4px; line-height: 1.6; font-family: Arial, sans-serif; font-size: 12pt;'>{content}</li>"
+                list_html += f"<li style='margin-bottom: 4px; line-height: 1.6; font-family: Arial, sans-serif;'>{content}</li>"
             list_html += "</ul>"
             html_parts.append(list_html)
         elif any(re.match(r'^\s*[\*\-•]\s+', l) for l in lines):
@@ -917,7 +917,7 @@ def markdown_to_html(text):
                 match = re.match(r'^[\*\-•]\s+(.*)', l_strip)
                 if match:
                     content = match.group(1)
-                    list_html += f"<li style='margin-bottom: 6px; line-height: 1.6; font-family: Arial, sans-serif; font-size: 12pt;'>{content}</li>"
+                    list_html += f"<li style='margin-bottom: 6px; line-height: 1.6; font-family: Arial, sans-serif;'>{content}</li>"
                 else:
                     list_html += f" {l_strip}"
             list_html += "</ul>"
@@ -926,18 +926,15 @@ def markdown_to_html(text):
             # Check if this is a markdown table
             lines = p.split("\n")
             if len(lines) >= 2 and all(l.strip().startswith("|") and l.strip().endswith("|") for l in lines):
-                table_html = "<table style='width: auto; border-collapse: collapse; border: 1px solid #000000; margin-top: 12px; margin-bottom: 12px; font-family: Arial, sans-serif;'>"
+                table_html = "<table style='width:100%;border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:13px;'>"
                 for i, line in enumerate(lines):
                     line = line.strip()
-                    if not line:
-                        continue
+                    if not line: continue
                     cells = [c.strip() for c in line.split("|")[1:-1]]
                     if all(re.match(r'^[-:\s]+$', c) for c in cells):
                         continue
                     tag = "th" if i == 0 else "td"
-                    th_style = "padding: 6px 12px; border: 1px solid #000000; text-align: left; font-size: 11pt; font-weight: bold; color: #000000; font-family: Arial, sans-serif;"
-                    td_style = "padding: 6px 12px; border: 1px solid #000000; text-align: left; font-size: 11pt; font-weight: bold; color: #000000; font-family: Arial, sans-serif;"
-                    style = th_style if tag == "th" else td_style
+                    style = "border:1px solid #000;padding:8px 10px;text-align:left;font-weight:bold;font-size:13px;" if tag == "th" else "border:1px solid #000;padding:8px 10px;text-align:left;font-size:13px;font-weight:bold;"
                     row_html = f"<{tag} style='{style}'>" + f"</{tag}><{tag} style='{style}'>".join(cells) + f"</{tag}>"
                     table_html += f"<tr>{row_html}</tr>"
                 table_html += "</table>"
@@ -948,9 +945,13 @@ def markdown_to_html(text):
                     html_parts.append(p.strip())
                 else:
                     content = p.replace("\n", "<br>")
-                    html_parts.append(f"<p style='margin: 0; margin-bottom: 4px; line-height: 1.4; font-family: Arial, sans-serif; font-size: 12pt;'>{content}</p>")
+                    p_style = "margin-top: 0; margin-bottom: 18px; line-height: 1.6; font-family: Arial, sans-serif;" if gmail_style else "margin-top: 0; margin-bottom: 8px; line-height: 1.4; font-family: Arial, sans-serif;"
+                    html_parts.append(f"<p style='{p_style}'>{content}</p>")
     
-    return "".join(html_parts)
+    result = "".join(html_parts)
+    if gmail_style:
+        result = f"<div style='padding: 0 40px; font-family: Arial, sans-serif;'>{result}</div>"
+    return result
 
 class DraftRequest(BaseModel):
     lead_id: int
@@ -1276,6 +1277,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         
         profile = get_sender_profile(user_id)
         generator = EmailGenerator()
+        is_yashika = False
         
         # Select template
         if req.template_type == 'palak':
@@ -1307,6 +1309,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 subject = email_data.get("subject", "Following up")
                 body = email_data.get("body", "")
         elif req.template_type != 'standard':
+            is_yashika = req.template_type.startswith('yashika_')
             cur.execute("SELECT content FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE", (req.template_type,))
             row_t = cur.fetchone()
             
@@ -1394,7 +1397,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         if subject_found:
             body_with_sig = "\n".join(new_body_lines).strip()
         
-        html_body = markdown_to_html(body_with_sig)
+        html_body = markdown_to_html(body_with_sig, gmail_style=is_yashika)
         email_content = f"Subject: {subject}\n\n{body_with_sig}"
         
         old_gmail_id = lead.get('gmail_draft_id')
@@ -1906,58 +1909,63 @@ Dear {{First Name}},
 
 I hope you're doing well.
 
-I'm {{Sender Name}} from QVSCL (Gurugram), a strategic advisory firm working with high-growth early-stage ventures. We are currently raising a round for a **climate-focused agritech platform** that is **building a full-stack renewable energy marketplace for rural India**.
+I'm {{Sender First Name}} from QVSCL (Gurugram), a strategic advisory firm working with high-growth early-stage ventures. We are currently raising a round for a climate-focused agritech platform that is building a full-stack renewable energy marketplace for rural India.
 
 **Business Overview**
 
-* **Sector**: Agritech / Climate / Social Impact
-* **Stage**: Revenue-generating, growth-stage
-* **Positioning**: India's first curated marketplace for renewable & green energy products for farmers and rural households
-* **Platform Offering**:
-* Multi-brand marketplace with **60+ brands and 200+ SKUs** across solar, biogas, and green energy solutions
-* End-to-end solutions spanning product discovery, advisory, deployment, and after-sales service
-* AI-enabled touchpoints including chatbots and localized support
-* **Business Model**:
-* Phygital distribution model combining **AI-enabled digital platform + village-level offline stores**
-* Asset-light approach with **franchise-led last-mile distribution**
-* Multiple revenue streams across **B2C sales, B2B projects, partnerships, franchise fees, and AMC services**
+**Sector:** Agritech / Climate / Social Impact
+
+**Stage:** Revenue-generating, growth-stage
+
+**Positioning:** India's first curated marketplace for renewable & green energy products for farmers and rural households
+
+**Platform Offering:**
+• Multi-brand marketplace with 60+ brands and 200+ SKUs across solar, biogas, and green energy solutions
+• End-to-end solutions spanning product discovery, advisory, deployment, and after-sales service
+• AI-enabled touchpoints including chatbots and localized support
+
+**Business Model:**
+• Phygital distribution model combining AI-enabled digital platform + village-level offline stores
+• Asset-light approach with franchise-led last-mile distribution
+• Multiple revenue streams across B2C sales, B2B projects, partnerships, franchise fees, and AMC services
 
 **Problems**
 
 Rural India faces structural inefficiencies in energy access and agri productivity:
-* High dependence on **firewood, diesel, and unreliable electricity**
-* Limited access to **modern technologies and advisory support**
-* Fragmented distribution through traditional dealer networks limits penetration
+• High dependence on firewood, diesel, and unreliable electricity
+• Limited access to modern technologies and advisory support
+• Fragmented distribution through traditional dealer networks limits penetration
 
 **Solutions**
 
-A **one-stop, full-stack renewable energy platform** addressing access, affordability, and adoption:
-* **Phygital Marketplace**: Seamless online + offline distribution network
-* **AI-led Advisory**: Personalized product recommendations and assisted buying
-* **Last-Mile Reach**: Deep rural penetration via trained partners and franchise stores
-* **Integrated Offering**: Solar, biogas, thermal, and green energy products under one platform
-* **Value-Added Services**: Financing support, insurance, and long-term after-sales service
+A one-stop, full-stack renewable energy platform addressing access, affordability, and adoption:
+• **Phygital Marketplace:** Seamless online + offline distribution network
+• **AI-led Advisory:** Personalized product recommendations and assisted buying
+• **Last-Mile Reach:** Deep rural penetration via trained partners and franchise stores
+• **Integrated Offering:** Solar, biogas, thermal, and green energy products under one platform
+• **Value-Added Services:** Financing support, insurance, and long-term after-sales service
 
 **Traction & Impact**
 
-* **Revenue**: INR 5.1 Cr achieved till Feb'26 with ~105% YoY growth
-* **Advance Orders**: INR 2 Cr pipeline
-* **On-ground Impact (FY20-25)**:
-* 1,24,153+ lives impacted; 1,10,000+ women impacted
-* 2,070+ tons of CO₂ emissions abated
-* 66,000+ green jobs created; 900+ acres irrigated via solar
-* Large-scale deployment of renewable energy products across rural India
+• **Revenue:** INR 5.1 Cr achieved till Feb'26 with ~105% YoY growth
+• **Advance Orders:** INR 2 Cr pipeline
+
+**On-ground Impact (FY20-25):**
+• 1,24,153+ lives impacted; 1,10,000+ women impacted
+• 2,070+ tons of CO₂ emissions abated
+• 66,000+ green jobs created; 900+ acres irrigated via solar
+• Large-scale deployment of renewable energy products across rural India
 
 **Differentiation**
 
-* **First-mover advantage** in building a **renewable energy marketplace with advisory layer**
-* Strong **last-mile rural distribution network** vs. e-commerce-led competitors
-* Integrated stack combining **commerce, financing, service, and impact delivery**
+• First-mover advantage in building a renewable energy marketplace with advisory layer
+• Strong last-mile rural distribution network vs. e-commerce-led competitors
+• Integrated stack combining commerce, financing, service, and impact delivery
 
 **Fundraise**
 
-* **Raising**: USD 500K - 1M
-* **Use of Funds**: Expansion, product development (AgriVoltaics), team scale-up, and market expansion
+• **Raising:** USD 500K - 1M
+• **Use of Funds:** Expansion, product development (AgriVoltaics), team scale-up, and market expansion
 
 If this aligns with your portfolio focus and does not conflict with it, I'd be happy to share the full presentation or connect over a virtual meeting at your convenience. I have attached the QVSCL Profile. You may also share your investment thesis with us so we can send relevant deal flow in the future.
 
@@ -1967,12 +1975,14 @@ Looking forward to your response.
 
 SIG_START
 --
-**Thanks & Regards,**
+Thanks & Regards,
 
 ***{{Sender Name}}***
 {{Sender Title}}
 [LinkedIn]({{Sender LinkedIn}})
 {{Sender Phone}}
+
+Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you.
 SIG_END"""
 
         cur.execute(

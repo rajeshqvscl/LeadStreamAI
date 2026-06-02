@@ -57,9 +57,23 @@ def get_metrics(
 
     params = []
     where_parts = []
+    resolved_id = None
+    resolved_name = None
     if user_id and user_id != 'all':
-        where_parts.append("user_id = %s")
-        params.append(user_id)
+        uid_val = user_id.strip()
+        if uid_val.isdigit():
+            cur.execute("SELECT id, full_name, username FROM users WHERE id = %s LIMIT 1", (int(uid_val),))
+        else:
+            cur.execute("SELECT id, full_name, username FROM users WHERE LOWER(username) = LOWER(%s) OR LOWER(email) = LOWER(%s) LIMIT 1", (uid_val, uid_val))
+        row = cur.fetchone()
+        if row:
+            resolved_id = row['id']
+            resolved_name = row['full_name'] or row['username']
+        if resolved_id is not None:
+            where_parts.append("user_id = %s")
+            params.append(resolved_id)
+        else:
+            where_parts.append("1=0")
     where_parts.append("1=1")
     where_base = " AND ".join(where_parts)
     where_clause = f"WHERE {where_base} {rng} {dte}".strip()
@@ -84,8 +98,8 @@ def get_metrics(
     leads_count = cur.fetchone()['count'] or 0
 
     # Registry (without range)
-    if user_id and user_id != 'all':
-        cur.execute("SELECT COUNT(*) as count FROM company_registry WHERE user_id = %s", (user_id,))
+    if user_id and user_id != 'all' and resolved_id is not None:
+        cur.execute("SELECT COUNT(*) as count FROM company_registry WHERE user_id = %s", (resolved_id,))
     else:
         cur.execute("SELECT COUNT(*) as count FROM company_registry WHERE 1=1")
     registry_count = cur.fetchone()['count'] or 0
@@ -93,10 +107,10 @@ def get_metrics(
     # Today sent (from activity_log, IST timezone)
     ist_today = "(NOW() AT TIME ZONE 'Asia/Kolkata')::date"
     ist_date = "(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date"
-    if user_id and user_id != 'all':
-        cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE user_id = %s AND action = 'EMAIL_SENT' AND {ist_date} = {ist_today}", (user_id,))
+    if user_id and user_id != 'all' and resolved_name:
+        cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE performed_by = %s AND action = 'EMAIL_SENT' AND {ist_date} = {ist_today}", (resolved_name,))
         today_sent = cur.fetchone()['count'] or 0
-        cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE user_id = %s AND action IN ('FOLLOWUP_SENT', 'AUTO_FOLLOWUP_SENT') AND {ist_date} = {ist_today}", (user_id,))
+        cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE performed_by = %s AND action IN ('FOLLOWUP_SENT', 'AUTO_FOLLOWUP_SENT') AND {ist_date} = {ist_today}", (resolved_name,))
         today_followups = cur.fetchone()['count'] or 0
     else:
         cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE action = 'EMAIL_SENT' AND {ist_date} = {ist_today}")

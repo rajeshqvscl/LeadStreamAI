@@ -12,18 +12,43 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
     
     is_admin = (str(user_id or '').lower() == 'admin')
 
+    # Resolve user_id to numeric DB id + full_name for activity_log queries
+    # (activity_log stores performed_by=full_name or username, not user_id)
+    resolved_id = None
+    resolved_name = None
+    if user_id and not is_admin and user_id.strip():
+        uid_value = user_id.strip()
+        if uid_value.isdigit():
+            cur.execute("SELECT id, full_name, username FROM users WHERE id = %s LIMIT 1", (int(uid_value),))
+        else:
+            cur.execute("SELECT id, full_name, username FROM users WHERE LOWER(username) = LOWER(%s) OR LOWER(email) = LOWER(%s) LIMIT 1", (uid_value, uid_value))
+        row = cur.fetchone()
+        if row:
+            resolved_id = row['id']
+            resolved_name = row['full_name'] or row['username']
+
     if is_admin:
         user_cond = "1=1"
         user_params = []
-    elif user_id and user_id.strip():
+        act_cond = "1=1"
+        act_params = []
+    elif resolved_id is not None:
         user_cond = "user_id = %s"
-        user_params = [user_id]
+        user_params = [resolved_id]
+        if resolved_name:
+            act_cond = "performed_by = %s"
+            act_params = [resolved_name]
+        else:
+            act_cond = "1=1"
+            act_params = []
     else:
         user_cond = "user_id IS NULL"
         user_params = []
+        act_cond = "1=1"
+        act_params = []
 
     # Single query for all counts
-    company_count_sql = "1=1" if is_admin else user_cond
+    company_count_sql = user_cond if is_admin or resolved_id is not None else "1=1"
     cur.execute(f"""
         SELECT
             (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND (is_responded = TRUE OR email_status IN ('REPLIED','INTERESTED','MEETING SCHEDULED') OR reply_intent = 'INTERESTED')) AS total_leads,
@@ -90,7 +115,7 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         if r['persona']:
             persona_data[r['persona']] = r['count']
         
-    cur.execute(f"SELECT * FROM activity_log WHERE {user_cond} ORDER BY created_at DESC LIMIT 7", user_params)
+    cur.execute(f"SELECT * FROM activity_log WHERE {act_cond} ORDER BY created_at DESC LIMIT 7", act_params)
     logs_rows = cur.fetchall()
     recent_logs = []
     for row in logs_rows:
@@ -102,9 +127,9 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
     today_str = "(NOW() AT TIME ZONE 'Asia/Kolkata')::date"
     cur.execute(f"""
         SELECT
-            (SELECT COUNT(*) FROM activity_log WHERE action = 'EMAIL_SENT' AND {user_cond} AND {ist_date} = {today_str}) AS sent_today,
-            (SELECT COUNT(*) FROM activity_log WHERE action IN ('FOLLOWUP_SENT','AUTO_FOLLOWUP_SENT') AND {user_cond} AND {ist_date} = {today_str}) AS fup_today
-    """, user_params * 2 if user_params else [])
+            (SELECT COUNT(*) FROM activity_log WHERE action = 'EMAIL_SENT' AND {act_cond} AND {ist_date} = {today_str}) AS sent_today,
+            (SELECT COUNT(*) FROM activity_log WHERE action IN ('FOLLOWUP_SENT','AUTO_FOLLOWUP_SENT') AND {act_cond} AND {ist_date} = {today_str}) AS fup_today
+    """, act_params * 2 if act_params else [])
     today_row = cur.fetchone()
     sent_today = today_row['sent_today'] or 0
     fup_today = today_row['fup_today'] or 0
