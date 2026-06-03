@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Eye, Edit3, Loader2, Send, ChevronLeft, ChevronRight, X, Archive, CheckCircle2, Sparkles, History, User, Globe, Calendar, Trash2, AlertCircle } from 'lucide-react';
+import { Eye, Edit3, Loader2, Send, ChevronLeft, ChevronRight, X, Archive, CheckCircle2, Sparkles, History, User, Globe, Calendar, Trash2, AlertCircle, Square } from 'lucide-react';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import api from '../services/api';
@@ -31,6 +31,8 @@ const Emails = () => {
   const [approveStep, setApproveStep] = useState(0);
   const [isBulkSending, setIsBulkSending] = useState(false);
   const [bulkSendResult, setBulkSendResult] = useState(null); // { sent, failed, total }
+  const stopBulkSendRef = useRef(false);
+  const [bulkSendProgress, setBulkSendProgress] = useState({ sent: 0, failed: 0, total: 0, current: '' });
   
   // ✨ Generation Logic State
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
@@ -101,27 +103,53 @@ const Emails = () => {
 
   const handleBulkSend = async () => {
     if (selectedIds.length === 0) return;
-    const taskId = `bulk-send-${Date.now()}`;
-    window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
-      detail: { id: taskId, title: `Sending ${selectedIds.length} Emails`, subtitle: 'Initializing batch...', progress: 5, status: 'RUNNING' } 
-    }));
-
+    const idsToSend = [...selectedIds];
+    stopBulkSendRef.current = false;
+    setIsBulkSending(true);
+    setBulkSendProgress({ sent: 0, failed: 0, total: idsToSend.length, current: 'Starting...' });
     setSelectedIds([]);
-    try {
-      const res = await api.post('/api/send-selected-batch', { lead_ids: selectedIds });
-      const { sent_count, failed_count } = res.data;
-      
-      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
-        detail: { id: taskId, title: 'Batch Dispatched', subtitle: `Sent: ${sent_count} | Failed: ${failed_count}`, progress: 100, status: 'COMPLETED' } 
-      }));
-      
-      fetchEmails();
-    } catch (err) {
-      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
-        detail: { id: taskId, title: 'Batch Failed', subtitle: err?.response?.data?.detail || 'Check Gmail link', progress: 0, status: 'FAILED' } 
-      }));
-      showNotification('error', err?.response?.data?.detail || 'Bulk send failed');
+
+    let sentCount = 0;
+    let failedCount = 0;
+    const BATCH_SIZE = 3;
+
+    for (let i = 0; i < idsToSend.length; i += BATCH_SIZE) {
+      if (stopBulkSendRef.current) {
+        setBulkSendProgress(prev => ({ ...prev, current: `⏹ Stopped — ${sentCount} sent, ${idsToSend.length - i} skipped` }));
+        break;
+      }
+
+      const batch = idsToSend.slice(i, i + BATCH_SIZE);
+      setBulkSendProgress(prev => ({ ...prev, current: `Sending batch ${Math.floor(i / BATCH_SIZE) + 1} (${i + 1}-${Math.min(i + BATCH_SIZE, idsToSend.length)} of ${idsToSend.length})...` }));
+
+      const results = await Promise.allSettled(
+        batch.map(id => api.post('/api/send-selected-batch', { lead_ids: [id] }))
+      );
+
+      for (const r of results) {
+        if (r.status === 'fulfilled' && r.value?.data?.sent_count > 0) {
+          sentCount++;
+        } else {
+          failedCount++;
+        }
+      }
+      setBulkSendProgress(prev => ({ ...prev, sent: sentCount, failed: failedCount }));
     }
+
+    const wasStopped = stopBulkSendRef.current;
+    setBulkSendProgress(prev => ({ ...prev, current: wasStopped ? `⏹ Stopped — ${sentCount} sent, ${failedCount} failed` : `✓ Done — ${sentCount} sent, ${failedCount} failed` }));
+    showNotification(sentCount > 0 ? 'success' : 'error', wasStopped ? `Stopped: ${sentCount} sent, ${failedCount} failed` : `Sent ${sentCount} of ${idsToSend.length} emails`);
+    
+    setTimeout(() => {
+      setIsBulkSending(false);
+      setBulkSendProgress({ sent: 0, failed: 0, total: 0, current: '' });
+      fetchEmails();
+    }, 2500);
+  };
+
+  const handleStopBulkSend = () => {
+    stopBulkSendRef.current = true;
+    setBulkSendProgress(prev => ({ ...prev, current: 'Stopping after current batch...' }));
   };
 
   const handleReject = (id) => {
@@ -793,6 +821,42 @@ const Emails = () => {
         </div>
       )}
 
+      {/* ── Bulk Send Progress Bar with STOP ── */}
+      {isBulkSending && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[200] animate-in slide-in-from-bottom-10 duration-300">
+          <div className="bg-[#0d1117]/95 backdrop-blur-2xl border border-indigo-500/30 rounded-2xl px-8 py-5 shadow-[0_0_60px_rgba(79,70,229,0.3)] min-w-[520px]">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-3">
+                <Loader2 className="w-4 h-4 text-indigo-400 animate-spin" />
+                <span className="text-[11px] font-black text-white uppercase tracking-widest">
+                  Sending Emails — {bulkSendProgress.sent + bulkSendProgress.failed}/{bulkSendProgress.total}
+                </span>
+              </div>
+              <button
+                onClick={handleStopBulkSend}
+                disabled={stopBulkSendRef.current}
+                className="flex items-center gap-2 px-4 py-1.5 bg-red-500/20 hover:bg-red-500/40 text-red-400 hover:text-red-300 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all border border-red-500/30 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Square className="w-3 h-3 fill-current" />
+                Stop
+              </button>
+            </div>
+            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden mb-2">
+              <div
+                className="h-full bg-gradient-to-r from-indigo-600 to-emerald-500 transition-all duration-300 ease-out shadow-[0_0_12px_rgba(79,70,229,0.4)]"
+                style={{ width: `${bulkSendProgress.total > 0 ? ((bulkSendProgress.sent + bulkSendProgress.failed) / bulkSendProgress.total * 100) : 0}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-slate-500 truncate max-w-[320px]">{bulkSendProgress.current}</span>
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-black text-emerald-400">{bulkSendProgress.sent} sent</span>
+                {bulkSendProgress.failed > 0 && <span className="text-[10px] font-black text-red-400">{bulkSendProgress.failed} failed</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showTemplatePicker && (
         <div className="fixed inset-0 z-[4000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
