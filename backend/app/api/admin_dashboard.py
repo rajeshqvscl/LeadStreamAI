@@ -76,7 +76,8 @@ def get_all_leads_admin(
     intent: Optional[str] = None,
     owner: Optional[str] = None,
     sector: Optional[str] = None,
-    search: Optional[str] = None
+    search: Optional[str] = None,
+    period: Optional[str] = None
 ):
     """
     Returns paginated leads for the admin dashboard with global filtering.
@@ -129,6 +130,15 @@ def get_all_leads_admin(
             where_clauses.append("(l.first_name ILIKE %s OR l.last_name ILIKE %s OR l.company_name ILIKE %s OR l.email ILIKE %s)")
             s_param = f"%{search}%"
             params.extend([s_param, s_param, s_param, s_param])
+        if period and period != 'ALL':
+            if period == 'DAILY':
+                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
+            elif period == 'WEEKLY':
+                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '6 days'")
+            elif period == 'MONTHLY':
+                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '29 days'")
+            elif period == 'QUARTERLY':
+                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '89 days'")
             
         where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
@@ -139,7 +149,12 @@ def get_all_leads_admin(
                    l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
                    l.followup_stage, l.followup_status, l.last_outreach_at, l.email_status,
                    l.persona, l.email_draft, l.first_outreach_subject, l.last_outreach_subject,
-                   u.username as owner_name
+                   u.username as owner_name,
+                   (
+                       SELECT al.details FROM activity_log al 
+                       WHERE al.lead_id = l.id AND al.action = 'BOUNCED' 
+                       ORDER BY al.created_at DESC LIMIT 1
+                   ) as bounce_reason
             FROM leads_raw l
             LEFT JOIN users u ON l.user_id = u.id
             {where_sql}
@@ -184,12 +199,12 @@ def get_all_leads_admin(
 
 @router.get("/leads/export")
 def export_all_leads_admin(
-    range: Optional[str] = "ALL", 
+    period: Optional[str] = "ALL", 
     user_id: Optional[str] = Header(None, alias="X-User-Id")
 ):
     """
     Returns filtered leads in the system without pagination for full master export.
-    Supports range: DAILY, WEEKLY, MONTHLY, QUARTERLY, YEARLY, ALL
+    Supports period: DAILY, WEEKLY, MONTHLY, QUARTERLY, YEARLY, ALL
     """
     try:
         conn = get_db_connection()
@@ -204,15 +219,15 @@ def export_all_leads_admin(
 
         # 2. Build Range Filter (IST timezone — filter by updated_at)
         range_clause = ""
-        if range == 'DAILY':
+        if period == 'DAILY':
             range_clause = "AND l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date"
-        elif range == 'WEEKLY':
+        elif period == 'WEEKLY':
             range_clause = "AND l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '6 days'"
-        elif range == 'MONTHLY':
+        elif period == 'MONTHLY':
             range_clause = "AND l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '29 days'"
-        elif range == 'QUARTERLY':
+        elif period == 'QUARTERLY':
             range_clause = "AND l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '89 days'"
-        elif range == 'YEARLY':
+        elif period == 'YEARLY':
             range_clause = "AND l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '364 days'"
 
         # 3. Fetch leads
@@ -243,9 +258,15 @@ def export_all_leads_admin(
             conn.close()
 
 @router.get("/stats/global")
-def get_global_stats(user_id: Any = Header(None, alias="X-User-Id"), _t: Any = None):
+def get_global_stats(
+    user_id: Any = Header(None, alias="X-User-Id"),
+    owner: Optional[str] = None,
+    period: Optional[str] = 'ALL',
+    _t: Any = None
+):
     """
     Aggregates metrics across the entire workspace.
+    Supports owner (sender) filter and time range (DAILY/WEEKLY/MONTHLY/QUARTERLY/ALL).
     """
     try:
         conn = get_db_connection()
@@ -253,7 +274,6 @@ def get_global_stats(user_id: Any = Header(None, alias="X-User-Id"), _t: Any = N
         
         uid = normalize_user_id(user_id)
         
-        # Determine if user is admin
         is_admin = False
         if uid:
             cur.execute("SELECT role FROM users WHERE id = %s", (uid,))
@@ -263,64 +283,101 @@ def get_global_stats(user_id: Any = Header(None, alias="X-User-Id"), _t: Any = N
                 if role_val and str(role_val).upper() == 'ADMIN':
                     is_admin = True
 
-        # Base filter
-        base_filter = ""
-        params = []
-        if not is_admin:
-            if uid:
-                base_filter = " WHERE user_id = %s"
-                params = [uid]
-            else:
-                return {"total_leads": 0, "interested": 0, "meetings": 0, "active_flows": 0, "avg_score": 0, "total_followups": 0, "engaged": 0}
+        if not is_admin and not uid:
+            return {"total_leads": 0, "interested": 0, "meetings": 0, "active_flows": 0, "avg_score": 0, "total_followups": 0, "engaged": 0}
+
+        # Build lead-level filters
+        l_clauses = ["TRUE"]
+        l_params = []
+
+        if not is_admin and uid:
+            l_clauses.append("l.user_id = %s")
+            l_params.append(uid)
+        if owner and owner != 'ALL':
+            l_clauses.append("u.username ILIKE %s")
+            l_params.append(owner)
+        if period and period != 'ALL':
+            if period == 'DAILY':
+                l_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
+            elif period == 'WEEKLY':
+                l_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '6 days'")
+            elif period == 'MONTHLY':
+                l_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '29 days'")
+            elif period == 'QUARTERLY':
+                l_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '89 days'")
+
+        l_where = f"WHERE {' AND '.join(l_clauses)}"
+        from_l = "FROM leads_raw l LEFT JOIN users u ON l.user_id = u.id"
+
+        # Build activity_log-level filters
+        a_clauses = ["TRUE"]
+        a_params = []
+
+        if not is_admin and uid:
+            a_clauses.append("al.user_id = %s")
+            a_params.append(uid)
+        if owner and owner != 'ALL':
+            a_clauses.append("u.username ILIKE %s")
+            a_params.append(owner)
+        if period and period != 'ALL':
+            if period == 'DAILY':
+                a_clauses.append("al.created_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
+            elif period == 'WEEKLY':
+                a_clauses.append("al.created_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '6 days'")
+            elif period == 'MONTHLY':
+                a_clauses.append("al.created_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '29 days'")
+            elif period == 'QUARTERLY':
+                a_clauses.append("al.created_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '89 days'")
+
+        a_where = f"WHERE {' AND '.join(a_clauses)}"
+        from_act = "FROM activity_log al JOIN leads_raw l ON al.lead_id = l.id LEFT JOIN users u ON l.user_id = u.id"
 
         # Total leads (only sent, not all records)
-        cur.execute(f"SELECT COUNT(*) FROM leads_raw {base_filter} {'AND' if base_filter else 'WHERE'} email_status = 'SENT'", tuple(params))
+        cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND l.email_status = 'SENT'", tuple(l_params))
         total_leads = cur.fetchone()[0]
         
         # Interested (Intent)
-        cur.execute(f"SELECT COUNT(*) FROM leads_raw {base_filter} {'AND' if base_filter else 'WHERE'} reply_intent ILIKE 'INTERESTED'", tuple(params))
+        cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND l.reply_intent ILIKE 'INTERESTED'", tuple(l_params))
         interested = cur.fetchone()[0]
         
         # Meetings
-        cur.execute(f"SELECT COUNT(*) FROM leads_raw {base_filter} {'AND' if base_filter else 'WHERE'} (email_status ILIKE 'Meeting Scheduled' OR meeting_time IS NOT NULL)", tuple(params))
+        cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND (l.email_status ILIKE 'Meeting Scheduled' OR l.meeting_time IS NOT NULL)", tuple(l_params))
         meetings = cur.fetchone()[0]
         
         # Active Flows
-        cur.execute(f"SELECT COUNT(*) FROM leads_raw {base_filter} {'AND' if base_filter else 'WHERE'} (followup_status ILIKE 'ACTIVE' OR campaign_id IS NOT NULL)", tuple(params))
+        cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND (l.followup_status ILIKE 'ACTIVE' OR l.campaign_id IS NOT NULL)", tuple(l_params))
         active_flows = cur.fetchone()[0]
         
         # Avg Score
-        cur.execute(f"SELECT AVG(sentiment_score) FROM leads_raw {base_filter} {'AND' if base_filter else 'WHERE'} sentiment_score IS NOT NULL", tuple(params))
+        cur.execute(f"SELECT AVG(l.sentiment_score) {from_l} {l_where} AND l.sentiment_score IS NOT NULL", tuple(l_params))
         avg_score = cur.fetchone()[0] or 0
         
-        # Total Followups Sent (Stage 1+)
-        # Note: activity_log also has user_id
-        act_filter = f" WHERE user_id = %s" if not is_admin else ""
-        cur.execute(f"SELECT COUNT(*) FROM activity_log {act_filter} {'AND' if act_filter else 'WHERE'} action IN ('AUTO_FOLLOWUP_SENT', 'FOLLOWUP_APPROVED')", tuple(params))
+        # Total Followups Sent
+        cur.execute(f"SELECT COUNT(*) {from_act} {a_where} AND al.action IN ('AUTO_FOLLOWUP_SENT', 'FOLLOWUP_APPROVED')", tuple(a_params))
         total_followups = cur.fetchone()[0]
         
         # Engaged Leads
-        cur.execute(f"SELECT COUNT(*) FROM leads_raw {base_filter} {'AND' if base_filter else 'WHERE'} (reply_intent ILIKE 'INTERESTED' OR reply_intent ILIKE 'MEETING_SCHEDULED' OR is_responded = TRUE)", tuple(params))
+        cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND (l.reply_intent ILIKE 'INTERESTED' OR l.reply_intent ILIKE 'MEETING_SCHEDULED' OR l.is_responded = TRUE)", tuple(l_params))
         engaged = cur.fetchone()[0]
         
         # System Reach (leads with emails sent)
-        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status IS NOT NULL")
+        cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND l.email_status IS NOT NULL", tuple(l_params))
         system_reach = cur.fetchone()[0]
         
         # Open Rate (using email_status - SENT means delivered)
-        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'OPENED'")
+        cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND l.email_status = 'OPENED'", tuple(l_params))
         opened = cur.fetchone()[0]
         
         # Click Rate (leads who clicked)
-        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'CLICKED'")
+        cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND l.email_status = 'CLICKED'", tuple(l_params))
         clicked = cur.fetchone()[0]
         
         # Bounce Rate (invalid emails)
-        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'BOUNCED'")
+        cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND l.email_status = 'BOUNCED'", tuple(l_params))
         bounced = cur.fetchone()[0]
         
         # Opt-outs
-        cur.execute("SELECT COUNT(*) FROM leads_raw WHERE reply_intent = 'NOT_INTERESTED'")
+        cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND l.reply_intent = 'NOT_INTERESTED'", tuple(l_params))
         opt_outs = cur.fetchone()[0]
         
         # Open Rate %
@@ -332,16 +389,16 @@ def get_global_stats(user_id: Any = Header(None, alias="X-User-Id"), _t: Any = N
         conversion_rate = round((engaged / total_leads * 100), 1) if total_leads > 0 else 0
 
         # Intent Breakdown
-        cur.execute("""
-            SELECT COALESCE(reply_intent, 'UNKNOWN') as label, COUNT(*) as value 
-            FROM leads_raw 
+        cur.execute(f"""
+            SELECT COALESCE(l.reply_intent, 'UNKNOWN') as label, COUNT(*) as value 
+            {from_l} {l_where}
             GROUP BY 1 
             ORDER BY 2 DESC
-        """)
+        """, tuple(l_params))
         intent_breakdown = [dict(r) for r in cur.fetchall()]
 
         # Owner Breakdown
-        cur.execute("""
+        cur.execute(f"""
             SELECT COALESCE(u.username, 'Unassigned') as label, COUNT(l.id) as value
             FROM users u
             LEFT JOIN leads_raw l ON l.user_id = u.id
@@ -351,7 +408,7 @@ def get_global_stats(user_id: Any = Header(None, alias="X-User-Id"), _t: Any = N
         owner_breakdown = [dict(r) for r in cur.fetchall()]
 
         # Type Breakdown
-        cur.execute("""
+        cur.execute(f"""
             SELECT 
                 CASE 
                     WHEN u.username ILIKE '%%yashika%%' AND l.sector ILIKE '%%agri%%' THEN 'AGRIVIJAY'
@@ -359,15 +416,13 @@ def get_global_stats(user_id: Any = Header(None, alias="X-User-Id"), _t: Any = N
                     ELSE UPPER(COALESCE(l.lead_type, 'CLIENT'))
                 END as label, 
                 COUNT(*) as value
-            FROM leads_raw l
-            LEFT JOIN users u ON l.user_id = u.id
+            {from_l} {l_where}
             GROUP BY 1
             ORDER BY 2 DESC
-        """)
+        """, tuple(l_params))
         type_breakdown = [dict(r) for r in cur.fetchall()]
 
-        # Sector Breakdown (Excluding Type categories like Investor/Client)
-        # First, a quick cleanup to ensure consistency (Case Insensitive)
+        # Sector Breakdown — cleanup pass
         try:
             cur.execute("""
                 SELECT id, company_name, designation, raw_payload->>'remarks' as remarks, sector, lead_type 
@@ -376,7 +431,6 @@ def get_global_stats(user_id: Any = Header(None, alias="X-User-Id"), _t: Any = N
                 LIMIT 20
             """)
             to_fix = cur.fetchall()
-            
             if to_fix:
                 from app.utils.classification import infer_lead_classification
                 for row in to_fix:
@@ -385,11 +439,10 @@ def get_global_stats(user_id: Any = Header(None, alias="X-User-Id"), _t: Any = N
                             row['company_name'], 
                             row['designation'], 
                             row['remarks'] or '', 
-                            None # Pass None to force re-inference
+                            None
                         )
                         if new_sector.upper() in ['INVESTOR', 'CLIENT']:
                             new_sector = 'Other'
-                        
                         cur.execute("""
                             UPDATE leads_raw 
                             SET lead_type = %s, sector = %s, updated_at = NOW()
@@ -404,23 +457,23 @@ def get_global_stats(user_id: Any = Header(None, alias="X-User-Id"), _t: Any = N
             if conn:
                 conn.rollback()
         
-        cur.execute("""
-            SELECT COALESCE(sector, 'Other') as label, COUNT(*) as value
-            FROM leads_raw
-            WHERE UPPER(COALESCE(sector, 'Other')) NOT IN ('INVESTOR', 'CLIENT')
+        cur.execute(f"""
+            SELECT COALESCE(l.sector, 'Other') as label, COUNT(*) as value
+            {from_l} {l_where}
+            AND UPPER(COALESCE(l.sector, 'Other')) NOT IN ('INVESTOR', 'CLIENT')
             GROUP BY 1
             ORDER BY 2 DESC
             LIMIT 10
-        """)
+        """, tuple(l_params))
         sector_breakdown = [dict(r) for r in cur.fetchall()]
 
         # Source Breakdown
-        cur.execute("""
-            SELECT COALESCE(source, 'Direct') as label, COUNT(*) as value
-            FROM leads_raw
+        cur.execute(f"""
+            SELECT COALESCE(l.source, 'Direct') as label, COUNT(*) as value
+            {from_l} {l_where}
             GROUP BY 1
             ORDER BY 2 DESC
-        """)
+        """, tuple(l_params))
         source_breakdown = [dict(r) for r in cur.fetchall()]
         
         return {
@@ -434,6 +487,7 @@ def get_global_stats(user_id: Any = Header(None, alias="X-User-Id"), _t: Any = N
             "system_reach": system_reach,
             "open_rate": open_rate,
             "click_rate": click_rate,
+            "bounced": bounced,
             "bounce_rate": bounce_rate,
             "opt_outs": opt_outs,
             "intent_breakdown": intent_breakdown,
@@ -457,6 +511,7 @@ def get_filtered_breakdowns(
     status: Optional[str] = None,
     owner: Optional[str] = None,
     sector: Optional[str] = None,
+    period: Optional[str] = None,
     _t: Any = None
 ):
     """
@@ -501,6 +556,15 @@ def get_filtered_breakdowns(
         if sector and sector != 'ALL':
             clauses.append("l.sector ILIKE %s")
             params.append(sector)
+        if period and period != 'ALL':
+            if period == 'DAILY':
+                clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
+            elif period == 'WEEKLY':
+                clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '6 days'")
+            elif period == 'MONTHLY':
+                clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '29 days'")
+            elif period == 'QUARTERLY':
+                clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '89 days'")
         
         where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         

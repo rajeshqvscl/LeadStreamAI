@@ -295,6 +295,7 @@ def generate_followup_preview(lead_id: int, user_id: int):
         body = lead.get('followup_draft')
         if is_generic_followup(body):
             body = get_template_followup(lead, next_stage)
+        body = body.strip() if body else ""
         
         # Clean subject
         orig_subject = get_original_outreach_subject(lead)

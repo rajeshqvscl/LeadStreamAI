@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import api from '../services/api';
 import {
   Users, Target, MessageSquare, Calendar,
@@ -8,11 +8,11 @@ import {
   Sparkles, ShieldCheck, Mail, ArrowUpRight,
   Clock, CheckCircle2, AlertCircle, X, AlertTriangle,
   FileText, Briefcase, Zap, Info, DollarSign,
-  PieChart as PieIcon, Globe, RefreshCcw, Database, Terminal
+  RefreshCcw, Terminal
 } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid
+  BarChart, Bar, XAxis, YAxis
 } from 'recharts';
 
 const AdminDashboard = () => {
@@ -34,6 +34,7 @@ const AdminDashboard = () => {
     avg_score: 0,
     active_followups: 0
   });
+  const [statsLoading, setStatsLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedLead, setSelectedLead] = useState(null);
@@ -79,6 +80,44 @@ const AdminDashboard = () => {
   const [notification, setNotification] = useState(null);
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [exportRange, setExportRange] = useState('ALL');
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showAIMenu, setShowAIMenu] = useState(false);
+  const [showColumnMenu, setShowColumnMenu] = useState(false);
+  const allColumns = [
+    { key: 'name', label: 'Name' }, { key: 'company', label: 'Company' },
+    { key: 'email', label: 'Email Address' }, { key: 'type', label: 'Type' },
+    { key: 'sector', label: 'Sector' }, { key: 'intent', label: 'Intent' },
+    { key: 'rag', label: 'RAG Analysis' }, { key: 'check_size', label: 'Check Size' },
+    { key: 'score', label: 'Score' }, { key: 'stage', label: 'Stage' },
+    { key: 'followups', label: 'Followups' }, { key: 'rejection', label: 'Rejection' },
+    { key: 'status', label: 'Status' }, { key: 'sent_draft', label: 'Sent/Draft' },
+    { key: 'owner', label: 'Owner' }, { key: 'actions', label: 'Actions' },
+  ];
+  const [visibleColumns, setVisibleColumns] = useState(new Set(['name', 'company', 'type', 'status', 'stage', 'followups', 'owner', 'sent_draft', 'actions']));
+  const activeFilterCount = [filters.type, filters.status, filters.intent, filters.owner, filters.sector].filter(v => v !== 'ALL').length;
+  const [chartRange, setChartRange] = useState('ALL');
+
+  const isWithinRange = useCallback((dateStr) => {
+    if (chartRange === 'ALL' || !dateStr) return true;
+    const d = parseUtcDate(dateStr);
+    if (!d) return true;
+    const now = Date.now();
+    const diff = now - d.getTime();
+    if (chartRange === 'DAILY') return diff < 86400000;
+    if (chartRange === 'WEEKLY') return diff < 604800000;
+    if (chartRange === 'MONTHLY') return diff < 2592000000;
+    return true;
+  }, [chartRange]);
+
+  const chartFilteredLeads = useMemo(() => leads.filter(l => isWithinRange(l.updated_at)), [leads, isWithinRange]);
+
+  const quickFilterCounts = useMemo(() => ({
+    bounced: leads.filter(l => l.email_status === 'BOUNCED').length,
+    active: leads.filter(l => l.followup_status === 'ACTIVE').length,
+    pending: leads.filter(l => l.email_status === 'PENDING_APPROVAL').length,
+    replied: leads.filter(l => l.email_status === 'REPLIED').length,
+  }), [leads]);
 
   // Debounce Search Term
   useEffect(() => {
@@ -96,12 +135,20 @@ const AdminDashboard = () => {
     return html.replace(/<[^>]*>?/gm, '');
   };
 
-  const fetchGlobalStats = async () => {
+  const fetchGlobalStats = async (periodOverride, ownerOverride) => {
+    setStatsLoading(true);
     try {
-      const res = await api.get(`/api/admin/stats/global?_t=${Date.now()}`);
+      const params = new URLSearchParams({ _t: Date.now() });
+      const p = periodOverride || chartRange;
+      const o = ownerOverride || filters.owner;
+      if (o !== 'ALL') params.set('owner', o);
+      if (p !== 'ALL') params.set('period', p);
+      const res = await api.get(`/api/admin/stats/global?${params.toString()}`);
       setStats(res.data || {});
     } catch (err) {
       console.error('Failed to fetch stats', err);
+    } finally {
+      setStatsLoading(false);
     }
   };
 
@@ -128,7 +175,7 @@ const AdminDashboard = () => {
     }
   };
 
-  const fetchData = async (page = 1, silent = false) => {
+  const fetchData = async (page = 1, silent = false, periodOverride) => {
     try {
       if (!silent) setLoading(true);
       const params = new URLSearchParams({
@@ -136,6 +183,7 @@ const AdminDashboard = () => {
         limit: 50,
         ...filters,
         search: debouncedSearch || '',
+        period: periodOverride || chartRange,
         _t: Date.now()
       });
       
@@ -147,6 +195,7 @@ const AdminDashboard = () => {
         setAvailableSectors(leadsRes.data.sectors || []);
         setAvailableOwners(leadsRes.data.owners || []);
       }
+      setLastUpdatedAt(new Date());
     } catch (err) {
       console.error('Failed to fetch admin data', err);
     } finally {
@@ -161,6 +210,7 @@ const AdminDashboard = () => {
   }, []);
 
   useEffect(() => {
+    fetchGlobalStats();
     const fetchChartBreakdowns = async () => {
       try {
         const params = new URLSearchParams({ _t: Date.now() });
@@ -168,6 +218,7 @@ const AdminDashboard = () => {
         if (filters.status !== 'ALL') params.set('status', filters.status);
         if (filters.owner !== 'ALL') params.set('owner', filters.owner);
         if (filters.sector !== 'ALL') params.set('sector', filters.sector);
+        if (chartRange !== 'ALL') params.set('period', chartRange);
         const res = await api.get(`/api/admin/stats/breakdown?${params.toString()}`);
         setChartBreakdowns(res.data);
       } catch (err) {
@@ -175,7 +226,7 @@ const AdminDashboard = () => {
       }
     };
     fetchChartBreakdowns();
-  }, [filters]);
+  }, [filters, chartRange]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -194,11 +245,25 @@ const AdminDashboard = () => {
       if (filters.status !== 'ALL') params.set('status', filters.status);
       if (filters.owner !== 'ALL') params.set('owner', filters.owner);
       if (filters.sector !== 'ALL') params.set('sector', filters.sector);
+      if (chartRange !== 'ALL') params.set('period', chartRange);
       api.get(`/api/admin/stats/breakdown?${params.toString()}`).then(res => setChartBreakdowns(res.data)).catch(() => {});
     }, 20000);
 
     return () => clearInterval(pollId);
-  }, [currentPage, filters, debouncedSearch]);
+  }, [currentPage, filters, debouncedSearch, chartRange]);
+
+  // Live counter for "last updated Xs ago"
+  const [timeAgo, setTimeAgo] = useState('');
+  useEffect(() => {
+    const tick = () => {
+      if (!lastUpdatedAt) { setTimeAgo(''); return; }
+      const sec = Math.floor((Date.now() - lastUpdatedAt.getTime()) / 1000);
+      setTimeAgo(sec < 5 ? 'just now' : sec < 60 ? `${sec}s ago` : `${Math.floor(sec / 60)}m ago`);
+    };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => clearInterval(id);
+  }, [lastUpdatedAt]);
 
   const filteredLeads = useMemo(() => {
     // Backend now handles filtering, so we just return the leads state
@@ -234,45 +299,137 @@ const AdminDashboard = () => {
     return isInvestorTeam ? 'INVESTOR' : isClientTeam ? 'CLIENT' : (lead.lead_type || 'CLIENT');
   };
 
-  const chartIntentData = useMemo(() => {
-    if (chartBreakdowns?.intent_breakdown) return chartBreakdowns.intent_breakdown.map(d => ({ name: d.label, value: d.value }));
-    const counts = {};
-    leads.forEach(l => {
-      const k = l.reply_intent || 'UNKNOWN';
-      counts[k] = (counts[k] || 0) + 1;
-    });
-    return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-  }, [leads, chartBreakdowns]);
 
-  const chartSectorData = useMemo(() => {
-    if (chartBreakdowns?.sector_breakdown) return chartBreakdowns.sector_breakdown.map(d => ({ label: d.label, value: d.value }));
+
+  const chartSentByType = useMemo(() => {
     const counts = {};
-    leads.forEach(l => {
-      const k = l.sector || 'Other';
-      counts[k] = (counts[k] || 0) + 1;
+    chartFilteredLeads.filter(l => l.email_status === 'SENT' || l.email_status === 'REPLIED' || l.email_status === 'BOUNCED' || l.email_status === 'OPENED' || l.email_status === 'CLICKED' || l.last_outreach_at).forEach(l => {
+      const t = deriveType(l);
+      counts[t] = (counts[t] || 0) + 1;
     });
     return Object.entries(counts).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
-  }, [leads, chartBreakdowns]);
+  }, [chartFilteredLeads]);
 
-  const chartSourceData = useMemo(() => {
-    if (chartBreakdowns?.source_breakdown) return chartBreakdowns.source_breakdown.map(d => ({ name: d.label, value: d.value }));
+  const chartFollowupsByType = useMemo(() => {
     const counts = {};
-    leads.forEach(l => {
-      const k = l.source || 'Direct';
-      counts[k] = (counts[k] || 0) + 1;
+    chartFilteredLeads.filter(l => parseInt(l.followup_stage, 10) > 0).forEach(l => {
+      const t = deriveType(l);
+      counts[t] = (counts[t] || 0) + (parseInt(l.followup_stage, 10) || 1);
     });
-    return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-  }, [leads, chartBreakdowns]);
+    return Object.entries(counts).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+  }, [chartFilteredLeads]);
 
-  const chartTypeData = useMemo(() => {
-    if (chartBreakdowns?.type_breakdown) return chartBreakdowns.type_breakdown.map(d => ({ name: d.label, value: d.value }));
+  const chartSectorFiltered = useMemo(() => {
     const counts = {};
-    leads.forEach(l => {
-      const k = deriveType(l);
-      counts[k] = (counts[k] || 0) + 1;
+    chartFilteredLeads.forEach(l => {
+      const s = l.sector || 'Other';
+      counts[s] = (counts[s] || 0) + 1;
     });
-    return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-  }, [leads, chartBreakdowns]);
+    return Object.entries(counts).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+  }, [chartFilteredLeads]);
+
+  const chartBouncedDomains = useMemo(() => {
+    const counts = {};
+    leads.filter(l => l.email_status === 'BOUNCED').forEach(l => {
+      const domain = (l.email || '').split('@')[1] || 'unknown';
+      counts[domain] = (counts[domain] || 0) + 1;
+    });
+    return Object.entries(counts).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value).slice(0, 5);
+  }, [leads]);
+
+  const exportMasterCSV = async () => {
+    try {
+      const rangeLabel = exportRange === 'ALL' ? 'full' : exportRange.toLowerCase();
+      showNotification('success', `Preparing ${rangeLabel} master export...`);
+      const res = await api.get(`/api/admin/leads/export?period=${exportRange}`);
+      const allLeads = res.data.leads || [];
+      const headers = ['Name','Email','Designation','Company','Type','Status','Intent','Score','Check Size','Rejection Reason','Sector/Industry','Owner','Last Interaction','AI Strategy','Analyst Report','Key Signals','Confidence %'].join(',');
+      const rows = allLeads.map(l => {
+        const clean = (val) => `"${(val || '').toString().replace(/"/g, '""')}"`;
+        const rejectionReason = l.reply_intent === 'NOT_INTERESTED' ? (l.rag_advice?.split('.')[0] || 'No specific reason') : 'N/A';
+        let derivedType = l.lead_type || 'CLIENT';
+        const owner = (l.owner_name || '').toLowerCase();
+        if (owner.includes('yashika')) {
+          const sectorLower = (l.sector || '').toLowerCase();
+          const draftLower = (l.email_draft || '').toLowerCase();
+          const personaLower = (l.persona || '').toLowerCase();
+          const subjLower = (l.first_outreach_subject || l.last_outreach_subject || '').toLowerCase();
+          const isAiHiring = sectorLower.includes('hiring') || draftLower.includes('hiring') || personaLower.includes('hiring') || subjLower.includes('hiring') || sectorLower.includes('recruitment') || draftLower.includes('recruitment') || draftLower.includes('gigin');
+          derivedType = isAiHiring ? 'Gigin AI' : 'Agrivijay';
+        }
+        return [clean(`${l.first_name} ${l.last_name}`),clean(l.email),clean(l.designation),clean(l.company_name || l.family_office_name),clean(derivedType),clean(l.email_status),clean(l.reply_intent),clean(l.sentiment_score),clean(l.deal_size),clean(rejectionReason),clean(l.sector || 'Other'),clean(l.owner_name),clean(parseUtcDate(l.updated_at).toLocaleDateString()),clean(l.rag_intelligence?.strategy || 'General Outreach'),clean(l.rag_advice || 'Analyst Review Pending'),clean(Array.isArray(l.rag_intelligence?.signals) ? l.rag_intelligence.signals.join(' | ') : (l.rag_intelligence?.signals || 'N/A')),clean(l.rag_intelligence?.confidence || 'N/A')].join(',');
+      });
+      const csv = [headers, ...rows].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.setAttribute('hidden', ''); a.setAttribute('href', url); a.setAttribute('download', `FULL_MASTER_DATA_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      showNotification('success', `${rangeLabel === 'full' ? 'Full' : rangeLabel.charAt(0).toUpperCase() + rangeLabel.slice(1)} master export completed successfully!`);
+    } catch (err) {
+      console.error('Full export failed', err);
+      showNotification('error', 'Export Failure: Unable to aggregate total workspace data.');
+    }
+  };
+  const exportRejections = () => {
+    const rejections = leads.filter(l => l.reply_intent === 'NOT_INTERESTED');
+    const headers = ['Name','Company','Email','Check Size','Rejection Reason','Full Analyst Feedback'].join(',');
+    const rows = rejections.map(l => {
+      const clean = (val) => `"${(val || '').toString().replace(/"/g, '""')}"`;
+      return [clean(`${l.first_name} ${l.last_name}`),clean(l.company_name || l.family_office_name),clean(l.email),clean(l.deal_size),clean(l.rag_advice?.split('.')[0] || 'Unknown'),clean(l.rag_advice)].join(',');
+    });
+    const csv = [headers, ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.setAttribute('hidden', ''); a.setAttribute('href', url); a.setAttribute('download', `REJECTION_ANALYSIS_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  };
+  const exportReplies = () => {
+    const replies = leads.filter(l => l.email_status === 'REPLIED' || l.is_responded === true || (l.reply_intent && l.reply_intent !== 'NOT_INTERESTED'));
+    const headers = ['Name','Company','Email','Intent','Score','Check Size','Response Summary'].join(',');
+    const rows = replies.map(l => {
+      const clean = (val) => `"${(val || '').toString().replace(/"/g, '""')}"`;
+      return [clean(`${l.first_name} ${l.last_name}`),clean(l.company_name || l.family_office_name),clean(l.email),clean(l.reply_intent || 'N/A'),clean(l.sentiment_score),clean(l.deal_size),clean(l.rag_advice?.split('.')[0] || 'N/A')].join(',');
+    });
+    const csv = [headers, ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.setAttribute('hidden', ''); a.setAttribute('href', url); a.setAttribute('download', `REPLIES_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  };
+  const runAIClassify = async () => {
+    try {
+      const btn = document.getElementById('ai-classify-btn');
+      const original = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = '<span class="animate-pulse">🧠</span> Analyzing...';
+      const res = await api.post('/api/intelligence/leads/ai-deep-classify');
+      showNotification('success', `AI successfully categorized ${res.data.updated || 0} leads!`);
+      fetchData();
+      btn.disabled = false; btn.innerHTML = original;
+    } catch (err) {
+      console.error('AI Refresh failed', err);
+      const btn = document.getElementById('ai-classify-btn');
+      btn.disabled = false; btn.innerHTML = '❌ AI Classification Failed';
+      setTimeout(() => { btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-sparkles w-3.5 h-3.5"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path><path d="M5 3v4"></path><path d="M19 17v4"></path><path d="M3 5h4"></path><path d="M17 19h4"></path></svg> AI Deep Classify'; }, 3000);
+    }
+  };
+  const refreshSectors = async () => {
+    try {
+      const btn = document.getElementById('refresh-sectors-btn');
+      const original = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = '<span class="animate-spin">🔄</span> Processing...';
+      await api.post('/api/intelligence/leads/auto-enrich-sectors');
+      showNotification('success', 'Workspace sectors re-classified successfully!');
+      fetchData();
+      btn.disabled = false; btn.innerHTML = original;
+    } catch (err) {
+      console.error('Refresh failed', err);
+      const btn = document.getElementById('refresh-sectors-btn');
+      btn.disabled = false; btn.innerHTML = 'Sector Refresh Failed';
+    }
+  };
 
   if (loading && leads.length === 0) {
     return (
@@ -288,7 +445,7 @@ const AdminDashboard = () => {
   return (
     <>
       {notification && (
-        <div className="fixed top-4 right-4 z-[9999] flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-2xl animate-in slide-in-from-right-8 pointer-events-auto text-[10px]" style={{ background: notification.type === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(244,63,94,0.12)', border: notification.type === 'success' ? '1px solid rgba(16,185,129,0.2)' : '1px solid rgba(244,63,94,0.2)', color: notification.type === 'success' ? '#34d399' : '#fb7185' }}>
+        <div className="fixed top-20 right-4 z-[9999] flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-2xl animate-in slide-in-from-right-8 pointer-events-auto text-[10px]" style={{ background: notification.type === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(244,63,94,0.12)', border: notification.type === 'success' ? '1px solid rgba(16,185,129,0.2)' : '1px solid rgba(244,63,94,0.2)', color: notification.type === 'success' ? '#34d399' : '#fb7185' }}>
           {notification.type === 'success' ? <CheckCircle2 className="w-3 h-3 shrink-0" /> : <AlertCircle className="w-3 h-3 shrink-0" />}
           <span className="font-black uppercase tracking-widest">{notification.message}</span>
         </div>
@@ -306,87 +463,34 @@ const AdminDashboard = () => {
           <h1 className="text-2xl font-black text-white uppercase tracking-tight">Admin <span className="text-indigo-500">Intelligence</span></h1>
         </div>
 
-        <div className="flex items-center gap-4">
-          <button
-            onClick={async () => {
-              try {
-                const rangeLabel = exportRange === 'ALL' ? 'full' : exportRange.toLowerCase();
-                showNotification('success', `Preparing ${rangeLabel} master export...`);
-                const res = await api.get(`/api/admin/leads/export?range=${exportRange}`);
-                const allLeads = res.data.leads || [];
+        <div className="flex items-center gap-3">
+          <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest shrink-0">{timeAgo}</div>
+          <div className="relative">
+            <button
+              onClick={() => { setShowExportMenu(!showExportMenu); setShowAIMenu(false); }}
+              className="flex items-center gap-2 px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shrink-0"
+            >
+              <Download className="w-3.5 h-3.5" /> Export <ChevronRight className={`w-3 h-3 transition-transform ${showExportMenu ? 'rotate-90' : ''}`} />
+            </button>
+            {showExportMenu && (
+              <div className="absolute top-full right-0 mt-1 min-w-[200px] bg-[#111521] border border-white/10 rounded-xl shadow-2xl z-50 py-1 flex flex-col">
+                <button onClick={() => { setShowExportMenu(false); exportMasterCSV(); }} className="flex items-center gap-2 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-slate-300 hover:bg-white/5 hover:text-white transition-all text-left">
+                  <Download className="w-3 h-3" /> Full Master Export
+                </button>
+                <button onClick={() => { setShowExportMenu(false); exportRejections(); }} className="flex items-center gap-2 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-rose-400 hover:bg-white/5 transition-all text-left">
+                  <AlertCircle className="w-3 h-3" /> Export Rejections
+                </button>
+                <button onClick={() => { setShowExportMenu(false); exportReplies(); }} className="flex items-center gap-2 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-emerald-400 hover:bg-white/5 transition-all text-left">
+                  <Mail className="w-3 h-3" /> Export Replies
+                </button>
+              </div>
+            )}
+          </div>
 
-                const headers = [
-                  'Name', 'Email', 'Designation', 'Company', 'Type', 'Status',
-                  'Intent', 'Score', 'Check Size', 'Rejection Reason', 'Sector/Industry', 'Owner',
-                  'Last Interaction', 'AI Strategy', 'Analyst Report', 'Key Signals', 'Confidence %'
-                ].join(',');
-
-                const rows = allLeads.map(l => {
-                  const clean = (val) => `"${(val || '').toString().replace(/"/g, '""')}"`;
-                  const rejectionReason = l.reply_intent === 'NOT_INTERESTED' ? (l.rag_advice?.split('.')[0] || 'No specific reason') : 'N/A';
-                  
-                  let derivedType = l.lead_type || 'CLIENT';
-                  const owner = (l.owner_name || '').toLowerCase();
-                  if (owner.includes('yashika')) {
-                    const sectorLower = (l.sector || '').toLowerCase();
-                    const draftLower = (l.email_draft || '').toLowerCase();
-                    const personaLower = (l.persona || '').toLowerCase();
-                    const subjLower = (l.first_outreach_subject || l.last_outreach_subject || '').toLowerCase();
-                    const isAiHiring = sectorLower.includes('hiring') || 
-                                       draftLower.includes('hiring') || 
-                                       personaLower.includes('hiring') || 
-                                       subjLower.includes('hiring') || 
-                                       sectorLower.includes('recruitment') || 
-                                       draftLower.includes('recruitment') ||
-                                       draftLower.includes('gigin');
-                    if (isAiHiring) {
-                      derivedType = 'Gigin AI';
-                    } else {
-                      derivedType = 'Agrivijay';
-                    }
-                  }
-
-                  return [
-                    clean(`${l.first_name} ${l.last_name}`),
-                    clean(l.email),
-                    clean(l.designation),
-                    clean(l.company_name || l.family_office_name),
-                    clean(derivedType),
-                    clean(l.email_status),
-                    clean(l.reply_intent),
-                    clean(l.sentiment_score),
-                    clean(l.deal_size),
-                    clean(rejectionReason),
-                    clean(l.sector || 'Other'),
-                    clean(l.owner_name),
-                    clean(parseUtcDate(l.updated_at).toLocaleDateString()),
-                    clean(l.rag_intelligence?.strategy || 'General Outreach'),
-                    clean(l.rag_advice || 'Analyst Review Pending'),
-                    clean(Array.isArray(l.rag_intelligence?.signals) ? l.rag_intelligence.signals.join(' | ') : (l.rag_intelligence?.signals || 'N/A')),
-                    clean(l.rag_intelligence?.confidence || 'N/A')
-                  ].join(',');
-                });
-
-                const csv = [headers, ...rows].join('\n');
-                const blob = new Blob([csv], { type: 'text/csv' });
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.setAttribute('hidden', ''); a.setAttribute('href', url); a.setAttribute('download', `FULL_MASTER_DATA_${new Date().toISOString().split('T')[0]}.csv`);
-                document.body.appendChild(a); a.click(); document.body.removeChild(a);
-                showNotification('success', `${rangeLabel === 'full' ? 'Full' : rangeLabel.charAt(0).toUpperCase() + rangeLabel.slice(1)} master export completed successfully!`);
-              } catch (err) {
-                console.error('Full export failed', err);
-                showNotification('error', 'Export Failure: Unable to aggregate total workspace data.');
-              }
-            }}
-            className="flex items-center gap-2 px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-[10px] font-black uppercase tracking-widest rounded-l-xl border-r-0 transition-all shrink-0"
-          >
-            <Download className="w-3.5 h-3.5" /> Full Master Export
-          </button>
           <select
             value={exportRange}
             onChange={(e) => setExportRange(e.target.value)}
-            className="bg-white/5 hover:bg-white/10 border border-white/10 text-white text-[10px] font-black uppercase tracking-widest rounded-r-xl px-3 py-3 focus:outline-none focus:border-indigo-500/50 transition-all appearance-none cursor-pointer"
+            className="bg-white/5 hover:bg-white/10 border border-white/10 text-white text-[10px] font-black uppercase tracking-widest rounded-xl px-3 py-3 focus:outline-none focus:border-indigo-500/50 transition-all appearance-none cursor-pointer"
           >
             <option value="ALL">All Time</option>
             <option value="DAILY">Daily</option>
@@ -396,128 +500,41 @@ const AdminDashboard = () => {
             <option value="YEARLY">Yearly</option>
           </select>
 
-          <button
-            onClick={async () => {
-              try {
-                const btn = document.getElementById('ai-classify-btn');
-                const original = btn.innerHTML;
-                btn.disabled = true;
-                btn.innerHTML = '<span class="animate-pulse">🧠</span> Analyzing...';
-                
-                const res = await api.post('/api/intelligence/leads/ai-deep-classify');
-                showNotification('success', `AI successfully categorized ${res.data.updated || 0} leads!`);
-                fetchData();
-                
-                btn.disabled = false;
-                btn.innerHTML = original;
-              } catch (err) {
-                console.error('AI Refresh failed', err);
-                const btn = document.getElementById('ai-classify-btn');
-                btn.disabled = false;
-                btn.innerHTML = '❌ AI Classification Failed';
-                setTimeout(() => {
-                  btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-sparkles w-3.5 h-3.5"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path><path d="M5 3v4"></path><path d="M19 17v4"></path><path d="M3 5h4"></path><path d="M17 19h4"></path></svg> AI Deep Classify';
-                }, 3000);
-              }
-            }}
-            id="ai-classify-btn"
-            className="flex items-center gap-2 px-6 py-3 bg-violet-600/10 hover:bg-violet-600/20 text-violet-400 border border-violet-500/20 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all"
-          >
-            <Sparkles className="w-3.5 h-3.5" /> AI Deep Classify
-          </button>
-
-          <button
-            onClick={async () => {
-              try {
-                const btn = document.getElementById('refresh-sectors-btn');
-                const original = btn.innerHTML;
-                btn.disabled = true;
-                btn.innerHTML = '<span class="animate-spin">🔄</span> Processing...';
-                
-                await api.post('/api/intelligence/leads/auto-enrich-sectors');
-                showNotification('success', 'Workspace sectors re-classified successfully!');
-                fetchData();
-                
-                btn.disabled = false;
-                btn.innerHTML = original;
-              } catch (err) {
-                console.error('Refresh failed', err);
-                const btn = document.getElementById('refresh-sectors-btn');
-                btn.disabled = false;
-                btn.innerHTML = 'Sector Refresh Failed';
-              }
-            }}
-            id="refresh-sectors-btn"
-            className="flex items-center gap-2 px-6 py-3 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all"
-          >
-            <RefreshCcw className="w-3.5 h-3.5" /> Refresh All Sectors
-          </button>
-
-          <button
-            onClick={() => {
-              const rejections = leads.filter(l => l.reply_intent === 'NOT_INTERESTED');
-              const headers = ['Name', 'Company', 'Email', 'Check Size', 'Rejection Reason', 'Full Analyst Feedback'].join(',');
-              const rows = rejections.map(l => {
-                const clean = (val) => `"${(val || '').toString().replace(/"/g, '""')}"`;
-                return [
-                  clean(`${l.first_name} ${l.last_name}`),
-                  clean(l.company_name || l.family_office_name),
-                  clean(l.email),
-                  clean(l.deal_size),
-                  clean(l.rag_advice?.split('.')[0] || 'Unknown'),
-                  clean(l.rag_advice)
-                ].join(',');
-              });
-              const csv = [headers, ...rows].join('\n');
-              const blob = new Blob([csv], { type: 'text/csv' });
-              const url = window.URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.setAttribute('hidden', ''); a.setAttribute('href', url); a.setAttribute('download', `REJECTION_ANALYSIS_${new Date().toISOString().split('T')[0]}.csv`);
-              document.body.appendChild(a); a.click(); document.body.removeChild(a);
-            }}
-            className="flex items-center gap-2 px-6 py-3 bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-xl shadow-rose-500/20"
-          >
-            <AlertCircle className="w-3.5 h-3.5" /> Export Rejections
-          </button>
-
-          <button
-            onClick={() => {
-              const replies = leads.filter(l => l.email_status === 'REPLIED' || l.is_responded === true || (l.reply_intent && l.reply_intent !== 'NOT_INTERESTED'));
-              const headers = ['Name', 'Company', 'Email', 'Intent', 'Score', 'Check Size', 'Response Summary'].join(',');
-              const rows = replies.map(l => {
-                const clean = (val) => `"${(val || '').toString().replace(/"/g, '""')}"`;
-                return [
-                  clean(`${l.first_name} ${l.last_name}`),
-                  clean(l.company_name || l.family_office_name),
-                  clean(l.email),
-                  clean(l.reply_intent || 'N/A'),
-                  clean(l.sentiment_score),
-                  clean(l.deal_size),
-                  clean(l.rag_advice?.split('.')[0] || 'N/A')
-                ].join(',');
-              });
-              const csv = [headers, ...rows].join('\n');
-              const blob = new Blob([csv], { type: 'text/csv' });
-              const url = window.URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.setAttribute('hidden', ''); a.setAttribute('href', url); a.setAttribute('download', `REPLIES_${new Date().toISOString().split('T')[0]}.csv`);
-              document.body.appendChild(a); a.click(); document.body.removeChild(a);
-            }}
-            className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-xl shadow-emerald-500/20"
-          >
-            <Mail className="w-3.5 h-3.5" /> Export Replies
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => { setShowAIMenu(!showAIMenu); setShowExportMenu(false); }}
+              className="flex items-center gap-2 px-4 py-3 bg-violet-600/10 hover:bg-violet-600/20 text-violet-400 border border-violet-500/20 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all"
+            >
+              <Sparkles className="w-3.5 h-3.5" /> AI Actions <ChevronRight className={`w-3 h-3 transition-transform ${showAIMenu ? 'rotate-90' : ''}`} />
+            </button>
+            {showAIMenu && (
+              <div className="absolute top-full right-0 mt-1 min-w-[200px] bg-[#111521] border border-white/10 rounded-xl shadow-2xl z-50 py-1 flex flex-col">
+                <button onClick={async () => { setShowAIMenu(false); await runAIClassify(); }} id="ai-classify-btn" className="flex items-center gap-2 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-violet-400 hover:bg-white/5 transition-all text-left">
+                  <Sparkles className="w-3 h-3" /> AI Deep Classify
+                </button>
+                <button onClick={async () => { setShowAIMenu(false); await refreshSectors(); }} id="refresh-sectors-btn" className="flex items-center gap-2 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-indigo-400 hover:bg-white/5 transition-all text-left">
+                  <RefreshCcw className="w-3 h-3" /> Refresh All Sectors
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
 
       {/* Analytics Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 mb-4">
+      <div className="relative">
+        {loading && (
+          <div className="absolute inset-0 z-10 bg-[#0a0c10]/60 flex items-center justify-center rounded-xl">
+            <div className="w-6 h-6 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
+          </div>
+        )}
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 mb-4">
         {[
           { label: 'Total Sent', value: stats.total_leads, icon: Users, color: 'indigo', desc: 'Emails successfully sent', contrib: 'From Database' },
           { label: 'Followups Sent', value: stats.total_followups, icon: Mail, color: 'emerald', desc: 'Total stages sent', contrib: 'Activity Log' },
           { label: 'Engaged', value: stats.engaged, icon: Target, color: 'blue', desc: 'Replied or interested', contrib: 'Email Status & Intent' },
-          { label: 'Active Flows', value: stats.active_flows, icon: Zap, color: 'amber', desc: 'Running sequences', contrib: 'Lead Status' },
+          { label: 'Bounced', value: stats.bounced, icon: AlertCircle, color: 'rose', desc: `${stats.bounce_rate || 0}% of sent — invalid emails`, contrib: 'Email Status' },
           { label: 'Meetings', value: stats.meetings, icon: Calendar, color: 'rose', desc: 'Scheduled calls', contrib: 'Meeting Status' },
           { label: 'Interested', value: stats.interested, icon: MessageSquare, color: 'violet', desc: 'Intent identified', contrib: 'AI Classification' },
           { label: 'Avg Score', value: stats.avg_score, icon: TrendingUp, color: 'sky', desc: 'Overall sentiment', contrib: 'Lead Sentiment' },
@@ -531,12 +548,17 @@ const AdminDashboard = () => {
               <div className="text-[7px] font-black text-slate-700 uppercase tracking-widest">{stat.contrib}</div>
             </div>
             <div className="relative z-10">
-              <div className="text-[18px] font-black text-white leading-tight mb-0.5">{stat.value}</div>
+              {statsLoading ? (
+                <div className="h-7 w-20 bg-white/5 rounded-lg animate-pulse mb-1.5" />
+              ) : (
+                <div className="text-[18px] font-black text-white leading-tight mb-0.5">{stat.value}</div>
+              )}
               <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest leading-none mb-1">{stat.label}</div>
               <div className="text-[7px] text-slate-600 font-bold uppercase tracking-widest leading-none">{stat.desc}</div>
             </div>
           </div>
         ))}
+      </div>
       </div>
 
       {/* Search & Filters */}
@@ -560,6 +582,22 @@ const AdminDashboard = () => {
           Replies
         </button>
 
+        <div className="relative shrink-0">
+          <button onClick={() => { setShowColumnMenu(!showColumnMenu); setShowExportMenu(false); setShowAIMenu(false); }} className="flex items-center gap-1.5 px-3 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border bg-white/[0.03] border-white/5 text-slate-500 hover:text-white hover:bg-white/[0.06]">
+            <BarChart3 className="w-3.5 h-3.5" /> Columns
+          </button>
+          {showColumnMenu && (
+            <div className="absolute top-full left-0 mt-1 min-w-[180px] bg-[#111521] border border-white/10 rounded-xl shadow-2xl z-50 py-2 px-1">
+              {allColumns.map(col => (
+                <label key={col.key} className="flex items-center gap-2 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-400 hover:bg-white/5 hover:text-white rounded-lg cursor-pointer transition-all">
+                  <input type="checkbox" checked={visibleColumns.has(col.key)} onChange={() => { const next = new Set(visibleColumns); next.has(col.key) ? next.delete(col.key) : next.add(col.key); setVisibleColumns(next); }} className="accent-indigo-500 w-3 h-3" />
+                  {col.label}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="flex items-center gap-3">
           <select
             value={filters.type}
@@ -571,6 +609,23 @@ const AdminDashboard = () => {
             <option value="GIGIN AI">Gigin AI</option>
             <option value="INVESTOR">Investors</option>
             <option value="CLIENT">Clients</option>
+          </select>
+
+          <select
+            value={chartRange}
+            onChange={(e) => {
+              const val = e.target.value;
+              setChartRange(val);
+              fetchData(1, false, val);
+              fetchGlobalStats(val, filters.owner);
+            }}
+            className="bg-white/[0.03] border border-white/5 rounded-xl py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest focus:outline-none focus:border-indigo-500/50"
+          >
+            <option value="ALL">All Time</option>
+            <option value="DAILY">Daily</option>
+            <option value="WEEKLY">Weekly</option>
+            <option value="MONTHLY">Monthly</option>
+            <option value="QUARTERLY">Quarterly</option>
           </select>
 
           <select
@@ -588,7 +643,11 @@ const AdminDashboard = () => {
 
           <select
             value={filters.owner}
-            onChange={(e) => setFilters({ ...filters, owner: e.target.value })}
+            onChange={(e) => {
+              const val = e.target.value;
+              setFilters({ ...filters, owner: val });
+              fetchGlobalStats(chartRange, val);
+            }}
             className="bg-white/[0.03] border border-white/5 rounded-xl py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest focus:outline-none focus:border-indigo-500/50"
           >
             {owners.map(o => (
@@ -605,59 +664,73 @@ const AdminDashboard = () => {
               <option key={s} value={s}>{s === 'ALL' ? 'All Sectors' : s}</option>
             ))}
           </select>
+
+          {activeFilterCount > 0 && (
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="px-2 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-[9px] font-black text-indigo-400 uppercase tracking-widest">{activeFilterCount} active</span>
+              <button onClick={() => { setFilters({ type: 'ALL', status: 'ALL', intent: 'ALL', owner: 'ALL', sector: 'ALL' }); fetchGlobalStats(chartRange, 'ALL'); }} className="px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[9px] font-black text-slate-500 hover:text-white uppercase tracking-widest transition-all">Clear</button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Visual Analytics Section */}
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-3 mb-6">
+      {/* Quick Filters Row */}
+      <div className="flex flex-wrap items-center gap-2 mb-6">
         {[
-          { title: 'Lead Intent', sub: 'Pipeline State', icon: PieIcon, color: 'indigo', data: chartIntentData, type: 'pie', desc: 'Sentiment of lead replies', contrib: 'AI Sentiment Analysis' },
-          { title: 'Sectors', sub: 'Industry Volume', icon: Globe, color: 'purple', data: chartSectorData, type: 'bar', desc: 'Lead volume by industry', contrib: 'Registry Classification' },
-          { title: 'Sources', sub: 'Acquisition', icon: Database, color: 'blue', data: chartSourceData, type: 'pie', desc: 'Where leads were imported', contrib: 'Ingestion Metadata' },
-          { title: 'Lead Type', sub: 'Investor/Client', icon: Users, color: 'emerald', data: chartTypeData, type: 'pie', desc: 'Investors vs Clients split', contrib: 'Team Ownership Logic' }
+          { label: 'Bounced', count: quickFilterCounts.bounced, filterVal: 'BOUNCED', color: 'rose' },
+          { label: 'Active', count: quickFilterCounts.active, filterVal: 'ACTIVE', color: 'indigo' },
+          { label: 'Pending Approval', count: quickFilterCounts.pending, filterVal: 'PENDING_APPROVAL', color: 'amber' },
+          { label: 'Replied', count: quickFilterCounts.replied, filterVal: 'REPLIED', color: 'blue' },
+        ].map((chip, i) => (
+          <button
+            key={i}
+            onClick={() => setFilters({ ...filters, status: filters.status === chip.filterVal ? 'ALL' : chip.filterVal })}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all border ${
+              filters.status === chip.filterVal
+                ? `bg-${chip.color}-500/20 border-${chip.color}-500/40 text-${chip.color}-400 shadow-lg shadow-${chip.color}-500/10`
+                : 'bg-white/[0.03] border-white/5 text-slate-500 hover:text-white hover:bg-white/[0.06]'
+            }`}
+          >
+            {chip.label} <span className="text-white/70">{chip.count}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Simplified Visual Analytics */}
+      <div className="flex items-center gap-3 mb-4">
+        <h3 className="text-[11px] font-black text-white uppercase tracking-[0.2em]">Analytics</h3>
+        <div className="h-4 w-px bg-white/10" />
+      </div>
+
+      {/* Charts Grid: Sent, Followups, Sector, Bounced Domains */}
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
+        {[
+          { title: 'Sent by Type', desc: 'Leads with outreach sent', icon: Mail, data: chartSentByType },
+          { title: 'Followups by Type', desc: 'Total followup stages sent', icon: Zap, data: chartFollowupsByType },
+          { title: 'Sectors', desc: 'Lead volume by sector', icon: Briefcase, data: chartSectorFiltered },
+          { title: 'Top Bounced Domains', desc: 'Most common invalid domains', icon: AlertCircle, data: chartBouncedDomains },
         ].map((item, i) => (
           <div key={i} className="bg-[#111521] border border-white/5 rounded-xl p-3 flex flex-col">
             <div className="flex items-center justify-between mb-2">
               <div>
-                <h3 className="text-[11px] font-black text-white uppercase tracking-wider">{item.title}</h3>
-                <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">{item.sub}</p>
+                <h3 className="text-[10px] font-black text-white uppercase tracking-wider">{item.title}</h3>
                 <p className="text-[7px] text-slate-600 font-bold uppercase tracking-widest leading-none">{item.desc}</p>
               </div>
-              <div className="flex flex-col items-end gap-1">
-                <div className={`w-6 h-6 rounded-lg bg-${item.color}-500/10 flex items-center justify-center border border-${item.color}-500/20`}>
-                  <item.icon className={`w-3 h-3 text-${item.color}-400`} />
-                </div>
-                <div className="text-[6px] font-black text-slate-800 uppercase tracking-tighter">{item.contrib}</div>
-              </div>
+              <item.icon className="w-3.5 h-3.5 text-slate-500" />
             </div>
-            <div className="h-[120px]">
-              <ResponsiveContainer width="100%" height="100%">
-                {item.type === 'pie' ? (
-                  <PieChart>
-                    <Pie
-                      data={item.data || []}
-                      innerRadius={35}
-                      outerRadius={50}
-                      paddingAngle={3}
-                      dataKey="value"
-                      label={({ name, value }) => `${value}`}
-                      labelLine={false}
-                    >
-                      {(item.data || []).map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={item.color === 'emerald' ? (entry.label === 'INVESTOR' ? '#10b981' : '#64748b') : ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'][index % 6]} />
-                      ))}
-                    </Pie>
-                    <Tooltip contentStyle={{ backgroundColor: '#111521', border: '1px solid rgba(255,255,255,0.1)', fontSize: '9px' }} />
-                  </PieChart>
-                ) : (
-                  <BarChart data={item.data || []} layout="vertical" margin={{ right: 30 }}>
+            <div className="flex-1 min-h-[100px]">
+              {item.data.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-[8px] text-slate-700 font-black uppercase tracking-widest">No data</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={(() => { const s = [...item.data].sort((a, b) => b.value - a.value); const t = s.slice(0, 6); const r = s.slice(6); if (r.length > 0) t.push({ label: 'Others', value: r.reduce((x, y) => x + y.value, 0) }); return t; })()} layout="vertical" margin={{ right: 20, left: 0 }}>
                     <XAxis type="number" hide />
-                    <YAxis dataKey="label" type="category" hide />
+                    <YAxis dataKey="label" type="category" width={55} tick={{ fill: '#94a3b8', fontSize: 8, fontWeight: 700 }} />
                     <Tooltip cursor={{ fill: 'rgba(255,255,255,0.02)' }} contentStyle={{ backgroundColor: '#111521', border: '1px solid rgba(255,255,255,0.1)', fontSize: '9px' }} />
-                    <Bar dataKey="value" fill="#8b5cf6" radius={[0, 4, 4, 0]} barSize={8} label={{ position: 'right', fill: '#94a3b8', fontSize: 10 }} />
+                    <Bar dataKey="value" fill="#8b5cf6" radius={[0, 3, 3, 0]} barSize={10} label={{ position: 'right', fill: '#94a3b8', fontSize: 9 }} />
                   </BarChart>
-                )}
-              </ResponsiveContainer>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
         ))}
@@ -717,23 +790,23 @@ const AdminDashboard = () => {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse border border-white/5">
             <thead>
-              <tr className="bg-white/[0.02] border-b border-white/5 sticky top-0 z-10">
-                  <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Name</th>
-                  <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Company</th>
-                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Email Address</th>
-                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Type</th>
-                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Sector</th>
-<th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Intent</th>
-                  <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">RAG Analysis</th>
-                  <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Check Size</th>
-                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Score</th>
-                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Stage</th>
-                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Followups</th>
-                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Rejection / Reason</th>
-                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Status</th>
-                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Sent/Draft</th>
-                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Owner</th>
-                <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Actions</th>
+              <tr className="bg-[#0f111a] border-b border-white/5 sticky top-0 z-10">
+                {visibleColumns.has('name') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Name</th>}
+                {visibleColumns.has('company') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Company</th>}
+                {visibleColumns.has('email') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Email Address</th>}
+                {visibleColumns.has('type') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Type</th>}
+                {visibleColumns.has('sector') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Sector</th>}
+                {visibleColumns.has('intent') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Intent</th>}
+                {visibleColumns.has('rag') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">RAG Analysis</th>}
+                {visibleColumns.has('check_size') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Check Size</th>}
+                {visibleColumns.has('score') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Score</th>}
+                {visibleColumns.has('stage') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Stage</th>}
+                {visibleColumns.has('followups') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Followups</th>}
+                {visibleColumns.has('rejection') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Rejection / Reason</th>}
+                {visibleColumns.has('status') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Status</th>}
+                {visibleColumns.has('sent_draft') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Sent/Draft</th>}
+                {visibleColumns.has('owner') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Owner</th>}
+                {visibleColumns.has('actions') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -743,7 +816,7 @@ const AdminDashboard = () => {
                   onClick={() => setSelectedLead(lead)}
                   className="hover:bg-white/[0.02] transition-colors cursor-pointer group"
                 >
-                   <td className="px-1 py-1 border border-white/5">
+                   {visibleColumns.has('name') && <td className="px-1 py-1 border border-white/5">
                     <div className="flex items-center gap-2">
                       <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500/20 to-violet-500/10 flex items-center justify-center border border-white/10 group-hover:border-indigo-500/30 transition-all shrink-0">
                         <span className="text-[11px] font-black text-indigo-400">
@@ -775,19 +848,19 @@ const AdminDashboard = () => {
                         </div>
                       </div>
                     </div>
-                  </td>
-                  <td className="px-1 py-1 border border-white/5">
+                  </td>}
+                  {visibleColumns.has('company') && <td className="px-1 py-1 border border-white/5">
                     <div className="text-[11px] font-bold text-slate-400 uppercase tracking-tighter">
                       {(lead.company_name === 'Independent' || !lead.company_name) ? '—' : (lead.company_name || lead.family_office_name || '—')}
                     </div>
-                  </td>
-                  <td className="px-1 py-1 border border-white/5">
+                    </td>}
+                  {visibleColumns.has('email') && <td className="px-1 py-1 border border-white/5">
                     <div>
                       <div className="text-[12px] font-bold text-white break-words">{lead.email}</div>
                       {lead.phone && <div className="text-[9px] text-slate-500 font-medium">{lead.phone}</div>}
                     </div>
-                  </td>
-                  <td className="px-1 py-1 border border-white/5">
+                  </td>}
+                  {visibleColumns.has('type') && <td className="px-1 py-1 border border-white/5">
                     {(() => {
                       const name = (lead.owner_name || '').toLowerCase();
                       const isInvestorTeam = name.includes('yashika') || name.includes('kajal') || name.includes('ayush');
@@ -830,14 +903,14 @@ const AdminDashboard = () => {
                         </span>
                       );
                     })()}
-                  </td>
-                  <td className="px-1 py-1 border border-white/5">
+                  </td>}
+                  {visibleColumns.has('sector') && <td className="px-1 py-1 border border-white/5">
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-indigo-500/5 border border-indigo-500/20 text-indigo-400">
                       <Briefcase className="w-3 h-3" />
                       {lead.sector || 'OTHER'}
                     </span>
-                  </td>
-                  <td className="px-1 py-1 border border-white/5">
+                  </td>}
+                  {visibleColumns.has('intent') && <td className="px-1 py-1 border border-white/5">
                     {lead.reply_intent ? (
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${lead.reply_intent === 'INTERESTED' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : lead.reply_intent === 'NOT_INTERESTED' ? 'bg-rose-500/10 border-rose-500/20 text-rose-400' : 'bg-amber-500/10 border-amber-500/20 text-amber-400'}`}>
                         {lead.reply_intent}
@@ -845,8 +918,8 @@ const AdminDashboard = () => {
                     ) : (
                       <span className="text-[10px] font-bold text-slate-700 tracking-widest uppercase italic">Awaiting reply</span>
                     )}
-                  </td>
-                  <td className="px-1 py-1 border border-white/5">
+                  </td>}
+                  {visibleColumns.has('rag') && <td className="px-1 py-1 border border-white/5">
                     {lead.rag_intelligence?.verdict ? (
                       <div className="flex flex-col gap-1">
                         <span className={`text-[9px] font-black uppercase tracking-widest ${lead.rag_intelligence.verdict === 'POSITIVE' ? 'text-emerald-400' : lead.rag_intelligence.verdict === 'STRONG' ? 'text-blue-400' : 'text-amber-400'}`}>
@@ -857,19 +930,19 @@ const AdminDashboard = () => {
                     ) : (
                       <span className="text-[10px] font-bold text-slate-700 uppercase tracking-widest italic">—</span>
                     )}
-                  </td>
-                  <td className="px-1 py-1 border border-white/5">
+                  </td>}
+                  {visibleColumns.has('check_size') && <td className="px-1 py-1 border border-white/5">
                     <div className="flex items-center gap-2">
                       <DollarSign className="w-3.5 h-3.5 text-emerald-500" />
                       <span className="text-[13px] font-black text-white">{lead.deal_size || '—'}</span>
                     </div>
-                  </td>
-                  <td className="px-1.5 py-1.5 text-center border border-white/5">
+                  </td>}
+                  {visibleColumns.has('score') && <td className="px-1.5 py-1.5 text-center border border-white/5">
                     <div className={`text-[15px] font-black ${(lead.rag_intelligence?.sentiment_score || lead.sentiment_score) >= 80 ? 'text-emerald-400' : (lead.rag_intelligence?.sentiment_score || lead.sentiment_score) >= 50 ? 'text-amber-400' : 'text-slate-400'}`}>
                       {lead.rag_intelligence?.sentiment_score || lead.sentiment_score || '—'}
                     </div>
-                  </td>
-                  <td className="px-1.5 py-1.5 text-center border border-white/5">
+                  </td>}
+                  {visibleColumns.has('stage') && <td className="px-1.5 py-1.5 text-center border border-white/5">
                     {(() => {
                       const stageNum = parseInt(lead.followup_stage, 10) || 0;
                       return (
@@ -885,8 +958,8 @@ const AdminDashboard = () => {
                         </div>
                       );
                     })()}
-                  </td>
-                  <td className="px-1.5 py-1.5 text-center border border-white/5">
+                  </td>}
+                  {visibleColumns.has('followups') && <td className="px-1.5 py-1.5 text-center border border-white/5">
                     {(() => {
                       const stageNum = parseInt(lead.followup_stage, 10) || 0;
                       const isPalak = (lead.owner_name || '').toLowerCase().includes('palak');
@@ -912,8 +985,8 @@ const AdminDashboard = () => {
                         </div>
                       );
                     })()}
-                  </td>
-                  <td className="px-1 py-1 border border-white/5">
+                  </td>}
+                  {visibleColumns.has('rejection') && <td className="px-1 py-1 border border-white/5">
                     {lead.reply_intent === 'NOT_INTERESTED' ? (
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-1.5 px-2 py-0.5 bg-rose-500/10 border border-rose-500/20 rounded-md w-fit">
@@ -927,8 +1000,8 @@ const AdminDashboard = () => {
                     ) : (
                       <span className="text-[10px] font-bold text-slate-700 uppercase tracking-widest">N/A</span>
                     )}
-                  </td>
-                  <td className="px-1 py-1 border border-white/5">
+                  </td>}
+                  {visibleColumns.has('status') && <td className="px-1 py-1 border border-white/5">
                     <div className="flex flex-col gap-1">
                       <div className="text-[11px] font-black text-white uppercase tracking-wider">{lead.email_status || 'NEW'}</div>
                       {lead.followup_status === 'ACTIVE' && (
@@ -937,28 +1010,38 @@ const AdminDashboard = () => {
                         </div>
                       )}
                     </div>
-                  </td>
-                  <td className="px-1 py-1 border border-white/5">
+                  </td>}
+                  {visibleColumns.has('sent_draft') && <td className="px-1 py-1 border border-white/5">
                     {(() => {
                       const st = (lead.email_status || '').toUpperCase();
                       if (st === 'SENT' || (st === '' && lead.last_outreach_at)) return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">Sent</span>;
                       if (st === 'PENDING_APPROVAL' || st === 'APPROVED') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-amber-500/10 border border-amber-500/20 text-amber-400">Draft</span>;
                       if (st === 'REJECTED') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-rose-500/10 border border-rose-500/20 text-rose-400">Rejected</span>;
-                      if (st === 'BOUNCED') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-red-500/10 border border-red-500/20 text-red-400">Bounced</span>;
+                      if (st === 'BOUNCED') {
+                        const raw = stripHtml(lead.bounce_reason || '').replace(/^Email bounced\s*[—–-]\s*/i, '').replace(/^Server Response:\s*/i, '').trim();
+                        const short = !raw ? 'Inbox full' :
+                          /doesn.*exist|5\.1\.1|no such user|invalid.*address/i.test(raw) ? "Email doesn't exist" :
+                          /inbox.*full|over quota|5\.2\.2/i.test(raw) ? 'Inbox full' :
+                          /spam|blocked|5\.7\.1/i.test(raw) ? 'Blocked by spam filter' :
+                          /domain.*not|5\.1\.2|5\.4\.1/i.test(raw) ? "Domain doesn't exist" :
+                          /temporar|try again|4\.\d/i.test(raw) ? 'Temporary issue' :
+                          raw.length > 40 ? raw.slice(0, 40) + '…' : raw;
+                        return <div className="flex flex-col gap-0.5"><span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-red-500/10 border border-red-500/20 text-red-400 w-fit">Bounced</span><span className="text-[8px] text-red-400/70 italic leading-tight max-w-[140px] truncate" title={raw || 'Inbox full'}>{short}</span></div>;
+                      }
                       if (st === 'REPLIED') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-blue-500/10 border border-blue-500/20 text-blue-400">Replied</span>;
                       if (lead.email_draft) return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-amber-500/10 border border-amber-500/20 text-amber-400">Draft</span>;
                       return <span className="text-[10px] font-bold text-slate-700 italic">—</span>;
                     })()}
-                  </td>
-                  <td className="px-1 py-1 border border-white/5">
+                  </td>}
+                  {visibleColumns.has('owner') && <td className="px-1 py-1 border border-white/5">
                     <div className="flex items-center gap-2">
                       <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center border border-white/5">
                         <Users className="w-3 h-3 text-slate-500" />
                       </div>
                       <span className="text-[11px] font-bold text-slate-400">{lead.owner_name}</span>
                     </div>
-                  </td>
-                  <td className="px-1 py-1 border border-white/5">
+                  </td>}
+                  {visibleColumns.has('actions') && <td className="px-1 py-1 border border-white/5">
                     {(() => {
                       const d = parseUtcDate(lead.last_outreach_at);
                       if (!d) return <span className="text-[11px] text-slate-600">—</span>;
@@ -974,8 +1057,8 @@ const AdminDashboard = () => {
                         </div>
                       );
                     })()}
-                  </td>
-                  <td className="px-1.5 py-1.5 text-right border border-white/5">
+                  </td>}
+                  {visibleColumns.has('actions') && <td className="px-1.5 py-1.5 text-right border border-white/5">
                     <div className="flex items-center justify-end gap-1">
                       <button 
                         onClick={async (e) => {
@@ -998,7 +1081,7 @@ const AdminDashboard = () => {
                         <MoreHorizontal className="w-4 h-4" />
                       </button>
                     </div>
-                  </td>
+                  </td>}
                 </tr>
               ))}
             </tbody>
@@ -1344,10 +1427,10 @@ const AdminDashboard = () => {
                       {timelineData.ai_summary.split('\n').map((line, i) => (
                         <div key={i} className="text-[13px] font-bold text-indigo-100 leading-relaxed">
                           {line}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+          </div>
+        ))}
+      </div>
+      </div>
                 ) : (
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-6 text-center italic text-slate-500 text-xs">
                     No story highlights available yet.

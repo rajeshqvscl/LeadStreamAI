@@ -267,7 +267,7 @@ const Layout = () => {
       <header className="fixed top-0 left-[240px] right-0 h-[64px] bg-[#0e121d] border-b border-[#ffffff15] flex items-center justify-between z-[150] px-6">
         <div className="flex items-center gap-6">
           <div className="flex flex-col">
-            <span className="text-[9px] font-semibold uppercase tracking-[0.8px] text-[#64748b] leading-none">Total Leads</span>
+            <span className="text-[9px] font-semibold uppercase tracking-[0.8px] text-[#64748b] leading-none">Total Replies</span>
             <div className="flex items-baseline gap-1.5 mt-1">
               <span className="text-[18px] font-bold text-white">{totalLeads}</span>
             </div>

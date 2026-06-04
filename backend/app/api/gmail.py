@@ -408,30 +408,49 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             conn.commit()
             invalidate_inbound_deals_cache(str(user_id))
 
-            # Stop followups for ALL other leads from the same company
+            # Stop followups for ALL other leads from the same company/domain
             try:
                 cur.execute("SELECT company_name FROM leads_raw WHERE id = %s", (lead_id,))
                 company_row = cur.fetchone()
-                if company_row:
-                    company_name = company_row['company_name'] if isinstance(company_row, dict) else company_row[0]
-                    if company_name and company_name.strip() and company_name.strip().upper() not in ('', 'INDEPENDENT', 'N/A', 'NONE', '-'):
+                if not company_row:
+                    return lead_id, sender_email, thread_id
+                company_name = company_row['company_name'] if isinstance(company_row, dict) else company_row[0]
+                company_name_clean = company_name.strip().upper() if company_name else ''
+
+                if company_name_clean and company_name_clean not in ('', 'INDEPENDENT', 'N/A', 'NONE', '-'):
+                    cur.execute("""
+                        SELECT id, first_name, last_name, email FROM leads_raw
+                        WHERE company_name ILIKE %s AND id != %s
+                        AND followup_status = 'ACTIVE' AND is_responded = FALSE
+                    """, (company_name, lead_id))
+                else:
+                    # Fallback: match by email domain base (e.g. merakventure.com → merakventure.in)
+                    sender_domain_base = None
+                    if '@' in sender_email:
+                        domain_part = sender_email.split('@')[1]
+                        sender_domain_base = domain_part.split('.')[0].lower()
+                    if sender_domain_base:
+                        domain_pattern = f"{sender_domain_base}.%"
                         cur.execute("""
                             SELECT id, first_name, last_name, email FROM leads_raw
-                            WHERE company_name ILIKE %s AND id != %s
+                            WHERE id != %s
                             AND followup_status = 'ACTIVE' AND is_responded = FALSE
-                        """, (company_name, lead_id))
-                        same_company_leads = cur.fetchall()
-                        for sc_lead in same_company_leads:
-                            sc_id = sc_lead['id']
-                            sc_name = f"{sc_lead['first_name'] or ''} {sc_lead['last_name'] or ''}".strip() or sc_lead['email']
-                            cur.execute("""
-                                UPDATE leads_raw SET followup_status = 'STOPPED', updated_at = NOW()
-                                WHERE id = %s
-                            """, (sc_id,))
-                            from app.models.lead import add_activity_log
-                            add_activity_log(sc_id, 'FOLLOWUP_STOPPED', f'Reply received from {lead_name} ({sender_email}) at same company — auto-stopped', 'system')
-                            logger.info(f"Stopped followup for {sc_name} ({sc_lead['email']}) — same company as {lead_name} who replied")
-                        conn.commit()
+                            AND LOWER(split_part(email, '@', 2)) LIKE %s
+                        """, (lead_id, domain_pattern))
+                    else:
+                        cur.execute("SELECT id, first_name, last_name, email FROM leads_raw WHERE FALSE", ())
+                same_company_leads = cur.fetchall()
+                for sc_lead in same_company_leads:
+                    sc_id = sc_lead['id']
+                    sc_name = f"{sc_lead['first_name'] or ''} {sc_lead['last_name'] or ''}".strip() or sc_lead['email']
+                    cur.execute("""
+                        UPDATE leads_raw SET followup_status = 'STOPPED', updated_at = NOW()
+                        WHERE id = %s
+                    """, (sc_id,))
+                    from app.models.lead import add_activity_log
+                    add_activity_log(sc_id, 'FOLLOWUP_STOPPED', f'Reply received from {lead_name} ({sender_email}) at same company — auto-stopped', 'system')
+                    logger.info(f"Stopped followup for {sc_name} ({sc_lead['email']}) — same company as {lead_name} who replied")
+                conn.commit()
             except Exception as company_err:
                 logger.warning(f"Company-level followup stop failed: {company_err}")
 
@@ -1143,19 +1162,36 @@ def poll_all_users_for_replies():
                                     body_text = extract_message_body(full_bounce.get('payload', {}))
                                     
                                     if body_text:
+                                        # Strip HTML before parsing so text patterns match properly
+                                        clean_body = re.sub(r'<[^>]+>', ' ', body_text)
+                                        clean_body = re.sub(r'\s+', ' ', clean_body)
+                                        
                                         # Extract failed recipient from body if snippet failed
                                         if not failed_email_raw:
-                                            failed_email_raw = re.search(r'[\w\.-]+@[\w\.-]+', body_text)
+                                            failed_email_raw = re.search(r'[\w\.-]+@[\w\.-]+', clean_body)
                                         
-                                        # Extract specific reason if possible (e.g., 550 error codes)
-                                        # Common pattern in Gmail bounces: "The response from the remote server was: 550 ..."
-                                        reason_match = re.search(r'(?:response from the remote server was:|Diagnostic-Code:).*?\n\s*(.*?)(?:\n|$)', body_text, re.IGNORECASE | re.DOTALL)
+                                        # Map common SMTP error codes to simple human-readable reasons
+                                        raw_reason = ""
+                                        reason_match = re.search(r'(?:response from the remote server was:|Diagnostic-Code:|Remote Server returned)\s*[\s:]*\s*(.*?)(?:\s{2,}|$)', clean_body, re.IGNORECASE)
                                         if reason_match:
-                                            bounce_reason = f"Server Response: {reason_match.group(1).strip()[:150]}"
-                                        elif "inbox is full" in body_text.lower():
-                                            bounce_reason = "Recipient's inbox is full"
-                                        elif "spam" in body_text.lower() or "blocked" in body_text.lower():
-                                            bounce_reason = "Message blocked by recipient's spam filter"
+                                            raw_reason = reason_match.group(1).strip().lower()
+                                        if raw_reason:
+                                            if re.search(r'5\.1\.1|does not exist|no such user|invalid.*address|recipient.*reject|mailbox.*not.*found|addr.*not|unknown.*user|doesn\'?t have', raw_reason):
+                                                bounce_reason = "Email doesn't exist"
+                                            elif re.search(r'5\.2\.2|over quota|inbox.*full|mailbox.*full|quota', raw_reason):
+                                                bounce_reason = "Inbox is full"
+                                            elif re.search(r'5\.7\.1|5\.7\.0|spam|blocked|policy.*reject|not.*authorized|banned|refused|suspected', raw_reason):
+                                                bounce_reason = "Blocked by their spam filter"
+                                            elif re.search(r'5\.4\.1|5\.1\.2|no.*mx|domain.*not|doesn\'?t exist.*domain|no.*dns', raw_reason):
+                                                bounce_reason = "Domain doesn't exist"
+                                            elif re.search(r'4\.[0-9]\.|temporar|try again|later|busy|rate limit|too many', raw_reason):
+                                                bounce_reason = "Temporary server issue — will retry"
+                                            else:
+                                                bounce_reason = f"Server rejected — {raw_reason[:100]}"
+                                        elif "inbox is full" in clean_body.lower():
+                                            bounce_reason = "Inbox is full"
+                                        elif "spam" in clean_body.lower() or "blocked" in clean_body.lower():
+                                            bounce_reason = "Blocked by their spam filter"
 
                                     if failed_email_raw:
                                         failed_email = failed_email_raw.group(0).lower()

@@ -35,12 +35,8 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
     elif resolved_id is not None:
         user_cond = "user_id = %s"
         user_params = [resolved_id]
-        if resolved_name:
-            act_cond = "performed_by = %s"
-            act_params = [resolved_name]
-        else:
-            act_cond = "1=1"
-            act_params = []
+        act_cond = "user_id = %s"
+        act_params = [resolved_id]
     else:
         user_cond = "user_id IS NULL"
         user_params = []
@@ -51,7 +47,7 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
     company_count_sql = user_cond if is_admin or resolved_id is not None else "1=1"
     cur.execute(f"""
         SELECT
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND (is_responded = TRUE OR email_status IN ('REPLIED','INTERESTED','MEETING SCHEDULED') OR reply_intent = 'INTERESTED')) AS total_leads,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND is_responded = TRUE) AS total_leads,
             (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND validation_status = 'VALID') AS valid_leads,
             (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND persona IS NOT NULL AND persona != '') AS classified,
             (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND (email_status = 'PENDING_APPROVAL' OR email_status = 'pending')) AS pending,

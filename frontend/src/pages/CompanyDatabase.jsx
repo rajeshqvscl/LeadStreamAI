@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Search, Upload, Download, Trash2, Loader2, Sparkles,
-  Table, FileSpreadsheet, Plus, CheckCircle2, AlertCircle, X, Send, Mail, Pencil, PanelRightClose, Save, Layout, Tag, Building2, Filter, ChevronDown, User, Globe, Calendar
+  Table, FileSpreadsheet, Plus, CheckCircle2, AlertCircle, X, Send, Mail, Pencil, PanelRightClose, Save, Layout, Tag, Building2, Filter, ChevronDown, User, Globe, Calendar, Eye, EyeOff
 } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
@@ -28,6 +28,8 @@ const CompanyDatabase = () => {
   const [selectedIds, setSelectedIds] = useState([]);
   const [columnFilters, setColumnFilters] = useState({});
   const [showFilters, setShowFilters] = useState(false);
+  const [showColumnMenu, setShowColumnMenu] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState(null); // null = show all
   // Browsing Tabs State
   const [browsingTabs, setBrowsingTabs] = useState(['ALL DATA']);
   const [activeBrowsingTab, setActiveBrowsingTab] = useState(localStorage.getItem('active_browsing_tab') || 'ALL DATA');
@@ -36,6 +38,9 @@ const CompanyDatabase = () => {
   const [currentPage, setCurrentPage] = useState(parseInt(localStorage.getItem('current_company_page')) || 1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+
+  // Sort State
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: null }); // null | 'asc' | 'desc'
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
@@ -102,6 +107,14 @@ const CompanyDatabase = () => {
   useEffect(() => {
     fetchTabs();
   }, []);
+
+  // Close column menu on outside click
+  useEffect(() => {
+    if (!showColumnMenu) return;
+    const close = () => setShowColumnMenu(false);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [showColumnMenu]);
 
   // Auto-load sheet tabs from localStorage URL on mount
   useEffect(() => {
@@ -442,10 +455,10 @@ const CompanyDatabase = () => {
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.length === filteredCompanies.length && filteredCompanies.length > 0) {
+    if (selectedIds.length === sortedCompanies.length && sortedCompanies.length > 0) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(filteredCompanies.map(c => c.id));
+      setSelectedIds(sortedCompanies.map(c => c.id));
     }
   };
 
@@ -511,9 +524,24 @@ const CompanyDatabase = () => {
 
   const filteredCompanies = companies;
 
-  const getUniqueValues = (column) => {
-    const values = companies.map(c => c[column]).filter(v => v !== undefined && v !== null && v !== '');
-    return Array.from(new Set(values)).sort();
+  const sortedCompanies = React.useMemo(() => {
+    if (!sortConfig.key || !sortConfig.direction) return filteredCompanies;
+    const sorted = [...filteredCompanies].sort((a, b) => {
+      const aVal = (a[sortConfig.key] || '').toString().toLowerCase();
+      const bVal = (b[sortConfig.key] || '').toString().toLowerCase();
+      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return sorted;
+  }, [filteredCompanies, sortConfig]);
+
+  const handleSort = (header) => {
+    setSortConfig(prev => {
+      if (prev.key !== header) return { key: header, direction: 'asc' };
+      if (prev.direction === 'asc') return { key: header, direction: 'desc' };
+      return { key: null, direction: null };
+    });
   };
 
   const headers = React.useMemo(() => {
@@ -543,6 +571,32 @@ const CompanyDatabase = () => {
       return a.localeCompare(b);
     });
   }, [companies]);
+
+  const visibleHeaders = React.useMemo(() => {
+    if (!visibleColumns) return headers;
+    return headers.filter(h => visibleColumns.has(h));
+  }, [headers, visibleColumns]);
+
+  const toggleColumn = (col) => {
+    setVisibleColumns(prev => {
+      const next = new Set(prev || headers);
+      if (next.has(col)) next.delete(col);
+      else next.add(col);
+      return next.size === headers.size ? null : next;
+    });
+  };
+
+  const openColumnMenu = () => {
+    if (visibleColumns === null && headers.length > 0) {
+      setVisibleColumns(new Set(headers));
+    }
+    setShowColumnMenu(!showColumnMenu);
+  };
+
+  const getUniqueValues = (column) => {
+    const values = companies.map(c => c[column]).filter(v => v !== undefined && v !== null && v !== '');
+    return Array.from(new Set(values)).sort();
+  };
 
   const renderEditDrawer = () => {
     if (!isDrawerOpen || !selectedCompany) return null;
@@ -639,6 +693,35 @@ const CompanyDatabase = () => {
                 setCurrentPage(1);
               }}
             />
+          </div>
+
+          <div className="relative">
+            <button
+              onClick={(e) => { e.stopPropagation(); openColumnMenu(); }}
+              className={`btn px-4 h-12 rounded-2xl flex items-center gap-2 text-[11px] font-black uppercase tracking-widest transition-all cursor-pointer ${showColumnMenu ? 'bg-indigo-500 text-white shadow-indigo-500/20' : 'bg-white/5 text-slate-400 border border-white/5'}`}
+            >
+              <Eye className="w-4 h-4" />
+              Columns
+              <span className={`ml-1 px-1.5 py-0.5 text-[8px] rounded-full ${visibleColumns ? 'bg-indigo-500/20 text-indigo-300' : 'bg-white/10 text-slate-500'}`}>
+                {visibleColumns ? visibleColumns.size : headers.length}
+              </span>
+            </button>
+            {showColumnMenu && (
+              <div className="absolute right-0 top-full mt-2 z-50 bg-[#1a1f2e] border border-white/10 rounded-2xl p-3 shadow-2xl min-w-[220px] max-h-[320px] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest px-2 pb-2 border-b border-white/5 mb-2">Toggle Columns</div>
+                {headers.map(h => (
+                  <label key={h} className="flex items-center gap-3 px-2 py-1.5 hover:bg-white/5 rounded-xl cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      className="w-3.5 h-3.5 rounded border-white/10 bg-transparent text-indigo-500 focus:ring-offset-0 focus:ring-0 cursor-pointer"
+                      checked={!visibleColumns || visibleColumns.has(h)}
+                      onChange={() => toggleColumn(h)}
+                    />
+                    <span className="text-[11px] font-semibold text-slate-300 group-hover:text-white transition-colors">{h.replace(/_/g, ' ')}</span>
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
 
           <button
@@ -836,19 +919,23 @@ const CompanyDatabase = () => {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-white/[0.03] border-b border-white/5">
-                <th className="w-16 px-6 py-4 text-center">
+                <th className="w-10 px-3 py-4 text-center text-[9px] font-black text-slate-600 uppercase tracking-wider">#</th>
+                <th className="w-16 px-3 py-4 text-center">
                   <input
                     type="checkbox"
                     className="w-4 h-4 rounded border-white/10 bg-transparent text-blue-500 focus:ring-offset-0 focus:ring-0 cursor-pointer"
-                    checked={selectedIds.length === filteredCompanies.length && filteredCompanies.length > 0}
+                    checked={selectedIds.length === sortedCompanies.length && sortedCompanies.length > 0}
                     onChange={toggleSelectAll}
                   />
                 </th>
-                {headers.map((header) => (
-                  <th key={header} className="px-5 py-4 text-[9px] font-black text-slate-500 uppercase tracking-wider border-r border-white/5 last:border-0 min-w-[160px]">
+                {visibleHeaders.map((header) => (
+                  <th key={header} onClick={() => handleSort(header)} className="px-5 py-4 text-[9px] font-black text-slate-500 uppercase tracking-wider border-r border-white/5 last:border-0 min-w-[160px] cursor-pointer hover:bg-white/[0.02] select-none">
                     <div className="flex items-center gap-2">
                       <Table className="w-3 h-3 opacity-40 text-blue-500" />
                       <span className="whitespace-nowrap">{header.replace(/_/g, ' ')}</span>
+                      {sortConfig.key === header && (
+                        <span className="text-blue-400 text-[10px]">{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>
+                      )}
                     </div>
                   </th>
                 ))}
@@ -861,9 +948,10 @@ const CompanyDatabase = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.03]">
-              {filteredCompanies.map((company, i) => (
+              {sortedCompanies.map((company, i) => (
                 <tr key={company.id} className={`hover:bg-blue-500/[0.04] transition-all group ${selectedIds.includes(company.id) ? 'bg-blue-500/[0.06]' : ''}`}>
-                  <td className="px-6 py-3 text-center">
+                  <td className="px-3 py-3 text-center text-[11px] font-mono text-slate-600">{(currentPage - 1) * 100 + i + 1}</td>
+                  <td className="px-3 py-3 text-center">
                     <input
                       type="checkbox"
                       className="w-4 h-4 rounded border-white/10 bg-transparent text-blue-500 focus:ring-offset-0 focus:ring-0 cursor-pointer"
@@ -871,7 +959,7 @@ const CompanyDatabase = () => {
                       onChange={() => toggleSelectRow(company.id)}
                     />
                   </td>
-                  {headers.map((header) => {
+                  {visibleHeaders.map((header) => {
                     const raw = company[header];
                     const val = raw !== null && raw !== undefined ? String(raw) : '';
                     const displayVal = val.trim() ? val : '-';
@@ -946,7 +1034,7 @@ const CompanyDatabase = () => {
             </tbody>
           </table>
 
-          {filteredCompanies.length === 0 && !isLoading && (
+          {sortedCompanies.length === 0 && !isLoading && (
             <div className="flex flex-col items-center justify-center py-32 text-center">
               <div className="w-20 h-20 bg-slate-500/5 rounded-[30px] flex items-center justify-center mb-8 border border-white/5">
                 <Plus className="w-10 h-10 text-slate-700" />
@@ -958,6 +1046,23 @@ const CompanyDatabase = () => {
             </div>
           )}
         </div>
+
+        {/* Excel-style Summary Bar */}
+        {sortedCompanies.length > 0 && (
+          <div className="bg-[#0d1117]/80 border-t border-white/5 flex items-center justify-between px-6 py-2.5 text-[10px] font-mono text-slate-500">
+            <span>
+              {totalCount > 0
+                ? `Showing ${(currentPage - 1) * 100 + 1}–${Math.min(currentPage * 100, totalCount)} of ${totalCount} entries`
+                : `${sortedCompanies.length} entries`}
+            </span>
+            <span className="flex items-center gap-4">
+              {sortConfig.key && (
+                <span>Sorted by <span className="text-blue-400 font-semibold">{sortConfig.key.replace(/_/g, ' ')}</span> ({sortConfig.direction === 'asc' ? 'A→Z' : 'Z→A'})</span>
+              )}
+              <span>{selectedIds.length > 0 ? `${selectedIds.length} selected` : ''}</span>
+            </span>
+          </div>
+        )}
 
         {/* Spreadsheet-style Bottom Tabs */}
         {browsingTabs.length > 1 && (

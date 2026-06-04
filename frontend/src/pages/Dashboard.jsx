@@ -160,7 +160,7 @@ const Dashboard = () => {
     };
 
     // Process plain text for quotes
-    const lines = content.split('\n');
+    const lines = content.trim().split('\n');
     return lines.map((line, idx) => {
       const trimmedLine = line.trim();
       const isQuote = trimmedLine.startsWith('>');

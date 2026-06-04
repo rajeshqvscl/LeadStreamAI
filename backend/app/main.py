@@ -39,7 +39,7 @@ async def scheduler_loop():
             await asyncio.to_thread(poll_all_users_for_replies)
         except Exception as e:
             print(f"Scheduler error: {e}")
-        await asyncio.sleep(60)
+        await asyncio.sleep(10)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
