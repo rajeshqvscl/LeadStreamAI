@@ -551,7 +551,8 @@ def get_inbound_deals(
                 SELECT id, first_name, last_name, email, company_name, persona, fit_score,
                        email_status, is_responded, reply_intent, deal_size, pitch_deck_url,
                        meeting_time, meeting_link, updated_at, created_at,
-                       rag_intelligence, remarks, phone, linkedin_url, source, user_id
+                       rag_intelligence, remarks, phone, linkedin_url, source, user_id,
+                       sentiment_score, sector, designation
                 FROM leads_raw 
                 WHERE meeting_time IS NOT NULL 
                 OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED'))
@@ -569,7 +570,8 @@ def get_inbound_deals(
                 SELECT id, first_name, last_name, email, company_name, persona, fit_score,
                        email_status, is_responded, reply_intent, deal_size, pitch_deck_url,
                        meeting_time, meeting_link, updated_at, created_at,
-                       rag_intelligence, remarks, phone, linkedin_url, source, user_id
+                       rag_intelligence, remarks, phone, linkedin_url, source, user_id,
+                       sentiment_score, sector, designation
                 FROM leads_raw 
                 WHERE user_id = %s 
                 AND (meeting_time IS NOT NULL OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED')))

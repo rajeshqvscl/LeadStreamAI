@@ -23,6 +23,11 @@ const FOLLOWUP_STYLES = {
   'Not started': { color: 'text-slate-500', bg: 'bg-slate-500/5', border: 'border-slate-500/20' },
 };
 
+const MONTHS = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December'
+];
+
 const RANGES = [
   { key: 'daily', label: 'Daily' },
   { key: 'weekly', label: 'Weekly' },
@@ -31,6 +36,13 @@ const RANGES = [
 ];
 
 const todayStr = () => new Date().toISOString().split('T')[0];
+
+const getMonthRange = (year, month) => {
+  const start = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const end = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  return { start, end };
+};
 
 const Metrics = () => {
   const navigate = useNavigate();
@@ -43,6 +55,9 @@ const Metrics = () => {
   const [range, setRange] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const _now = new Date();
+  const [selYear, setSelYear] = useState(_now.getFullYear());
+  const [selMonth, setSelMonth] = useState(_now.getMonth());
 
   const fetchReport = async () => {
     try {
@@ -417,6 +432,14 @@ const Metrics = () => {
               </button>
             ))}
             <div className="w-px h-6 bg-white/10" />
+            <select value={selYear} onChange={e => { setSelYear(Number(e.target.value)); const {start, end} = getMonthRange(Number(e.target.value), selMonth); setDateFrom(start); setDateTo(end); setRange('all'); }}
+              className="bg-[#111521] border border-white/5 rounded-lg px-3 py-2 text-[10px] text-slate-300 font-mono focus:outline-none focus:border-indigo-500/50">
+              {(() => { const y = []; for (let i = _now.getFullYear() - 2; i <= _now.getFullYear(); i++) y.push(i); return y; })().map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <select value={selMonth} onChange={e => { setSelMonth(Number(e.target.value)); const {start, end} = getMonthRange(selYear, Number(e.target.value)); setDateFrom(start); setDateTo(end); setRange('all'); }}
+              className="bg-[#111521] border border-white/5 rounded-lg px-3 py-2 text-[10px] text-slate-300 font-mono focus:outline-none focus:border-indigo-500/50">
+              {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
+            </select>
             <div className="flex items-center gap-2">
               <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setRange('all'); }} className="bg-[#111521] border border-white/5 rounded-lg px-3 py-2 text-[10px] text-slate-300 font-mono focus:outline-none focus:border-indigo-500/50" />
               <span className="text-[9px] text-slate-600 font-black uppercase tracking-widest">to</span>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
+import ReminderPanel from './ReminderPanel';
 
 const Layout = () => {
   const location = useLocation();
@@ -154,9 +155,6 @@ const Layout = () => {
             <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'generate' ? 'text-white' : 'text-[#94a3b8]'}`}>✨</span> AI Generation
           </Link> 
           */}
-          <Link to="/dashboard/campaigns" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'campaigns' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
-            <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'campaigns' ? 'text-white' : 'text-[#94a3b8]'}`}>🎯</span> Campaigns
-          </Link>
         </div>
 
         {user.google_linked_at && (
@@ -369,6 +367,8 @@ const Layout = () => {
       <main className={`ml-[240px] mt-[64px] flex-1 p-6 relative transition-all duration-500 ${tasks.length > 0 ? (isMinimized ? 'mr-[70px]' : 'mr-[380px]') : ''}`}>
         <Outlet />
       </main>
+
+      <ReminderPanel />
 
       {/* Right Side Task Drawer */}
       <div className={`fixed top-[64px] right-0 bottom-0 bg-[#0f172a]/95 backdrop-blur-2xl border-l border-white/5 z-[2000] transition-all duration-500 shadow-[-20px_0_50px_rgba(0,0,0,0.5)] flex flex-col ${tasks.length > 0 ? (isMinimized ? 'w-[70px] translate-x-0' : 'w-[380px] translate-x-0') : 'w-[380px] translate-x-full'}`}>

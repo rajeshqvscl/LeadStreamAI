@@ -481,6 +481,23 @@ def create_tables():
         """, (default_username, "admin@leadstreamai.com", "System Administrator", password_hash, "ADMIN"))
     
 
+    # Reminders Table
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS reminders (
+        id SERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        due_at TIMESTAMP NOT NULL,
+        priority TEXT DEFAULT 'MEDIUM',
+        status TEXT DEFAULT 'PENDING',
+        user_id INTEGER,
+        user_name TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        completed_at TIMESTAMP
+    );
+    """)
+    conn.commit()
+
     conn.commit()
     cur.close()
     conn.close()

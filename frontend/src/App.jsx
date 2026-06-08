@@ -10,7 +10,6 @@ import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
 import Leads from './pages/Leads';
 import LeadDetail from './pages/LeadDetail';
-import Campaigns from './pages/Campaigns';
 import Emails from './pages/Emails';
 import EditEmail from './pages/EditEmail';
 import Prompts from './pages/Prompts';
@@ -99,7 +98,6 @@ function App() {
           <Route index element={<Dashboard />} />
           <Route path="leads" element={<Leads />} />
           <Route path="leads/:leadId" element={<LeadDetail />} />
-          <Route path="campaigns" element={<Campaigns />} />
           <Route path="emails" element={<Emails />} />
           <Route path="emails/:draftId/edit" element={<EditEmail />} />
           <Route path="prompts" element={<Prompts />} />

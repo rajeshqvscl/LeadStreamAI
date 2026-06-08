@@ -46,6 +46,90 @@ const Dashboard = () => {
   const [msgDetail, setMsgDetail] = useState(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
+  // Card detail modal state
+  const [detailModal, setDetailModal] = useState({ open: false, type: '', title: '' });
+  const [detailData, setDetailData] = useState({ records: [], total: 0, page: 1 });
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [filterMonth, setFilterMonth] = useState(0);
+  const [filterYear, setFilterYear] = useState(new Date().getFullYear());
+  const [detailPage, setDetailPage] = useState(1);
+
+  const EMPTY_MESSAGES = {
+    ingested: ['No leads ingested yet', 'The system hasn\'t sourced any leads yet. Run a bulk search or enable AI discovery to populate your pipeline.'],
+    pipeline: ['No replies received', 'No leads have responded to your outreach yet. Follow up with leads in your pipeline to start conversations.'],
+    classified: ['No leads classified', 'AI classification hasn\'t processed any leads yet. Enable auto-classification in settings to analyze lead personas automatically.'],
+    pending: ['Approval queue is clear', 'No emails are pending your review. All caught up! New drafts will appear here once generated.'],
+    refined: ['No drafts generated', 'No email drafts have been created yet. Generate drafts for your leads to start your outreach campaigns.'],
+    unsubscribed: ['No unsubscribes recorded', 'Your unsubscribe list is clean. No leads have opted out of your communications.'],
+    outbound: ['No emails sent yet', 'Your outbound limit hasn\'t been used yet. Start sending emails to track your daily usage here.'],
+    followups: ['No follow-ups dispatched', 'No follow-up sequences have been triggered yet. They will appear here once scheduled.'],
+    open_rate_detail: ['No opens tracked yet', 'No email opens have been recorded. Ensure your emails include tracking pixels to measure open rates accurately.'],
+    click_rate_detail: ['No clicks tracked yet', 'No link clicks have been recorded. Add trackable links to your emails to measure engagement.'],
+    bounce_detail: ['No bounces detected', 'Your deliverability looks healthy! No emails have bounced back.'],
+    optouts_detail: ['No opt-outs recorded', 'No leads have opted out. Your email content is resonating well with your audience.']
+  };
+
+  const CARD_TITLES = {
+    ingested: 'Total Ingested',
+    pipeline: 'Primary Pipeline',
+    classified: 'AI Processed',
+    pending: 'Approval Queue',
+    refined: 'Refined Emails',
+    unsubscribed: 'Unsubscribed',
+    outbound: 'Outbound Limit',
+    followups: 'Follow-ups Sent',
+    open_rate_detail: 'Open Rate',
+    click_rate_detail: 'Click Rate',
+    bounce_detail: 'Bounce',
+    optouts_detail: 'Opt-outs'
+  };
+
+  const MONTHS = [
+    { value: 0, label: 'All Months' },
+    { value: 1, label: 'January' }, { value: 2, label: 'February' }, { value: 3, label: 'March' },
+    { value: 4, label: 'April' }, { value: 5, label: 'May' }, { value: 6, label: 'June' },
+    { value: 7, label: 'July' }, { value: 8, label: 'August' }, { value: 9, label: 'September' },
+    { value: 10, label: 'October' }, { value: 11, label: 'November' }, { value: 12, label: 'December' }
+  ];
+
+  const openCardDetail = (type) => {
+    setDetailModal({ open: true, type, title: CARD_TITLES[type] || type });
+    setDetailPage(1);
+    fetchCardDetail(type, filterMonth === 0 ? null : filterMonth, filterYear, 1);
+  };
+
+  const closeCardDetail = () => {
+    setDetailModal({ open: false, type: '', title: '' });
+    setDetailData({ records: [], total: 0, page: 1 });
+  };
+
+  const fetchCardDetail = async (type, month, year, page) => {
+    setDetailLoading(true);
+    try {
+      const params = { card_type: type, page, per_page: 25 };
+      if (month) params.month = month;
+      if (year) params.year = year;
+      const { data } = await axios.get('/api/dashboard/card-detail', { params });
+      setDetailData(data);
+    } catch (err) {
+      console.error('Failed to fetch card detail', err);
+      setDetailData({ records: [], total: 0, page: 1 });
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const handleMonthFilter = (month) => {
+    setFilterMonth(month);
+    setDetailPage(1);
+    fetchCardDetail(detailModal.type, month === 0 ? null : month, filterYear, 1);
+  };
+
+  const handleDetailPageChange = (newPage) => {
+    setDetailPage(newPage);
+    fetchCardDetail(detailModal.type, filterMonth, filterYear, newPage);
+  };
+
   const renderClickableText = (text) => {
       if (!text) return text;
       const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -288,20 +372,22 @@ const Dashboard = () => {
       {/* Main Stats Grid */}
       <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-6 mb-10">
         {[
-          { label: 'Primary Pipeline', val: data.total_leads, sub: 'Lead targets sourced', class: 'card-v', border: 'border-l-blue-500' },
-          { label: 'AI Processed', val: data.classified, sub: 'Ingestion automation', class: 'card-i', border: 'border-l-purple-500' },
-          { label: 'Approval Queue', val: data.pending, sub: 'Pending Review', class: 'card-b', border: 'border-l-indigo-500' },
-          { label: 'Refined Emails', val: data.refined !== undefined ? data.refined : 0, sub: 'Drafted and enriched', class: 'card-g', border: 'border-l-emerald-500' },
-          { label: 'Unsubscribed', val: `${data.unsub_rate.toFixed(1)}%`, sub: 'At-risk leads', class: 'card-y', border: 'border-l-amber-500' },
-          { label: 'Outbound Limit', val: `${data.daily_sent_count}/${data.daily_limit}`, sub: 'Daily limits reset', class: 'card-o', border: 'border-l-orange-500' }
+          { type: 'ingested', label: 'Total Ingested', val: data.total_ingested, sub: 'Total leads sourced', border: 'border-l-cyan-500' },
+          { type: 'pipeline', label: 'Primary Pipeline', val: data.total_leads, sub: 'Lead replies received', border: 'border-l-blue-500' },
+          { type: 'classified', label: 'AI Processed', val: data.classified, sub: 'Ingestion automation', border: 'border-l-purple-500' },
+          { type: 'pending', label: 'Approval Queue', val: data.pending, sub: 'Pending Review', border: 'border-l-indigo-500' },
+          { type: 'refined', label: 'Refined Emails', val: data.refined !== undefined ? data.refined : 0, sub: 'Drafted and enriched', border: 'border-l-emerald-500' },
+          { type: 'followups', label: 'Follow-ups Sent', val: data.total_followups || 0, sub: 'Total follow-ups dispatched', border: 'border-l-teal-500' },
+          { type: 'unsubscribed', label: 'Unsubscribed', val: `${data.unsub_rate.toFixed(1)}%`, sub: 'At-risk leads', border: 'border-l-amber-500' },
+          { type: 'outbound', label: 'Outbound Limit', val: `${data.daily_sent_count}/${data.daily_limit}`, sub: 'Daily limits reset', border: 'border-l-orange-500' }
         ].map((stat, i) => (
-          <div key={i} className={`bg-[#131722] border border-white/5 border-l-4 ${stat.border} rounded-2xl p-6 shadow-xl transition-all hover:scale-105`}>
+          <div key={i} onClick={() => openCardDetail(stat.type)} className={`bg-[#131722] border border-white/5 border-l-4 ${stat.border} rounded-2xl p-6 shadow-xl transition-all hover:scale-105 hover:bg-white/[0.03] cursor-pointer group`}>
             <div className="flex items-center justify-between mb-3">
               <div className="text-[10px] font-black uppercase tracking-[2px] text-slate-500">{stat.label}</div>
-              <div className="w-2 h-2 rounded-full bg-blue-500/50 animate-pulse"></div>
+              <div className="w-2 h-2 rounded-full bg-blue-500/50 animate-pulse group-hover:bg-blue-400"></div>
             </div>
             <div className="text-[32px] font-black text-white mb-1">{stat.val}</div>
-            <div className="text-[11px] font-bold text-slate-600 uppercase tracking-tighter">{stat.sub}</div>
+            <div className="text-[11px] font-bold text-slate-600 uppercase tracking-tighter group-hover:text-slate-400 transition-colors">{stat.sub}</div>
           </div>
         ))}
       </div>
@@ -380,12 +466,12 @@ const Dashboard = () => {
           </div>
           <div className="p-8 grid grid-cols-2 md:grid-cols-4 gap-8">
             {[
-              { label: 'Open Rate', val: `${data.open_rate}%`, sub: `${data.unique_opens} unique`, color: 'text-blue-500' },
-              { label: 'Click Rate', val: `${data.click_rate}%`, sub: `${data.unique_clicks} unique`, color: 'text-emerald-500' },
-              { label: 'Bounce', val: `${data.bounce_rate}%`, sub: `${data.total_bounces} events`, color: 'text-orange-500' },
-              { label: 'Opt-outs', val: data.total_unsubs, sub: `${data.unsub_rate.toFixed(1)}% volatility`, color: 'text-red-500' }
+              { type: 'open_rate_detail', label: 'Open Rate', val: `${data.open_rate}%`, sub: `${data.unique_opens} unique`, color: 'text-blue-500' },
+              { type: 'click_rate_detail', label: 'Click Rate', val: `${data.click_rate}%`, sub: `${data.unique_clicks} unique`, color: 'text-emerald-500' },
+              { type: 'bounce_detail', label: 'Bounce', val: `${data.bounce_rate}%`, sub: `${data.total_bounces} events`, color: 'text-orange-500' },
+              { type: 'optouts_detail', label: 'Opt-outs', val: data.total_unsubs, sub: `${data.unsub_rate.toFixed(1)}% volatility`, color: 'text-red-500' }
             ].map((p, i) => (
-              <div key={i} className="text-center group">
+              <div key={i} onClick={() => openCardDetail(p.type)} className="text-center group cursor-pointer hover:bg-white/[0.02] rounded-2xl p-4 transition-all">
                 <div className="text-[10px] text-[#475569] uppercase font-black tracking-widest mb-3 group-hover:text-slate-400 transition-colors">{p.label}</div>
                 <div className={`text-[32px] font-black ${p.color}`}>{p.val}</div>
                 <div className="text-[11px] text-[#64748b] mt-1 font-bold uppercase tracking-tighter">{p.sub}</div>
@@ -886,6 +972,195 @@ const Dashboard = () => {
                     )}
                 </div>
             </div>
+        </div>
+      )}
+
+      {/* Card Detail Drawer */}
+      {detailModal.open && (
+        <div className="fixed inset-0 z-[500] flex justify-end animate-in fade-in duration-300">
+          <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-md" onClick={closeCardDetail}></div>
+          <div className="relative w-full max-w-[700px] bg-[#0b0f1a] border-l border-white/5 shadow-[0_0_80px_rgba(0,0,0,0.9)] flex flex-col h-full animate-in slide-in-from-right duration-700 ease-[cubic-bezier(0.2,0.8,0.2,1)]">
+            {/* Header */}
+            <div className="p-8 border-b border-white/[0.03] flex items-center justify-between bg-gradient-to-r from-blue-500/[0.02] to-transparent">
+              <div className="flex items-center gap-5">
+                <div className="w-14 h-14 rounded-[20px] bg-gradient-to-br from-blue-600/20 to-indigo-600/20 border border-blue-500/10 flex items-center justify-center text-blue-400">
+                  <FileText size={26} strokeWidth={1.5} />
+                </div>
+                <div>
+                  <h2 className="text-[20px] font-black text-white tracking-tight leading-none mb-2">{detailModal.title}</h2>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-[3px]">
+                      {detailData.total} Records
+                    </span>
+                    <div className="w-px h-3 bg-white/10" />
+                    <span className="text-[10px] font-bold text-blue-500 uppercase tracking-[3px]">
+                      Page {detailData.page} of {Math.max(1, Math.ceil(detailData.total / 100))}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <button onClick={closeCardDetail} className="p-4 bg-rose-500/10 hover:bg-rose-500/20 rounded-2xl transition-all text-rose-500 hover:text-rose-400 active:scale-95 shadow-xl border border-rose-500/10 cursor-pointer">
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Month Filter */}
+            <div className="px-8 py-4 border-b border-white/5 flex items-center gap-3">
+              <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Filter by Month:</span>
+              <select
+                value={filterMonth}
+                onChange={(e) => handleMonthFilter(Number(e.target.value))}
+                className="bg-[#0f121b] border border-[#ffffff10] rounded-md px-3 py-1.5 text-[10px] font-bold text-slate-300 uppercase tracking-widest outline-none focus:border-blue-500/50"
+              >
+                {MONTHS.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+              <select
+                value={filterYear}
+                onChange={(e) => {
+                  setFilterYear(Number(e.target.value));
+                  setDetailPage(1);
+                  fetchCardDetail(detailModal.type, filterMonth, Number(e.target.value), 1);
+                }}
+                className="bg-[#0f121b] border border-[#ffffff10] rounded-md px-3 py-1.5 text-[10px] font-bold text-slate-300 uppercase tracking-widest outline-none focus:border-blue-500/50"
+              >
+                {[2024, 2025, 2026, 2027].map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Records Table */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
+              {detailLoading ? (
+                <div className="flex items-center justify-center h-full">
+                  <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+                </div>
+              ) : detailData.records.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-center px-8">
+                  <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mb-5">
+                    <FileText className="w-7 h-7 text-slate-600" />
+                  </div>
+                  <p className="text-[13px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                    {(EMPTY_MESSAGES[detailModal.type] || ['No records found'])[0]}
+                  </p>
+                  <p className="text-[10px] text-slate-600 font-medium max-w-[300px] leading-relaxed">
+                    {(EMPTY_MESSAGES[detailModal.type] || ['', 'No data available for this period.'])[1]}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {/* Summary section for classified */}
+                  {detailModal.type === 'classified' && detailData.followup_summary && (
+                    <div className="p-4 bg-white/[0.02] border border-white/5 rounded-xl flex items-center gap-4 flex-wrap">
+                      <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Follow-up Status:</span>
+                      {detailData.followup_summary.map((s, i) => (
+                        <span key={i} className="text-[10px] font-bold px-3 py-1 rounded-full border text-white/80" style={{
+                          borderColor: s.followup_status === 'ACTIVE' ? 'rgba(59,130,246,0.3)' : s.followup_status === 'COMPLETED' ? 'rgba(16,185,129,0.3)' : s.followup_status === 'STOPPED' ? 'rgba(245,158,11,0.3)' : 'rgba(100,116,139,0.3)',
+                          background: s.followup_status === 'ACTIVE' ? 'rgba(59,130,246,0.1)' : s.followup_status === 'COMPLETED' ? 'rgba(16,185,129,0.1)' : s.followup_status === 'STOPPED' ? 'rgba(245,158,11,0.1)' : 'rgba(100,116,139,0.1)'
+                        }}>
+                          {s.followup_status || 'NONE'}: {s.cnt}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Company breakdown for bounce */}
+                  {detailModal.type === 'bounce_detail' && detailData.company_breakdown && detailData.company_breakdown.length > 0 && (
+                    <div className="p-4 bg-white/[0.02] border border-white/5 rounded-xl">
+                      <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-3">Top Companies Bounced:</span>
+                      <div className="flex flex-wrap gap-2">
+                        {detailData.company_breakdown.map((c, i) => (
+                          <span key={i} className="text-[10px] font-bold px-3 py-1.5 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400">
+                            {c.company_name}: {c.count}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {detailData.records.map((rec, i) => (
+                    <div key={rec.id || i} className="p-4 bg-white/[0.02] border border-white/[0.03] rounded-xl hover:bg-white/[0.04] transition-all group">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-600/20 to-indigo-600/20 border border-blue-500/10 flex items-center justify-center text-[10px] font-black text-blue-400 shrink-0">
+                            {((rec.first_name || '?').charAt(0) + (rec.last_name || '?').charAt(0)).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <span className="text-[11px] font-bold text-white">{[rec.first_name, rec.last_name].filter(Boolean).join(' ') || rec.email?.split('@')[0] || 'Unknown'}</span>
+                            <span className="text-[9px] font-medium text-slate-500 ml-2">{rec.email || ''}</span>
+                          </div>
+                        </div>
+                        <div className="text-[8px] font-bold text-slate-600 uppercase tracking-widest shrink-0">
+                          {rec.created_at ? formatIST(rec.created_at, true) : ''}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 text-[9px] font-bold text-slate-500 uppercase tracking-wider flex-wrap">
+                        {rec.company_name && <span>🏢 {rec.company_name}</span>}
+                        {rec.persona && <span className="text-blue-500/80">🎯 {rec.persona}</span>}
+                        {rec.email_status && <span>{rec.email_status === 'SENT' ? '✅' : rec.email_status === 'PENDING_APPROVAL' ? '⏳' : rec.email_status === 'OPENED' ? '👁️' : rec.email_status === 'BOUNCED' ? '💥' : rec.email_status === 'CLICKED' ? '🔗' : ''} {rec.email_status?.replace(/_/g, ' ')}</span>}
+                        {rec.source && !rec.email_status && <span className="text-slate-600">📡 {rec.source.replace(/_/g, ' ')}</span>}
+                        {rec.reason && <span className="text-amber-500">🚫 {rec.reason}</span>}
+                        {rec.is_unsubscribed && <span className="text-rose-500">🚫 Unsubscribed</span>}
+                        {/* Follow-up info for classified */}
+                        {rec.followup_status && rec.followup_status !== 'IDLE' && (
+                          <span className={`px-2 py-0.5 rounded text-[8px] font-black ${
+                            rec.followup_status === 'ACTIVE' ? 'bg-blue-500/10 text-blue-400' :
+                            rec.followup_status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400' :
+                            rec.followup_status === 'STOPPED' ? 'bg-amber-500/10 text-amber-400' :
+                            'bg-slate-500/10 text-slate-400'
+                          }`}>
+                            Follow-up: Stage {rec.followup_stage || 0} ({rec.followup_status})
+                          </span>
+                        )}
+                        {/* Bounce reason */}
+                        {rec.bounce_reason && (
+                          <span className="text-rose-400/80 max-w-[250px] truncate" title={rec.bounce_reason}>
+                            💥 {rec.bounce_reason.replace(/^Email bounced\s*[—–-]\s*/i, '')}
+                          </span>
+                        )}
+                        {rec.updated_at && rec.updated_at !== rec.created_at && (
+                          <span className="text-slate-600">Updated {formatIST(rec.updated_at, true)}</span>
+                        )}
+                      </div>
+                      {rec.draft_preview && (
+                        <div className="mt-2 text-[9px] text-slate-600 italic line-clamp-1 border-l-2 border-blue-500/20 pl-2">{rec.draft_preview}...</div>
+                      )}
+                      {rec.details && (
+                        <div className="mt-1 text-[8px] text-slate-600 font-mono truncate">{rec.details}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Pagination */}
+            {detailData.total > 100 && (
+              <div className="px-8 py-5 border-t border-white/5 flex items-center justify-between bg-black/20">
+                <button
+                  onClick={() => handleDetailPageChange(detailPage - 1)}
+                  disabled={detailPage <= 1}
+                  className="px-4 py-2 bg-white/5 rounded-xl text-[10px] font-black text-slate-300 uppercase tracking-widest hover:bg-white/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  ← Previous
+                </button>
+                <span className="text-[10px] font-bold text-slate-500">
+                  Page {detailData.page} of {Math.max(1, Math.ceil(detailData.total / 100))}
+                </span>
+                <button
+                  onClick={() => handleDetailPageChange(detailPage + 1)}
+                  disabled={detailPage >= Math.ceil(detailData.total / 100)}
+                  className="px-4 py-2 bg-white/5 rounded-xl text-[10px] font-black text-slate-300 uppercase tracking-widest hover:bg-white/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Next →
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
