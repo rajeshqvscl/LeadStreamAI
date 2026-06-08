@@ -58,12 +58,14 @@ const Metrics = () => {
   const _now = new Date();
   const [selYear, setSelYear] = useState(_now.getFullYear());
   const [selMonth, setSelMonth] = useState(_now.getMonth());
+  const [filterStatus, setFilterStatus] = useState('');
 
   const fetchReport = async () => {
     try {
       let url = `/api/metrics?period=${range}&_t=${Date.now()}`;
       if (dateFrom) url += `&date_from=${dateFrom}`;
       if (dateTo) url += `&date_to=${dateTo}`;
+      if (filterStatus) url += `&status=${filterStatus}`;
       const res = await api.get(url);
       setData(res.data);
     } catch (err) {
@@ -78,7 +80,7 @@ const Metrics = () => {
     fetchReport();
     const interval = setInterval(fetchReport, 30000);
     return () => clearInterval(interval);
-  }, [range, dateFrom, dateTo]);
+  }, [range, dateFrom, dateTo, filterStatus]);
 
   const handleSort = (key) => {
     if (sortKey === key) {
@@ -166,6 +168,22 @@ const Metrics = () => {
     a.click();
   };
 
+  const exportBouncedCSV = () => {
+    if (!data?.report?.length) return;
+    const bounced = data.report.filter(r => r.action === 'Bounced');
+    if (!bounced.length) return;
+    const headers = ['Name', 'Email', 'Company', 'Sector', 'Bounce Reason'];
+    const rows = bounced.map(r => [
+      `"${r.name}"`, `"${r.email}"`, `"${r.company}"`, `"${r.sector}"`, `"${r.bounce_reason || ''}"`
+    ].join(','));
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `bounced_leads_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+  };
+
   const renderTableView = () => (
     <>
       <div className="relative mb-4">
@@ -235,6 +253,11 @@ const Metrics = () => {
                             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${actionStyle.bg} ${actionStyle.border} ${actionStyle.color}`}>
                               <ActionIcon className="w-3 h-3" /> {row.action}
                             </span>
+                            {row.bounce_reason && (
+                              <div className="mt-1 text-[9px] text-orange-400/70 max-w-[200px] truncate" title={row.bounce_reason}>
+                                {row.bounce_reason}
+                              </div>
+                            )}
                           </td>
                           <td className="px-4 py-3">
                             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${fsStyle.bg} ${fsStyle.border} ${fsStyle.color}`}>
@@ -395,6 +418,9 @@ const Metrics = () => {
             <button onClick={exportCSV} className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border border-emerald-500/20 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all">
               <Download className="w-3.5 h-3.5" /> Export CSV
             </button>
+            <button onClick={exportBouncedCSV} className="flex items-center gap-2 px-4 py-2.5 bg-orange-600/10 hover:bg-orange-600/20 text-orange-400 border border-orange-500/20 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all">
+              <AlertTriangle className="w-3.5 h-3.5" /> Export Bounced
+            </button>
             <button onClick={() => window.open('/mis-report', '_blank')} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all">
               <FileText className="w-3.5 h-3.5" /> MIS PDF
             </button>
@@ -445,6 +471,17 @@ const Metrics = () => {
               <span className="text-[9px] text-slate-600 font-black uppercase tracking-widest">to</span>
               <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setRange('all'); }} className="bg-[#111521] border border-white/5 rounded-lg px-3 py-2 text-[10px] text-slate-300 font-mono focus:outline-none focus:border-indigo-500/50" />
             </div>
+            <div className="w-px h-6 bg-white/10" />
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+              className="bg-[#111521] border border-white/5 rounded-lg px-3 py-2 text-[10px] text-slate-300 font-mono focus:outline-none focus:border-indigo-500/50">
+              <option value="">ALL STATUS</option>
+              <option value="BOUNCED">BOUNCED</option>
+              <option value="SENT">SENT</option>
+              <option value="PENDING_APPROVAL">PENDING</option>
+              <option value="REPLIED">REPLIED</option>
+              <option value="OPENED">OPENED</option>
+              <option value="REJECTED">REJECTED</option>
+            </select>
           </div>
         </div>
 

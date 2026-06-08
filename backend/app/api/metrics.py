@@ -48,6 +48,7 @@ def get_metrics(
     period: str = Query('all'),
     date_from: str = Query(None),
     date_to: str = Query(None),
+    status: str = Query(None),
 ):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -167,6 +168,12 @@ def get_metrics(
     report_params = []
     report_where = []
 
+    # Optional status filter (e.g. status=BOUNCED)
+    if status:
+        status_val = status.strip().upper()
+        report_where.append("l.email_status = %s")
+        report_params.append(status_val)
+
     # Detect Palak for 2-followup display
     _palak_user = False
     if user_id and user_id != 'all':
@@ -198,7 +205,8 @@ def get_metrics(
                COALESCE(l.sector, 'Other') as sector,
                l.email_status, l.followup_status, l.followup_stage,
                l.is_responded, l.is_unsubscribed, l.reply_intent,
-               l.updated_at
+               l.updated_at,
+               (SELECT al.details FROM activity_log al WHERE al.lead_id = l.id AND al.action = 'BOUNCED' ORDER BY al.created_at DESC LIMIT 1) as bounce_reason
         FROM leads_raw l
         {report_filter}
         ORDER BY l.updated_at DESC
@@ -249,6 +257,7 @@ def get_metrics(
             "action": action,
             "followup": followup_display,
             "date": updated,
+            "bounce_reason": r.get('bounce_reason') or '',
         })
 
     cur.close()
