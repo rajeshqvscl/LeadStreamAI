@@ -6,11 +6,30 @@ from typing import Optional
 router = APIRouter()
 
 @router.get("/dashboard/stats")
-def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_dashboard_stats(
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    user_id: Optional[str] = Header(None, alias="X-User-Id")
+):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
     is_admin = (str(user_id or '').lower() == 'admin')
+
+    # Build date filter condition
+    date_cond = ""
+    date_params = []
+    if month and year:
+        date_cond = "AND EXTRACT(MONTH FROM created_at) = %s AND EXTRACT(YEAR FROM created_at) = %s"
+        date_params = [month, year]
+    elif month:
+        date_cond = "AND EXTRACT(MONTH FROM created_at) = %s"
+        date_params = [month]
+    elif year:
+        date_cond = "AND EXTRACT(YEAR FROM created_at) = %s"
+        date_params = [year]
+    # For tables with different timestamp column
+    date_cond_unsub = date_cond.replace("created_at", "unsubscribed_at") if date_cond else ""
 
     # Resolve user_id to numeric DB id + full_name for activity_log queries
     # (activity_log stores performed_by=full_name or username, not user_id)
@@ -43,24 +62,35 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         act_cond = "1=1"
         act_params = []
 
+    # Build date filter for leads_raw (has created_at column)
+    lr_date = ""
+    lr_date_params = []
+    if date_cond:
+        lr_date = date_cond
+        lr_date_params = date_params
+    # Build date filter for company_registry (has created_at column)
+    cr_date = lr_date
+    cr_date_params = lr_date_params
+
     # Single query for all counts
     company_count_sql = user_cond if is_admin or resolved_id is not None else "1=1"
+    all_params = user_params + lr_date_params
     cur.execute(f"""
         SELECT
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond}) AS total_ingested,
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND is_responded = TRUE) AS total_leads,
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND validation_status = 'VALID') AS valid_leads,
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND persona IS NOT NULL AND persona != '') AS classified,
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND (email_status = 'PENDING_APPROVAL' OR email_status = 'pending')) AS pending,
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND email_status = 'SENT') AS sent,
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND email_draft IS NOT NULL) AS refined,
-            (SELECT COUNT(*) FROM company_registry WHERE {company_count_sql}) AS total_companies,
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND email_status = 'OPENED') AS unique_opens,
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND email_status = 'CLICKED') AS unique_clicks,
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND email_status = 'BOUNCED') AS total_bounces,
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND email IS NOT NULL AND email != '') AS with_email,
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND linkedin_url IS NOT NULL AND linkedin_url != '') AS with_linkedin
-    """, user_params * 13 if user_params else [])
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date}) AS total_ingested,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND is_responded = TRUE) AS total_leads,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND validation_status = 'VALID') AS valid_leads,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND persona IS NOT NULL AND persona != '') AS classified,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND (email_status = 'PENDING_APPROVAL' OR email_status = 'pending')) AS pending,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND email_status = 'SENT') AS sent,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND email_draft IS NOT NULL) AS refined,
+            (SELECT COUNT(*) FROM company_registry WHERE {company_count_sql} {cr_date}) AS total_companies,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND email_status = 'OPENED') AS unique_opens,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND email_status = 'CLICKED') AS unique_clicks,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND email_status = 'BOUNCED') AS total_bounces,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND email IS NOT NULL AND email != '') AS with_email,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND linkedin_url IS NOT NULL AND linkedin_url != '') AS with_linkedin
+    """, all_params * 13 if all_params else [])
     
     row = cur.fetchone()
     
@@ -79,16 +109,23 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
     with_linkedin = row['with_linkedin'] or 0
 
     # Get unsubscribes count
-    cur.execute(f"SELECT COUNT(*) as unsubs FROM unsubscribe_list WHERE email IN (SELECT email FROM leads_raw WHERE {user_cond})", user_params)
+    unsub_params = user_params + lr_date_params
+    cur.execute(f"SELECT COUNT(*) as unsubs FROM unsubscribe_list WHERE email IN (SELECT email FROM leads_raw WHERE {user_cond} {lr_date})", unsub_params)
     total_unsubs = cur.fetchone()['unsubs'] or 0
+
+    # Build date filter for activity_log (has created_at column)
+    al_date = lr_date
+    al_date_params = lr_date_params
 
     # Also check activity_log + campaign_events for opens/clicks (tracking pixel fallback)
     try:
+        log_params = act_params + al_date_params if act_params else al_date_params
+        log_params_2x = log_params + log_params if log_params else []
         cur.execute(f"""
             SELECT 
-                (SELECT COUNT(DISTINCT lead_id) FROM activity_log WHERE action IN ('OPENED','EMAIL_OPENED') AND {act_cond}) AS log_opens,
-                (SELECT COUNT(DISTINCT lead_id) FROM activity_log WHERE action IN ('CLICKED','EMAIL_CLICKED') AND {act_cond}) AS log_clicks
-        """, act_params * 2 if act_params else [])
+                (SELECT COUNT(DISTINCT lead_id) FROM activity_log WHERE action IN ('OPENED','EMAIL_OPENED') AND {act_cond} {al_date}) AS log_opens,
+                (SELECT COUNT(DISTINCT lead_id) FROM activity_log WHERE action IN ('CLICKED','EMAIL_CLICKED') AND {act_cond} {al_date}) AS log_clicks
+        """, log_params_2x if log_params_2x else [])
         log_row = cur.fetchone()
         log_opens = log_row['log_opens'] or 0
         log_clicks = log_row['log_clicks'] or 0
@@ -99,24 +136,26 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
 
     # Also check campaign_events table for additional tracking
     try:
+        ce_date = lr_date.replace('created_at', 'ce.created_at') if lr_date else ""
         if is_admin:
-            cur.execute("""
+            admin_ce_date = lr_date.replace('created_at', 'created_at') if lr_date else ""
+            cur.execute(f"""
                 SELECT 
-                    (SELECT COUNT(DISTINCT recipient_id) FROM campaign_events WHERE event_type = 'OPEN') AS ce_opens,
-                    (SELECT COUNT(DISTINCT recipient_id) FROM campaign_events WHERE event_type = 'CLICK') AS ce_clicks
-            """)
+                    (SELECT COUNT(DISTINCT recipient_id) FROM campaign_events WHERE event_type = 'OPEN' {admin_ce_date}) AS ce_opens,
+                    (SELECT COUNT(DISTINCT recipient_id) FROM campaign_events WHERE event_type = 'CLICK' {admin_ce_date}) AS ce_clicks
+            """, lr_date_params * 2 if lr_date_params else [])
         else:
             cur.execute(f"""
                 SELECT 
                     (SELECT COUNT(DISTINCT ce.recipient_id) FROM campaign_events ce
                      JOIN recipients r ON ce.recipient_id = r.id
                      JOIN leads_raw l ON r.lead_id = l.id
-                     WHERE ce.event_type = 'OPEN' AND {user_cond.replace('user_id', 'l.user_id')}) AS ce_opens,
+                     WHERE ce.event_type = 'OPEN' AND {user_cond.replace('user_id', 'l.user_id')} {ce_date}) AS ce_opens,
                     (SELECT COUNT(DISTINCT ce.recipient_id) FROM campaign_events ce
                      JOIN recipients r ON ce.recipient_id = r.id
                      JOIN leads_raw l ON r.lead_id = l.id
-                     WHERE ce.event_type = 'CLICK' AND {user_cond.replace('user_id', 'l.user_id')}) AS ce_clicks
-            """, user_params * 2 if user_params else [])
+                     WHERE ce.event_type = 'CLICK' AND {user_cond.replace('user_id', 'l.user_id')} {ce_date}) AS ce_clicks
+            """, user_params * 2 if user_params else (lr_date_params * 2 if lr_date_params else []))
         ce_row = cur.fetchone()
         unique_opens = max(unique_opens, (ce_row['ce_opens'] or 0))
         unique_clicks = max(unique_clicks, (ce_row['ce_clicks'] or 0))
@@ -142,7 +181,7 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         bounce_rate = 0.0
         unsub_rate = float(f"{(total_unsubs / total_leads * 100):.1f}") if total_leads > 0 else 0.0
 
-    cur.execute(f"SELECT persona, COUNT(*) as count FROM leads_raw WHERE {user_cond} AND persona IS NOT NULL GROUP BY persona", user_params)
+    cur.execute(f"SELECT persona, COUNT(*) as count FROM leads_raw WHERE {user_cond} {lr_date} AND persona IS NOT NULL GROUP BY persona", user_params + lr_date_params)
 
     persona_rows = cur.fetchall()
     persona_data = {}
@@ -150,7 +189,7 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         if r['persona']:
             persona_data[r['persona']] = r['count']
         
-    cur.execute(f"SELECT * FROM activity_log WHERE {act_cond} ORDER BY created_at DESC LIMIT 7", act_params)
+    cur.execute(f"SELECT * FROM activity_log WHERE {act_cond} {al_date} ORDER BY created_at DESC LIMIT 7", act_params + al_date_params if act_params and al_date_params else (act_params if act_params else (al_date_params if al_date_params else [])))
     logs_rows = cur.fetchall()
     recent_logs = []
     for row in logs_rows:
@@ -158,6 +197,7 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
 
         
     # Count of emails sent today (using activity_log for accuracy, IST timezone)
+    # Today counts — always today regardless of month filter
     ist_date = "(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date"
     today_str = "(NOW() AT TIME ZONE 'Asia/Kolkata')::date"
     cur.execute(f"""
@@ -169,9 +209,25 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
     sent_today = today_row['sent_today'] or 0
     fup_today = today_row['fup_today'] or 0
 
-    # Total follow-ups count (all-time)
-    cur.execute(f"SELECT COUNT(*) as total FROM activity_log WHERE action IN ('FOLLOWUP_SENT','AUTO_FOLLOWUP_SENT') AND {act_cond}", act_params)
+    # Total follow-ups count (with month/year filter if provided)
+    fup_params = act_params + al_date_params if act_params and al_date_params else (act_params if act_params else (al_date_params if al_date_params else []))
+    cur.execute(f"SELECT COUNT(*) as total FROM activity_log WHERE action IN ('FOLLOWUP_SENT','AUTO_FOLLOWUP_SENT') AND {act_cond} {al_date}", fup_params)
     total_followups = cur.fetchone()['total'] or 0
+
+    # Pending meeting reminders count
+    try:
+        if is_admin:
+            cur.execute("SELECT COUNT(*) as total FROM reminders WHERE status = 'PENDING'")
+        elif resolved_id is not None:
+            cur.execute("SELECT COUNT(*) as total FROM reminders WHERE status = 'PENDING' AND user_id = %s", (resolved_id,))
+        else:
+            rem_count = 0
+        if not is_admin and resolved_id is None:
+            meeting_reminders = 0
+        else:
+            meeting_reminders = cur.fetchone()['total'] or 0
+    except:
+        meeting_reminders = 0
 
     cur.close()
     conn.close()
@@ -199,7 +255,10 @@ def get_dashboard_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")
         "unsub_rate": unsub_rate,
         "recent_logs": recent_logs,
         "persona_data": persona_data if persona_data else { "FOUNDER": 0, "INVESTOR": 0, "PARTNER": 0 },
-        "total_companies": total_companies
+        "total_companies": total_companies,
+        "filter_month": month,
+        "filter_year": year,
+        "pending_reminders": meeting_reminders
     }
 
 @router.get("/dashboard/card-detail")

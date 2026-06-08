@@ -118,7 +118,7 @@ const Metrics = () => {
 
   const stats = data ? [
     { label: 'Replies', value: data.reverted },
-    { label: 'Emails Sent', value: `${data.today_sent} / ${data.daily_limit}` },
+    { label: 'Emails Sent', value: data.today_sent },
     { label: 'Follow-ups', value: data.today_followups },
     { label: 'Drafts', value: data.drafts_generated },
     { label: 'Registry', value: data.total_registry },

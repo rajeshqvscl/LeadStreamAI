@@ -408,6 +408,24 @@ SIG_END"""
 
     # 3. Palak Mam Corporate Advisory Template
     palak_corp_description = "Corporate Advisory / Equity Fund Raising Services — QVSCL Introduction"
+    palak_corp_followup1 = """Dear {{First Name}},
+
+I hope you are doing well.
+
+Just following up on my previous email. We would value the opportunity to connect and understand your growth roadmap and any potential **capital/funding** priorities that may be ahead.
+
+Would you be open to a short video call this week or next week? Happy to coordinate as per your availability.
+
+Looking forward to hearing from you."""
+    palak_corp_followup2 = """Dear {{First Name}},
+
+Just following up on my earlier note.
+
+Given your growth journey, we thought it may be worthwhile to connect and exchange perspectives around future expansion and funding opportunities.
+
+**Please let us know a suitable time for a brief discussion if this would be of interest.**
+
+Looking forward to connecting."""
     palak_corp_content = """Subject: Corporate Advisory/ Equity Fund Raising Services.
 
 Dear {{First Name}},
@@ -449,13 +467,13 @@ SIG_END"""
 
     # FORCE UPDATE
     cur.execute(
-        "UPDATE prompts SET content = %s, description = %s WHERE name = 'palak_mam_corporate_advisory'",
-        (palak_corp_content, palak_corp_description)
+        "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s, followup_3 = NULL WHERE name = 'palak_mam_corporate_advisory'",
+        (palak_corp_content, palak_corp_description, palak_corp_followup1, palak_corp_followup2)
     )
     if cur.rowcount == 0:
         cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type) VALUES ('palak_mam_corporate_advisory', %s, %s, 'CUSTOM_DRAFT')",
-            (palak_corp_description, palak_corp_content)
+            "INSERT INTO prompts (name, description, content, prompt_type, followup_1, followup_2) VALUES ('palak_mam_corporate_advisory', %s, %s, 'CUSTOM_DRAFT', %s, %s)",
+            (palak_corp_description, palak_corp_content, palak_corp_followup1, palak_corp_followup2)
         )
     conn.commit()
 
@@ -629,7 +647,8 @@ Looking forward to connecting."""
 
     # 6. Palak Mam M&A and Fundraising Template
     palak_mna_description = "Supporting Growth Through M&A and Fundraising"
-    palak_mna_content = """Subject: Supporting Growth Through M&A and Fundraising.
+    palak_mna_description = "Supporting Growth Through M&A and Fundraising"
+    palak_mna_content = """Subject: Supporting Growth Through M&A and Fundraising
 
 Dear {{First Name}},
 
@@ -637,12 +656,12 @@ Greetings from QVSCL.
 
 We're pleased to introduce QV Strategic Consulting, your trusted partner for driving sustainable growth and value creation. With extensive experience across diverse industries, we help businesses achieve their growth objectives through fundraising, mergers & acquisitions, and strategic partnerships.
 
-In M&A Advisory, we support:
+**In M&A Advisory, we support:**
 • Acquisitions to expand capabilities, market presence, or product offerings
 • Strategic mergers, joint ventures, and partnerships
 • Target identification, valuation, due diligence, negotiation, and transaction execution
 
-In Fundraising Advisory we help with:
+**In Fundraising Advisory we help with:**
 • Equity fundraising from VC, PE, Family Offices, and Strategic Investors
 • Debt fundraising for growth, working capital, and expansion requirements
 
@@ -1129,25 +1148,11 @@ def heal_draft_content(email_draft: str, user_id: Optional[str], profile: Option
     # 0b. Restore protected image filenames
     healed = healed.replace("[[KAJAL_IMG_PNG]]", "kajal.png")
         
-    # 2. Heal the subject line if this is the AI tech platform draft but has the generic subject
-    healed_lower = healed.lower()
-    is_ai_tech = (
-        "hiring" in healed_lower or 
-        "recruitment" in healed_lower or 
-        "verification" in healed_lower or 
-        "bgv" in healed_lower or 
-        "hr tech" in healed_lower or
-        "ats" in healed_lower or
-        "100k+" in healed_lower
-    )
+    # 2. (Subject healing removed — all templates now have their own Subject: line in the content,
+    #     extracted correctly by generate_email_internal() at lines 1430-1438.)
     
-    if is_ai_tech:
-        if "strategic partnership" in healed_lower or "strategic investment" in healed_lower or "qvscl x" in healed_lower or "qvscl ×" in healed_lower:
-            lines = healed.split("\n")
-            if lines and lines[0].lower().startswith("subject:"):
-                lines[0] = "Subject: AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |"
-                healed = "\n".join(lines)
-                
+    healed_lower = healed.lower()
+    
     # 3. Hospital-specific healing: detect by unique content fingerprints and upgrade signature
     hospital_fingerprints = [
         "uttar pradesh",
@@ -1186,48 +1191,60 @@ def heal_draft_content(email_draft: str, user_id: Optional[str], profile: Option
 
 def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     """Appends a premium standardized signature and mandatory unsubscribe link."""
+    import re
     body_text = body.strip()
-    body_lower = body_text.lower()
-    
-    # If unsubscribe already exists in body, strip it to avoid duplication,
-    # then let the normal flow add the proper signature + unsubscribe link
-    if "unsubscribe" in body_lower:
-        lines = body_text.split("\n")
-        lines = [l for l in lines if "unsubscribe" not in l.lower()]
-        body_text = "\n".join(lines).strip()
-        body_lower = body_text.lower()
-    
+
+    # Aggressive strip: remove any existing signature/unsubscribe block to prevent duplication
+    body_text = re.sub(r'<a\s[^>]*>Click here to unsubscribe</a>.*$', '', body_text, flags=re.DOTALL | re.IGNORECASE)
+    body_text = re.sub(r'Click here to unsubscribe.*$', '', body_text, flags=re.DOTALL | re.IGNORECASE)
+    body_text = re.sub(r'<div\s+style="font-family:\s*Calibri.*?</div>\s*</div>\s*$', '', body_text, flags=re.DOTALL | re.IGNORECASE)
+    body_text = re.sub(r'<div\s+style="color:\s*#666666;.*?</div>\s*$', '', body_text, flags=re.DOTALL | re.IGNORECASE)
+    body_text = body_text.strip()
+
     # 1. Strip existing signature to allow replacement by the current logged-in user
-    # Look for the formal separator "--"
     if "--" in body_text:
-        # Check if what follows -- looks like a signature (regards, sincerely, etc.)
         parts = body_text.rsplit("--", 1)
-        after_sep = parts[1].lower()
+        after_sep = parts[1].lower() if len(parts) > 1 else ""
         if any(x in after_sep for x in ["regards", "sincerely", "thanks", "analyst"]):
             body_text = parts[0].strip()
-            body_lower = body_text.lower()
 
     # 2. Strip any trailing sign-offs to prevent duplication
+    body_lower = body_text.lower()
     sign_offs = ["thanks & regards", "sincerely", "best regards", "thanks,", "regards,", "thanks and regards"]
     for s in sign_offs:
         if body_lower.endswith(s):
             body_text = body_text[:-(len(s))].strip()
-            body_lower = body_text.lower()
             break
 
-    name = profile.get('full_name') or profile.get('username') or 'The Team'
-    name = " ".join([p.capitalize() for p in name.split()])
+    raw_name = profile.get('full_name') or profile.get('username') or 'The Team'
+    name = " ".join([p.capitalize() for p in raw_name.split()])
     title = profile.get('job_title') or 'Analyst'
     linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
     phone = profile.get('phone') or "8527083798"
-    
+
     disclaimer = """Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."""
 
-    # Active unsubscribe link
     unsub_link = f"https://qvscl.com/unsubscribe?lead_id={lead_id}"
-    
-    # Standardized signature in grey (fully left-aligned with no leading spaces)
-    sig_html = f"""
+
+    is_palak = (profile.get('full_name') or '').strip().lower() == 'palak jain'
+
+    if is_palak:
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", "qvscllogo.png"), "rb") as f:
+            b64_logo = base64.b64encode(f.read()).decode()
+        logo_data_uri = f"data:image/png;base64,{b64_logo}"
+        sig_html = f"""<div style="font-family:Arial,Calibri,sans-serif;color:#0B2A6F;line-height:1.15;">
+<a href="{unsub_link}" style="color:#0B2A6F;font-size:10px;text-decoration:underline;">Click here to unsubscribe</a>
+<div style="color:#999;font-size:12px;">--</div>
+<div style="font-size:16px;font-weight:700;font-style:italic;margin:0;color:#0B2A6F;">Thanks &amp; Regards,</div>
+<div style="font-size:16px;font-weight:700;font-style:italic;margin:0;color:#0B2A6F;">{name}</div>
+<div style="font-size:15px;font-style:italic;margin:0;color:#0B2A6F;">{title}</div>
+<div style="font-size:15px;font-style:italic;margin:0;color:#0B2A6F;"><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> <span style="color:#1d5fd0;">/</span> <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></div>
+<div style="font-size:15px;font-style:italic;margin-top:2px;color:#0B2A6F;">{phone}</div>
+<img src="{logo_data_uri}" alt="QVSCL" width="110" style="margin-top:10px;width:110px;height:auto;display:block;">
+<div style="margin-top:10px;font-size:10px;line-height:1.4;color:#555555;max-width:600px;"><span style="font-weight:700;">Important:</span> This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you.</div>
+</div>"""
+    else:
+        sig_html = f"""
 <div style="color: #666666; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
 <a href="{unsub_link}" style="color: #666666; text-decoration: underline;">Click here to unsubscribe</a><br>
 --<br>
@@ -1241,7 +1258,9 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 </div>
 </div>
 """
-    return body_text + sig_html
+    # MUST separate signature from body with a blank line so markdown_to_html()
+    # can split it into its own <div> block instead of embedding inside a <p> tag
+    return body_text + "\n\n" + sig_html
 
 @router.post("/generate-draft")
 @router.post("/generate-email")
@@ -2359,12 +2378,33 @@ def _get_template_attachments(template_name: Optional[str]) -> list:
 @router.get("/emails")
 def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Optional[str] = None, geo: Optional[str] = None, company: Optional[str] = None, name: Optional[str] = None, per_page: int = 60, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     try:
-        uid = normalize_user_id(user_id) if user_id else None
+        # Resolve user — non-admin users only see their own drafts
+        resolved_uid = None
+        is_admin_user = False
+        if user_id and user_id.strip():
+            if str(user_id).lower() == 'admin':
+                is_admin_user = True
+            else:
+                try:
+                    conn_resolve = get_db_connection()
+                    cur_resolve = conn_resolve.cursor(cursor_factory=psycopg2.extras.DictCursor)
+                    uv = user_id.strip()
+                    if uv.isdigit():
+                        cur_resolve.execute("SELECT id FROM users WHERE id = %s LIMIT 1", (int(uv),))
+                    else:
+                        cur_resolve.execute("SELECT id FROM users WHERE LOWER(username) = LOWER(%s) OR LOWER(email) = LOWER(%s) LIMIT 1", (uv, uv))
+                    row = cur_resolve.fetchone()
+                    cur_resolve.close()
+                    conn_resolve.close()
+                    if row:
+                        resolved_uid = row['id']
+                except:
+                    pass
 
         # Try Redis cache first
         cache_key = None
         if redis_available and redis_client and not any([region, geo, company, name]):
-            cache_key = f"pending_drafts:{uid or 'all'}:{status or 'all'}:{page}:{per_page}"
+            cache_key = f"pending_drafts:{resolved_uid or 'unassigned'}:{status or 'all'}:{page}:{per_page}"
             try:
                 cached = redis_client.get(cache_key)
                 if cached:
@@ -2379,15 +2419,12 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         where_clause = "WHERE email_draft IS NOT NULL"
         params = []
         
-        # Show drafts for the specific user if uid is provided and not admin (uid != "1")
-        if uid and uid != "1":
-            where_clause += " AND (user_id = %s OR user_id::text = %s)"
-            try:
-                params.extend([int(uid), str(uid)])
-            except:
-                params.extend([uid, uid])
-        # If uid is admin ("1") or not provided, show all drafts without additional user filter
-        # No extra clause added
+        # User isolation: non-admin → only their drafts; admin → all; unset → unassigned only
+        if resolved_uid is not None:
+            where_clause += " AND user_id = %s"
+            params.append(resolved_uid)
+        elif not is_admin_user:
+            where_clause += " AND user_id IS NULL"
 
         if status:
             where_clause += " AND email_status = %s"

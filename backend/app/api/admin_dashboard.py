@@ -635,7 +635,7 @@ def get_system_settings(user_id: Any = Header(None, alias="X-User-Id"), _t: Any 
         
         return {
             "auto_followup": settings['auto_followup'] if settings else False,
-            "outreach_daily_limit": settings['outreach_daily_limit'] if (settings and settings['outreach_daily_limit'] is not None) else 200
+            "outreach_daily_limit": settings['outreach_daily_limit'] if (settings and settings['outreach_daily_limit'] is not None) else 999999
         }
     except Exception as e:
         logger.error("get_settings_error", error=str(e))

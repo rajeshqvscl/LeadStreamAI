@@ -66,7 +66,8 @@ const Dashboard = () => {
     open_rate_detail: ['No opens tracked yet', 'No email opens have been recorded. Ensure your emails include tracking pixels to measure open rates accurately.'],
     click_rate_detail: ['No clicks tracked yet', 'No link clicks have been recorded. Add trackable links to your emails to measure engagement.'],
     bounce_detail: ['No bounces detected', 'Your deliverability looks healthy! No emails have bounced back.'],
-    optouts_detail: ['No opt-outs recorded', 'No leads have opted out. Your email content is resonating well with your audience.']
+    optouts_detail: ['No opt-outs recorded', 'No leads have opted out. Your email content is resonating well with your audience.'],
+    meeting_requests: ['No meeting requests', 'No leads have proposed a meeting time yet. Replies with meeting requests will appear here automatically.']
   };
 
   const CARD_TITLES = {
@@ -81,7 +82,8 @@ const Dashboard = () => {
     open_rate_detail: 'Open Rate',
     click_rate_detail: 'Click Rate',
     bounce_detail: 'Bounce',
-    optouts_detail: 'Opt-outs'
+    optouts_detail: 'Opt-outs',
+    meeting_requests: 'Meeting Requests'
   };
 
   const MONTHS = [
@@ -92,10 +94,23 @@ const Dashboard = () => {
     { value: 10, label: 'October' }, { value: 11, label: 'November' }, { value: 12, label: 'December' }
   ];
 
-  const openCardDetail = (type) => {
+  const openCardDetail = async (type) => {
     setDetailModal({ open: true, type, title: CARD_TITLES[type] || type });
     setDetailPage(1);
-    fetchCardDetail(type, filterMonth === 0 ? null : filterMonth, filterYear, 1);
+    if (type === 'meeting_requests') {
+      setDetailLoading(true);
+      try {
+        const { data } = await axios.get('/api/reminders', { params: { status: 'PENDING' } });
+        setDetailData({ records: data, total: data.length, page: 1 });
+      } catch (err) {
+        console.error('Failed to fetch reminders', err);
+        setDetailData({ records: [], total: 0, page: 1 });
+      } finally {
+        setDetailLoading(false);
+      }
+    } else {
+      fetchCardDetail(type, filterMonth === 0 ? null : filterMonth, filterYear, 1);
+    }
   };
 
   const closeCardDetail = () => {
@@ -265,9 +280,15 @@ const Dashboard = () => {
       return <div key={idx} className="min-h-[1.5em]">{renderLine(cleanLine)}</div>;
     });
   };
+  const [dashboardMonth, setDashboardMonth] = useState(0);
+  const [dashboardYear, setDashboardYear] = useState(new Date().getFullYear());
+
   const fetchData = async () => {
     try {
-      const response = await axios.get('/api/dashboard/stats');
+      const params = {};
+      if (dashboardMonth > 0) params.month = dashboardMonth;
+      if (dashboardYear) params.year = dashboardYear;
+      const response = await axios.get('/api/dashboard/stats', { params });
       if (response.data) {
         setData(prev => ({ ...prev, ...response.data }));
       }
@@ -334,7 +355,7 @@ const Dashboard = () => {
     fetchData();
     const interval = setInterval(fetchData, 10000); // High-frequency 10s polling for real-time Command Center
     return () => clearInterval(interval);
-  }, [isAdmin]);
+  }, [isAdmin, dashboardMonth, dashboardYear]);
 
   useEffect(() => {
     fetchVelocity();
@@ -367,6 +388,36 @@ const Dashboard = () => {
         <p className="text-slate-400 text-lg max-w-[600px] relative z-10">
           Your pipeline is soaring. AI discovery has identified <span className="text-blue-400 font-extrabold underline decoration-blue-500/50">{data.total_leads}</span> targets today.
         </p>
+        {/* Month/Year Filter */}
+        <div className="flex items-center gap-4 mt-6 relative z-10">
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Month</label>
+            <select
+              value={dashboardMonth}
+              onChange={(e) => setDashboardMonth(parseInt(e.target.value))}
+              className="bg-[#131722] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500/30 cursor-pointer"
+            >
+              <option value={0}>All Time</option>
+              {Array.from({ length: 12 }, (_, i) => (
+                <option key={i + 1} value={i + 1}>
+                  {new Date(0, i).toLocaleString('en', { month: 'long' })}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Year</label>
+            <select
+              value={dashboardYear}
+              onChange={(e) => setDashboardYear(parseInt(e.target.value))}
+              className="bg-[#131722] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500/30 cursor-pointer"
+            >
+              {[2024, 2025, 2026, 2027].map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
 
       {/* Main Stats Grid */}
@@ -379,7 +430,8 @@ const Dashboard = () => {
           { type: 'refined', label: 'Refined Emails', val: data.refined !== undefined ? data.refined : 0, sub: 'Drafted and enriched', border: 'border-l-emerald-500' },
           { type: 'followups', label: 'Follow-ups Sent', val: data.total_followups || 0, sub: 'Total follow-ups dispatched', border: 'border-l-teal-500' },
           { type: 'unsubscribed', label: 'Unsubscribed', val: `${data.unsub_rate.toFixed(1)}%`, sub: 'At-risk leads', border: 'border-l-amber-500' },
-          { type: 'outbound', label: 'Outbound Limit', val: `${data.daily_sent_count}/${data.daily_limit}`, sub: 'Daily limits reset', border: 'border-l-orange-500' }
+
+          { type: 'meeting_requests', label: 'Meeting Requests', val: data.pending_reminders || 0, sub: 'Pending follow-ups from replies', border: 'border-l-rose-500' }
         ].map((stat, i) => (
           <div key={i} onClick={() => openCardDetail(stat.type)} className={`bg-[#131722] border border-white/5 border-l-4 ${stat.border} rounded-2xl p-6 shadow-xl transition-all hover:scale-105 hover:bg-white/[0.03] cursor-pointer group`}>
             <div className="flex items-center justify-between mb-3">
@@ -1006,7 +1058,8 @@ const Dashboard = () => {
               </div>
             </div>
 
-            {/* Month Filter */}
+            {/* Month Filter (hide for meeting_requests) */}
+            {detailModal.type !== 'meeting_requests' && (
             <div className="px-8 py-4 border-b border-white/5 flex items-center gap-3">
               <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Filter by Month:</span>
               <select
@@ -1032,6 +1085,7 @@ const Dashboard = () => {
                 ))}
               </select>
             </div>
+            )}
 
             {/* Records Table */}
             <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
@@ -1082,7 +1136,42 @@ const Dashboard = () => {
                     </div>
                   )}
 
-                  {detailData.records.map((rec, i) => (
+                  {/* Special rendering for meeting_requests (reminders) */}
+                  {detailModal.type === 'meeting_requests' && detailData.records.map((rec, i) => (
+                    <div key={rec.id || i} className="p-4 bg-white/[0.02] border border-white/[0.03] rounded-xl hover:bg-white/[0.04] transition-all group">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-rose-600/20 to-pink-600/20 border border-rose-500/10 flex items-center justify-center text-[10px] font-black text-rose-400 shrink-0">
+                            {(rec.title || 'MR').charAt(0)}
+                          </div>
+                          <div className="min-w-0">
+                            <span className="text-[11px] font-bold text-white truncate block">{rec.title || 'Meeting Request'}</span>
+                            <span className="text-[9px] font-medium text-slate-500">{rec.priority || 'MEDIUM'} Priority</span>
+                          </div>
+                        </div>
+                        <div className="text-[8px] font-bold text-slate-600 uppercase tracking-widest shrink-0">
+                          {rec.due_at ? formatIST(rec.due_at, true) : ''}
+                        </div>
+                      </div>
+                      <div className="text-[9px] text-slate-400 leading-relaxed mt-1 whitespace-pre-wrap line-clamp-2">
+                        {rec.description || ''}
+                      </div>
+                      <div className="flex items-center gap-2 mt-2">
+                        <span className={`px-2 py-0.5 rounded-full text-[8px] font-black ${
+                          rec.status === 'PENDING' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                          rec.status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                          'bg-slate-500/10 text-slate-400 border border-slate-500/20'
+                        }`}>
+                          {rec.status || 'PENDING'}
+                        </span>
+                        {rec.user_name && (
+                          <span className="text-[8px] font-medium text-slate-600">by {rec.user_name}</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+
+                  {detailModal.type !== 'meeting_requests' && detailData.records.map((rec, i) => (
                     <div key={rec.id || i} className="p-4 bg-white/[0.02] border border-white/[0.03] rounded-xl hover:bg-white/[0.04] transition-all group">
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-3">
@@ -1138,8 +1227,8 @@ const Dashboard = () => {
               )}
             </div>
 
-            {/* Pagination */}
-            {detailData.total > 100 && (
+            {/* Pagination (hide for meeting_requests) */}
+            {detailModal.type !== 'meeting_requests' && detailData.total > 100 && (
               <div className="px-8 py-5 border-t border-white/5 flex items-center justify-between bg-black/20">
                 <button
                   onClick={() => handleDetailPageChange(detailPage - 1)}

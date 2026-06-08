@@ -133,12 +133,13 @@ def get_urgent_actions(user_id: Optional[str] = Header(None, alias="X-User-Id"))
 
         params = uid_val if uid_val else ()
 
-        # Pending follow-ups — leads with active/idle followup, not responded, any outreach
+        # Pending follow-ups — leads with active/idle/scheduled followup, not responded
         cur.execute(f"""
-            SELECT id, name, company_name, followup_stage, followup_status,
+            SELECT id, COALESCE(first_name, '') || ' ' || COALESCE(last_name, '') AS name,
+                   company_name, followup_stage, followup_status,
                    last_outreach_at, sector
             FROM leads_raw
-            WHERE followup_status IN ('ACTIVE', 'IDLE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED')
+            WHERE followup_status IN ('ACTIVE', 'IDLE', 'SCHEDULED')
               AND COALESCE(is_responded, FALSE) = FALSE
               {uid_cond}
             ORDER BY followup_stage DESC, last_outreach_at ASC NULLS FIRST
@@ -146,16 +147,13 @@ def get_urgent_actions(user_id: Optional[str] = Header(None, alias="X-User-Id"))
         """, params)
         pending_followups = [dict(r) for r in cur.fetchall()]
 
-        # Pending drafts — any lead with draft content or pending email status
+        # Pending drafts — only leads actively awaiting approval
         cur.execute(f"""
-            SELECT id, name, company_name, email_draft, email_status,
+            SELECT id, COALESCE(first_name, '') || ' ' || COALESCE(last_name, '') AS name,
+                   company_name, email_draft, email_status,
                    created_at, sector
             FROM leads_raw
-            WHERE (
-              (email_draft IS NOT NULL AND email_draft != '')
-              OR COALESCE(email_status, '') = 'DRAFT'
-              OR COALESCE(email_status, '') = 'PENDING'
-            )
+            WHERE email_status IN ('PENDING_APPROVAL', 'DRAFT', 'PENDING')
               AND COALESCE(is_responded, FALSE) = FALSE
               {uid_cond}
             ORDER BY created_at ASC

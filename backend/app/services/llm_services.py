@@ -338,7 +338,9 @@ Looking forward to your response.
           "has_pitch_deck": boolean,
           "pitch_deck_url": null if not explicitly shared by the lead,
           "sentiment_score": integer (0-100),
-          "urgency_level": "HIGH" | "MEDIUM" | "LOW"
+          "urgency_level": "HIGH" | "MEDIUM" | "LOW",
+          "proposed_meeting_date": "If intent is MEETING_REQUESTED, extract the proposed date/time as ISO date if clear (e.g. '2026-06-15T10:00:00'), otherwise null",
+          "proposed_meeting_text": "If intent is MEETING_REQUESTED, the exact phrase mentioning the meeting time (e.g. 'Monday ko baat karte hain', 'let's talk next week'), otherwise null"
         }}
         """
         result_text = self._call_llm(prompt, max_tokens=512)

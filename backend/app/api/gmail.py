@@ -454,7 +454,35 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             except Exception as company_err:
                 logger.warning(f"Company-level followup stop failed: {company_err}")
 
-            # Step 3: Auto-Scheduling (Disabled - User will schedule manually)
+            # Step 3: Auto-create a reminder when MEETING_REQUESTED
+            if intent == 'MEETING_REQUESTED':
+                proposed_text = ai_data.get('proposed_meeting_text') or body[:200]
+                proposed_date_str = ai_data.get('proposed_meeting_date')
+                default_due = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)
+                if proposed_date_str:
+                    try:
+                        due_at = datetime.datetime.fromisoformat(proposed_date_str)
+                        if due_at.tzinfo:
+                            due_at = due_at.replace(tzinfo=None)
+                    except:
+                        due_at = default_due.replace(tzinfo=None) if default_due.tzinfo else default_due
+                else:
+                    due_at = default_due.replace(tzinfo=None) if default_due.tzinfo else default_due
+                reminder_title = f"Meeting Request: {lead_name}"
+                reminder_desc = f"Lead: {lead_name} ({sender_email})\nProposed Time: {proposed_text or 'Not specified'}\nIntent: {intent}\nLink: https://mail.google.com/mail/u/0/#inbox/{thread_id}"
+                try:
+                    cur.execute("""
+                        INSERT INTO reminders (title, description, due_at, priority, status, user_id, user_name)
+                        VALUES (%s, %s, %s, 'HIGH', 'PENDING', %s, %s)
+                    """, (reminder_title, reminder_desc, due_at, user_id, lead_name if lead_name else 'System'))
+                    conn.commit()
+                    print(f"SUCCESS: Auto-created reminder for meeting with {lead_name}")
+                    from app.models.lead import add_activity_log
+                    add_activity_log(lead_id, 'REMINDER_CREATED', f'Meeting reminder auto-created: {proposed_text}', 'system')
+                except Exception as reminder_err:
+                    print(f"Warning: Failed to auto-create reminder: {reminder_err}")
+
+            # Step 4: Auto-Scheduling (Disabled - User will schedule manually)
             if False: # intent in ["INTERESTED", "MEETING_REQUESTED"]:
                 # Schedule for 3 days from now at 10 AM UTC
                 meeting_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=3)

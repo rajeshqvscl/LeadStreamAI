@@ -162,7 +162,7 @@ def get_template_followup(lead: dict, stage: int) -> str:
     # Also check subject as fallback (some leads may not have draft_template_used saved)
     orig_subj = get_original_outreach_subject(lead) or ""
     
-    if draft_template in ('palak_mam_corporate_advisory', 'palak_mam_mna_fundraising') or "corporate advisory" in orig_subj.lower() or "m&a" in orig_subj.lower():
+    if draft_template in ('palak_mam_corporate_advisory', 'palak_mam_mna_fundraising', 'palak_mam_Draft_1') or "corporate advisory" in orig_subj.lower() or "m&a" in orig_subj.lower():
         campaign_key = "INVESTOR_PALAK_ADVISORY"
     elif draft_template == 'kajal_mam_health_ecosystem':
         campaign_key = "INVESTOR_KAJAL_HEALTH_ECOSYSTEM"
@@ -370,6 +370,8 @@ def process_outreach_sequences():
             AND l.email_status = 'SENT'
             AND COALESCE(l.is_responded, FALSE) = FALSE
             AND l.followup_stage < 3
+            AND l.draft_template_used IS NOT NULL
+            AND l.draft_template_used != ''
             ORDER BY l.last_outreach_at ASC
         """)
 
@@ -399,25 +401,8 @@ def process_outreach_sequences():
                 logger.info(f"Skipping auto-pilot for user {uid}: auto-followup disabled or Gmail not linked.")
                 continue
 
-            daily_limit = first_lead['outreach_daily_limit'] or 200
-
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT COUNT(*) FROM activity_log
-                WHERE user_id = %s
-                AND action IN ('AUTO_FOLLOWUP_SENT', 'EMAIL_SENT')
-                AND created_at >= NOW() - INTERVAL '1 day'
-            """, (uid,))
-            row_count = cur.fetchone()
-            sent_today = list(row_count.values())[0] if row_count else 0
-            cur.close()
-            conn.close()
-
-            remaining_allowance = max(0, daily_limit - sent_today)
-            if remaining_allowance <= 0:
-                logger.info(f"User {uid} has hit their daily outreach limit ({sent_today}/{daily_limit} sent today).")
-                continue
+            # Daily limit removed — user requested no restrictions
+            remaining_allowance = 999999
 
             sent_count = 0
             for lead in group:
@@ -663,8 +648,8 @@ def process_outreach_sequences():
                         add_activity_log(lead_id, "AUTO_FOLLOWUP_SENT", f"Stage {next_stage} auto-sent", "system", uid)
                         sent_count += 1
 
-                        logger.info(f"Auto-followup sent from {first_lead['sender_name']} ({first_lead['sender_email']}) to {lead['email']}. Enforcing 30s cool-down...")
-                        time.sleep(30)
+                        logger.info(f"Auto-followup sent from {first_lead['sender_name']} ({first_lead['sender_email']}) to {lead['email']}. Enforcing 5s cool-down...")
+                        time.sleep(5)
                     else:
                         logger.error(f"Auto-Pilot failed for {lead['email']}: {msg}")
                 except Exception as ex:

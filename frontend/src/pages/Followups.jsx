@@ -130,8 +130,7 @@ const Followups = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedDraft, setEditedDraft] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [systemSettings, setSystemSettings] = useState({ auto_followup: false, outreach_daily_limit: 200 });
-  const [localLimit, setLocalLimit] = useState('200');
+  const [systemSettings, setSystemSettings] = useState({ auto_followup: false, outreach_daily_limit: 999999 });
   const perPage = 100;
 
   useEffect(() => { 
@@ -146,25 +145,21 @@ const Followups = () => {
   const fetchSystemSettings = async () => {
     try {
       const res = await api.get('/api/admin/stats/settings');
-      const limit = res.data.outreach_daily_limit || 200;
       setSystemSettings({
         auto_followup: res.data.auto_followup,
-        outreach_daily_limit: limit
+        outreach_daily_limit: 999999
       });
-      setLocalLimit(String(limit));
     } catch {}
   };
 
-  const handleUpdateSettings = async (auto, limit) => {
-    // Update local state immediately for snappy UI
-    setSystemSettings({ auto_followup: auto, outreach_daily_limit: limit });
-    setLocalLimit(String(limit));
+  const handleUpdateSettings = async (auto) => {
+    setSystemSettings({ auto_followup: auto, outreach_daily_limit: 999999 });
     try {
       await api.post('/api/admin/stats/settings', { 
         auto_followup: auto, 
-        outreach_daily_limit: limit 
+        outreach_daily_limit: 999999
       });
-      showNotification('success', `Settings updated: Auto-Pilot ${auto ? 'ON' : 'OFF'}, Limit ${limit}`);
+      showNotification('success', `Auto-Pilot ${auto ? 'ON' : 'OFF'}`);
     } catch {
       showNotification('error', 'Failed to update settings');
     }
@@ -410,36 +405,11 @@ const Followups = () => {
                 <div className={`w-2 h-2 rounded-full ${systemSettings.auto_followup ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`} />
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Auto-Pilot</span>
                 <button
-                  onClick={() => handleUpdateSettings(!systemSettings.auto_followup, systemSettings.outreach_daily_limit)}
+                  onClick={() => handleUpdateSettings(!systemSettings.auto_followup)}
                   className={`w-10 h-5 rounded-full relative transition-all ${systemSettings.auto_followup ? 'bg-indigo-600' : 'bg-slate-700'}`}
                 >
                   <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all ${systemSettings.auto_followup ? 'left-6' : 'left-1'}`} />
                 </button>
-              </div>
-              <div className="w-px h-6 bg-white/10" />
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Daily Limit</span>
-                <input
-                  type="number"
-                  value={localLimit}
-                  onChange={(e) => setLocalLimit(e.target.value)}
-                  onBlur={() => {
-                    const val = parseInt(localLimit, 10);
-                    if (isNaN(val) || val <= 0) {
-                      setLocalLimit(String(systemSettings.outreach_daily_limit));
-                      return;
-                    }
-                    if (val !== systemSettings.outreach_daily_limit) {
-                      handleUpdateSettings(systemSettings.auto_followup, val);
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.target.blur();
-                    }
-                  }}
-                  className="w-16 bg-white/5 border border-white/10 rounded-lg py-1 px-2 text-[11px] font-black text-white text-center outline-none focus:border-indigo-500/50"
-                />
               </div>
             </div>
 
