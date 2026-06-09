@@ -73,6 +73,7 @@ const AdminDashboard = () => {
   const [availableOwners, setAvailableOwners] = useState([]);
   const [systemSettings, setSystemSettings] = useState({ auto_followup: false, outreach_daily_limit: 50 });
   const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
+  const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
     if (selectedLead?.id) {
@@ -120,7 +121,7 @@ const AdminDashboard = () => {
     { key: 'status', label: 'Status' }, { key: 'sent_draft', label: 'Sent/Draft' },
     { key: 'owner', label: 'Owner' }, { key: 'actions', label: 'Actions' },
   ];
-  const [visibleColumns, setVisibleColumns] = useState(new Set(['name', 'company', 'type', 'status', 'stage', 'followups', 'owner', 'sent_draft', 'actions']));
+  const [visibleColumns, setVisibleColumns] = useState(new Set(['name', 'company', 'type', 'check_size', 'status', 'stage', 'followups', 'owner', 'sent_draft', 'actions']));
   const activeFilterCount = [filters.type, filters.status, filters.intent, filters.owner, filters.sector].filter(v => v !== 'ALL').length;
   const [chartRange, setChartRange] = useState('ALL');
 
@@ -243,8 +244,7 @@ const AdminDashboard = () => {
   };
 
   useEffect(() => {
-    fetchGlobalStats();
-    fetchSystemSettings();
+    Promise.all([fetchGlobalStats(), fetchSystemSettings()]).then(() => setInitialized(true));
   }, []);
 
   useEffect(() => {
@@ -277,14 +277,7 @@ const AdminDashboard = () => {
     const pollId = setInterval(() => {
       fetchData(currentPage, true);
       fetchGlobalStats();
-      // Also refresh chart breakdowns silently
-      const params = new URLSearchParams({ _t: Date.now() });
-      if (filters.type !== 'ALL') params.set('type', filters.type);
-      if (filters.status !== 'ALL') params.set('status', filters.status);
-      if (filters.owner !== 'ALL') params.set('owner', filters.owner);
-      if (filters.sector !== 'ALL') params.set('sector', filters.sector);
-      if (chartRange !== 'ALL') params.set('period', chartRange);
-      api.get(`/api/admin/stats/breakdown?${params.toString()}`).then(res => setChartBreakdowns(res.data)).catch(() => {});
+      api.get(`/api/admin/stats/breakdown`).then(res => setChartBreakdowns(res.data)).catch(() => {});
     }, 20000);
 
     return () => clearInterval(pollId);
@@ -346,16 +339,7 @@ const AdminDashboard = () => {
 
   const getDisplaySector = (lead) => {
     if (!lead) return 'OTHER';
-    const cleanSector = (sec) => {
-      if (!sec) return '';
-      const s = sec.toString().trim().toUpperCase();
-      if (s === 'OTHER' || s === 'N/A' || s === '—' || s === '-') return '';
-      return s;
-    };
     
-    const existing = cleanSector(lead.sector) || cleanSector(lead.industry);
-    if (existing) return existing;
-
     const template = lead.draft_template_used || '';
     const textToSearch = [
       lead.email_draft,
@@ -365,19 +349,46 @@ const AdminDashboard = () => {
       lead.last_outreach_subject
     ].filter(Boolean).join(' ').toLowerCase();
 
-    if (template === 'palak_mam_Draft_1' || textToSearch.includes('india entry advisory') || textToSearch.includes('partnership opportunity') || textToSearch.includes('strategic partnership')) {
-      return 'M&A / STRATEGIC PARTNERSHIP';
+    // 1. Real Estate (Kajal Noida JV / leasing / investment)
+    if (textToSearch.includes('jv & investment') || textToSearch.includes('jv, investment') || textToSearch.includes('noida ncr') || textToSearch.includes('leasing | noida ncr')) {
+      return 'REAL ESTATE';
     }
-    if (template === 'palak_mam_corporate_advisory' || textToSearch.includes('corporate advisory/ equity fund raising') || textToSearch.includes('corporate advisory/equity fund')) {
+    // 2. Logistics (Kajal Warehousing & Fulfilment)
+    if (textToSearch.includes('warehousing & fulfilment') || textToSearch.includes('67k+ warehouses')) {
+      return 'LOGISTICS';
+    }
+    // 3. AI Hiring (Gigin AI/Hiring platform)
+    if (textToSearch.includes('vertical ai-powered hiring') || textToSearch.includes('hiring intelligence') || textToSearch.includes('gigin') || textToSearch.includes('hiring platform')) {
+      return 'AI HIRING';
+    }
+    // 4. Corporate Advisory (Palak / Kajal intro)
+    if (template === 'palak_mam_corporate_advisory' || textToSearch.includes('corporate advisory/ equity fund raising') || textToSearch.includes('corporate advisory/equity fund') || textToSearch.includes('qvscl: capital & growth solutions')) {
       return 'CORPORATE ADVISORY';
     }
+    // 5. M&A / Fundraising (Palak)
     if (template === 'palak_mam_mna_fundraising' || textToSearch.includes('supporting growth through m&a and fundraising') || textToSearch.includes('m&a and fundraising')) {
       return 'M&A / FUNDRAISING';
     }
+    // 6. M&A / Strategic Partnership (Palak)
+    if (template === 'palak_mam_draft_1' || template === 'palak_mam_Draft_1' || textToSearch.includes('india entry advisory') || textToSearch.includes('partnership opportunity') || textToSearch.includes('strategic partnership')) {
+      return 'M&A / STRATEGIC PARTNERSHIP';
+    }
+
+    // Fallback to database value if it's set and not generic "Other/SaaS" or if none of the above specific templates matched
+    const cleanSector = (sec) => {
+      if (!sec) return '';
+      const s = sec.toString().trim().toUpperCase();
+      if (s === 'OTHER' || s === 'N/A' || s === '—' || s === '-' || s === 'SAAS') return '';
+      return s;
+    };
+    const existing = cleanSector(lead.sector) || cleanSector(lead.industry);
+    if (existing) return existing;
+
+    // Standard fallback matching
     if (textToSearch.includes('climate') || textToSearch.includes('carbon') || textToSearch.includes('solar') || textToSearch.includes('renewable') || textToSearch.includes('green tech') || textToSearch.includes('clean tech') || textToSearch.includes('sustainability')) {
       return 'CLIMATE TECH';
     }
-    if (textToSearch.includes('hiring') || textToSearch.includes('recruitment') || textToSearch.includes('talent') || textToSearch.includes('gigin') || textToSearch.includes('staffing') || textToSearch.includes('hrtech')) {
+    if (textToSearch.includes('hiring') || textToSearch.includes('recruitment') || textToSearch.includes('talent') || textToSearch.includes('staffing') || textToSearch.includes('hrtech')) {
       return 'AI HIRING';
     }
     if (textToSearch.includes('hospital') || textToSearch.includes('healthcare') || textToSearch.includes('medical') || textToSearch.includes('health tech') || textToSearch.includes('clinical') || textToSearch.includes('pharma') || textToSearch.includes('clinic')) {
@@ -537,7 +548,7 @@ const AdminDashboard = () => {
     }
   };
 
-  if (loading && leads.length === 0) {
+  if (!initialized) {
     return (
       <div className="flex items-center justify-center h-[80vh]">
         <div className="flex flex-col items-center gap-4">
@@ -1016,7 +1027,7 @@ const AdminDashboard = () => {
                   {visibleColumns.has('check_size') && <td className="px-1 py-1 border border-white/5">
                     <div className="flex items-center gap-2">
                       <DollarSign className="w-3.5 h-3.5 text-emerald-500" />
-                      <span className="text-[13px] font-black text-white">{lead.deal_size || '—'}</span>
+                      <span className="text-[13px] font-black text-white">{lead.check_size || lead.deal_size || '—'}</span>
                     </div>
                   </td>}
                   {visibleColumns.has('score') && <td className="px-1.5 py-1.5 text-center border border-white/5">
@@ -1077,10 +1088,50 @@ const AdminDashboard = () => {
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-1.5 px-2 py-0.5 bg-rose-500/10 border border-rose-500/20 rounded-md w-fit">
                           <AlertCircle className="w-2.5 h-2.5 text-rose-400" />
-                          <span className="text-[9px] font-black text-rose-400 uppercase tracking-widest">Rejected ({lead.deal_size || 'N/A'})</span>
+                          <span className="text-[9px] font-black text-rose-400 uppercase tracking-widest">Rejected ({lead.check_size || lead.deal_size || 'N/A'})</span>
                         </div>
                         <div className="text-[10px] font-medium text-slate-400 italic break-words max-w-[200px] truncate" title={lead.rejection_reason || stripHtml(lead.remarks || '').replace(/\s+/g, ' ').trim()}>
                           {lead.rejection_reason || 'Not Interested'}
+                        </div>
+                      </div>
+                    ) : lead.reply_intent === 'MEETING_REQUESTED' ? (
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-1.5 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded-md w-fit">
+                          <Calendar className="w-2.5 h-2.5 text-emerald-400" />
+                          <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Meeting Requested ({lead.check_size || lead.deal_size || 'N/A'})</span>
+                        </div>
+                        <div className="text-[10px] font-medium text-slate-400 italic break-words max-w-[200px] truncate" title={lead.rejection_reason || stripHtml(lead.remarks || '').replace(/\s+/g, ' ').trim()}>
+                          {lead.rejection_reason || 'Wants to meet'}
+                        </div>
+                      </div>
+                    ) : lead.reply_intent === 'INTERESTED' ? (
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-1.5 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded-md w-fit">
+                          <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+                          <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Interested ({lead.check_size || lead.deal_size || 'N/A'})</span>
+                        </div>
+                        <div className="text-[10px] font-medium text-slate-400 italic break-words max-w-[200px] truncate" title={lead.rejection_reason || stripHtml(lead.remarks || '').replace(/\s+/g, ' ').trim()}>
+                          {lead.rejection_reason || 'Interested'}
+                        </div>
+                      </div>
+                    ) : lead.reply_intent === 'NEEDS_MORE_INFO' ? (
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-1.5 px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded-md w-fit">
+                          <Info className="w-2.5 h-2.5 text-amber-400" />
+                          <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest">Needs Info ({lead.check_size || lead.deal_size || 'N/A'})</span>
+                        </div>
+                        <div className="text-[10px] font-medium text-slate-400 italic break-words max-w-[200px] truncate" title={lead.rejection_reason || stripHtml(lead.remarks || '').replace(/\s+/g, ' ').trim()}>
+                          {lead.rejection_reason || 'Requesting info'}
+                        </div>
+                      </div>
+                    ) : (lead.email_status === 'REPLIED' || lead.reply_intent) ? (
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-1.5 px-2 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded-md w-fit">
+                          <MessageSquare className="w-2.5 h-2.5 text-indigo-400" />
+                          <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">Replied ({lead.check_size || lead.deal_size || 'N/A'})</span>
+                        </div>
+                        <div className="text-[10px] font-medium text-slate-400 italic break-words max-w-[200px] truncate" title={lead.rejection_reason || stripHtml(lead.remarks || '').replace(/\s+/g, ' ').trim()}>
+                          {lead.rejection_reason || 'Replied'}
                         </div>
                       </div>
                     ) : (
@@ -1311,7 +1362,7 @@ const AdminDashboard = () => {
                     <DollarSign className="w-4 h-4 text-emerald-400" />
                     <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Check Size</span>
                   </div>
-                  <div className="text-2xl font-black text-white">{selectedLead.deal_size || 'TBD'}</div>
+                  <div className="text-2xl font-black text-white">{selectedLead.check_size || selectedLead.deal_size || 'TBD'}</div>
                   <p className="mt-1 text-[9px] font-bold text-slate-500 uppercase tracking-widest">Estimated Deal Value</p>
                 </div>
               </div>
@@ -1403,7 +1454,7 @@ const AdminDashboard = () => {
                     </div>
                     <div>
                       <div className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">Deal Size</div>
-                      <div className="text-[13px] font-bold text-emerald-400">{selectedLead.deal_size || 'TBD'}</div>
+                      <div className="text-[13px] font-bold text-emerald-400">{selectedLead.check_size || selectedLead.deal_size || 'TBD'}</div>
                     </div>
                     <div>
                       <div className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">Lead Score</div>

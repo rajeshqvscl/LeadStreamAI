@@ -204,11 +204,20 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
 
         # Extract message body
         from app.services.google_service import extract_message_body, extract_attachments, get_gmail_service
-        # Extract message body and STRIP quoted history to avoid analyzing our own sent text/PDFs
-        from app.services.google_service import extract_message_body, extract_attachments, get_gmail_service
         payload = message_data.get('payload', {})
         full_body = extract_message_body(payload)
         
+        # Clean HTML tags first if it looks like HTML content to prevent HTML leaks
+        if full_body and "<" in full_body and ">" in full_body:
+            import re as _re
+            # Replace common block elements with newlines to preserve spacing
+            full_body_clean = _re.sub(r'(?i)<br\s*/?>|<p[^>]*>|</div>|</tr>|</table>', '\n', full_body)
+            # Strip all remaining HTML tags
+            full_body_clean = _re.sub(r'<[^>]+>', ' ', full_body_clean)
+            # Decode HTML entities
+            import html as _html
+            full_body = _html.unescape(full_body_clean)
+
         # Strip everything after 'On ... wrote:', 'On ... at ...:', 'From: ...', etc.
         # Handles case where email clients join inline like "iPhoneOn 8 May 2026, at 10:50 AM"
         pattern = r'(?mi)(?:On\s+.*wrote:|\bOn\s+.*\b(?:at\b)?\s*\d{1,2}:\d{2}.*?:|On\s+\d{1,2}\s+[a-z]+\s+\d{4},?\s+at\s+\d{1,2}:\d{2}|On\s+[a-z]+,?\s+[a-z]+\s+\d{1,2},?\s+\d{4}|\bFrom:\s+.*@.*|^---+\s*Original\s+Message\s*---+|----------\s*Forwarded\s+message\s*----------)'
@@ -262,9 +271,10 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         ai_data = llm.classify_reply(body)
         intent = ai_data.get("intent", "INTERESTED")
         
-        # USER REQUEST: Do not use email-body estimation for the primary revenue field.
-        # Only show financial metrics if they are verified in a PDF.
-        deal_size = None 
+        # Extract check size / ticket size from the reply text (monetary values only)
+        # LLM returns "deal_size" key — use it for both check_size and deal_size
+        check_size = ai_data.get("deal_size")
+        deal_size = ai_data.get("deal_size")
         pitch_deck_url = ai_data.get("pitch_deck_url")
         
         # If we got an actual PDF attachment, upload to Google Drive
@@ -378,20 +388,20 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         if intent == 'NOT_INTERESTED':
             final_status = 'CLOSED'
             
-        # EXTRA SAFEGUARD: Never set deal_size from LLM hallucination.
-        # Only keep it if it came from actual PDF analysis.
-        if not pdf_attachment:
-            deal_size = None
+        # Allow deal_size to be populated from the LLM-extracted value if not already set by PDF analysis
+        if not deal_size:
+            deal_size = ai_data.get("deal_size")
 
         rag_intel_json = json.dumps(rag_intel) if rag_intel else None
 
-        rejection_reason = ai_data.get("rejection_reason") if intent == 'NOT_INTERESTED' else None
+        rejection_reason = ai_data.get("rejection_reason")
 
         cur.execute("""
             UPDATE leads_raw 
             SET is_responded = %s, 
                 email_status = %s,
                 reply_intent = %s,
+                check_size = COALESCE(%s, check_size),
                 deal_size = %s,
                 pitch_deck_url = %s,
                 rag_advice = %s,
@@ -405,7 +415,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 followup_status = 'STOPPED'
             WHERE LOWER(email) = LOWER(%s) AND user_id = %s
             RETURNING id, first_name, last_name, user_id
-        """, (should_show_in_intel, final_status, intent, deal_size, pitch_deck_url, rag_advice, rag_intel_json, rag_category, ai_data.get("sentiment_score"), ai_data.get("urgency_level"), body, rejection_reason, sender_email, user_id))
+        """, (should_show_in_intel, final_status, intent, check_size, deal_size, pitch_deck_url, rag_advice, rag_intel_json, rag_category, ai_data.get("sentiment_score"), ai_data.get("urgency_level"), body, rejection_reason, sender_email, user_id))
 
         
         lead = cur.fetchone()
@@ -579,39 +589,49 @@ def get_inbound_deals(
         # Total Bypass: If a meeting exists, it must show up. Otherwise, show replied leads.
         print(f"DEBUG: Fetching inbound deals for uid: {uid} (Original X-User-Id: {user_id})")
         if user_id == "admin":
-            count_query = "SELECT COUNT(*) FROM leads_raw WHERE meeting_time IS NOT NULL OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED'))"
+            count_query = """SELECT COUNT(*) FROM leads_raw WHERE meeting_time IS NOT NULL 
+                 OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED'))
+                 OR reply_intent IN ('INTERESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED')
+                 OR email_status IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED', 'NOT_INTERESTED')"""
             cur.execute(count_query)
             count_result = cur.fetchone()
             total = count_result['count'] if count_result else 0
             
             query = """
                 SELECT id, first_name, last_name, email, company_name, persona, fit_score,
-                       email_status, is_responded, reply_intent, deal_size, pitch_deck_url,
+                       email_status, is_responded, reply_intent, deal_size, check_size, pitch_deck_url,
                        meeting_time, meeting_link, updated_at, created_at,
                        rag_intelligence, remarks, phone, linkedin_url, source, user_id,
                        sentiment_score, sector, designation
                 FROM leads_raw 
                 WHERE meeting_time IS NOT NULL 
                 OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED'))
+                 OR reply_intent IN ('INTERESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED')
+                 OR email_status IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED', 'NOT_INTERESTED')
                 ORDER BY updated_at DESC LIMIT %s OFFSET %s
             """
             cur.execute(query, (per_page, offset))
             leads = cur.fetchall()
         else:
-            count_query = "SELECT COUNT(*) FROM leads_raw WHERE user_id = %s AND (meeting_time IS NOT NULL OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED')))"
+            count_query = """SELECT COUNT(*) FROM leads_raw WHERE user_id = %s AND (meeting_time IS NOT NULL 
+                 OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED'))
+                 OR reply_intent IN ('INTERESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED')
+                 OR email_status IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED', 'NOT_INTERESTED'))"""
             cur.execute(count_query, (uid,))
             count_result = cur.fetchone()
             total = count_result['count'] if count_result else 0
             
             query = """
                 SELECT id, first_name, last_name, email, company_name, persona, fit_score,
-                       email_status, is_responded, reply_intent, deal_size, pitch_deck_url,
+                       email_status, is_responded, reply_intent, deal_size, check_size, pitch_deck_url,
                        meeting_time, meeting_link, updated_at, created_at,
                        rag_intelligence, remarks, phone, linkedin_url, source, user_id,
                        sentiment_score, sector, designation
                 FROM leads_raw 
                 WHERE user_id = %s 
-                AND (meeting_time IS NOT NULL OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED')))
+                AND (meeting_time IS NOT NULL OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED'))
+                 OR reply_intent IN ('INTERESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED')
+                 OR email_status IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED', 'NOT_INTERESTED'))
                 ORDER BY updated_at DESC LIMIT %s OFFSET %s
             """
             cur.execute(query, (uid, per_page, offset))

@@ -78,7 +78,7 @@ def get_dashboard_stats(
     cur.execute(f"""
         SELECT
             (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date}) AS total_ingested,
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND is_responded = TRUE) AS total_leads,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND (is_responded = TRUE OR reply_intent IN ('INTERESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED') OR email_status IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED', 'NOT_INTERESTED'))) AS total_leads,
             (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND validation_status = 'VALID') AS valid_leads,
             (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND persona IS NOT NULL AND persona != '') AS classified,
             (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND (email_status = 'PENDING_APPROVAL' OR email_status = 'pending')) AS pending,
@@ -284,6 +284,7 @@ def get_card_detail(
         row = cur.fetchone()
         if row:
             resolved_id = row['id']
+            resolved_name = row['full_name'] or row['username']
 
     if is_admin:
         user_cond = "1=1"

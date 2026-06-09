@@ -128,8 +128,8 @@ const DealCard = React.memo(({ deal, onClick, formatIST, getStatusColor, getStat
 
         <div className="w-full md:w-auto flex items-center gap-6 md:border-l border-white/5 md:pl-8">
           <div className="text-center">
-            <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Est. Size</div>
-            <div className="text-lg font-black text-white">{deal.deal_size || '—'}</div>
+            <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Check Size</div>
+            <div className="text-lg font-black text-white">{deal.check_size || '—'}</div>
           </div>
           <div className="text-center">
             <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Activity</div>
@@ -175,9 +175,18 @@ const InboundDeals = () => {
 
   useEffect(() => {
     fetchDeals();
-    const pollId = setInterval(() => fetchDeals(true), 30000);
+    const pollId = setInterval(() => fetchDeals(true), 2000);
     return () => clearInterval(pollId);
   }, [fetchDeals]);
+
+  useEffect(() => {
+    const syncId = setInterval(() => {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const userId = user.id || 'admin';
+      api.post('/api/gmail/sync-inbound', {}, { headers: { 'X-User-Id': userId } }).catch(() => {});
+    }, 30000);
+    return () => clearInterval(syncId);
+  }, []);
 
   const filteredDeals = useMemo(() => {
     return deals.filter(deal => {
@@ -415,7 +424,11 @@ const InboundDeals = () => {
                         <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
                           <ShieldCheck className="w-3 h-3 text-blue-400" /> Actuals
                         </div>
-                        <div className="grid grid-cols-2 gap-6">
+                        <div className="grid grid-cols-3 gap-6">
+                          <div>
+                            <div className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">Check Size</div>
+                            <div className="text-lg font-black text-white">{selectedDeal.check_size || '—'}</div>
+                          </div>
                           <div>
                             <div className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">Revenue</div>
                             <div className="text-lg font-black text-white">

@@ -5,10 +5,37 @@ import psycopg2.extras
 from app.database import get_db_connection
 import structlog
 import json
+import os
+import datetime
 from pydantic import BaseModel
+
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (datetime.datetime, datetime.date, datetime.time)):
+            return obj.isoformat()
+        return super().default(obj)
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
+
+# --- REDIS CACHE INITIALIZATION ---
+redis_client = None
+redis_available = False
+
+try:
+    import redis
+    REDIS_URL = os.getenv("REDIS_URL") or os.getenv("REDIS_TLS_URL") or "redis://localhost:6379"
+    redis_client = redis.Redis.from_url(
+        REDIS_URL,
+        decode_responses=True,
+    )
+    redis_client.ping()
+    redis_available = True
+    logger.info(f"SUCCESS: Connected to Redis Cache at {REDIS_URL.split('@')[-1]}")
+except Exception as re_err:
+    logger.warning(f"NOTICE: Redis is not active. Falling back to direct database execution. Error: {re_err}")
+    redis_client = None
+    redis_available = False
 
 TYPE_CASE_SQL = """
 CASE 
@@ -20,21 +47,63 @@ END
 
 SECTOR_CASE_SQL = """
 CASE
-    WHEN l.draft_template_used = 'palak_mam_Draft_1'
-      OR COALESCE(l.email_draft, '') ~* 'India Entry Advisory|Partnership Opportunity|Strategic Partnership'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'India Entry Advisory|Partnership Opportunity|Strategic Partnership'
-      OR COALESCE(l.last_outreach_subject, '') ~* 'India Entry Advisory|Partnership Opportunity|Strategic Partnership'
-      THEN 'M&A / STRATEGIC PARTNERSHIP'
+    -- Kajal templates: explicit template-name mapping (highest priority)
+    WHEN l.draft_template_used = 'kajal_mam_jv'
+      THEN 'REAL ESTATE'
+    WHEN l.draft_template_used = 'kajal_mam_hyphen'
+      THEN 'LOGISTICS'
+    WHEN l.draft_template_used = 'kajal_mam_health_ecosystem'
+      THEN 'HEALTHCARE'
+    WHEN l.draft_template_used = 'kajal_mam_agritech'
+      THEN 'AGRITECH'
+    WHEN l.draft_template_used = 'kajal_mam_qvscl_intro'
+      THEN 'CORPORATE ADVISORY'
+
+    -- Yashika templates: explicit template-name mapping
+    WHEN l.draft_template_used = 'yashika_draft_ai_tech'
+      THEN 'AI HIRING'
+    WHEN l.draft_template_used = 'yashika_draft_agritech'
+      THEN 'AGRITECH'
+
+    -- Palak templates: explicit template-name mapping
     WHEN l.draft_template_used = 'palak_mam_corporate_advisory'
-      OR COALESCE(l.email_draft, '') ~* 'Corporate Advisory/ Equity Fund Raising|Corporate Advisory/Equity Fund'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'Corporate Advisory/ Equity Fund Raising|Corporate Advisory/Equity Fund'
-      OR COALESCE(l.last_outreach_subject, '') ~* 'Corporate Advisory/ Equity Fund Raising|Corporate Advisory/Equity Fund'
       THEN 'CORPORATE ADVISORY'
     WHEN l.draft_template_used = 'palak_mam_mna_fundraising'
-      OR COALESCE(l.email_draft, '') ~* 'Supporting Growth Through M&A and Fundraising|M&A and Fundraising'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'Supporting Growth Through M&A and Fundraising|M&A and Fundraising'
-      OR COALESCE(l.last_outreach_subject, '') ~* 'Supporting Growth Through M&A and Fundraising|M&A and Fundraising'
       THEN 'M&A / FUNDRAISING'
+    WHEN l.draft_template_used = 'palak_mam_Draft_1'
+      THEN 'M&A / STRATEGIC PARTNERSHIP'
+
+    -- 1. Real Estate (JV / Noida NCR)
+    WHEN COALESCE(l.email_draft, '') ~* 'JV & Investment|JV, Investment|Noida NCR|Leasing \\| Noida NCR'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'JV & Investment|JV, Investment|Noida NCR|Leasing \\| Noida NCR'
+      THEN 'REAL ESTATE'
+
+    -- 2. Logistics (Warehousing & Fulfilment)
+    WHEN COALESCE(l.email_draft, '') ~* 'Warehousing & Fulfilment|67K\\+ Warehouses'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'Warehousing & Fulfilment|67K\\+ Warehouses'
+      THEN 'LOGISTICS'
+
+    -- 3. AI Hiring (Gigin)
+    WHEN COALESCE(l.email_draft, '') ~* 'vertical AI-powered hiring|hiring intelligence|gigin|hiring platform'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'vertical AI-powered hiring|hiring intelligence|gigin|hiring platform'
+      THEN 'AI HIRING'
+
+    -- 4. Corporate Advisory (content fallback)
+    WHEN COALESCE(l.email_draft, '') ~* 'Corporate Advisory/ Equity Fund Raising|Corporate Advisory/Equity Fund|QVSCL: Capital & Growth Solutions'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'Corporate Advisory/ Equity Fund Raising|Corporate Advisory/Equity Fund|QVSCL: Capital & Growth Solutions'
+      THEN 'CORPORATE ADVISORY'
+
+    -- 5. M&A / Fundraising (content fallback)
+    WHEN COALESCE(l.email_draft, '') ~* 'Supporting Growth Through M&A and Fundraising'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'Supporting Growth Through M&A and Fundraising'
+      THEN 'M&A / FUNDRAISING'
+
+    -- 6. M&A / Strategic Partnership (content fallback)
+    WHEN COALESCE(l.email_draft, '') ~* 'India Entry Advisory|Partnership Opportunity|Strategic Partnership'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'India Entry Advisory|Partnership Opportunity|Strategic Partnership'
+      THEN 'M&A / STRATEGIC PARTNERSHIP'
+
+    -- 7. Climate Tech
     WHEN COALESCE(l.email_draft, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
       OR COALESCE(l.remarks, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
       OR COALESCE(l.persona, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
@@ -43,14 +112,18 @@ CASE
       OR COALESCE(l.sector, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
       OR COALESCE(l.industry, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
       THEN 'CLIMATE TECH'
-    WHEN COALESCE(l.email_draft, '') ~* 'hiring|recruitment|talent|gigin|staffing|hrtech'
-      OR COALESCE(l.remarks, '') ~* 'hiring|recruitment|talent|gigin|staffing|hrtech'
-      OR COALESCE(l.persona, '') ~* 'hiring|recruitment|talent|gigin|staffing|hrtech'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'hiring|recruitment|talent|gigin|staffing|hrtech'
-      OR COALESCE(l.last_outreach_subject, '') ~* 'hiring|recruitment|talent|gigin|staffing|hrtech'
-      OR COALESCE(l.sector, '') ~* 'hiring|recruitment|talent|gigin|staffing|hrtech'
-      OR COALESCE(l.industry, '') ~* 'hiring|recruitment|talent|gigin|staffing|hrtech'
+
+    -- 8. AI Hiring (Fallback)
+    WHEN COALESCE(l.email_draft, '') ~* 'hiring|recruitment|talent|hrtech'
+      OR COALESCE(l.remarks, '') ~* 'hiring|recruitment|talent|hrtech'
+      OR COALESCE(l.persona, '') ~* 'hiring|recruitment|talent|hrtech'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'hiring|recruitment|talent|hrtech'
+      OR COALESCE(l.last_outreach_subject, '') ~* 'hiring|recruitment|talent|hrtech'
+      OR COALESCE(l.sector, '') ~* 'hiring|recruitment|talent|hrtech'
+      OR COALESCE(l.industry, '') ~* 'hiring|recruitment|talent|hrtech'
       THEN 'AI HIRING'
+
+    -- 9. Healthcare
     WHEN COALESCE(l.email_draft, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
       OR COALESCE(l.remarks, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
       OR COALESCE(l.persona, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
@@ -59,14 +132,18 @@ CASE
       OR COALESCE(l.sector, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
       OR COALESCE(l.industry, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
       THEN 'HEALTHCARE'
-    WHEN COALESCE(l.email_draft, '') ~* 'agri|agtech|farming|agriculture|agrivijay'
-      OR COALESCE(l.remarks, '') ~* 'agri|agtech|farming|agriculture|agrivijay'
-      OR COALESCE(l.persona, '') ~* 'agri|agtech|farming|agriculture|agrivijay'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'agri|agtech|farming|agriculture|agrivijay'
-      OR COALESCE(l.last_outreach_subject, '') ~* 'agri|agtech|farming|agriculture|agrivijay'
-      OR COALESCE(l.sector, '') ~* 'agri|agtech|farming|agriculture|agrivijay'
-      OR COALESCE(l.industry, '') ~* 'agri|agtech|farming|agriculture|agrivijay'
+
+    -- 10. Agritech
+    WHEN COALESCE(l.email_draft, '') ~* 'agri|agtech|farming|agriculture'
+      OR COALESCE(l.remarks, '') ~* 'agri|agtech|farming|agriculture'
+      OR COALESCE(l.persona, '') ~* 'agri|agtech|farming|agriculture'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'agri|agtech|farming|agriculture'
+      OR COALESCE(l.last_outreach_subject, '') ~* 'agri|agtech|farming|agriculture'
+      OR COALESCE(l.sector, '') ~* 'agri|agtech|farming|agriculture'
+      OR COALESCE(l.industry, '') ~* 'agri|agtech|farming|agriculture'
       THEN 'AGRITECH'
+
+    -- 11. Edtech
     WHEN COALESCE(l.email_draft, '') ~* 'edtech|education|school|learning'
       OR COALESCE(l.remarks, '') ~* 'edtech|education|school|learning'
       OR COALESCE(l.persona, '') ~* 'edtech|education|school|learning'
@@ -75,6 +152,8 @@ CASE
       OR COALESCE(l.sector, '') ~* 'edtech|education|school|learning'
       OR COALESCE(l.industry, '') ~* 'edtech|education|school|learning'
       THEN 'EDTECH'
+
+    -- 12. Fintech
     WHEN COALESCE(l.email_draft, '') ~* 'fintech|banking|finance|payments'
       OR COALESCE(l.remarks, '') ~* 'fintech|banking|finance|payments'
       OR COALESCE(l.persona, '') ~* 'fintech|banking|finance|payments'
@@ -83,6 +162,8 @@ CASE
       OR COALESCE(l.sector, '') ~* 'fintech|banking|finance|payments'
       OR COALESCE(l.industry, '') ~* 'fintech|banking|finance|payments'
       THEN 'FINTECH'
+
+    -- 13. SaaS
     WHEN COALESCE(l.email_draft, '') ~* 'saas|software|b2b saas'
       OR COALESCE(l.remarks, '') ~* 'saas|software|b2b saas'
       OR COALESCE(l.persona, '') ~* 'saas|software|b2b saas'
@@ -91,6 +172,7 @@ CASE
       OR COALESCE(l.sector, '') ~* 'saas|software|b2b saas'
       OR COALESCE(l.industry, '') ~* 'saas|software|b2b saas'
       THEN 'SAAS'
+
     ELSE COALESCE(NULLIF(TRIM(UPPER(l.sector)), 'OTHER'), NULLIF(TRIM(UPPER(l.industry)), 'OTHER'), 'OTHER')
 END
 """
@@ -167,6 +249,15 @@ def get_all_leads_admin(
     """
     Returns paginated leads for the admin dashboard with global filtering.
     """
+    cache_key = f"admin_leads:{user_id}:{page}:{limit}:{type}:{status}:{intent}:{owner}:{sector}:{search}:{period}"
+    if redis_available and redis_client:
+        try:
+            cached = redis_client.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -224,7 +315,7 @@ def get_all_leads_admin(
         # 3. Fetch leads
         query = f"""
             SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.company_name, l.family_office_name, l.designation, 
-                   ({SECTOR_CASE_SQL}) as sector, ({TYPE_CASE_SQL}) as lead_type, l.reply_intent, l.sentiment_score, l.deal_size, l.source,
+                   ({SECTOR_CASE_SQL}) as sector, ({TYPE_CASE_SQL}) as lead_type, l.reply_intent, l.sentiment_score, l.deal_size, l.check_size, l.source,
                    l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
                    l.followup_stage, l.followup_status, l.last_outreach_at, l.email_status,
                    l.persona, l.email_draft, l.first_outreach_subject, l.last_outreach_subject, l.remarks, l.rejection_reason,
@@ -271,7 +362,7 @@ def get_all_leads_admin(
                             row["company_name"] = domain_part.capitalize()
             lead_list.append(row)
 
-        return {
+        result = {
             "leads": lead_list,
             "sectors": all_sectors,
             "owners": all_owners,
@@ -282,6 +373,12 @@ def get_all_leads_admin(
                 "pages": (total_count + limit - 1) // limit
             }
         }
+        if redis_available and redis_client:
+            try:
+                redis_client.setex(cache_key, 5, json.dumps(result, cls=DateTimeEncoder))
+            except Exception:
+                pass
+        return result
         
     except HTTPException:
         raise
@@ -328,7 +425,7 @@ def export_all_leads_admin(
         # 3. Fetch leads
         query = f"""
             SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.company_name, l.family_office_name, l.designation, 
-                   l.sector, l.lead_type, l.reply_intent, l.sentiment_score, l.deal_size,
+                   l.sector, l.lead_type, l.reply_intent, l.sentiment_score, l.deal_size, l.check_size,
                    l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
                    l.email_status, l.followup_status,
                    l.persona, l.email_draft, l.first_outreach_subject, l.last_outreach_subject,
@@ -363,6 +460,15 @@ def get_global_stats(
     Aggregates metrics across the entire workspace.
     Supports owner (sender) filter and time range (DAILY/WEEKLY/MONTHLY/QUARTERLY/ALL).
     """
+    cache_key = f"admin_stats_global:{user_id}:{owner}:{period}"
+    if redis_available and redis_client:
+        try:
+            cached = redis_client.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -564,7 +670,7 @@ def get_global_stats(
         """, tuple(l_params))
         source_breakdown = [dict(r) for r in cur.fetchall()]
         
-        return {
+        result = {
             "total_leads": total_leads,
             "interested": interested,
             "meetings": meetings,
@@ -584,6 +690,12 @@ def get_global_stats(
             "sector_breakdown": sector_breakdown,
             "source_breakdown": source_breakdown
         }
+        if redis_available and redis_client:
+            try:
+                redis_client.setex(cache_key, 5, json.dumps(result, cls=DateTimeEncoder))
+            except Exception:
+                pass
+        return result
         
     except Exception as e:
         logger.error("admin_global_stats_error", error=str(e))
@@ -605,6 +717,15 @@ def get_filtered_breakdowns(
     """
     Returns chart breakdowns filtered by type/status/owner/sector.
     """
+    cache_key = f"admin_breakdowns:{user_id}:{type}:{status}:{owner}:{sector}:{period}"
+    if redis_available and redis_client:
+        try:
+            cached = redis_client.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -684,12 +805,18 @@ def get_filtered_breakdowns(
         """, tuple(params))
         source_breakdown = [dict(r) for r in cur.fetchall()]
         
-        return {
+        result = {
             "intent_breakdown": intent_breakdown,
             "type_breakdown": type_breakdown,
             "sector_breakdown": sector_breakdown,
             "source_breakdown": source_breakdown
         }
+        if redis_available and redis_client:
+            try:
+                redis_client.setex(cache_key, 5, json.dumps(result, cls=DateTimeEncoder))
+            except Exception:
+                pass
+        return result
         
     except Exception as e:
         logger.error("admin_filtered_breakdown_error", error=str(e))

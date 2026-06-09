@@ -325,7 +325,7 @@ Looking forward to your response.
         1. Identify the new response/reply at the very beginning/top of the text. Ignore any quoted historical thread or original outreach text trailing after it (e.g., descriptions of QVSCL, the climate agritech project, traction, etc.).
         2. If the lead declines the opportunity in the new reply—even in a short sentence like "Pass from us", "Pass for now", "Not interested", "Not within our mandate", "Too early for us", "No thank you"—you MUST classify the intent as "NOT_INTERESTED" and set the sentiment_score between 0 and 20.
         3. Do NOT let the details of the original outreach email (which is positive) confuse you. Focus 100% on the lead's new reply at the top.
-        4. CRITICAL — deal_size: ONLY extract a deal size if it is EXPLICITLY mentioned in the lead's NEW reply (the top part). If the reply says "Pass from us", "Not interested", or any short decline, deal_size MUST be null. Do NOT infer, guess, or copy deal sizes from the quoted original email thread below. If in doubt, set null.
+        4. CRITICAL — deal_size: Extract the ticket size, investment range, check size, or revenue criteria (MONETARY VALUES ONLY, e.g., '$1M', '$500K-$1M', 'INR 100 cr+', '10-20 Cr') explicitly mentioned in the lead's NEW reply (the top part). Crucially: DO NOT include stage names like 'Series A', 'Series B', 'Seed', or 'Pre-Seed' — only extract numeric monetary values/ranges. If none is mentioned, set null.
         5. CRITICAL — pitch_deck_url: ONLY set if the lead's NEW reply explicitly includes a URL or attachment reference. Do not fabricate or copy from the quoted thread.
         
         REPLY TEXT:
@@ -334,14 +334,14 @@ Looking forward to your response.
          JSON STRUCTURE:
          {{
            "intent": "MEETING_REQUESTED" | "INTERESTED" | "NEEDS_MORE_INFO" | "NOT_INTERESTED",
-           "deal_size": null if not explicitly mentioned in the lead's own reply,
+           "deal_size": "ticket size, investment range, or revenue criteria mentioned (MONETARY VALUES ONLY, e.g., '100 cr+', '$1M', '$500K-$1M') or null if not mentioned. Do not include stage names like 'Series A' or 'Series B'.",
            "has_pitch_deck": boolean,
            "pitch_deck_url": null if not explicitly shared by the lead,
            "sentiment_score": integer (0-100),
            "urgency_level": "HIGH" | "MEDIUM" | "LOW",
            "proposed_meeting_date": "If intent is MEETING_REQUESTED, extract the proposed date/time as ISO date if clear (e.g. '2026-06-15T10:00:00'), otherwise null",
            "proposed_meeting_text": "If intent is MEETING_REQUESTED, the exact phrase mentioning the meeting time (e.g. 'Monday ko baat karte hain', 'let's talk next week'), otherwise null",
-           "rejection_reason": "If intent is NOT_INTERESTED, extract the short reason from the lead's reply (e.g. 'Pass from us', 'Not within our mandate', 'Too early', 'No budget'). Otherwise null."
+           "rejection_reason": "A concise 3-8 word summary of the lead's response or rejection reason (e.g. 'Focus on Series B onwards', 'Too early for us', 'Interested, wants to connect', 'Requesting pitch deck', 'Wants meeting next week'). Crucially: DO NOT include greetings (like 'Dear Yashika', 'Hi', 'Hello'), signatures, names, disclaimers, or HTML tags. Keep it very clean and short."
          }}
         """
         result_text = self._call_llm(prompt, max_tokens=512)

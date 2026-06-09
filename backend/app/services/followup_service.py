@@ -369,6 +369,8 @@ def process_outreach_sequences():
             WHERE l.followup_status = 'ACTIVE'
             AND l.email_status = 'SENT'
             AND COALESCE(l.is_responded, FALSE) = FALSE
+            AND COALESCE(l.reply_intent, '') NOT IN ('INTERESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED')
+            AND COALESCE(l.email_status, '') NOT IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED', 'NOT_INTERESTED', 'BOUNCED')
             AND l.followup_stage < 3
             ORDER BY LOWER(l.email), l.last_outreach_at ASC
         """)
@@ -485,7 +487,7 @@ def process_outreach_sequences():
                         verify_conn = get_db_connection()
                         verify_cur = verify_conn.cursor()
                         verify_cur.execute("""
-                            SELECT l.followup_stage, l.followup_status, l.is_responded, u.auto_followup
+                            SELECT l.followup_stage, l.followup_status, l.is_responded, l.reply_intent, l.email_status, u.auto_followup
                             FROM leads_raw l
                             JOIN users u ON l.user_id = u.id
                             WHERE l.id = %s
@@ -498,7 +500,9 @@ def process_outreach_sequences():
                             current_stage = verify_row['followup_stage'] if isinstance(verify_row, dict) else verify_row[0]
                             current_status = verify_row['followup_status'] if isinstance(verify_row, dict) else verify_row[1]
                             current_responded = verify_row['is_responded'] if isinstance(verify_row, dict) else verify_row[2]
-                            current_auto = verify_row['auto_followup'] if isinstance(verify_row, dict) else verify_row[3]
+                            current_reply_intent = verify_row['reply_intent'] if isinstance(verify_row, dict) else verify_row[3]
+                            current_email_status = verify_row['email_status'] if isinstance(verify_row, dict) else verify_row[4]
+                            current_auto = verify_row['auto_followup'] if isinstance(verify_row, dict) else verify_row[5]
                             
                             if current_stage is not None and current_stage != stage:
                                 logger.info(f"Lead {lead_id} stage changed from {stage} to {current_stage} — skipping")
@@ -508,6 +512,12 @@ def process_outreach_sequences():
                                 continue
                             if current_responded:
                                 logger.info(f"Lead {lead_id} already responded — skipping")
+                                continue
+                            if current_reply_intent in ('INTERESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED'):
+                                logger.info(f"Lead {lead_id} reply_intent is '{current_reply_intent}' — skipping")
+                                continue
+                            if current_email_status in ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED', 'NOT_INTERESTED', 'BOUNCED'):
+                                logger.info(f"Lead {lead_id} email_status is '{current_email_status}' — skipping")
                                 continue
                             if not current_auto:
                                 logger.info(f"Lead {lead_id} auto-pilot turned off — skipping")

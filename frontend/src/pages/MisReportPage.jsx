@@ -60,7 +60,7 @@ const MisReportPage = () => {
           useCORS: true,
           backgroundColor: '#ffffff',
           logging: false,
-          foreignObjectRendering: true
+          foreignObjectRendering: false
         });
         const imgData = canvas.toDataURL('image/jpeg', 0.95);
         const imgW = pageW - 20;
@@ -190,7 +190,7 @@ const MisReportPage = () => {
           <div className="grid gap-4 mb-6 no-break" style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px'}}>
             <div className="kpi-card"><div className="kpi-value">{reverted}</div><div className="kpi-label">Replied Leads</div></div>
             <div className="kpi-card"><div className="kpi-value">{data.sent || 0}</div><div className="kpi-label">Emails Sent</div></div>
-            <div className="kpi-card"><div className="kpi-value">{today_followups || 0}</div><div className="kpi-label">Follow-ups</div></div>
+            <div className="kpi-card"><div className="kpi-value">{data.total_followups || 0}</div><div className="kpi-label">Follow-ups</div></div>
             <div className="kpi-card"><div className="kpi-value">{drafts_generated}</div><div className="kpi-label">Drafts Pending</div></div>
             <div className="kpi-card"><div className="kpi-value">{bounces}</div><div className="kpi-label">Bounced</div></div>
           </div>
@@ -201,7 +201,7 @@ const MisReportPage = () => {
               <li><strong>{reverted}</strong> leads have responded to outreach — representing the active engagement pipeline.</li>
               <li><strong>{drafts_generated}</strong> drafts are pending in the review queue awaiting approval.</li>
               <li><strong>{data.sent || 0}</strong> emails dispatched during the reporting period.</li>
-              <li><strong>{today_followups || 0}</strong> follow-up sequences triggered.</li>
+              <li><strong>{data.total_followups || 0}</strong> follow-up sequences triggered.</li>
               <li><strong>{total_registry}</strong> companies registered in the CRM database.</li>
               <li><strong>{bounces}</strong> emails bounced due to invalid or unreachable addresses.</li>
             </ul>

@@ -320,15 +320,6 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                         from urllib.parse import urljoin
                         from app.api.tracking import inject_click_tracking
                         backend_url = os.getenv("BACKEND_URL", "https://lead-backend-g9de.onrender.com")
-                        # Add tracked "View Company Profile" link for initial outreach with PDFs
-                        if not is_followup and attachments:
-                            for att in attachments:
-                                fname = att.get('filename', '')
-                                if fname.endswith('.pdf') and 'company' in fname.lower():
-                                    pdf_url = f"{backend_url.rstrip('/')}/assets/{fname}"
-                                    link_html = f'<p style="margin:14px 0 0 0"><a href="{pdf_url}" style="display:inline-block;padding:10px 24px;background-color:#0B2A6F;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold;font-size:13px;">📄 View Company Profile</a></p>'
-                                    html_content = html_content + link_html
-                                    break
                         # Inject click tracking — replaces link hrefs with tracking redirect URLs
                         html_content = inject_click_tracking(html_content, tracking_token, backend_url.rstrip("/"))
                         # Inject open tracking pixel
