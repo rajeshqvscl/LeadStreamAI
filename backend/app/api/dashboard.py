@@ -54,8 +54,8 @@ def get_dashboard_stats(
     elif resolved_id is not None:
         user_cond = "user_id = %s"
         user_params = [resolved_id]
-        act_cond = "user_id = %s"
-        act_params = [resolved_id]
+        act_cond = "performed_by = %s"
+        act_params = [resolved_name]
     else:
         user_cond = "user_id IS NULL"
         user_params = []

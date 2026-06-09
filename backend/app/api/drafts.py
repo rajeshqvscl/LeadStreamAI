@@ -645,6 +645,12 @@ Looking forward to connecting."""
         )
     conn.commit()
 
+    # Fix kajal_mam_jv: remove CONFIDENTIAL disclaimer
+    cur.execute(
+        "UPDATE prompts SET content = REPLACE(content, '<div style=\"text-align: center; margin-top: 25px; font-weight: bold; color: #444; font-size: 12px; letter-spacing: 1.5px;\">CONFIDENTIAL | FOR PRIVATE CIRCULATION ONLY</div>', '') WHERE name = 'kajal_mam_jv'"
+    )
+    conn.commit()
+
     # 6. Palak Mam M&A and Fundraising Template
     palak_mna_description = "Supporting Growth Through M&A and Fundraising"
     palak_mna_description = "Supporting Growth Through M&A and Fundraising"

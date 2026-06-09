@@ -38,7 +38,7 @@ const getLeadType = (lead) => {
     if (userStr) {
       const user = JSON.parse(userStr);
       const name = String(user.username || user.full_name || '').toLowerCase();
-      if (name.includes('yashika') || name.includes('gupta')) return 'Investor';
+      if (name.includes('yashika') || name.includes('gupta') || name.includes('kajal') || name.includes('ayush')) return 'Investor';
     }
   } catch (e) {}
 
@@ -592,8 +592,8 @@ const Followups = () => {
                           <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${isInvestor ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20'}`}>
                             {lt}
                           </span>
-                          <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-md border ${getStageColor(statusFilter === 'SENT' ? Math.max(0, lead.followup_stage - 1) : lead.followup_stage)}`}>
-                            {statusFilter === 'IN_PROGRESS' ? `Stage ${lead.followup_stage}/${lead.max_followup_stage || 3}` : getStageLabel(lead.followup_stage, lead, statusFilter)}
+                          <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-md border ${lead.followup_status === 'COMPLETED' || lead.followup_stage >= (lead.max_followup_stage || 3) ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : getStageColor(statusFilter === 'SENT' ? Math.max(0, lead.followup_stage - 1) : lead.followup_stage)}`}>
+                            {lead.followup_status === 'COMPLETED' || lead.followup_stage >= (lead.max_followup_stage || 3) ? 'Completed' : statusFilter === 'IN_PROGRESS' ? `Stage ${lead.followup_stage}/${lead.max_followup_stage || 3}` : getStageLabel(lead.followup_stage, lead, statusFilter)}
                           </span>
                           {statusFilter === 'IN_PROGRESS' && (
                             <>
@@ -645,14 +645,14 @@ const Followups = () => {
                       {statusFilter === 'IN_PROGRESS' && (
                         <div className="flex flex-col items-end gap-1">
                           <div className="flex items-center gap-1">
-                            {[...Array(lead.max_followup_stage || 3)].map((_, i) => { const s = i + 1; return (
-                              <div key={s} className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black border transition-all ${lead.followup_stage >= s ? 'bg-indigo-500/30 border-indigo-500/60 text-indigo-300' : 'bg-white/5 border-white/10 text-slate-600'}`}>
+                            {[...Array(lead.max_followup_stage || 3)].map((_, i) => { const s = i + 1; const isComplete = lead.followup_status === 'COMPLETED' || lead.followup_stage >= (lead.max_followup_stage || 3); return (
+                              <div key={s} className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black border transition-all ${isComplete ? 'bg-emerald-500/30 border-emerald-500/60 text-emerald-300' : lead.followup_stage >= s ? 'bg-indigo-500/30 border-indigo-500/60 text-indigo-300' : 'bg-white/5 border-white/10 text-slate-600'}`}>
                                 {s}
                               </div>
                             )})}
                           </div>
-                          <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md ${lead.followup_stage >= (lead.max_followup_stage || 3) ? 'bg-emerald-500/10 text-emerald-400' : lead.followup_stage >= 2 ? 'bg-amber-500/10 text-amber-400' : 'bg-indigo-500/10 text-indigo-400'}`}>
-                            Stage {lead.followup_stage}/{lead.max_followup_stage || 3}
+                          <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md ${lead.followup_status === 'COMPLETED' || lead.followup_stage >= (lead.max_followup_stage || 3) ? 'bg-emerald-500/10 text-emerald-400' : lead.followup_stage >= 2 ? 'bg-amber-500/10 text-amber-400' : 'bg-indigo-500/10 text-indigo-400'}`}>
+                            {lead.followup_status === 'COMPLETED' || lead.followup_stage >= (lead.max_followup_stage || 3) ? 'Completed' : `Stage ${lead.followup_stage}/${lead.max_followup_stage || 3}`}
                           </span>
                         </div>
                       )}

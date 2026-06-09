@@ -303,6 +303,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 # Generate tracking token & inject tracking pixel
                 if lead_id:
                     import uuid
+                    from app.database import get_db_connection
                     tracking_token = str(uuid.uuid4())
                     try:
                         track_conn = get_db_connection()
@@ -319,6 +320,15 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                         from urllib.parse import urljoin
                         from app.api.tracking import inject_click_tracking
                         backend_url = os.getenv("BACKEND_URL", "https://lead-backend-g9de.onrender.com")
+                        # Add tracked "View Company Profile" link for initial outreach with PDFs
+                        if not is_followup and attachments:
+                            for att in attachments:
+                                fname = att.get('filename', '')
+                                if fname.endswith('.pdf') and 'company' in fname.lower():
+                                    pdf_url = f"{backend_url.rstrip('/')}/assets/{fname}"
+                                    link_html = f'<p style="margin:14px 0 0 0"><a href="{pdf_url}" style="display:inline-block;padding:10px 24px;background-color:#0B2A6F;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold;font-size:13px;">📄 View Company Profile</a></p>'
+                                    html_content = html_content + link_html
+                                    break
                         # Inject click tracking — replaces link hrefs with tracking redirect URLs
                         html_content = inject_click_tracking(html_content, tracking_token, backend_url.rstrip("/"))
                         # Inject open tracking pixel
@@ -368,7 +378,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 if thread_id:
                     send_body['threadId'] = thread_id
                 
-                # Gmail API send with SSL retry
+                # Gmail API send with SSL retry + thread recovery
                 try:
                     sent = service.users().messages().send(userId='me', body=send_body).execute()
                 except ssl.SSLError as ssl_err:
@@ -380,6 +390,14 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                         sent = service.users().messages().send(userId='me', body=send_body).execute()
                     else:
                         raise ssl_err
+                except Exception as api_err:
+                    err_str = str(api_err)
+                    if '404' in err_str and 'not found' in err_str.lower() and thread_id:
+                        logger.warning(f"Thread {thread_id} not found in Gmail — retrying without thread_id")
+                        send_body.pop('threadId', None)
+                        sent = service.users().messages().send(userId='me', body=send_body).execute()
+                    else:
+                        raise
                 sent_thread_id = sent.get('threadId')
                 
                 # Robustly get the RFC Message-ID from the sent message for future In-Reply-To chaining

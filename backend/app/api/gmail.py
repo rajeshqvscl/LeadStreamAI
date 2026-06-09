@@ -231,6 +231,12 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         attachments = extract_attachments(service, msg_id, payload)
         pdf_attachment = next((att for att in attachments if att['filename'].lower().endswith('.pdf')), None)
 
+        # Skip QVSCL's own PDFs (company profile, huria profile) — not sent by the lead
+        if pdf_attachment:
+            fname_lower = pdf_attachment['filename'].lower()
+            if any(x in fname_lower for x in ['qvscl company profile', 'lalit_huria_profile']):
+                pdf_attachment = None
+
         # --- STRICT OUTREACH-ONLY FILTER ---
         # ONLY process replies from leads we actually emailed through this platform.
         # Skip all random inbox emails (marketing, newsletters, unknown senders, etc.)
@@ -379,6 +385,8 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
 
         rag_intel_json = json.dumps(rag_intel) if rag_intel else None
 
+        rejection_reason = ai_data.get("rejection_reason") if intent == 'NOT_INTERESTED' else None
+
         cur.execute("""
             UPDATE leads_raw 
             SET is_responded = %s, 
@@ -392,11 +400,12 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 sentiment_score = %s,
                 urgency_level = %s,
                 remarks = %s,
+                rejection_reason = %s,
                 updated_at = NOW(),
                 followup_status = 'STOPPED'
             WHERE LOWER(email) = LOWER(%s) AND user_id = %s
             RETURNING id, first_name, last_name, user_id
-        """, (should_show_in_intel, final_status, intent, deal_size, pitch_deck_url, rag_advice, rag_intel_json, rag_category, ai_data.get("sentiment_score"), ai_data.get("urgency_level"), body, sender_email, user_id))
+        """, (should_show_in_intel, final_status, intent, deal_size, pitch_deck_url, rag_advice, rag_intel_json, rag_category, ai_data.get("sentiment_score"), ai_data.get("urgency_level"), body, rejection_reason, sender_email, user_id))
 
         
         lead = cur.fetchone()
@@ -1316,6 +1325,12 @@ def retro_sync_pdfs(request: Request, x_user_id: Optional[str] = Header(None)):
                     payload = msg_data.get('payload', {})
                     attachments = extract_attachments(service, msg['id'], payload)
                     pdf_attachment = next((att for att in attachments if att['filename'].lower().endswith('.pdf')), None)
+                    
+                    if pdf_attachment:
+                        # Skip QVSCL's own PDFs (company profile, huria profile) — not sent by lead
+                        filename_lower = pdf_attachment['filename'].lower()
+                        if any(x in filename_lower for x in ['qvscl company profile', 'lalit_huria_profile']):
+                            pdf_attachment = None
                     
                     if pdf_attachment:
                         os.makedirs("static/pitch_decks", exist_ok=True)

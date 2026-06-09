@@ -362,7 +362,7 @@ def process_outreach_sequences():
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
         cur.execute("""
-            SELECT l.*, u.id as sender_id, u.email as sender_email, u.full_name as sender_name,
+            SELECT DISTINCT ON (LOWER(l.email)) l.*, u.id as sender_id, u.email as sender_email, u.full_name as sender_name,
                    u.auto_followup, u.outreach_daily_limit, u.google_refresh_token
             FROM leads_raw l
             JOIN users u ON l.user_id = u.id
@@ -370,9 +370,7 @@ def process_outreach_sequences():
             AND l.email_status = 'SENT'
             AND COALESCE(l.is_responded, FALSE) = FALSE
             AND l.followup_stage < 3
-            AND l.draft_template_used IS NOT NULL
-            AND l.draft_template_used != ''
-            ORDER BY l.last_outreach_at ASC
+            ORDER BY LOWER(l.email), l.last_outreach_at ASC
         """)
 
         leads = cur.fetchall()
@@ -442,6 +440,15 @@ def process_outreach_sequences():
                     _max_stage = 2 if "palak" in (lead.get('sender_name') or "").lower() else 3
                     if stage >= _max_stage:
                         logger.info(f"Lead {lead_id} at stage {stage} >= max {_max_stage} for {lead.get('sender_name')} — skipping")
+                        try:
+                            comp_conn = get_db_connection()
+                            comp_cur = comp_conn.cursor()
+                            comp_cur.execute("UPDATE leads_raw SET followup_status = 'COMPLETED', updated_at = NOW() WHERE id = %s AND followup_status = 'ACTIVE'", (lead_id,))
+                            comp_conn.commit()
+                            comp_cur.close()
+                            comp_conn.close()
+                        except:
+                            pass
                         continue
 
                     if is_investor:
@@ -568,6 +575,7 @@ def process_outreach_sequences():
                         continue
 
                     # Final duplicate guard: check activity_log for existing follow-up at this stage
+                    # Skip only if stage was NOT reset (i.e. followup_stage matches expected stage)
                     try:
                         dup_conn = get_db_connection()
                         dup_cur = dup_conn.cursor()
@@ -579,8 +587,12 @@ def process_outreach_sequences():
                         dup_cur.close()
                         dup_conn.close()
                         if dup_count > 0:
-                            logger.info(f"Lead {lead_id}: Stage {next_stage} already sent ({dup_count}x in log) — skipping duplicate")
-                            continue
+                            # If stage was reset (e.g. by approve_draft), re-send even if activity_log has old entry
+                            if stage == 0 and next_stage == 1:
+                                logger.info(f"Lead {lead_id}: Stage {next_stage} was in log but stage reset to 0 — allowing re-send")
+                            else:
+                                logger.info(f"Lead {lead_id}: Stage {next_stage} already sent ({dup_count}x in log) — skipping duplicate")
+                                continue
                     except Exception as dup_err:
                         logger.warning(f"Duplicate check failed for lead {lead_id}: {dup_err}")
 
@@ -621,21 +633,23 @@ def process_outreach_sequences():
                         from_name=lead['sender_name'],
                         user_id=str(uid),
                         thread_id=existing_thread_id,
-                        in_reply_to=existing_msg_id
+                        in_reply_to=existing_msg_id,
+                        lead_id=lead_id
                     )
 
                     if success:
                         conn = get_db_connection()
                         cur = conn.cursor()
+                        new_status = 'COMPLETED' if next_stage >= _max_stage else 'ACTIVE'
                         cur.execute("""
                             UPDATE leads_raw 
-                            SET followup_stage = %s, followup_status = 'ACTIVE', email_status = 'SENT',
+                            SET followup_stage = %s, followup_status = %s, email_status = 'SENT',
                                 last_outreach_at = NOW(), last_outreach_subject = %s,
                                 gmail_thread_id = COALESCE(%s, gmail_thread_id),
                                 gmail_message_id = COALESCE(%s, gmail_message_id),
                                 updated_at = NOW()
                             WHERE id = %s AND followup_stage = %s
-                        """, (next_stage, subject, new_thread_id, new_rfc_msg_id, lead_id, stage))
+                        """, (next_stage, new_status, subject, new_thread_id, new_rfc_msg_id, lead_id, stage))
                         conn.commit()
                         updated_count = cur.rowcount
                         cur.close()

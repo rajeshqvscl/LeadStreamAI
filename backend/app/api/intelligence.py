@@ -255,6 +255,12 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
             
         pitch_deck_url = lead.get('pitch_deck_url')
 
+        # Skip RAG analysis if the PDF is QVSCL's own company profile (not sent by the lead)
+        if pitch_deck_url:
+            pitch_lower = pitch_deck_url.lower()
+            if any(x in pitch_lower for x in ['qvscl_company_profile', 'lalit_huria_profile']):
+                pitch_deck_url = None  # treat as no PDF from lead
+
         # Download the file if it's a local static path
         file_data = None
         if pitch_deck_url and pitch_deck_url.startswith("http"):

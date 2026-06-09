@@ -25,6 +25,31 @@ const AdminDashboard = () => {
     return new Date(cleanStr);
   };
 
+  const getDisplayCompany = (lead) => {
+    if (!lead) return '—';
+    const cleanCompany = (name) => {
+      if (!name) return '';
+      const n = name.toString().trim();
+      if (n === '—' || n === '-' || n.toLowerCase() === 'independent') return '';
+      return n;
+    };
+    const existing = cleanCompany(lead.company_name) || cleanCompany(lead.family_office_name);
+    if (existing) return existing;
+    
+    const email = lead.email;
+    if (email && email.includes('@')) {
+      const firstEmail = email.split(/[\r\n\s,;]+/)[0].trim();
+      if (firstEmail.includes('@')) {
+        const domain = firstEmail.split('@')[1].split('.')[0].toLowerCase();
+        const generic = ['gmail','yahoo','hotmail','outlook','protonmail','icloud','qvscl','me','live','microsoft','samsung','sea','example'];
+        if (!generic.includes(domain)) {
+          return domain.split(/[-_]/).map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+        }
+      }
+    }
+    return '—';
+  };
+
   const [leads, setLeads] = useState([]);
   const [stats, setStats] = useState({
     total_leads: 0,
@@ -87,6 +112,7 @@ const AdminDashboard = () => {
   const allColumns = [
     { key: 'name', label: 'Name' }, { key: 'company', label: 'Company' },
     { key: 'email', label: 'Email Address' }, { key: 'type', label: 'Type' },
+    { key: 'template_used', label: 'Template Used' },
     { key: 'sector', label: 'Sector' }, { key: 'intent', label: 'Intent' },
     { key: 'rag', label: 'RAG Analysis' }, { key: 'check_size', label: 'Check Size' },
     { key: 'score', label: 'Score' }, { key: 'stage', label: 'Stage' },
@@ -190,7 +216,19 @@ const AdminDashboard = () => {
       const leadsRes = await api.get(`/api/admin/leads/all?${params.toString()}`);
       
       if (leadsRes.data.leads) {
-        setLeads(leadsRes.data.leads);
+        const generic = ['gmail','yahoo','hotmail','outlook','protonmail','icloud','qvscl','me','live','microsoft','samsung','sea','example'];
+        setLeads(leadsRes.data.leads.map(l => {
+          if (!l.company_name || l.company_name === 'Independent') {
+            const fo = l.family_office_name;
+            if (fo) return { ...l, company_name: fo };
+            const em = l.email;
+            if (em && em.includes('@')) {
+              const d = em.split('@')[1].split('.')[0].toLowerCase();
+              if (!generic.includes(d)) return { ...l, company_name: d.charAt(0).toUpperCase() + d.slice(1) };
+            }
+          }
+          return l;
+        }));
         setPagination(leadsRes.data.pagination);
         setAvailableSectors(leadsRes.data.sectors || []);
         setAvailableOwners(leadsRes.data.owners || []);
@@ -279,6 +317,15 @@ const AdminDashboard = () => {
   }, [availableSectors]);
 
   const deriveType = (lead) => {
+    if (!lead) return 'CLIENT';
+    const name = (lead.owner_name || '').toLowerCase();
+    const isInvestorTeam = name.includes('yashika') || name.includes('kajal') || name.includes('ayush');
+    const isClientTeam = name.includes('palak');
+    return isInvestorTeam ? 'INVESTOR' : isClientTeam ? 'CLIENT' : (lead.lead_type || 'CLIENT');
+  };
+
+  const getTemplateUsed = (lead) => {
+    if (!lead) return '—';
     const name = (lead.owner_name || '').toLowerCase();
     if (name.includes('yashika')) {
       const sectorLower = (lead.sector || '').toLowerCase();
@@ -294,21 +341,77 @@ const AdminDashboard = () => {
         draftLower.includes('gigin');
       return isAiHiring ? 'Gigin AI' : 'Agrivijay';
     }
-    const isInvestorTeam = name.includes('yashika') || name.includes('kajal') || name.includes('ayush');
-    const isClientTeam = name.includes('palak');
-    return isInvestorTeam ? 'INVESTOR' : isClientTeam ? 'CLIENT' : (lead.lead_type || 'CLIENT');
+    return lead.draft_template_used || '—';
+  };
+
+  const getDisplaySector = (lead) => {
+    if (!lead) return 'OTHER';
+    const cleanSector = (sec) => {
+      if (!sec) return '';
+      const s = sec.toString().trim().toUpperCase();
+      if (s === 'OTHER' || s === 'N/A' || s === '—' || s === '-') return '';
+      return s;
+    };
+    
+    const existing = cleanSector(lead.sector) || cleanSector(lead.industry);
+    if (existing) return existing;
+
+    const template = lead.draft_template_used || '';
+    const textToSearch = [
+      lead.email_draft,
+      lead.remarks,
+      lead.persona,
+      lead.first_outreach_subject,
+      lead.last_outreach_subject
+    ].filter(Boolean).join(' ').toLowerCase();
+
+    if (template === 'palak_mam_Draft_1' || textToSearch.includes('india entry advisory') || textToSearch.includes('partnership opportunity') || textToSearch.includes('strategic partnership')) {
+      return 'M&A / STRATEGIC PARTNERSHIP';
+    }
+    if (template === 'palak_mam_corporate_advisory' || textToSearch.includes('corporate advisory/ equity fund raising') || textToSearch.includes('corporate advisory/equity fund')) {
+      return 'CORPORATE ADVISORY';
+    }
+    if (template === 'palak_mam_mna_fundraising' || textToSearch.includes('supporting growth through m&a and fundraising') || textToSearch.includes('m&a and fundraising')) {
+      return 'M&A / FUNDRAISING';
+    }
+    if (textToSearch.includes('climate') || textToSearch.includes('carbon') || textToSearch.includes('solar') || textToSearch.includes('renewable') || textToSearch.includes('green tech') || textToSearch.includes('clean tech') || textToSearch.includes('sustainability')) {
+      return 'CLIMATE TECH';
+    }
+    if (textToSearch.includes('hiring') || textToSearch.includes('recruitment') || textToSearch.includes('talent') || textToSearch.includes('gigin') || textToSearch.includes('staffing') || textToSearch.includes('hrtech')) {
+      return 'AI HIRING';
+    }
+    if (textToSearch.includes('hospital') || textToSearch.includes('healthcare') || textToSearch.includes('medical') || textToSearch.includes('health tech') || textToSearch.includes('clinical') || textToSearch.includes('pharma') || textToSearch.includes('clinic')) {
+      return 'HEALTHCARE';
+    }
+    if (textToSearch.includes('agri') || textToSearch.includes('agtech') || textToSearch.includes('farming') || textToSearch.includes('agriculture') || textToSearch.includes('agrivijay')) {
+      return 'AGRITECH';
+    }
+    if (textToSearch.includes('edtech') || textToSearch.includes('education') || textToSearch.includes('school') || textToSearch.includes('learning')) {
+      return 'EDTECH';
+    }
+    if (textToSearch.includes('fintech') || textToSearch.includes('banking') || textToSearch.includes('finance') || textToSearch.includes('payments')) {
+      return 'FINTECH';
+    }
+    if (textToSearch.includes('saas') || textToSearch.includes('software') || textToSearch.includes('b2b saas')) {
+      return 'SAAS';
+    }
+    
+    return 'OTHER';
   };
 
 
 
   const chartSentByType = useMemo(() => {
+    if (chartBreakdowns?.type_breakdown) {
+      return chartBreakdowns.type_breakdown.map(b => ({ label: b.label.toUpperCase(), value: b.value }));
+    }
     const counts = {};
     chartFilteredLeads.filter(l => l.email_status === 'SENT' || l.email_status === 'REPLIED' || l.email_status === 'BOUNCED' || l.email_status === 'OPENED' || l.email_status === 'CLICKED' || l.last_outreach_at).forEach(l => {
       const t = deriveType(l);
       counts[t] = (counts[t] || 0) + 1;
     });
     return Object.entries(counts).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
-  }, [chartFilteredLeads]);
+  }, [chartFilteredLeads, chartBreakdowns]);
 
   const chartFollowupsByType = useMemo(() => {
     const counts = {};
@@ -320,22 +423,25 @@ const AdminDashboard = () => {
   }, [chartFilteredLeads]);
 
   const chartSectorFiltered = useMemo(() => {
+    if (chartBreakdowns?.sector_breakdown) {
+      return chartBreakdowns.sector_breakdown.map(b => ({ label: b.label.toUpperCase(), value: b.value }));
+    }
     const counts = {};
     chartFilteredLeads.forEach(l => {
-      const s = l.sector || 'Other';
+      const s = getDisplaySector(l);
       counts[s] = (counts[s] || 0) + 1;
     });
     return Object.entries(counts).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
-  }, [chartFilteredLeads]);
+  }, [chartFilteredLeads, chartBreakdowns]);
 
   const chartBouncedDomains = useMemo(() => {
     const counts = {};
-    leads.filter(l => l.email_status === 'BOUNCED').forEach(l => {
+    chartFilteredLeads.filter(l => l.email_status === 'BOUNCED').forEach(l => {
       const domain = (l.email || '').split('@')[1] || 'unknown';
       counts[domain] = (counts[domain] || 0) + 1;
     });
     return Object.entries(counts).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value).slice(0, 5);
-  }, [leads]);
+  }, [chartFilteredLeads]);
 
   const exportMasterCSV = async () => {
     try {
@@ -346,7 +452,7 @@ const AdminDashboard = () => {
       const headers = ['Name','Email','Designation','Company','Type','Status','Intent','Score','Check Size','Rejection Reason','Sector/Industry','Owner','Last Interaction','AI Strategy','Analyst Report','Key Signals','Confidence %'].join(',');
       const rows = allLeads.map(l => {
         const clean = (val) => `"${(val || '').toString().replace(/"/g, '""')}"`;
-        const rejectionReason = l.reply_intent === 'NOT_INTERESTED' ? (l.rag_advice?.split('.')[0] || 'No specific reason') : 'N/A';
+        const rejectionReason = l.reply_intent === 'NOT_INTERESTED' ? (l.rejection_reason || 'Not Interested') : 'N/A';
         let derivedType = l.lead_type || 'CLIENT';
         const owner = (l.owner_name || '').toLowerCase();
         if (owner.includes('yashika')) {
@@ -357,7 +463,7 @@ const AdminDashboard = () => {
           const isAiHiring = sectorLower.includes('hiring') || draftLower.includes('hiring') || personaLower.includes('hiring') || subjLower.includes('hiring') || sectorLower.includes('recruitment') || draftLower.includes('recruitment') || draftLower.includes('gigin');
           derivedType = isAiHiring ? 'Gigin AI' : 'Agrivijay';
         }
-        return [clean(`${l.first_name} ${l.last_name}`),clean(l.email),clean(l.designation),clean(l.company_name || l.family_office_name),clean(derivedType),clean(l.email_status),clean(l.reply_intent),clean(l.sentiment_score),clean(l.deal_size),clean(rejectionReason),clean(l.sector || 'Other'),clean(l.owner_name),clean(parseUtcDate(l.updated_at).toLocaleDateString()),clean(l.rag_intelligence?.strategy || 'General Outreach'),clean(l.rag_advice || 'Analyst Review Pending'),clean(Array.isArray(l.rag_intelligence?.signals) ? l.rag_intelligence.signals.join(' | ') : (l.rag_intelligence?.signals || 'N/A')),clean(l.rag_intelligence?.confidence || 'N/A')].join(',');
+        return [clean(`${l.first_name} ${l.last_name}`),clean(l.email),clean(l.designation),clean(getDisplayCompany(l)),clean(derivedType),clean(l.email_status),clean(l.reply_intent),clean(l.sentiment_score),clean(l.deal_size),clean(rejectionReason),clean(l.sector || 'Other'),clean(l.owner_name),clean(parseUtcDate(l.updated_at).toLocaleDateString()),clean(l.rag_intelligence?.strategy || 'General Outreach'),clean(l.rag_advice || 'Analyst Review Pending'),clean(Array.isArray(l.rag_intelligence?.signals) ? l.rag_intelligence.signals.join(' | ') : (l.rag_intelligence?.signals || 'N/A')),clean(l.rag_intelligence?.confidence || 'N/A')].join(',');
       });
       const csv = [headers, ...rows].join('\n');
       const blob = new Blob([csv], { type: 'text/csv' });
@@ -373,10 +479,10 @@ const AdminDashboard = () => {
   };
   const exportRejections = () => {
     const rejections = leads.filter(l => l.reply_intent === 'NOT_INTERESTED');
-    const headers = ['Name','Company','Email','Check Size','Rejection Reason','Full Analyst Feedback'].join(',');
+    const headers = ['Name','Company','Email','Check Size','Rejection Reason'].join(',');
     const rows = rejections.map(l => {
       const clean = (val) => `"${(val || '').toString().replace(/"/g, '""')}"`;
-      return [clean(`${l.first_name} ${l.last_name}`),clean(l.company_name || l.family_office_name),clean(l.email),clean(l.deal_size),clean(l.rag_advice?.split('.')[0] || 'Unknown'),clean(l.rag_advice)].join(',');
+      return [clean(`${l.first_name} ${l.last_name}`),clean(getDisplayCompany(l)),clean(l.email),clean(l.deal_size),clean(l.rejection_reason || 'Not Interested')].join(',');
     });
     const csv = [headers, ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -390,7 +496,7 @@ const AdminDashboard = () => {
     const headers = ['Name','Company','Email','Intent','Score','Check Size','Response Summary'].join(',');
     const rows = replies.map(l => {
       const clean = (val) => `"${(val || '').toString().replace(/"/g, '""')}"`;
-      return [clean(`${l.first_name} ${l.last_name}`),clean(l.company_name || l.family_office_name),clean(l.email),clean(l.reply_intent || 'N/A'),clean(l.sentiment_score),clean(l.deal_size),clean(l.rag_advice?.split('.')[0] || 'N/A')].join(',');
+      return [clean(`${l.first_name} ${l.last_name}`),clean(getDisplayCompany(l)),clean(l.email),clean(l.reply_intent || 'N/A'),clean(l.sentiment_score),clean(l.deal_size),clean(l.rag_advice?.split('.')[0] || 'N/A')].join(',');
     });
     const csv = [headers, ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -605,8 +711,6 @@ const AdminDashboard = () => {
             className="bg-white/[0.03] border border-white/5 rounded-xl py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest focus:outline-none focus:border-indigo-500/50"
           >
             <option value="ALL">All Types</option>
-            <option value="AGRIVIJAY">Agrivijay</option>
-            <option value="GIGIN AI">Gigin AI</option>
             <option value="INVESTOR">Investors</option>
             <option value="CLIENT">Clients</option>
           </select>
@@ -795,6 +899,7 @@ const AdminDashboard = () => {
                 {visibleColumns.has('company') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Company</th>}
                 {visibleColumns.has('email') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Email Address</th>}
                 {visibleColumns.has('type') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Type</th>}
+                {visibleColumns.has('template_used') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Template Used</th>}
                 {visibleColumns.has('sector') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Sector</th>}
                 {visibleColumns.has('intent') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Intent</th>}
                 {visibleColumns.has('rag') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">RAG Analysis</th>}
@@ -851,9 +956,9 @@ const AdminDashboard = () => {
                   </td>}
                   {visibleColumns.has('company') && <td className="px-1 py-1 border border-white/5">
                     <div className="text-[11px] font-bold text-slate-400 uppercase tracking-tighter">
-                      {(lead.company_name === 'Independent' || !lead.company_name) ? '—' : (lead.company_name || lead.family_office_name || '—')}
+                      {getDisplayCompany(lead)}
                     </div>
-                    </td>}
+                  </td>}
                   {visibleColumns.has('email') && <td className="px-1 py-1 border border-white/5">
                     <div>
                       <div className="text-[12px] font-bold text-white break-words">{lead.email}</div>
@@ -862,39 +967,11 @@ const AdminDashboard = () => {
                   </td>}
                   {visibleColumns.has('type') && <td className="px-1 py-1 border border-white/5">
                     {(() => {
-                      const name = (lead.owner_name || '').toLowerCase();
-                      const isInvestorTeam = name.includes('yashika') || name.includes('kajal') || name.includes('ayush');
-                      const isClientTeam = name.includes('palak');
-                      
-                      let derivedType = isInvestorTeam ? 'INVESTOR' : isClientTeam ? 'CLIENT' : (lead.lead_type || 'CLIENT');
-                      
-                      // Custom branding logic based on user request
-                      if (name.includes('yashika')) {
-                        const sectorLower = (lead.sector || '').toLowerCase();
-                        const draftLower = (lead.email_draft || '').toLowerCase();
-                        const personaLower = (lead.persona || '').toLowerCase();
-                        const subjLower = (lead.first_outreach_subject || lead.last_outreach_subject || '').toLowerCase();
-                        const isAiHiring = sectorLower.includes('hiring') || 
-                                           draftLower.includes('hiring') || 
-                                           personaLower.includes('hiring') || 
-                                           subjLower.includes('hiring') || 
-                                           sectorLower.includes('recruitment') || 
-                                           draftLower.includes('recruitment') ||
-                                           draftLower.includes('gigin');
-                        if (isAiHiring) {
-                          derivedType = 'Gigin AI';
-                        } else {
-                          derivedType = 'Agrivijay';
-                        }
-                      }
-
-                      const isSpecial = derivedType === 'Agrivijay' || derivedType === 'Gigin AI';
+                      const derivedType = deriveType(lead);
                       const isInvestor = derivedType.toUpperCase() === 'INVESTOR';
                       
                       return (
                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${
-                          derivedType === 'Agrivijay' ? 'bg-amber-500/10 border-amber-500/20 text-amber-500' : 
-                          derivedType === 'Gigin AI' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' :
                           isInvestor ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 
                           'bg-white/5 border-white/10 text-slate-400'
                         }`}>
@@ -904,10 +981,15 @@ const AdminDashboard = () => {
                       );
                     })()}
                   </td>}
+                  {visibleColumns.has('template_used') && <td className="px-1 py-1 border border-white/5">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white/5 border border-white/10 text-slate-400">
+                      {getTemplateUsed(lead)}
+                    </span>
+                  </td>}
                   {visibleColumns.has('sector') && <td className="px-1 py-1 border border-white/5">
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-indigo-500/5 border border-indigo-500/20 text-indigo-400">
                       <Briefcase className="w-3 h-3" />
-                      {lead.sector || 'OTHER'}
+                      {getDisplaySector(lead)}
                     </span>
                   </td>}
                   {visibleColumns.has('intent') && <td className="px-1 py-1 border border-white/5">
@@ -977,11 +1059,15 @@ const AdminDashboard = () => {
                              stageNum === 2 ? `2 / ${maxStage} Sent` :
                              stageNum >= maxStage ? `${maxStage} / ${maxStage} Sent` : `0 / ${maxStage} Sent`}
                           </span>
-                          {lead.followup_status === 'ACTIVE' && stageNum < maxStage && (
+                          {lead.followup_status === 'COMPLETED' || stageNum >= maxStage ? (
+                            <span className="text-[8px] text-emerald-400/90 font-black uppercase tracking-widest mt-1">
+                              ● Completed
+                            </span>
+                          ) : lead.followup_status === 'ACTIVE' && stageNum > 0 ? (
                             <span className="text-[8px] text-indigo-400/90 font-black uppercase tracking-widest mt-1 animate-pulse">
                               ● Active
                             </span>
-                          )}
+                          ) : null}
                         </div>
                       );
                     })()}
@@ -993,8 +1079,8 @@ const AdminDashboard = () => {
                           <AlertCircle className="w-2.5 h-2.5 text-rose-400" />
                           <span className="text-[9px] font-black text-rose-400 uppercase tracking-widest">Rejected ({lead.deal_size || 'N/A'})</span>
                         </div>
-                        <div className="text-[10px] font-medium text-slate-400 italic break-words">
-                          "{stripHtml(lead.rag_advice).split('.')[0]}"
+                        <div className="text-[10px] font-medium text-slate-400 italic break-words max-w-[200px] truncate" title={lead.rejection_reason || stripHtml(lead.remarks || '').replace(/\s+/g, ' ').trim()}>
+                          {lead.rejection_reason || 'Not Interested'}
                         </div>
                       </div>
                     ) : (
@@ -1004,11 +1090,15 @@ const AdminDashboard = () => {
                   {visibleColumns.has('status') && <td className="px-1 py-1 border border-white/5">
                     <div className="flex flex-col gap-1">
                       <div className="text-[11px] font-black text-white uppercase tracking-wider">{lead.email_status || 'NEW'}</div>
-                      {lead.followup_status === 'ACTIVE' && (
+                      {lead.followup_status === 'COMPLETED' ? (
+                        <div className="flex items-center gap-1 text-[8px] font-black text-emerald-400 uppercase tracking-widest">
+                          <Zap className="w-2.5 h-2.5" /> Completed
+                        </div>
+                      ) : lead.followup_status === 'ACTIVE' ? (
                         <div className="flex items-center gap-1 text-[8px] font-black text-indigo-400 uppercase tracking-widest">
                           <Zap className="w-2.5 h-2.5 animate-pulse" /> Sequence Active
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   </td>}
                   {visibleColumns.has('sent_draft') && <td className="px-1 py-1 border border-white/5">
@@ -1041,45 +1131,45 @@ const AdminDashboard = () => {
                       <span className="text-[11px] font-bold text-slate-400">{lead.owner_name}</span>
                     </div>
                   </td>}
-                  {visibleColumns.has('actions') && <td className="px-1 py-1 border border-white/5">
-                    {(() => {
-                      const d = parseUtcDate(lead.last_outreach_at);
-                      if (!d) return <span className="text-[11px] text-slate-600">—</span>;
-                      return (
-                        <div className="flex flex-col items-end gap-0.5 text-slate-500">
-                          <div className="flex items-center gap-1.5">
-                            <Clock className="w-3.5 h-3.5 text-slate-600" />
-                            <span className="text-[11px] font-black text-slate-400 uppercase">{d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' })}</span>
+                  {visibleColumns.has('actions') && <td className="px-1.5 py-1.5 border border-white/5 text-right">
+                    <div className="flex items-center justify-between gap-3 min-w-[140px]">
+                      {(() => {
+                        const d = parseUtcDate(lead.last_outreach_at);
+                        if (!d) return <span className="text-[11px] text-slate-600">—</span>;
+                        return (
+                          <div className="flex flex-col items-start gap-0.5 text-slate-500">
+                            <div className="flex items-center gap-1.5">
+                              <Clock className="w-3.5 h-3.5 text-slate-600" />
+                              <span className="text-[10px] font-black text-slate-400 uppercase leading-none">{d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' })}</span>
+                            </div>
+                            <span className="text-[8px] font-bold text-slate-600 tracking-tighter leading-none">
+                              {d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })}
+                            </span>
                           </div>
-                          <span className="text-[9px] font-bold text-slate-600 tracking-tighter">
-                            {d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })}
-                          </span>
-                        </div>
-                      );
-                    })()}
-                  </td>}
-                  {visibleColumns.has('actions') && <td className="px-1.5 py-1.5 text-right border border-white/5">
-                    <div className="flex items-center justify-end gap-1">
-                      <button 
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          try {
-                            setNotification({ type: 'success', message: 'Triggering Deep AI Analysis...' });
-                            await api.post(`/api/intelligence/analyze-lead/${lead.id}`);
-                            fetchData();
-                            setNotification({ type: 'success', message: 'Analysis Complete! Data enriched.' });
-                          } catch (err) {
-                            setNotification({ type: 'error', message: 'Analysis failed. Check RAG connectivity.' });
-                          }
-                        }}
-                        className="p-2 hover:bg-indigo-500/10 rounded-lg transition-colors text-indigo-400" 
-                        title="Analyze Intelligence"
-                      >
-                        <Zap className="w-4 h-4" />
-                      </button>
-                      <button className="p-2 hover:bg-white/5 rounded-lg transition-colors text-slate-500 hover:text-white">
-                        <MoreHorizontal className="w-4 h-4" />
-                      </button>
+                        );
+                      })()}
+                      <div className="flex items-center justify-end gap-1">
+                        <button 
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            try {
+                              setNotification({ type: 'success', message: 'Triggering Deep AI Analysis...' });
+                              await api.post(`/api/intelligence/analyze-lead/${lead.id}`);
+                              fetchData();
+                              setNotification({ type: 'success', message: 'Analysis Complete! Data enriched.' });
+                            } catch (err) {
+                              setNotification({ type: 'error', message: 'Analysis failed. Check RAG connectivity.' });
+                            }
+                          }}
+                          className="p-2 hover:bg-indigo-500/10 rounded-lg transition-colors text-indigo-400" 
+                          title="Analyze Intelligence"
+                        >
+                          <Zap className="w-4 h-4" />
+                        </button>
+                        <button className="p-2 hover:bg-white/5 rounded-lg transition-colors text-slate-500 hover:text-white">
+                          <MoreHorizontal className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </td>}
                 </tr>
@@ -1191,7 +1281,7 @@ const AdminDashboard = () => {
                 </div>
                 <h2 className="text-3xl font-black text-white uppercase mb-2">{selectedLead.first_name} {selectedLead.last_name}</h2>
                 <p className="text-slate-400 font-bold uppercase text-[11px] tracking-widest flex items-center gap-2">
-                  <Briefcase className="w-3.5 h-3.5 text-indigo-400" /> {selectedLead.company_name}
+                  <Briefcase className="w-3.5 h-3.5 text-indigo-400" /> {getDisplayCompany(selectedLead)}
                 </p>
               </div>
               <button
@@ -1305,11 +1395,11 @@ const AdminDashboard = () => {
                   <div className="grid grid-cols-2 gap-4 mb-4">
                     <div>
                       <div className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">Company</div>
-                      <div className="text-[13px] font-bold text-white">{selectedLead.company_name || '—'}</div>
+                      <div className="text-[13px] font-bold text-white">{getDisplayCompany(selectedLead)}</div>
                     </div>
                     <div>
                       <div className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">Sector</div>
-                      <div className="text-[13px] font-bold text-white">{selectedLead.sector || '—'}</div>
+                      <div className="text-[13px] font-bold text-white">{getDisplaySector(selectedLead)}</div>
                     </div>
                     <div>
                       <div className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">Deal Size</div>

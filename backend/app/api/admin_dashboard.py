@@ -10,6 +10,91 @@ from pydantic import BaseModel
 router = APIRouter()
 logger = structlog.get_logger(__name__)
 
+TYPE_CASE_SQL = """
+CASE 
+    WHEN u.username ILIKE '%%yashika%%' OR u.username ILIKE '%%kajal%%' OR u.username ILIKE '%%ayush%%' THEN 'INVESTOR'
+    WHEN u.username ILIKE '%%palak%%' THEN 'CLIENT'
+    ELSE UPPER(COALESCE(l.lead_type, 'CLIENT'))
+END
+"""
+
+SECTOR_CASE_SQL = """
+CASE
+    WHEN l.draft_template_used = 'palak_mam_Draft_1'
+      OR COALESCE(l.email_draft, '') ~* 'India Entry Advisory|Partnership Opportunity|Strategic Partnership'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'India Entry Advisory|Partnership Opportunity|Strategic Partnership'
+      OR COALESCE(l.last_outreach_subject, '') ~* 'India Entry Advisory|Partnership Opportunity|Strategic Partnership'
+      THEN 'M&A / STRATEGIC PARTNERSHIP'
+    WHEN l.draft_template_used = 'palak_mam_corporate_advisory'
+      OR COALESCE(l.email_draft, '') ~* 'Corporate Advisory/ Equity Fund Raising|Corporate Advisory/Equity Fund'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'Corporate Advisory/ Equity Fund Raising|Corporate Advisory/Equity Fund'
+      OR COALESCE(l.last_outreach_subject, '') ~* 'Corporate Advisory/ Equity Fund Raising|Corporate Advisory/Equity Fund'
+      THEN 'CORPORATE ADVISORY'
+    WHEN l.draft_template_used = 'palak_mam_mna_fundraising'
+      OR COALESCE(l.email_draft, '') ~* 'Supporting Growth Through M&A and Fundraising|M&A and Fundraising'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'Supporting Growth Through M&A and Fundraising|M&A and Fundraising'
+      OR COALESCE(l.last_outreach_subject, '') ~* 'Supporting Growth Through M&A and Fundraising|M&A and Fundraising'
+      THEN 'M&A / FUNDRAISING'
+    WHEN COALESCE(l.email_draft, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
+      OR COALESCE(l.remarks, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
+      OR COALESCE(l.persona, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
+      OR COALESCE(l.last_outreach_subject, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
+      OR COALESCE(l.sector, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
+      OR COALESCE(l.industry, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
+      THEN 'CLIMATE TECH'
+    WHEN COALESCE(l.email_draft, '') ~* 'hiring|recruitment|talent|gigin|staffing|hrtech'
+      OR COALESCE(l.remarks, '') ~* 'hiring|recruitment|talent|gigin|staffing|hrtech'
+      OR COALESCE(l.persona, '') ~* 'hiring|recruitment|talent|gigin|staffing|hrtech'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'hiring|recruitment|talent|gigin|staffing|hrtech'
+      OR COALESCE(l.last_outreach_subject, '') ~* 'hiring|recruitment|talent|gigin|staffing|hrtech'
+      OR COALESCE(l.sector, '') ~* 'hiring|recruitment|talent|gigin|staffing|hrtech'
+      OR COALESCE(l.industry, '') ~* 'hiring|recruitment|talent|gigin|staffing|hrtech'
+      THEN 'AI HIRING'
+    WHEN COALESCE(l.email_draft, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
+      OR COALESCE(l.remarks, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
+      OR COALESCE(l.persona, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
+      OR COALESCE(l.last_outreach_subject, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
+      OR COALESCE(l.sector, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
+      OR COALESCE(l.industry, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
+      THEN 'HEALTHCARE'
+    WHEN COALESCE(l.email_draft, '') ~* 'agri|agtech|farming|agriculture|agrivijay'
+      OR COALESCE(l.remarks, '') ~* 'agri|agtech|farming|agriculture|agrivijay'
+      OR COALESCE(l.persona, '') ~* 'agri|agtech|farming|agriculture|agrivijay'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'agri|agtech|farming|agriculture|agrivijay'
+      OR COALESCE(l.last_outreach_subject, '') ~* 'agri|agtech|farming|agriculture|agrivijay'
+      OR COALESCE(l.sector, '') ~* 'agri|agtech|farming|agriculture|agrivijay'
+      OR COALESCE(l.industry, '') ~* 'agri|agtech|farming|agriculture|agrivijay'
+      THEN 'AGRITECH'
+    WHEN COALESCE(l.email_draft, '') ~* 'edtech|education|school|learning'
+      OR COALESCE(l.remarks, '') ~* 'edtech|education|school|learning'
+      OR COALESCE(l.persona, '') ~* 'edtech|education|school|learning'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'edtech|education|school|learning'
+      OR COALESCE(l.last_outreach_subject, '') ~* 'edtech|education|school|learning'
+      OR COALESCE(l.sector, '') ~* 'edtech|education|school|learning'
+      OR COALESCE(l.industry, '') ~* 'edtech|education|school|learning'
+      THEN 'EDTECH'
+    WHEN COALESCE(l.email_draft, '') ~* 'fintech|banking|finance|payments'
+      OR COALESCE(l.remarks, '') ~* 'fintech|banking|finance|payments'
+      OR COALESCE(l.persona, '') ~* 'fintech|banking|finance|payments'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'fintech|banking|finance|payments'
+      OR COALESCE(l.last_outreach_subject, '') ~* 'fintech|banking|finance|payments'
+      OR COALESCE(l.sector, '') ~* 'fintech|banking|finance|payments'
+      OR COALESCE(l.industry, '') ~* 'fintech|banking|finance|payments'
+      THEN 'FINTECH'
+    WHEN COALESCE(l.email_draft, '') ~* 'saas|software|b2b saas'
+      OR COALESCE(l.remarks, '') ~* 'saas|software|b2b saas'
+      OR COALESCE(l.persona, '') ~* 'saas|software|b2b saas'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'saas|software|b2b saas'
+      OR COALESCE(l.last_outreach_subject, '') ~* 'saas|software|b2b saas'
+      OR COALESCE(l.sector, '') ~* 'saas|software|b2b saas'
+      OR COALESCE(l.industry, '') ~* 'saas|software|b2b saas'
+      THEN 'SAAS'
+    ELSE COALESCE(NULLIF(TRIM(UPPER(l.sector)), 'OTHER'), NULLIF(TRIM(UPPER(l.industry)), 'OTHER'), 'OTHER')
+END
+"""
+
 class BulkApproveRequest(BaseModel):
     lead_ids: List[int]
 
@@ -100,14 +185,8 @@ def get_all_leads_admin(
         params = []
         
         if type and type != 'ALL':
-            t_upper = type.upper()
-            if t_upper == 'GIGIN AI':
-                where_clauses.append("u.username ILIKE '%%yashika%%' AND (l.sector NOT ILIKE '%%agri%%' OR l.sector IS NULL)")
-            elif t_upper == 'AGRIVIJAY':
-                where_clauses.append("u.username ILIKE '%%yashika%%' AND l.sector ILIKE '%%agri%%'")
-            else:
-                where_clauses.append("l.lead_type ILIKE %s")
-                params.append(type)
+            where_clauses.append(f"({TYPE_CASE_SQL}) = %s")
+            params.append(type.upper())
         if status and status != 'ALL':
             if status.upper() == 'REPLIED':
                 # STRICT: Must have is_responded flag OR status is explicitly REPLIED
@@ -124,8 +203,8 @@ def get_all_leads_admin(
             where_clauses.append("u.username ILIKE %s")
             params.append(owner)
         if sector and sector != 'ALL':
-            where_clauses.append("l.sector ILIKE %s")
-            params.append(sector)
+            where_clauses.append(f"({SECTOR_CASE_SQL}) = %s")
+            params.append(sector.upper())
         if search:
             where_clauses.append("(l.first_name ILIKE %s OR l.last_name ILIKE %s OR l.company_name ILIKE %s OR l.email ILIKE %s)")
             s_param = f"%{search}%"
@@ -144,11 +223,11 @@ def get_all_leads_admin(
 
         # 3. Fetch leads
         query = f"""
-            SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.company_name, l.designation, 
-                   l.sector, l.lead_type, l.reply_intent, l.sentiment_score, l.deal_size, l.source,
+            SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.company_name, l.family_office_name, l.designation, 
+                   ({SECTOR_CASE_SQL}) as sector, ({TYPE_CASE_SQL}) as lead_type, l.reply_intent, l.sentiment_score, l.deal_size, l.source,
                    l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
                    l.followup_stage, l.followup_status, l.last_outreach_at, l.email_status,
-                   l.persona, l.email_draft, l.first_outreach_subject, l.last_outreach_subject,
+                   l.persona, l.email_draft, l.first_outreach_subject, l.last_outreach_subject, l.remarks, l.rejection_reason,
                    u.username as owner_name,
                    (
                        SELECT al.details FROM activity_log al 
@@ -170,14 +249,30 @@ def get_all_leads_admin(
         total_count = cur.fetchone()[0]
         
         # 5. Dynamic Filters (Fetch all unique sectors and owners for the dropdowns)
-        cur.execute("SELECT DISTINCT sector FROM leads_raw WHERE sector IS NOT NULL AND sector != '' ORDER BY sector ASC")
-        all_sectors = [r[0] for r in cur.fetchall()]
+        cur.execute(f"SELECT DISTINCT ({SECTOR_CASE_SQL}) FROM leads_raw l ORDER BY 1 ASC")
+        all_sectors = [r[0] for r in cur.fetchall() if r[0]]
         
         cur.execute("SELECT DISTINCT username FROM users ORDER BY username ASC")
         all_owners = [r[0] for r in cur.fetchall()]
         
+        # Transform leads: fill company_name from email domain if missing
+        generic_domains = {"gmail", "yahoo", "hotmail", "outlook", "protonmail", "icloud", "qvscl", "me", "live", "microsoft", "samsung", "sea", "example"}
+        lead_list = []
+        for l in leads:
+            row = dict(l)
+            if not row.get("company_name") or row["company_name"] == "Independent":
+                if row.get("family_office_name"):
+                    row["company_name"] = row["family_office_name"]
+                else:
+                    email = row.get("email", "") or ""
+                    if "@" in email:
+                        domain_part = email.split("@")[-1].split(".")[0].lower()
+                        if domain_part not in generic_domains:
+                            row["company_name"] = domain_part.capitalize()
+            lead_list.append(row)
+
         return {
-            "leads": [dict(l) for l in leads],
+            "leads": lead_list,
             "sectors": all_sectors,
             "owners": all_owners,
             "pagination": {
@@ -232,7 +327,7 @@ def export_all_leads_admin(
 
         # 3. Fetch leads
         query = f"""
-            SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.company_name, l.designation, 
+            SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.company_name, l.family_office_name, l.designation, 
                    l.sector, l.lead_type, l.reply_intent, l.sentiment_score, l.deal_size,
                    l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
                    l.email_status, l.followup_status,
@@ -409,13 +504,7 @@ def get_global_stats(
 
         # Type Breakdown
         cur.execute(f"""
-            SELECT 
-                CASE 
-                    WHEN u.username ILIKE '%%yashika%%' AND l.sector ILIKE '%%agri%%' THEN 'AGRIVIJAY'
-                    WHEN u.username ILIKE '%%yashika%%' THEN 'GIGIN AI'
-                    ELSE UPPER(COALESCE(l.lead_type, 'CLIENT'))
-                END as label, 
-                COUNT(*) as value
+            SELECT ({TYPE_CASE_SQL}) as label, COUNT(*) as value
             {from_l} {l_where}
             GROUP BY 1
             ORDER BY 2 DESC
@@ -458,9 +547,8 @@ def get_global_stats(
                 conn.rollback()
         
         cur.execute(f"""
-            SELECT COALESCE(l.sector, 'Other') as label, COUNT(*) as value
+            SELECT ({SECTOR_CASE_SQL}) as label, COUNT(*) as value
             {from_l} {l_where}
-            AND UPPER(COALESCE(l.sector, 'Other')) NOT IN ('INVESTOR', 'CLIENT')
             GROUP BY 1
             ORDER BY 2 DESC
             LIMIT 10
@@ -539,14 +627,8 @@ def get_filtered_breakdowns(
             params.append(uid)
         
         if type and type != 'ALL':
-            t_upper = type.upper()
-            if t_upper == 'GIGIN AI':
-                clauses.append("u.username ILIKE '%%yashika%%' AND (l.sector NOT ILIKE '%%agri%%' OR l.sector IS NULL)")
-            elif t_upper == 'AGRIVIJAY':
-                clauses.append("u.username ILIKE '%%yashika%%' AND l.sector ILIKE '%%agri%%'")
-            else:
-                clauses.append("l.lead_type ILIKE %s")
-                params.append(type)
+            clauses.append(f"({TYPE_CASE_SQL}) = %s")
+            params.append(type.upper())
         if status and status != 'ALL':
             clauses.append("l.email_status ILIKE %s")
             params.append(status)
@@ -554,8 +636,8 @@ def get_filtered_breakdowns(
             clauses.append("u.username ILIKE %s")
             params.append(owner)
         if sector and sector != 'ALL':
-            clauses.append("l.sector ILIKE %s")
-            params.append(sector)
+            clauses.append(f"({SECTOR_CASE_SQL}) = %s")
+            params.append(sector.upper())
         if period and period != 'ALL':
             if period == 'DAILY':
                 clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
@@ -580,13 +662,7 @@ def get_filtered_breakdowns(
         
         # Type Breakdown
         cur.execute(f"""
-            SELECT 
-                CASE 
-                    WHEN u.username ILIKE '%%yashika%%' AND l.sector ILIKE '%%agri%%' THEN 'Agrivijay'
-                    WHEN u.username ILIKE '%%yashika%%' THEN 'Gigin AI'
-                    ELSE UPPER(COALESCE(l.lead_type, 'CLIENT'))
-                END as label, 
-                COUNT(*) as value
+            SELECT ({TYPE_CASE_SQL}) as label, COUNT(*) as value
             {from_clause} {where_sql}
             GROUP BY 1 ORDER BY 2 DESC
         """, tuple(params))
@@ -594,7 +670,7 @@ def get_filtered_breakdowns(
         
         # Sector Breakdown
         cur.execute(f"""
-            SELECT COALESCE(l.sector, 'Other') as label, COUNT(*) as value
+            SELECT ({SECTOR_CASE_SQL}) as label, COUNT(*) as value
             {from_clause} {where_sql}
             GROUP BY 1 ORDER BY 2 DESC LIMIT 10
         """, tuple(params))
