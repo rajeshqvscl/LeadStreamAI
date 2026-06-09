@@ -44,6 +44,16 @@ const getMonthRange = (year, month) => {
   return { start, end };
 };
 
+const GENERIC_DOMAINS = new Set(['gmail','yahoo','hotmail','outlook','protonmail','icloud','qvscl','me','live','microsoft','samsung','sea','example']);
+const getCompany = (row) => {
+  if (row.company && row.company !== 'Individual' && row.company !== '—' && row.company !== '-') return row.company;
+  if (row.email && row.email.includes('@')) {
+    const domain = row.email.split('@')[1].split('.')[0].toLowerCase();
+    if (!GENERIC_DOMAINS.has(domain)) return domain.split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  }
+  return row.company || 'Individual';
+};
+
 const Metrics = () => {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
@@ -98,7 +108,7 @@ const Metrics = () => {
 
   const report = useMemo(() => {
     if (!data?.report) return [];
-    let rows = [...data.report];
+    let rows = data.report.map(r => ({ ...r, company: getCompany(r) }));
     if (search) {
       const q = search.toLowerCase();
       rows = rows.filter(r =>
@@ -118,10 +128,11 @@ const Metrics = () => {
     return rows;
   }, [data, search, sortKey, sortDir]);
 
+  const hasFilter = !!(dateFrom || dateTo || range !== 'all');
   const stats = data ? [
     { label: 'Replies', value: data.reverted },
-    { label: 'Emails Sent', value: data.today_sent },
-    { label: 'Follow-ups', value: data.today_followups },
+    { label: 'Emails Sent', value: hasFilter ? (data.period_email_sent || data.sent) : data.sent },
+    { label: 'Follow-ups', value: hasFilter ? (data.period_followups || data.total_followups) : data.total_followups },
     { label: 'Drafts', value: data.drafts_generated },
     { label: 'Registry', value: data.total_registry },
     { label: 'Bounces', value: data.bounces },
@@ -421,7 +432,7 @@ const Metrics = () => {
             <button onClick={exportBouncedCSV} className="flex items-center gap-2 px-4 py-2.5 bg-orange-600/10 hover:bg-orange-600/20 text-orange-400 border border-orange-500/20 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all">
               <AlertTriangle className="w-3.5 h-3.5" /> Export Bounced
             </button>
-            <button onClick={() => window.open('/mis-report', '_blank')} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all">
+            <button onClick={() => navigate('/mis-report')} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all">
               <FileText className="w-3.5 h-3.5" /> MIS PDF
             </button>
             <button onClick={() => { setLoading(true); fetchReport(); }} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all">

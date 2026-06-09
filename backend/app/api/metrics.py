@@ -108,18 +108,66 @@ def get_metrics(
     # Today sent (from activity_log, IST timezone)
     ist_today = "(NOW() AT TIME ZONE 'Asia/Kolkata')::date"
     ist_date = "(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date"
-    if user_id and user_id != 'all' and resolved_name:
-        cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE performed_by = %s AND action = 'EMAIL_SENT' AND {ist_date} = {ist_today}", (resolved_name,))
+    if user_id and user_id != 'all' and resolved_id:
+        cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE performed_by = %s AND action = 'EMAIL_SENT' AND {ist_date} = {ist_today}", (resolved_name or resolved_id,))
         today_sent = cur.fetchone()['count'] or 0
-        cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE performed_by = %s AND action IN ('FOLLOWUP_SENT', 'AUTO_FOLLOWUP_SENT') AND {ist_date} = {ist_today}", (resolved_name,))
+        cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE user_id = %s AND action IN ('AUTO_FOLLOWUP_SENT', 'FOLLOWUP_APPROVED') AND {ist_date} = {ist_today}", (resolved_id,))
         today_followups = cur.fetchone()['count'] or 0
     else:
         cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE action = 'EMAIL_SENT' AND {ist_date} = {ist_today}")
         today_sent = cur.fetchone()['count'] or 0
-        cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE action IN ('FOLLOWUP_SENT', 'AUTO_FOLLOWUP_SENT') AND {ist_date} = {ist_today}")
+        cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE action IN ('AUTO_FOLLOWUP_SENT', 'FOLLOWUP_APPROVED') AND {ist_date} = {ist_today}")
         today_followups = cur.fetchone()['count'] or 0
 
     daily_limit = 2000
+
+    # Period-based sent/followups (from activity_log with date filter)
+    if date_from or date_to:
+        al_date_parts = []
+        al_date_params = []
+        if user_id and user_id != 'all' and resolved_name:
+            al_date_parts.append("performed_by = %s")
+            al_date_params.append(resolved_name)
+        al_date_parts.append("1=1")
+        al_date_base = " AND ".join(al_date_parts)
+        al_date_filter = ""
+        if date_from:
+            al_date_filter += " AND created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= %s::date AT TIME ZONE 'Asia/Kolkata'"
+            al_date_params.append(date_from)
+        if date_to:
+            al_date_filter += " AND created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < (%s::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata'"
+            al_date_params.append(date_to)
+        al_params = tuple(al_date_params)
+        cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE action = 'EMAIL_SENT' AND {al_date_base} {al_date_filter}", al_params)
+        period_email_sent = cur.fetchone()['count'] or 0
+        # Follow-ups: use user_id column for per-user filter
+        fup_date_parts = []
+        fup_date_params = []
+        if user_id and user_id != 'all' and resolved_id:
+            fup_date_parts.append("user_id = %s")
+            fup_date_params.append(resolved_id)
+        fup_date_parts.append("1=1")
+        fup_date_base = " AND ".join(fup_date_parts)
+        fup_date_filter = ""
+        if date_from:
+            fup_date_filter += " AND created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= %s::date AT TIME ZONE 'Asia/Kolkata'"
+            fup_date_params.append(date_from)
+        if date_to:
+            fup_date_filter += " AND created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < (%s::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata'"
+            fup_date_params.append(date_to)
+        fup_params = tuple(fup_date_params)
+        cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE action IN ('AUTO_FOLLOWUP_SENT', 'FOLLOWUP_APPROVED') AND {fup_date_base} {fup_date_filter}", fup_params)
+        period_followups = cur.fetchone()['count'] or 0
+    else:
+        period_email_sent = 0
+        period_followups = 0
+
+    # Total follow-ups (all time)
+    if user_id and user_id != 'all' and resolved_id:
+        cur.execute("SELECT COUNT(*) as count FROM activity_log WHERE user_id = %s AND action IN ('AUTO_FOLLOWUP_SENT', 'FOLLOWUP_APPROVED')", (resolved_id,))
+    else:
+        cur.execute("SELECT COUNT(*) as count FROM activity_log WHERE action IN ('AUTO_FOLLOWUP_SENT', 'FOLLOWUP_APPROVED')")
+    total_followups = cur.fetchone()['count'] or 0
 
     # Bounces
     cur.execute(f"SELECT COUNT(*) FROM leads_raw {where_clause} AND email_status = 'BOUNCED'", full_params)
@@ -176,21 +224,18 @@ def get_metrics(
 
     # Detect Palak for 2-followup display
     _palak_user = False
-    if user_id and user_id != 'all':
-        try:
-            cur.execute("SELECT username, full_name FROM users WHERE id = %s", (user_id,))
-            _u = cur.fetchone()
-            if _u:
-                _un = str(_u.get('username') or '').lower()
-                _fn = str(_u.get('full_name') or '').lower()
-                if 'palak' in _un or 'palak' in _fn:
-                    _palak_user = True
-        except:
-            pass
+    if resolved_id is not None and row:
+        _un = str(row.get('username') or '').lower()
+        _fn = str(row.get('full_name') or '').lower()
+        if 'palak' in _un or 'palak' in _fn:
+            _palak_user = True
 
     if user_id and user_id != 'all':
-        report_where.append("l.user_id = %s")
-        report_params.append(user_id)
+        if resolved_id is not None:
+            report_where.append("l.user_id = %s")
+            report_params.append(resolved_id)
+        else:
+            report_where.append("1=0")
     report_where.append("1=1")
     report_base = " AND ".join(report_where)
     report_filter = f"WHERE {report_base} {rng_report} {dte_report}".strip()
@@ -201,11 +246,12 @@ def get_metrics(
         report_params_t = report_params_t + (date_to,)
 
     cur.execute(f"""
-        SELECT l.first_name, l.last_name, l.email, l.company_name,
+        SELECT l.first_name, l.last_name, l.email, l.company_name, l.family_office_name,
                COALESCE(l.sector, 'Other') as sector,
+               COALESCE(l.lead_type, 'CLIENT') as lead_type,
                l.email_status, l.followup_status, l.followup_stage,
-               l.is_responded, l.is_unsubscribed, l.reply_intent,
-               l.updated_at,
+               l.is_responded, l.is_unsubscribed, l.reply_intent, l.check_size,
+               l.updated_at, l.first_outreach_subject,
                (SELECT al.details FROM activity_log al WHERE al.lead_id = l.id AND al.action = 'BOUNCED' ORDER BY al.created_at DESC LIMIT 1) as bounce_reason
         FROM leads_raw l
         {report_filter}
@@ -214,6 +260,7 @@ def get_metrics(
     report_rows = cur.fetchall()
 
     report = []
+    generic_domains = {"gmail", "yahoo", "hotmail", "outlook", "protonmail", "icloud", "qvscl", "me", "live", "microsoft", "samsung", "sea", "example"}
     for r in report_rows:
         status = (r['email_status'] or '').upper()
         reply_intent = (r['reply_intent'] or '').upper()
@@ -249,15 +296,51 @@ def get_metrics(
         if updated:
             updated = updated.isoformat() if hasattr(updated, 'isoformat') else str(updated)
 
+        # Company name: use family_office_name, then email domain, then Individual
+        company_name = r['company_name'] or ''
+        if not company_name or company_name.lower() == 'independent':
+            company_name = r.get('family_office_name') or ''
+        if not company_name:
+            email = r['email'] or ''
+            if '@' in email:
+                domain_part = email.split('@')[-1].split('.')[0].lower()
+                if domain_part not in generic_domains:
+                    company_name = domain_part.capitalize()
+        if not company_name:
+            company_name = 'Individual'
+
+        # Sector: always infer from subject first, fallback to DB sector or lead_type
+        subject = r.get('first_outreach_subject') or ''
+        s_lower = subject.lower()
+        if 'climate' in s_lower or 'agri' in s_lower:
+            sector = 'Climate AI'
+        elif 'hiring' in s_lower or 'recruitment' in s_lower or 'talent' in s_lower:
+            sector = 'AI Hiring'
+        elif 'health' in s_lower or 'diagnostics' in s_lower or 'pharma' in s_lower:
+            sector = 'HealthTech'
+        elif 'warehouse' in s_lower or 'logistics' in s_lower or 'fulfilment' in s_lower:
+            sector = 'Logistics'
+        elif 'fund' in s_lower or 'invest' in s_lower or 'capital' in s_lower or 'venture' in s_lower:
+            sector = 'Investment'
+        elif 'ai' in s_lower or 'software' in s_lower or 'saas' in s_lower or 'tech' in s_lower:
+            sector = 'AI / Tech'
+        else:
+            sector = r['sector'] or 'Other'
+            if sector == 'Other':
+                sector = r.get('lead_type') or 'CLIENT'
+                sector = sector.replace('_', ' ').title()
+
         report.append({
             "name": f"{r['first_name'] or ''} {r['last_name'] or ''}".strip(),
             "email": r['email'] or '',
-            "company": r['company_name'] or '',
-            "sector": r['sector'] or 'Other',
+            "company": company_name,
+            "sector": sector,
             "action": action,
             "followup": followup_display,
             "date": updated,
             "bounce_reason": r.get('bounce_reason') or '',
+            "first_outreach_subject": r.get('first_outreach_subject') or '',
+            "check_size": r.get('check_size') or '',
         })
 
     cur.close()
@@ -267,11 +350,14 @@ def get_metrics(
         "total_registry": registry_count,
         "today_sent": today_sent,
         "today_followups": today_followups,
+        "total_followups": total_followups,
+        "period_email_sent": period_email_sent,
+        "period_followups": period_followups,
         "daily_limit": daily_limit,
         "drafts_generated": drafts_generated,
         "reverted": reverted,
         "total_leads": leads_count,
-        "sent": sent,
+        "sent": period_email_sent if date_from or date_to else sent,
         "delivered": delivered,
         "unique_opens": unique_opens,
         "unique_clicks": unique_clicks,

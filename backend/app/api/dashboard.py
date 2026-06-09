@@ -51,16 +51,22 @@ def get_dashboard_stats(
         user_params = []
         act_cond = "1=1"
         act_params = []
+        fup_cond = "1=1"
+        fup_params = []
     elif resolved_id is not None:
         user_cond = "user_id = %s"
         user_params = [resolved_id]
         act_cond = "performed_by = %s"
         act_params = [resolved_name]
+        fup_cond = "user_id = %s"
+        fup_params = [resolved_id]
     else:
         user_cond = "user_id IS NULL"
         user_params = []
         act_cond = "1=1"
         act_params = []
+        fup_cond = "1=1"
+        fup_params = []
 
     # Build date filter for leads_raw (has created_at column)
     lr_date = ""
@@ -203,15 +209,15 @@ def get_dashboard_stats(
     cur.execute(f"""
         SELECT
             (SELECT COUNT(*) FROM activity_log WHERE action = 'EMAIL_SENT' AND {act_cond} AND {ist_date} = {today_str}) AS sent_today,
-            (SELECT COUNT(*) FROM activity_log WHERE action IN ('FOLLOWUP_SENT','AUTO_FOLLOWUP_SENT') AND {act_cond} AND {ist_date} = {today_str}) AS fup_today
-    """, act_params * 2 if act_params else [])
+            (SELECT COUNT(*) FROM activity_log WHERE action IN ('AUTO_FOLLOWUP_SENT','FOLLOWUP_APPROVED') AND {fup_cond} AND {ist_date} = {today_str}) AS fup_today
+    """, act_params + fup_params if act_params else [])
     today_row = cur.fetchone()
     sent_today = today_row['sent_today'] or 0
     fup_today = today_row['fup_today'] or 0
 
     # Total follow-ups count (with month/year filter if provided)
-    fup_params = act_params + al_date_params if act_params and al_date_params else (act_params if act_params else (al_date_params if al_date_params else []))
-    cur.execute(f"SELECT COUNT(*) as total FROM activity_log WHERE action IN ('FOLLOWUP_SENT','AUTO_FOLLOWUP_SENT') AND {act_cond} {al_date}", fup_params)
+    fup_params_list = fup_params + al_date_params if fup_params and al_date_params else (fup_params if fup_params else (al_date_params if al_date_params else []))
+    cur.execute(f"SELECT COUNT(*) as total FROM activity_log WHERE action IN ('AUTO_FOLLOWUP_SENT','FOLLOWUP_APPROVED') AND {fup_cond} {al_date}", fup_params_list)
     total_followups = cur.fetchone()['total'] or 0
 
     # Pending meeting reminders count
@@ -339,7 +345,7 @@ def get_card_detail(
 
     elif card_type == 'followups':
         all_params = act_params + date_params
-        count_sql = f"SELECT COUNT(*) FROM activity_log WHERE action IN ('FOLLOWUP_SENT','AUTO_FOLLOWUP_SENT') AND {act_cond} {date_cond.replace('created_at', 'created_at')}"
+        count_sql = f"SELECT COUNT(*) FROM activity_log WHERE action IN ('AUTO_FOLLOWUP_SENT','FOLLOWUP_APPROVED') AND {act_cond} {date_cond.replace('created_at', 'created_at')}"
         cur.execute(count_sql, all_params)
         total = cur.fetchone()[0] or 0
         data_sql = f"""
@@ -347,7 +353,7 @@ def get_card_detail(
                    l.first_name, l.last_name, l.email, l.company_name, l.persona
             FROM activity_log al
             LEFT JOIN leads_raw l ON al.lead_id = l.id
-            WHERE al.action IN ('FOLLOWUP_SENT','AUTO_FOLLOWUP_SENT') AND {act_cond.replace('user_id', 'al.user_id')} {date_cond.replace('created_at', 'al.created_at')}
+            WHERE al.action IN ('AUTO_FOLLOWUP_SENT','FOLLOWUP_APPROVED') AND {act_cond.replace('user_id', 'al.user_id')} {date_cond.replace('created_at', 'al.created_at')}
             ORDER BY al.created_at DESC LIMIT %s OFFSET %s
         """
         cur.execute(data_sql, all_params + [per_page, offset])
