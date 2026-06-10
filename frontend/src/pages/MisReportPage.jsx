@@ -100,7 +100,9 @@ const MisReportPage = () => {
 
   const { report = [], reverted, today_sent, today_followups, daily_limit, total_registry, bounces, drafts_generated } = data;
   const personaData = data.persona_breakdown ? Object.entries(data.persona_breakdown).map(([k, v]) => ({ name: k, value: v })) : [];
-  const industryData = data.industry_breakdown ? Object.entries(data.industry_breakdown).map(([k, v]) => ({ name: k, value: v })) : [];
+  const sectorCounts = {};
+  report.forEach(r => { const s = r.sector || 'Other'; sectorCounts[s] = (sectorCounts[s] || 0) + 1; });
+  const industryData = Object.entries(sectorCounts).map(([k, v]) => ({ name: k, value: v })).sort((a, b) => b.value - a.value);
   const countryData = data.country_breakdown ? Object.entries(data.country_breakdown).map(([k, v]) => ({ name: k, value: v })) : [];
 
   const actionCounts = {};
@@ -451,7 +453,7 @@ const MisReportPage = () => {
                     <BarChart width={220} height={220} data={sorted.map(([k, v]) => ({ name: k, value: v }))} layout="vertical" margin={{ left: 10, right: 10, top: 5, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis type="number" />
-                      <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 10 }} />
+                      <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 9 }} />
                       <Tooltip />
                       <Bar dataKey="value" fill="#10b981" radius={[0, 3, 3, 0]} />
                     </BarChart>

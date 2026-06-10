@@ -129,6 +129,18 @@ If the timing isn't right or this doesn't align with your current focus, I compl
 However, if circumstances change or you'd like to revisit this opportunity, please don't hesitate to reach out. We'd be happy to share the full deck or connect at your convenience.
 
 Thank you sincerely for your time and consideration."""
+    },
+    "INVESTOR_KAJAL_GENERIC": {
+        1: """Dear {name},
+
+I am following up on my previous email regarding the investment opportunity. Please let me know if you are open to a brief introductory call or if I should send the pitch deck for your review.
+
+Additionally, Would you like to share your investment thesis so that I can share relevant deals in the future?
+
+Looking forward to connecting.
+
+Best Regards,
+Kajal Narang"""
     }
 }
 
@@ -166,6 +178,8 @@ def get_template_followup(lead: dict, stage: int) -> str:
         campaign_key = "INVESTOR_PALAK_ADVISORY"
     elif draft_template == 'kajal_mam_health_ecosystem':
         campaign_key = "INVESTOR_KAJAL_HEALTH_ECOSYSTEM"
+    elif draft_template in ('kajal_mam_jv', 'kajal_mam_hyphen', 'kajal_mam_agritech', 'kajal_mam_qvscl_intro'):
+        campaign_key = "INVESTOR_KAJAL_GENERIC"
     else:
         # Dynamic campaign detection based on subject/draft/persona/sector (not lead_type)
         original_subject = get_original_outreach_subject(lead) or ""

@@ -849,7 +849,11 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
         lead = cur.fetchone()
         if not lead:
             raise HTTPException(status_code=404, detail="Lead not found.")
-            
+
+        # Skip if lead bounced
+        if (lead.get('email_status') or '').upper() == 'BOUNCED':
+            raise HTTPException(status_code=400, detail="Cannot send follow-up to a bounced lead.")
+
         from app.api.drafts import get_sender_profile, inject_signature, markdown_to_html
         profile = get_sender_profile(user_id)
         

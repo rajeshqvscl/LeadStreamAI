@@ -159,6 +159,7 @@ _TEMPLATE_ATTACHMENT_MAP = {
         "QVSCL Company Profile.pdf",
         "Lalit_Huria_Profile.pdf",
     ],
+    "vismaya_leadstream": [],
 }
 
 def _get_attachment_files_for_subject(subject: str, template_name: Optional[str] = None) -> list:
@@ -177,6 +178,14 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     DEFAULT_CC = "lalit.h@qvscl.com"
     if not cc:
         cc = DEFAULT_CC
+    # Vismaya ke emails mein sirf rajesh.s@qvscl.com CC karo
+    is_vismaya = (
+        template_name == 'vismaya_leadstream'
+        or (from_name and 'vismaya' in from_name.lower())
+        or (from_email and 'vismaya' in from_email.lower())
+    )
+    if is_vismaya:
+        cc = "rajesh.s@qvscl.com"
     
     import markdown
     # Convert markdown to HTML for a premium look

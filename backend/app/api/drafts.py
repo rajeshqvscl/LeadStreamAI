@@ -714,6 +714,62 @@ Palak"""
         )
     conn.commit()
 
+    # 7. Vismaya LeadStream Template
+    vismaya_description = "LeadStreamAI Client Outreach Draft by Vismaya Rajeevan"
+    vismaya_content = """Subject: Your Business on Autopilot — Meet LeadStreamAI
+
+Dear {{First Name}},
+
+I hope you are doing well.
+
+**<span style="color: #1a5276;">What if finding customers, reaching out, and following up were all done automatically — with zero effort from your team?</span>**
+
+We would like to introduce **<span style="color: #1a5276;">LeadStreamAI</span>** - a smart AI tool that helps your business find the right customers, reach out to them automatically, and save your team hours every day.
+
+**<span style="color: #1a5276;">With LeadStreamAI, you can:</span>**
+
+• **<span style="color: #1a5276;">Send personalised emails in bulk —</span>** the right message to the right person, every time
+• **<span style="color: #1a5276;">Follow up automatically —</span>** so no opportunity ever slips through the cracks
+• **<span style="color: #1a5276;">Track who opened and replied —</span>** so you always know who is interested
+• **<span style="color: #1a5276;">Zero manual work —</span>** it runs completely on its own, your team does not need to lift a finger
+
+**<span style="color: #c25e00;">LeadStreamAI does the work of 5 people — making your business 5 times more productive. Faster, smarter, and without a break.</span>**
+
+If you are interested, I would be happy to set up a **<span style="color: #1e7e34;">short 20-minute call</span>** to show you exactly how LeadStreamAI works — no technical knowledge needed!
+
+Looking forward to hearing from you.
+
+SIG_START
+--
+***Thanks & Regards,***
+***Vismaya Rajeevan,***
+***Business Associate***
+SIG_END"""
+
+    vismaya_followup1 = """Dear {{First Name}},
+
+I hope you are doing well. I am following up on my previous email about LeadStreamAI.
+
+Just wanted to check — would you be open to a quick 10-minute call to see how it works? Or would you prefer I send over a short demo video first?
+
+Would love to understand your team's current process so I can show you exactly where LeadStreamAI can make the biggest difference.
+
+Looking forward to hearing from you!
+
+Best Regards,
+Vismaya Rajeevan"""
+
+    cur.execute(
+        "UPDATE prompts SET content = %s, description = %s, owner_username = 'vismaya', followup_1 = %s WHERE name = 'vismaya_leadstream'",
+        (vismaya_content, vismaya_description, vismaya_followup1)
+    )
+    if cur.rowcount == 0:
+        cur.execute(
+            "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1) VALUES ('vismaya_leadstream', %s, %s, 'CUSTOM_DRAFT', 'vismaya', %s)",
+            (vismaya_description, vismaya_content, vismaya_followup1)
+        )
+    conn.commit()
+
     cur.close()
     conn.close()
     logger.info("🚀 Startup templates creation/verification completed successfully!")
@@ -795,7 +851,7 @@ def markdown_to_html(text, gmail_style=False):
         if not src_m:
             return tag
         src = src_m.group(1)
-        known = {"PHOTO-2026-05-25-10-33-35.jpg": "image/jpeg", "kajal.png": "image/png"}
+        known = {"PHOTO-2026-05-25-10-33-35.jpg": "image/jpeg", "kajal.png": "image/png", "qvscllogo.png": "image/png"}
         for img_name, mime_type in known.items():
             if img_name in src:
                 if img_name in _INLINED_IMAGE_CACHE:
@@ -813,11 +869,13 @@ def markdown_to_html(text, gmail_style=False):
     def _inline_md_img(m):
         alt_text = m.group(1)
         src = m.group(2)
-        known = {"PHOTO-2026-05-25-10-33-35.jpg": "image/jpeg", "kajal.png": "image/png"}
+        known = {"PHOTO-2026-05-25-10-33-35.jpg": "image/jpeg", "kajal.png": "image/png", "qvscllogo.png": "image/png"}
         for img_name, mime_type in known.items():
             if img_name in src:
                 if img_name in _INLINED_IMAGE_CACHE:
                     new_src = _INLINED_IMAGE_CACHE[img_name]
+                    if img_name == "qvscllogo.png":
+                        return f'<img src="{new_src}" alt="{alt_text}" style="width:110px;height:auto;display:block;margin-top:10px;" />'
                     return f'<div style="width: 100%; margin-top: 25px; margin-bottom: 25px;"><img src="{new_src}" alt="{alt_text}" width="420" height="126" style="display: block;" /></div>'
                 img_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", img_name)
                 if os.path.exists(img_path):
@@ -825,6 +883,8 @@ def markdown_to_html(text, gmail_style=False):
                         b64_data = base64.b64encode(f.read()).decode()
                     new_src = f"data:{mime_type};base64,{b64_data}"
                     _INLINED_IMAGE_CACHE[img_name] = new_src
+                    if img_name == "qvscllogo.png":
+                        return f'<img src="{new_src}" alt="{alt_text}" style="width:110px;height:auto;display:block;margin-top:10px;" />'
                     return f'<div style="width: 100%; margin-top: 25px; margin-bottom: 25px;"><img src="{new_src}" alt="{alt_text}" width="420" height="126" style="display: block;" /></div>'
         return m.group(0)
     
@@ -1230,14 +1290,38 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 
     disclaimer = """Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."""
 
+    is_vismaya = 'vismaya' in (profile.get('full_name') or '').strip().lower()
+    if is_vismaya:
+        disclaimer = disclaimer.replace(" and its attachments", "").replace("and its attachments ", "")
+        disclaimer = disclaimer.replace("are intended only", "is intended only")
+
     unsub_link = f"https://qvscl.com/unsubscribe?lead_id={lead_id}"
 
     is_palak = (profile.get('full_name') or '').strip().lower() == 'palak jain'
 
-    if is_palak:
-        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", "qvscllogo.png"), "rb") as f:
-            b64_logo = base64.b64encode(f.read()).decode()
-        logo_data_uri = f"data:image/png;base64,{b64_logo}"
+    # Load qvscllogo.png as base64 once — used in both Palak and Vismaya signatures
+    try:
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", "qvscllogo.png"), "rb") as _f:
+            _b64_logo = base64.b64encode(_f.read()).decode()
+        _logo_data_uri = f"data:image/png;base64,{_b64_logo}"
+    except Exception:
+        _logo_data_uri = ""
+
+    if is_vismaya:
+        dis_text_vis = "Important: This message is intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."
+        sig_html = f"""<div style="font-family:Arial,sans-serif;color:#1a5276;line-height:1.3;">
+<a href="{unsub_link}" style="color:#555;font-size:10px;text-decoration:underline;">Click here to unsubscribe</a>
+<div style="color:#999;font-size:12px;">--</div>
+<div style="font-size:15px;font-weight:700;font-style:italic;margin:0;color:#1a5276;">Thanks &amp; Regards,</div>
+<div style="font-size:15px;font-weight:700;font-style:italic;margin:0;color:#1a5276;">{name},</div>
+<div style="font-size:14px;font-style:italic;margin:0;color:#1a5276;">{title}</div>
+<div style="font-size:14px;font-style:italic;margin:0;color:#1a5276;"><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> <span style="color:#1d5fd0;">/</span> <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></div>
+<div style="font-size:14px;font-style:italic;margin-top:2px;color:#1a5276;">{phone}</div>
+{f'<img src="{_logo_data_uri}" alt="QVSCL" width="110" style="margin-top:10px;width:110px;height:auto;display:block;">' if _logo_data_uri else ''}
+<div style="margin-top:10px;font-size:10px;line-height:1.4;color:#555555;max-width:600px;">{dis_text_vis}</div>
+</div>"""
+    elif is_palak:
+        dis_text = "Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."
         sig_html = f"""<div style="font-family:Arial,Calibri,sans-serif;color:#0B2A6F;line-height:1.15;">
 <a href="{unsub_link}" style="color:#0B2A6F;font-size:10px;text-decoration:underline;">Click here to unsubscribe</a>
 <div style="color:#999;font-size:12px;">--</div>
@@ -1246,8 +1330,8 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 <div style="font-size:15px;font-style:italic;margin:0;color:#0B2A6F;">{title}</div>
 <div style="font-size:15px;font-style:italic;margin:0;color:#0B2A6F;"><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> <span style="color:#1d5fd0;">/</span> <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></div>
 <div style="font-size:15px;font-style:italic;margin-top:2px;color:#0B2A6F;">{phone}</div>
-<img src="{logo_data_uri}" alt="QVSCL" width="110" style="margin-top:10px;width:110px;height:auto;display:block;">
-<div style="margin-top:10px;font-size:10px;line-height:1.4;color:#555555;max-width:600px;"><span style="font-weight:700;">Important:</span> This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you.</div>
+{f'<img src="{_logo_data_uri}" alt="QVSCL" width="110" style="margin-top:10px;width:110px;height:auto;display:block;">' if _logo_data_uri else ''}
+<div style="margin-top:10px;font-size:10px;line-height:1.4;color:#555555;max-width:600px;">{dis_text}</div>
 </div>"""
     else:
         sig_html = f"""
@@ -1456,9 +1540,9 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
 
         cur.execute("""
             UPDATE leads_raw 
-            SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW(), gmail_draft_id = %s
+            SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW(), gmail_draft_id = %s, draft_template_used = %s
             WHERE id = %s
-        """, (email_content, gmail_draft_id, req.lead_id))
+        """, (email_content, gmail_draft_id, req.template_type if req.template_type != 'standard' else None, req.lead_id))
         conn.commit()
 
         invalidate_pending_drafts_cache(str(uid) if uid else None)
@@ -1506,6 +1590,7 @@ def list_custom_draft_templates(user_id: Optional[str] = Header(None, alias="X-U
             "kajal_mam_health_ecosystem": "kajal",
             "kajal_mam_agritech": "kajal",
             "kajal_mam_qvscl_intro": "kajal",
+            "vismaya_leadstream": "vismaya",
         }
         for tpl_name, owner in owner_seed.items():
             cur.execute("UPDATE prompts SET owner_username = %s WHERE name = %s AND (owner_username IS NULL OR owner_username != %s)", (owner, tpl_name, owner))
@@ -2237,14 +2322,16 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
             logger.warning(f"⚠️  Gmail draft sync failed: {ge}")
             gmail_draft_id = None
 
-        # Save to DB (with gmail_draft_id and draft_template_used)
+        # Save to DB (with gmail_draft_id, draft_template_used, and cc_email)
         conn2 = get_db_connection()
         cur2 = conn2.cursor()
+        vismaya_cc = "rajesh.s@qvscl.com" if template_name == 'vismaya_leadstream' else None
         cur2.execute("""
             UPDATE leads_raw
-            SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW(), gmail_draft_id = %s, draft_template_used = %s
+            SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW(), gmail_draft_id = %s, draft_template_used = %s,
+                cc_email = COALESCE(%s, cc_email)
             WHERE id = %s
-        """, (email_content, gmail_draft_id, template_name, lead_id))
+        """, (email_content, gmail_draft_id, template_name, vismaya_cc, lead_id))
         conn2.commit()
         cur2.close()
         conn2.close()
@@ -2366,6 +2453,7 @@ TEMPLATE_ATTACHMENT_MAP = {
         {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
         {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
     ],
+    "vismaya_leadstream": [],
 }
 
 # Default attachments for AI-generated or unknown templates
@@ -2734,6 +2822,16 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             pass
         
         cc_email = req.cc if (req and req.cc) else stored_cc
+        template_name = lead.get('draft_template_used') if lead else None
+        
+        # Vismaya ke emails mein sirf rajesh.s@qvscl.com CC karo
+        is_vismaya = (
+            (template_name or '').lower() == 'vismaya_leadstream'
+            or 'vismaya' in (sender_name or '').lower()
+            or 'vismaya' in (sender_email or '').lower()
+        )
+        if is_vismaya:
+            cc_email = "rajesh.s@qvscl.com"
         
         # --- Re-inject Signature of the CURRENT logged-in user ---
         # Only for templates without embedded SIG_START/SIG_END markers.
@@ -2764,7 +2862,6 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         else:
             body = inject_signature(body, profile, draft_id)
         
-        template_name = lead.get('draft_template_used') if lead else None
         success, error_msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=email,
             subject=subject,

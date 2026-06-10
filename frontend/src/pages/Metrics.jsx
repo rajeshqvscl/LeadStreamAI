@@ -19,7 +19,6 @@ const ACTION_STYLES = {
 const FOLLOWUP_STYLES = {
   'Active': { color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' },
   'Completed': { color: 'text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20' },
-  'Stage': { color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20' },
   'Not started': { color: 'text-slate-500', bg: 'bg-slate-500/5', border: 'border-slate-500/20' },
 };
 
@@ -69,13 +68,15 @@ const Metrics = () => {
   const [selYear, setSelYear] = useState(_now.getFullYear());
   const [selMonth, setSelMonth] = useState(_now.getMonth());
   const [filterStatus, setFilterStatus] = useState('');
+  const [onlySent, setOnlySent] = useState(false);
 
   const fetchReport = async () => {
     try {
       let url = `/api/metrics?period=${range}&_t=${Date.now()}`;
       if (dateFrom) url += `&date_from=${dateFrom}`;
       if (dateTo) url += `&date_to=${dateTo}`;
-      if (filterStatus) url += `&status=${filterStatus}`;
+      if (onlySent) url += `&status=active`;
+      else if (filterStatus) url += `&status=${filterStatus}`;
       const res = await api.get(url);
       setData(res.data);
     } catch (err) {
@@ -90,7 +91,7 @@ const Metrics = () => {
     fetchReport();
     const interval = setInterval(fetchReport, 30000);
     return () => clearInterval(interval);
-  }, [range, dateFrom, dateTo, filterStatus]);
+  }, [range, dateFrom, dateTo, filterStatus, onlySent]);
 
   const handleSort = (key) => {
     if (sortKey === key) {
@@ -146,7 +147,9 @@ const Metrics = () => {
   ] : [];
 
   const personaData = data ? Object.entries(data.persona_breakdown || {}).map(([k, v]) => ({ name: k, value: v })) : [];
-  const industryData = data ? Object.entries(data.industry_breakdown || {}).map(([k, v]) => ({ name: k, value: v })) : [];
+  const sectorCounts = {};
+  (data?.report || []).forEach(r => { const s = r.sector || 'Other'; sectorCounts[s] = (sectorCounts[s] || 0) + 1; });
+  const industryData = Object.entries(sectorCounts).map(([k, v]) => ({ name: k, value: v })).sort((a, b) => b.value - a.value);
   const countryData = data ? Object.entries(data.country_breakdown || {}).map(([k, v]) => ({ name: k, value: v })) : [];
 
   const pipelineData = data ? [
@@ -241,10 +244,9 @@ const Metrics = () => {
                     {report.map((row, i) => {
                       const actionStyle = ACTION_STYLES[row.action] || ACTION_STYLES['Pending'];
                       const ActionIcon = actionStyle.icon;
-                      const isActive = row.followup.toLowerCase().startsWith('active');
+                      const isActive = row.followup === 'Active' || /^\d+$/.test(row.followup);
                       const fsStyle = isActive ? FOLLOWUP_STYLES['Active'] :
-                        row.followup.toLowerCase().startsWith('completed') ? FOLLOWUP_STYLES['Completed'] :
-                        row.followup.toLowerCase().startsWith('stage') ? FOLLOWUP_STYLES['Stage'] : FOLLOWUP_STYLES['Not started'];
+                        row.followup === 'Completed' ? FOLLOWUP_STYLES['Completed'] : FOLLOWUP_STYLES['Not started'];
                       return (
                         <tr key={i} className="hover:bg-white/[0.02] transition-colors">
                           <td className="px-4 py-3">
@@ -483,8 +485,8 @@ const Metrics = () => {
               <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setRange('all'); }} className="bg-[#111521] border border-white/5 rounded-lg px-3 py-2 text-[10px] text-slate-300 font-mono focus:outline-none focus:border-indigo-500/50" />
             </div>
             <div className="w-px h-6 bg-white/10" />
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-              className="bg-[#111521] border border-white/5 rounded-lg px-3 py-2 text-[10px] text-slate-300 font-mono focus:outline-none focus:border-indigo-500/50">
+            <select value={filterStatus} disabled={onlySent} onChange={e => { setFilterStatus(e.target.value); setOnlySent(false); }}
+              className="bg-[#111521] border border-white/5 rounded-lg px-3 py-2 text-[10px] text-slate-300 font-mono focus:outline-none focus:border-indigo-500/50 disabled:opacity-30">
               <option value="">ALL STATUS</option>
               <option value="BOUNCED">BOUNCED</option>
               <option value="SENT">SENT</option>
@@ -493,6 +495,12 @@ const Metrics = () => {
               <option value="OPENED">OPENED</option>
               <option value="REJECTED">REJECTED</option>
             </select>
+            <button onClick={() => { setOnlySent(!onlySent); if (!onlySent) setFilterStatus(''); }}
+              className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all border ${
+                onlySent ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/30' : 'bg-white/[0.03] text-slate-500 border-white/5 hover:border-white/20'
+              }`}>
+              Only Sent
+            </button>
           </div>
         </div>
 

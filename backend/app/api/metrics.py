@@ -60,6 +60,7 @@ def get_metrics(
     where_parts = []
     resolved_id = None
     resolved_name = None
+    _investor_user_templates = []
     if user_id and user_id != 'all':
         uid_val = user_id.strip()
         if uid_val.isdigit():
@@ -70,9 +71,21 @@ def get_metrics(
         if row:
             resolved_id = row['id']
             resolved_name = row['full_name'] or row['username']
+            _un = str(row.get('username') or '').lower()
+            _fn = str(row.get('full_name') or '').lower()
+            if 'palak' in _un or 'palak' in _fn:
+                _investor_user_templates = ['palak_mam_corporate_advisory', 'palak_mam_mna_fundraising', 'palak_mam_draft_1']
+            elif 'yashika' in _un or 'yashika' in _fn:
+                _investor_user_templates = ['yashika_draft_ai_tech', 'yashika_draft_agritech']
+            elif 'kajal' in _un or 'kajal' in _fn:
+                _investor_user_templates = ['kajal_mam_jv', 'kajal_mam_hyphen', 'kajal_mam_health_ecosystem', 'kajal_mam_agritech', 'kajal_mam_qvscl_intro']
         if resolved_id is not None:
             where_parts.append("user_id = %s")
             params.append(resolved_id)
+            if _investor_user_templates:
+                tmpl_qs = ','.join(['%s'] * len(_investor_user_templates))
+                where_parts.append(f"(draft_template_used IN ({tmpl_qs}) OR email_status NOT IN ('PENDING', 'PENDING_APPROVAL'))")
+                params.extend(_investor_user_templates)
         else:
             where_parts.append("1=0")
     where_parts.append("1=1")
@@ -188,9 +201,21 @@ def get_metrics(
     conversion_rate = (unique_engaged / leads_count * 100) if leads_count > 0 else 0.0
 
     # Persona breakdown
-    cur.execute(f"SELECT COALESCE(lead_type, 'OTHER') as persona, COUNT(*) as count FROM leads_raw {where_clause} GROUP BY COALESCE(lead_type, 'OTHER')", full_params)
-    persona_rows = cur.fetchall()
-    persona_breakdown = { r['persona'].upper(): r['count'] for r in persona_rows }
+    if user_id and user_id != 'all' and resolved_name:
+        uname = (resolved_name or '').lower()
+        _is_investor_user = any(kw in uname for kw in ['yashika', 'kajal', 'ayush'])
+        _is_client_user = 'palak' in uname
+    else:
+        _is_investor_user = False
+        _is_client_user = False
+    if _is_investor_user:
+        persona_breakdown = {'INVESTOR': leads_count}
+    elif _is_client_user:
+        persona_breakdown = {'CLIENT': leads_count}
+    else:
+        cur.execute(f"SELECT COALESCE(lead_type, 'OTHER') as persona, COUNT(*) as count FROM leads_raw {where_clause} GROUP BY COALESCE(lead_type, 'OTHER')", full_params)
+        persona_rows = cur.fetchall()
+        persona_breakdown = { r['persona'].upper(): r['count'] for r in persona_rows }
 
     # Sector breakdown
     cur.execute(f"SELECT COALESCE(sector, 'Other') as industry, COUNT(*) as count FROM leads_raw {where_clause} GROUP BY COALESCE(sector, 'Other') ORDER BY count DESC LIMIT 10", full_params)
@@ -219,21 +244,25 @@ def get_metrics(
     # Optional status filter (e.g. status=BOUNCED)
     if status:
         status_val = status.strip().upper()
-        report_where.append("l.email_status = %s")
-        report_params.append(status_val)
+        if status_val == 'ACTIVE':
+            report_where.append("l.email_status IN ('SENT', 'OPENED', 'CLICKED', 'REPLIED', 'INTERESTED', 'MEETING SCHEDULED', 'CONTACTED')")
+        else:
+            report_where.append("l.email_status = %s")
+            report_params.append(status_val)
 
     # Detect Palak for 2-followup display
-    _palak_user = False
-    if resolved_id is not None and row:
-        _un = str(row.get('username') or '').lower()
-        _fn = str(row.get('full_name') or '').lower()
-        if 'palak' in _un or 'palak' in _fn:
-            _palak_user = True
+    _palak_user = 'palak' in (resolved_name or '').lower()
+    _investor_user_templates = _investor_user_templates  # already set during user lookup above
 
     if user_id and user_id != 'all':
         if resolved_id is not None:
             report_where.append("l.user_id = %s")
             report_params.append(resolved_id)
+            # For template-based users, only include leads with their known templates or sent emails
+            if _investor_user_templates:
+                tmpl_placeholders = ','.join(['%s'] * len(_investor_user_templates))
+                report_where.append(f"(l.draft_template_used IN ({tmpl_placeholders}) OR l.email_status NOT IN ('PENDING', 'PENDING_APPROVAL'))")
+                report_params.extend(_investor_user_templates)
         else:
             report_where.append("1=0")
     report_where.append("1=1")
@@ -251,7 +280,7 @@ def get_metrics(
                COALESCE(l.lead_type, 'CLIENT') as lead_type,
                l.email_status, l.followup_status, l.followup_stage,
                l.is_responded, l.is_unsubscribed, l.reply_intent, l.check_size,
-               l.updated_at, l.first_outreach_subject,
+               l.updated_at, l.first_outreach_subject, l.draft_template_used,
                (SELECT al.details FROM activity_log al WHERE al.lead_id = l.id AND al.action = 'BOUNCED' ORDER BY al.created_at DESC LIMIT 1) as bounce_reason
         FROM leads_raw l
         {report_filter}
@@ -283,12 +312,14 @@ def get_metrics(
         fs = (r['followup_status'] or '').upper()
         stage = r['followup_stage'] or 0
         _ms = 2 if _palak_user else 3
-        if fs == 'ACTIVE':
-            followup_display = f"Active ({stage}/{_ms})"
-        elif fs == 'COMPLETED' or stage >= _ms:
-            followup_display = f"Completed ({stage}/{_ms})"
+        if fs == 'COMPLETED' or stage >= _ms:
+            followup_display = 'Completed'
+        elif fs == 'ACTIVE' and stage > 0:
+            followup_display = str(stage)
         elif stage > 0:
-            followup_display = f"Stage {stage}/{_ms}"
+            followup_display = str(stage)
+        elif fs == 'ACTIVE':
+            followup_display = 'Active'
         else:
             followup_display = 'Not started'
 
@@ -309,26 +340,48 @@ def get_metrics(
         if not company_name:
             company_name = 'Individual'
 
-        # Sector: always infer from subject first, fallback to DB sector or lead_type
-        subject = r.get('first_outreach_subject') or ''
-        s_lower = subject.lower()
-        if 'climate' in s_lower or 'agri' in s_lower:
-            sector = 'Climate AI'
-        elif 'hiring' in s_lower or 'recruitment' in s_lower or 'talent' in s_lower:
-            sector = 'AI Hiring'
-        elif 'health' in s_lower or 'diagnostics' in s_lower or 'pharma' in s_lower:
-            sector = 'HealthTech'
-        elif 'warehouse' in s_lower or 'logistics' in s_lower or 'fulfilment' in s_lower:
-            sector = 'Logistics'
-        elif 'fund' in s_lower or 'invest' in s_lower or 'capital' in s_lower or 'venture' in s_lower:
-            sector = 'Investment'
-        elif 'ai' in s_lower or 'software' in s_lower or 'saas' in s_lower or 'tech' in s_lower:
-            sector = 'AI / Tech'
+        # Sector: check draft_template_used first, then infer from subject, fallback to DB
+        template = (r.get('draft_template_used') or '').strip().lower()
+        sector_from_template = {
+            'kajal_mam_jv': 'Real Estate',
+            'kajal_mam_hyphen': 'Logistics',
+            'kajal_mam_health_ecosystem': 'HealthTech',
+            'kajal_mam_agritech': 'AgriTech',
+            'kajal_mam_qvscl_intro': 'Corporate Advisory',
+            'yashika_draft_ai_tech': 'AI Hiring',
+            'yashika_draft_agritech': 'AgriTech',
+            'palak_mam_corporate_advisory': 'Corporate Advisory',
+            'palak_mam_mna_fundraising': 'M&A / Fundraising',
+            'palak_mam_draft_1': 'M&A / Strategic Partnership',
+        }.get(template)
+        if sector_from_template:
+            sector = sector_from_template
         else:
-            sector = r['sector'] or 'Other'
-            if sector == 'Other':
-                sector = r.get('lead_type') or 'CLIENT'
-                sector = sector.replace('_', ' ').title()
+            subject = r.get('first_outreach_subject') or ''
+            s_lower = subject.lower()
+            if 'climate' in s_lower or 'agri' in s_lower:
+                sector = 'AgriTech'
+            elif 'hiring' in s_lower or 'recruitment' in s_lower or 'talent' in s_lower:
+                sector = 'AI Hiring'
+            elif 'health' in s_lower or 'diagnostics' in s_lower or 'pharma' in s_lower:
+                sector = 'HealthTech'
+            elif 'warehouse' in s_lower or 'logistics' in s_lower or 'fulfilment' in s_lower:
+                sector = 'Logistics'
+            elif 'real estate' in s_lower or 'realestate' in s_lower or 'property' in s_lower or 'jv' in s_lower or 'joint venture' in s_lower:
+                sector = 'Real Estate'
+            elif 'corporate' in s_lower or 'advisory' in s_lower:
+                sector = 'Corporate Advisory'
+            elif 'fund' in s_lower or 'invest' in s_lower or 'capital' in s_lower or 'venture' in s_lower:
+                sector = 'Investment'
+            elif 'ai' in s_lower or 'software' in s_lower or 'saas' in s_lower or 'tech' in s_lower:
+                sector = 'AI / Tech'
+            else:
+                sector = r['sector'] or 'Other'
+
+        # Yashika-specific: only AI Hiring, AgriTech (from templates) or Other
+        if _investor_user_templates and 'yashika' in (resolved_name or '').lower():
+            if sector not in ('AI Hiring', 'AgriTech', 'Other'):
+                sector = 'Other'
 
         report.append({
             "name": f"{r['first_name'] or ''} {r['last_name'] or ''}".strip(),

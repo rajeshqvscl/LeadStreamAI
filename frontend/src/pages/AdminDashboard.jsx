@@ -313,7 +313,7 @@ const AdminDashboard = () => {
     if (!lead) return 'CLIENT';
     const name = (lead.owner_name || '').toLowerCase();
     const isInvestorTeam = name.includes('yashika') || name.includes('kajal') || name.includes('ayush');
-    const isClientTeam = name.includes('palak');
+    const isClientTeam = name.includes('palak') || name.includes('vismaya');
     return isInvestorTeam ? 'INVESTOR' : isClientTeam ? 'CLIENT' : (lead.lead_type || 'CLIENT');
   };
 
@@ -373,6 +373,10 @@ const AdminDashboard = () => {
     if (template === 'palak_mam_draft_1' || template === 'palak_mam_Draft_1' || textToSearch.includes('india entry advisory') || textToSearch.includes('partnership opportunity') || textToSearch.includes('strategic partnership')) {
       return 'M&A / STRATEGIC PARTNERSHIP';
     }
+    // 7. LeadStream AI (Vismaya)
+    if (template === 'vismaya_leadstream' || textToSearch.includes('leadstreamai') || textToSearch.includes('autopilot') || textToSearch.includes('your business on autopilot')) {
+      return 'SAAS';
+    }
 
     // Fallback to database value if it's set and not generic "Other/SaaS" or if none of the above specific templates matched
     const cleanSector = (sec) => {
@@ -428,7 +432,9 @@ const AdminDashboard = () => {
     if (chartBreakdowns?.followup_stage_breakdown) {
       return chartBreakdowns.followup_stage_breakdown.map(b => {
         const stage = b.stage || 0;
-        return { label: stage === 0 ? 'Initial' : `Stage ${stage}`, value: b.value };
+        const label = stage === 0 ? `Initial` : `Stage ${stage}`;
+        const bracket = stage === 0 ? 'Not started' : `${stage === 1 ? '1st' : stage === 2 ? '2nd' : '3rd'} followup sent`;
+        return { label, value: b.value, tooltip: `${label} (${bracket})` };
       }).sort((a, b) => {
         const order = { 'Initial': 0, 'Stage 1': 1, 'Stage 2': 2, 'Stage 3': 3 };
         return (order[a.label] || 0) - (order[b.label] || 0);
@@ -437,10 +443,14 @@ const AdminDashboard = () => {
     const counts = {};
     chartFilteredLeads.forEach(l => {
       const stage = parseInt(l.followup_stage, 10) || 0;
-      const label = stage === 0 ? 'Initial' : `Stage ${stage}`;
-      counts[label] = (counts[label] || 0) + 1;
+      const label = stage === 0 ? `Initial` : `Stage ${stage}`;
+      if (!counts[label]) {
+        const bracket = stage === 0 ? 'Not started' : `${stage === 1 ? '1st' : stage === 2 ? '2nd' : '3rd'} followup sent`;
+        counts[label] = { label, value: 0, tooltip: `${label} (${bracket})` };
+      }
+      counts[label].value += 1;
     });
-    return Object.entries(counts).map(([label, value]) => ({ label, value })).sort((a, b) => {
+    return Object.values(counts).sort((a, b) => {
       const order = { 'Initial': 0, 'Stage 1': 1, 'Stage 2': 2, 'Stage 3': 3 };
       return (order[a.label] || 0) - (order[b.label] || 0);
     });
@@ -854,7 +864,7 @@ const AdminDashboard = () => {
                   <BarChart data={(() => { const s = [...item.data].sort((a, b) => b.value - a.value); const t = s.slice(0, 6); const r = s.slice(6); if (r.length > 0) t.push({ label: 'Others', value: r.reduce((x, y) => x + y.value, 0) }); return t; })()} layout="vertical" margin={{ right: 20, left: 0 }}>
                     <XAxis type="number" hide />
                     <YAxis dataKey="label" type="category" width={55} tick={{ fill: '#94a3b8', fontSize: 8, fontWeight: 700 }} />
-                    <Tooltip cursor={{ fill: 'rgba(255,255,255,0.02)' }} contentStyle={{ backgroundColor: '#111521', border: '1px solid rgba(255,255,255,0.1)', fontSize: '9px' }} />
+                    <Tooltip cursor={{ fill: 'rgba(255,255,255,0.02)' }} contentStyle={{ backgroundColor: '#111521', border: '1px solid rgba(255,255,255,0.1)', fontSize: '9px' }} labelFormatter={(l, p) => p?.[0]?.payload?.tooltip || l} />
                     <Bar dataKey="value" fill="#8b5cf6" radius={[0, 3, 3, 0]} barSize={10} label={{ position: 'right', fill: '#94a3b8', fontSize: 9 }} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -932,6 +942,7 @@ const AdminDashboard = () => {
                 {visibleColumns.has('stage') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Stage</th>}
                 {visibleColumns.has('followups') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Followups</th>}
                 {visibleColumns.has('rejection') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Rejection / Reason</th>}
+
                 {visibleColumns.has('status') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Status</th>}
                 {visibleColumns.has('sent_draft') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Sent/Draft</th>}
                 {visibleColumns.has('owner') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Owner</th>}

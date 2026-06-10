@@ -40,13 +40,17 @@ except Exception as re_err:
 TYPE_CASE_SQL = """
 CASE 
     WHEN u.username ILIKE '%%yashika%%' OR u.username ILIKE '%%kajal%%' OR u.username ILIKE '%%ayush%%' THEN 'INVESTOR'
-    WHEN u.username ILIKE '%%palak%%' THEN 'CLIENT'
+    WHEN u.username ILIKE '%%palak%%' OR u.username ILIKE '%%vismaya%%' THEN 'CLIENT'
     ELSE UPPER(COALESCE(l.lead_type, 'CLIENT'))
 END
 """
 
 SECTOR_CASE_SQL = """
 CASE
+    -- Vismaya templates: explicit template-name mapping
+    WHEN l.draft_template_used = 'vismaya_leadstream'
+      THEN 'SAAS'
+
     -- Kajal templates: explicit template-name mapping (highest priority)
     WHEN l.draft_template_used = 'kajal_mam_jv'
       THEN 'REAL ESTATE'

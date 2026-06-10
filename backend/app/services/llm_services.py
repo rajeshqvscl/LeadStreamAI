@@ -326,7 +326,7 @@ Looking forward to your response.
         2. If the lead declines the opportunity in the new reply—even in a short sentence like "Pass from us", "Pass for now", "Not interested", "Not within our mandate", "Too early for us", "No thank you"—you MUST classify the intent as "NOT_INTERESTED" and set the sentiment_score between 0 and 20.
         3. Do NOT let the details of the original outreach email (which is positive) confuse you. Focus 100% on the lead's new reply at the top.
         4. CRITICAL — deal_size: Extract the ticket size, investment range, check size, or revenue criteria (MONETARY VALUES ONLY, e.g., '$1M', '$500K-$1M', 'INR 100 cr+', '10-20 Cr') explicitly mentioned in the lead's NEW reply (the top part). Crucially: DO NOT include stage names like 'Series A', 'Series B', 'Seed', or 'Pre-Seed' — only extract numeric monetary values/ranges. If none is mentioned, set null.
-        5. CRITICAL — pitch_deck_url: ONLY set if the lead's NEW reply explicitly includes a URL or attachment reference. Do not fabricate or copy from the quoted thread.
+         5. CRITICAL — pitch_deck_url: ONLY set if the lead's NEW reply explicitly includes a URL or attachment reference. Do not fabricate or copy from the quoted thread.
         
         REPLY TEXT:
         {text}
@@ -341,8 +341,8 @@ Looking forward to your response.
            "urgency_level": "HIGH" | "MEDIUM" | "LOW",
            "proposed_meeting_date": "If intent is MEETING_REQUESTED, extract the proposed date/time as ISO date if clear (e.g. '2026-06-15T10:00:00'), otherwise null",
            "proposed_meeting_text": "If intent is MEETING_REQUESTED, the exact phrase mentioning the meeting time (e.g. 'Monday ko baat karte hain', 'let's talk next week'), otherwise null",
-           "rejection_reason": "A concise 3-8 word summary of the lead's response or rejection reason (e.g. 'Focus on Series B onwards', 'Too early for us', 'Interested, wants to connect', 'Requesting pitch deck', 'Wants meeting next week'). Crucially: DO NOT include greetings (like 'Dear Yashika', 'Hi', 'Hello'), signatures, names, disclaimers, or HTML tags. Keep it very clean and short."
-         }}
+             "rejection_reason": "A concise 3-8 word summary of the lead's response or rejection reason (e.g. 'Focus on Series B onwards', 'Too early for us', 'Interested, wants to connect', 'Requesting pitch deck', 'Wants meeting next week'). Crucially: DO NOT include greetings (like 'Dear Yashika', 'Hi', 'Hello'), signatures, names, disclaimers, or HTML tags. Keep it very clean and short."
+          }}
         """
         result_text = self._call_llm(prompt, max_tokens=512)
         if not result_text: return {"intent": "NOT_INTERESTED"}

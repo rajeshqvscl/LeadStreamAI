@@ -92,6 +92,12 @@ const EditEmail = () => {
   const renderEmailPreview = (text) => {
     if (!text) return 'Generate AI draft to begin...';
 
+    // Resolve [[BACKEND_URL]] so images show in preview
+    const backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+    text = text.replace(/\[\[BACKEND_URL\]\]/g, backendUrl);
+
+    // Handle markdown images before other markdown processing
+
     // 1. Handle Signature Block — split at SIG_START and SIG_END
     const sigStartIdx = text.indexOf('SIG_START');
     const sigEndIdx = text.indexOf('SIG_END');
@@ -121,6 +127,8 @@ const EditEmail = () => {
           } else if (trimmed.startsWith('SIG_LINK:')) {
             const url = trimmed.replace('SIG_LINK:', '').trim();
             sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:2px;">LinkedIn</a>`;
+          } else if (trimmed.startsWith('<img') || trimmed.startsWith('<div')) {
+            sigHtml += trimmed;
           } else if (trimmed) {
             // Apply inline markdown to signature lines too
             let lineHtml = trimmed
@@ -128,6 +136,7 @@ const EditEmail = () => {
               .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
               .replace(/_(.*?)_/g, '<em>$1</em>')
               .replace(/\*(.*?)\*/g, '<em>$1</em>')
+              .replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width:120px;height:auto;display:block;margin-top:8px;" />')
               .replace(/\[(.*?)\]\((.*?)\)/g, `<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>`);
 
             sigHtml += `<div style="color:#94a3b8; font-size:12px; line-height:1.4; margin-bottom:0px;">${lineHtml}</div>`;
@@ -152,12 +161,15 @@ const EditEmail = () => {
           } else if (trimmed.startsWith('SIG_LINK:')) {
             const url = trimmed.replace('SIG_LINK:', '').trim();
             sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:2px;">LinkedIn</a>`;
+          } else if (trimmed.startsWith('<img') || trimmed.startsWith('<div')) {
+            sigHtml += trimmed;
           } else if (trimmed) {
             let lineHtml = trimmed
               .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
               .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
               .replace(/_(.*?)_/g, '<em>$1</em>')
               .replace(/\*(.*?)\*/g, '<em>$1</em>')
+              .replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width:120px;height:auto;display:block;margin-top:8px;" />')
               .replace(/\[(.*?)\]\((.*?)\)/g, `<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>`);
 
             sigHtml += `<div style="color:#94a3b8; font-size:12px; line-height:1.4; margin-bottom:0px;">${lineHtml}</div>`;
