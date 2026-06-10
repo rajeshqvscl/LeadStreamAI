@@ -425,13 +425,26 @@ const AdminDashboard = () => {
   }, [chartFilteredLeads, chartBreakdowns]);
 
   const chartFollowupsByType = useMemo(() => {
+    if (chartBreakdowns?.followup_stage_breakdown) {
+      return chartBreakdowns.followup_stage_breakdown.map(b => {
+        const stage = b.stage || 0;
+        return { label: stage === 0 ? 'Initial' : `Stage ${stage}`, value: b.value };
+      }).sort((a, b) => {
+        const order = { 'Initial': 0, 'Stage 1': 1, 'Stage 2': 2, 'Stage 3': 3 };
+        return (order[a.label] || 0) - (order[b.label] || 0);
+      });
+    }
     const counts = {};
-    chartFilteredLeads.filter(l => parseInt(l.followup_stage, 10) > 0).forEach(l => {
-      const t = deriveType(l);
-      counts[t] = (counts[t] || 0) + (parseInt(l.followup_stage, 10) || 1);
+    chartFilteredLeads.forEach(l => {
+      const stage = parseInt(l.followup_stage, 10) || 0;
+      const label = stage === 0 ? 'Initial' : `Stage ${stage}`;
+      counts[label] = (counts[label] || 0) + 1;
     });
-    return Object.entries(counts).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
-  }, [chartFilteredLeads]);
+    return Object.entries(counts).map(([label, value]) => ({ label, value })).sort((a, b) => {
+      const order = { 'Initial': 0, 'Stage 1': 1, 'Stage 2': 2, 'Stage 3': 3 };
+      return (order[a.label] || 0) - (order[b.label] || 0);
+    });
+  }, [chartBreakdowns, chartFilteredLeads]);
 
   const chartSectorFiltered = useMemo(() => {
     if (chartBreakdowns?.sector_breakdown) {
@@ -821,7 +834,7 @@ const AdminDashboard = () => {
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
         {[
           { title: 'Sent by Type', desc: 'Leads with outreach sent', icon: Mail, data: chartSentByType },
-          { title: 'Followups by Type', desc: 'Total followup stages sent', icon: Zap, data: chartFollowupsByType },
+          { title: 'Followups by Stage', desc: 'Leads by followup stage', icon: Zap, data: chartFollowupsByType },
           { title: 'Sectors', desc: 'Lead volume by sector', icon: Briefcase, data: chartSectorFiltered },
           { title: 'Top Bounced Domains', desc: 'Most common invalid domains', icon: AlertCircle, data: chartBouncedDomains },
         ].map((item, i) => (

@@ -804,12 +804,21 @@ def get_filtered_breakdowns(
             GROUP BY 1 ORDER BY 2 DESC
         """, tuple(params))
         source_breakdown = [dict(r) for r in cur.fetchall()]
-        
+
+        # Followup Stage Breakdown
+        cur.execute(f"""
+            SELECT COALESCE(l.followup_stage, 0) as stage, COUNT(*) as value
+            {from_clause} {where_sql}
+            GROUP BY 1 ORDER BY 1
+        """, tuple(params))
+        followup_stage_breakdown = [dict(r) for r in cur.fetchall()]
+
         result = {
             "intent_breakdown": intent_breakdown,
             "type_breakdown": type_breakdown,
             "sector_breakdown": sector_breakdown,
-            "source_breakdown": source_breakdown
+            "source_breakdown": source_breakdown,
+            "followup_stage_breakdown": followup_stage_breakdown
         }
         if redis_available and redis_client:
             try:
