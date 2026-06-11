@@ -218,7 +218,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
         attachments = []
         if not is_followup:
             asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
-            profile_files = _get_attachment_files_for_subject(subject, template_name)
+            profile_files = [] if is_vismaya else _get_attachment_files_for_subject(subject, template_name)
             
             logger.info(f"Looking for attachments in: {asset_dir}")
             for filename in profile_files:
@@ -520,7 +520,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 # .parent.parent = backend/app/
                 # .parent.parent.parent = backend/
                 asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
-                profile_files = _get_attachment_files_for_subject(subject, template_name)
+                profile_files = [] if is_vismaya else _get_attachment_files_for_subject(subject, template_name)
                 
                 logger.info(f"Looking for attachments in: {asset_dir}")
                 
