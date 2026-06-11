@@ -2058,7 +2058,7 @@ A one-stop renewable energy platform addressing access, affordability and adopti
 
 • **Revenue:** ₹5.1 Cr achieved till Feb'26
 • **Growth:** ~105% YoY
-• **Advance Orders:** ₹2 Cr pipeline for FY26
+• **Advance Orders:** ₹2 Cr pipeline for FY27
 • **Scale:** 84+ Renewable Energy Stores across 527+ villages
 • **Reach:** 20+ lakh farmers and rural households served through awareness, advisory and deployment initiatives
 • **Ecosystem:** 50+ partners across the renewable energy value chain
