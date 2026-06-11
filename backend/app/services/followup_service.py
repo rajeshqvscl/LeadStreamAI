@@ -50,9 +50,9 @@ FOLLOWUP_TEMPLATES = {
         3: "Hi {name},\n\nI've reached out a few times regarding our platform but haven't heard back, so I'll assume this isn't a priority for you at the moment.\n\nI'll stop my follow-ups for now, but feel free to reach out if your situation changes or if you have any questions in the future."
     },
     "INVESTOR_AGRITECH": {
-        1: "Dear {name},\n\nI hope you're doing well. I'm following up on the investment opportunity I shared last week regarding our agritech platform.\n\nPlease let me know if you have any questions or require further information.",
-        2: "Hi {name},\n\nFollowing up on my previous note. We are currently closing our latest round and have seen strong interest from strategic partners.\n\nGiven your expertise in this space, I'd value the opportunity to get your feedback on our current trajectory.",
-        3: "Hi {name},\n\nI'm reaching out one last time to see if you'd like to discuss the opportunity. I understand you're busy, so I'll move this to the back burner if I don't hear from you.\n\nThanks again for your time and consideration."
+        1: "Hi {name},\n\nI hope you're doing well.\n\nJust following up on the Climate Agritech Platform opportunity shared earlier. Please let me know if you've had a chance to review it or if I can provide any additional information.\n\nLooking forward to hearing from you.",
+        2: "Hi {name},\n\nJust checking in regarding the Climate Agritech Platform opportunity I shared earlier. I'd appreciate any initial thoughts or feedback on the opportunity when you have a moment.\n\nThank you for your time.",
+        3: "Hi {name},\n\nThis will be my final follow-up regarding the Climate Agritech Platform opportunity. If it's not a fit at the moment, I completely understand. If there is any interest, I'd be happy to share further details or schedule a brief discussion.\n\nThank you again for your consideration.",
     },
     "INVESTOR_AI_HIRING": {
         1: "Dear {name},\n\nI hope you're doing well. Following up on the AI Hiring Infrastructure platform teaser shared earlier. Please let me know if you have reviewed it or require any additional information for evaluation.",
@@ -131,16 +131,9 @@ However, if circumstances change or you'd like to revisit this opportunity, plea
 Thank you sincerely for your time and consideration."""
     },
     "INVESTOR_KAJAL_GENERIC": {
-        1: """Dear {name},
-
-I am following up on my previous email regarding the investment opportunity. Please let me know if you are open to a brief introductory call or if I should send the pitch deck for your review.
-
-Additionally, Would you like to share your investment thesis so that I can share relevant deals in the future?
-
-Looking forward to connecting.
-
-Best Regards,
-Kajal Narang"""
+        1: "Dear {name},\n\nI am following up on my previous email regarding the investment opportunity. Please let me know if you are open to a brief introductory call or if I should send the pitch deck for your review.\n\nAdditionally, Would you like to share your investment thesis so that I can share relevant deals in the future?\n\nLooking forward to connecting.",
+        2: "Hi {name},\n\nJust checking in regarding the opportunity I shared earlier. I'd appreciate any initial thoughts or feedback on the opportunity when you have a moment.\n\nThank you for your time.",
+        3: "Hi {name},\n\nThis will be my final follow-up regarding the opportunity I shared earlier. If it's not a fit at the moment, I completely understand. If there is any interest, I'd be happy to share further details or schedule a brief discussion.\n\nThank you again for your consideration.",
     }
 }
 
@@ -453,7 +446,7 @@ def process_outreach_sequences():
                     next_stage = stage + 1
 
                     # Per-user max follow-up override (Palak sirf 2 followups)
-                    _max_stage = 2 if "palak" in (lead.get('sender_name') or "").lower() else 3
+                    _max_stage = 2 if any(name in (lead.get('sender_name') or "").lower() for name in ["palak", "vismaya"]) else 3
                     if stage >= _max_stage:
                         logger.info(f"Lead {lead_id} at stage {stage} >= max {_max_stage} for {lead.get('sender_name')} — skipping")
                         try:

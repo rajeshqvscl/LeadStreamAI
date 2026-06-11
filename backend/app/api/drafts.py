@@ -754,19 +754,28 @@ Just wanted to check — would you be open to a quick 10-minute call to see how 
 
 Would love to understand your team's current process so I can show you exactly where LeadStreamAI can make the biggest difference.
 
-Looking forward to hearing from you!
+Looking forward to hearing from you!"""
 
-Best Regards,
-Vismaya Rajeevan"""
+    vismaya_followup2 = """Dear {{First Name}},
+
+I hope you are doing well.
+
+I wanted to reach out one more time about LeadStreamAI — our smart AI tool that does the work of 5 people, finds the right customers, and follows up automatically, so your team can focus on closing deals.
+
+I understand you are busy, so I will keep it simple — just 10 minutes is all it takes to see the difference it can make for your business.
+
+Would this week or next work for a quick call?
+
+Looking forward to hearing from you!"""
 
     cur.execute(
-        "UPDATE prompts SET content = %s, description = %s, owner_username = 'vismaya', followup_1 = %s WHERE name = 'vismaya_leadstream'",
-        (vismaya_content, vismaya_description, vismaya_followup1)
+        "UPDATE prompts SET content = %s, description = %s, owner_username = 'vismaya', followup_1 = %s, followup_2 = %s WHERE name = 'vismaya_leadstream'",
+        (vismaya_content, vismaya_description, vismaya_followup1, vismaya_followup2)
     )
     if cur.rowcount == 0:
         cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1) VALUES ('vismaya_leadstream', %s, %s, 'CUSTOM_DRAFT', 'vismaya', %s)",
-            (vismaya_description, vismaya_content, vismaya_followup1)
+            "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1, followup_2) VALUES ('vismaya_leadstream', %s, %s, 'CUSTOM_DRAFT', 'vismaya', %s, %s)",
+            (vismaya_description, vismaya_content, vismaya_followup1, vismaya_followup2)
         )
     conn.commit()
 
@@ -2001,70 +2010,63 @@ SIG_END"""
 
         # 5. Yashika Agritech Template
         agritech_description = "Climate Agritech Platform fundraising draft (USD 500K-1M)"
-        agritech_content = """Subject: Climate Agritech Platform | ₹5.1Cr Revenue | 105% YoY Growth | 1.24L+ Lives Impacted
+        agritech_content = """Subject: Climate Agritech Platform | ₹5.1 Cr Revenue | 105% YoY Growth | Backed by Leading Government Programs
 
 Dear {{First Name}},
 
 I hope you're doing well.
 
-I'm {{Sender First Name}} from QVSCL (Gurugram), a strategic advisory firm working with high-growth early-stage ventures. We are currently raising a round for a climate-focused agritech platform that is building a full-stack renewable energy marketplace for rural India.
+I'm {{Sender First Name}} from QVSCL (Gurugram), a strategic advisory firm working with high-growth early-stage ventures. We are currently raising a round for a climate-focused agritech platform building a full-stack renewable energy marketplace for rural India.
 
 **Business Overview**
 
 • **Sector:** Agritech / Climate / Social Impact
 • **Stage:** Revenue-generating, growth-stage
+• **Positioning:** India's first curated renewable energy marketplace for farmers and rural households
+• **Coverage:** Presence across 18+ states with a phygital distribution model
 
-**Positioning:** India's first curated marketplace for renewable & green energy products for farmers and rural households
+**Platform Offering**
 
-**Platform Offering:**
+• Multi-brand marketplace with 200+ products across solar, biogas, thermal, wind and green energy solutions
+• AI-enabled advisory platform helping users identify suitable renewable energy solutions
+• Village-level Renewable Energy Stores providing deployment and after-sales support
+• Financing, insurance, warranty and service support integrated into the customer journey
 
-• Multi-brand marketplace with 60+ brands and 200+ SKUs across solar, biogas, and green energy solutions
-• End-to-end solutions spanning product discovery, advisory, deployment, and after-sales service
-• AI-enabled touchpoints including chatbots and localized support
+**Validation**
 
-**Business Model:**
-
-• Phygital distribution model combining AI-enabled digital platform + village-level offline stores
-• Asset-light approach with franchise-led last-mile distribution
-• Multiple revenue streams across B2C sales, B2B projects, partnerships, franchise fees, and AMC services
+• Supported by leading ecosystem programs including Atal Innovation Mission (NITI Aayog), MNRE-backed initiatives, SIDBI and NABARD-linked programs
+• Recognized through national-level climate, agritech and innovation awards
+• Strategic partnerships across renewable energy, development and rural impact ecosystems
 
 **Problems**
 
-Rural India faces structural inefficiencies in energy access and agri productivity:
-• High dependence on firewood, diesel, and unreliable electricity
-• Limited access to modern technologies and advisory support
-• Fragmented distribution through traditional dealer networks limits penetration
+Rural India continues to face structural challenges in energy access and clean energy adoption:
+• Dependence on diesel, firewood and unreliable electricity
+• Limited awareness and advisory support for renewable energy solutions
+• Fragmented distribution and service networks in rural markets
+• Limited access to financing and after-sales support
 
 **Solutions**
 
-A one-stop, full-stack renewable energy platform addressing access, affordability, and adoption:
-• **Phygital Marketplace:** Seamless online + offline distribution network
-• **AI-led Advisory:** Personalized product recommendations and assisted buying
-• **Last-Mile Reach:** Deep rural penetration via trained partners and franchise stores
-• **Integrated Offering:** Solar, biogas, thermal, and green energy products under one platform
-• **Value-Added Services:** Financing support, insurance, and long-term after-sales service
+A one-stop renewable energy platform addressing access, affordability and adoption:
+• **Phygital Marketplace:** Integrated online and offline distribution network
+• **AI-led Advisory:** Personalized product recommendations
+• **Last-Mile Reach:** Village-level stores and franchise-led distribution
+• **Integrated Offering:** Renewable energy products, financing, deployment and service support under one platform
 
-**Traction & Impact**
+**Traction**
 
-• **Revenue:** INR 5.1 Cr achieved till Feb'26 with ~105% YoY growth
-• **Advance Orders:** INR 2 Cr pipeline
-
-**On-ground Impact (FY20-25):**
-• 1,24,153+ lives impacted; 1,10,000+ women impacted
-• 2,070+ tons of CO₂ emissions abated
-• 66,000+ green jobs created; 900+ acres irrigated via solar
-• Large-scale deployment of renewable energy products across rural India
-
-**Differentiation**
-
-• First-mover advantage in building a renewable energy marketplace with advisory layer
-• Strong last-mile rural distribution network vs. e-commerce-led competitors
-• Integrated stack combining commerce, financing, service, and impact delivery
+• **Revenue:** ₹5.1 Cr achieved till Feb'26
+• **Growth:** ~105% YoY
+• **Advance Orders:** ₹2 Cr pipeline for FY26
+• **Scale:** 84+ Renewable Energy Stores across 527+ villages
+• **Reach:** 20+ lakh farmers and rural households served through awareness, advisory and deployment initiatives
+• **Ecosystem:** 50+ partners across the renewable energy value chain
 
 **Fundraise**
 
 • **Raising:** USD 500K - 1M
-• **Use of Funds:** Expansion, product development (AgriVoltaics), team scale-up, and market expansion
+• **Use of Funds:** Expansion, technology development, AgriVoltaics initiatives, team growth and market expansion
 
 If this aligns with your portfolio focus and does not conflict with it, I'd be happy to share the full presentation or connect over a virtual meeting at your convenience. I have attached the QVSCL Profile. You may also share your investment thesis with us so we can send relevant deal flow in the future.
 
