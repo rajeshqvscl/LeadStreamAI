@@ -230,7 +230,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         user_record = cur_user.fetchone()
         cur_user.close()
         
-        if user_record and user_record[0].lower() in sender_email.lower():
+        if user_record and user_record['email'].lower() in sender_email.lower():
             print(f"DEBUG: Skipping {sender_email} — this is a sent message, not a reply.")
             return
 
@@ -558,6 +558,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             
     except Exception as e:
         print(f"Error handling potential reply for user {user_id}: {e}")
+        raise e
     finally:
         cur.close()
         conn.close()
@@ -1289,7 +1290,8 @@ def poll_all_users_for_replies():
                                     handle_potential_reply(target_uid, full_msg_data.get('threadId'), full_msg_data)
                                     conn.commit()
                                 except Exception as fetch_err:
-                                    print(f"Error fetching full message for polling: {fetch_err}")
+                                    print(f"Error fetching/processing message {m_id} for lead: {fetch_err}")
+                                    continue
                         
                         # Mark as processed in DB
                         cur.execute("INSERT INTO gmail_processed_messages (message_id, user_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (m_id, uid))
