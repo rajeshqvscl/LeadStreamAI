@@ -2188,11 +2188,11 @@ SIG_END"""
 
         if is_admin:
             # Admin sees all custom templates
-            cur.execute("SELECT id, name, description, content, followup_1, followup_2, followup_3, attachment_file FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
+            cur.execute("SELECT id, name, description, content, followup_1, followup_2, followup_3, attachment_file, subject, cc FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
         elif owner_filter:
-            cur.execute("SELECT id, name, description, content, followup_1, followup_2, followup_3, attachment_file FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND owner_username = %s ORDER BY id ASC", (owner_filter,))
+            cur.execute("SELECT id, name, description, content, followup_1, followup_2, followup_3, attachment_file, subject, cc FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND owner_username = %s ORDER BY id ASC", (owner_filter,))
         else:
-            cur.execute("SELECT id, name, description, content, followup_1, followup_2, followup_3, attachment_file FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND owner_username IS NULL ORDER BY id ASC")
+            cur.execute("SELECT id, name, description, content, followup_1, followup_2, followup_3, attachment_file, subject, cc FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND owner_username IS NULL ORDER BY id ASC")
         rows = cur.fetchall()
         logger.info(f"{len(rows)} templates found for user_id={user_id} (owner_filter={owner_filter}, is_admin={is_admin})")
         cur.close()
@@ -2236,7 +2236,7 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
         lead = normalize_lead(lead)
 
         # Fetch template
-        cur.execute("SELECT content FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE", (template_name,))
+        cur.execute("SELECT content, subject, cc FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE", (template_name,))
         tpl_row = cur.fetchone()
         cur.close()
         conn.close()
@@ -2245,6 +2245,8 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
             return {"error": f"Template '{template_name}' not found"}
 
         template_body = tpl_row["content"]
+        template_subject = (tpl_row.get("subject") or "").strip()
+        template_cc = (tpl_row.get("cc") or "").strip()
 
         # Resolve lead fields
         first_name = clean_first_name(lead)  # strips Dr./Mr./Mrs. etc.
@@ -2253,8 +2255,12 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
         company    = (lead.get("company_name") or lead.get("family_office_name") or "your organization").strip()
         designation= (lead.get("designation") or "").strip()
 
-        # Subject
-        subject = f"Strategic Partnership Opportunity | QVSCL × {company}"
+        # Subject — use template's subject if set, else fallback
+        if template_subject:
+            subject = template_subject
+            subject = subject.replace("{{First Name}}", first_name).replace("{{Company Name}}", company).replace("{{Company}}", company)
+        else:
+            subject = f"Strategic Partnership Opportunity | QVSCL × {company}"
 
         # Resolve sender fields for dynamic templates
         profile = get_sender_profile(user_id)
@@ -2392,7 +2398,7 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
         # Save to DB (with gmail_draft_id, draft_template_used, and cc_email)
         conn2 = get_db_connection()
         cur2 = conn2.cursor()
-        vismaya_cc = "rajesh.s@qvscl.com" if template_name == 'vismaya_leadstream' else None
+        vismaya_cc = "rajesh.s@qvscl.com" if template_name == 'vismaya_leadstream' else (template_cc if template_cc else None)
         cur2.execute("""
             UPDATE leads_raw
             SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW(), gmail_draft_id = %s, draft_template_used = %s,
