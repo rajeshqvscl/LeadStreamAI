@@ -28,6 +28,7 @@ class PromptCreate(BaseModel):
     followup_3: Optional[str] = None
     subject: Optional[str] = None
     cc: Optional[str] = None
+    followup_count: Optional[int] = 3
 
 class PromptUpdate(BaseModel):
     name: Optional[str] = None
@@ -40,6 +41,7 @@ class PromptUpdate(BaseModel):
     followup_3: Optional[str] = None
     subject: Optional[str] = None
     cc: Optional[str] = None
+    followup_count: Optional[int] = None
 
 @router.get("/prompts")
 def list_prompts():
@@ -85,7 +87,8 @@ def create_custom_template(tpl: PromptCreate, user_id: Optional[str] = Header(No
         followup_2=tpl.followup_2,
         followup_3=tpl.followup_3,
         subject=tpl.subject,
-        cc=tpl.cc
+        cc=tpl.cc,
+        followup_count=tpl.followup_count
     )
     return {"id": prompt_id, "message": "Custom template created successfully"}
 

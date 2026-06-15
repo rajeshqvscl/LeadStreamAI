@@ -1635,8 +1635,9 @@ def _fill_hardcoded_followups(template: dict) -> dict:
     owner = template.get("owner_username") or ""
     sender_name = owner.capitalize() if owner else "{{Sender Name}}"
     sig = f"\n\n--\nRegards,\n***{sender_name}***"
+    followup_count = template.get("followup_count") or 3
     tpl = FOLLOWUP_TEMPLATES.get(_detect_campaign_key(template["name"], template.get("content", ""), template.get("description", "")), {})
-    for i in (1, 2, 3):
+    for i in range(1, followup_count + 1):
         stage_text = tpl.get(i, "").replace("{name}", "{{First Name}}")
         if stage_text:
             template[f"followup_{i}"] = stage_text + sig
@@ -2188,11 +2189,11 @@ SIG_END"""
 
         if is_admin:
             # Admin sees all custom templates
-            cur.execute("SELECT id, name, description, content, followup_1, followup_2, followup_3, attachment_file, subject, cc FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
+            cur.execute("SELECT id, name, description, content, followup_1, followup_2, followup_3, attachment_file, subject, cc, followup_count FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
         elif owner_filter:
-            cur.execute("SELECT id, name, description, content, followup_1, followup_2, followup_3, attachment_file, subject, cc FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND owner_username = %s ORDER BY id ASC", (owner_filter,))
+            cur.execute("SELECT id, name, description, content, followup_1, followup_2, followup_3, attachment_file, subject, cc, followup_count FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND owner_username = %s ORDER BY id ASC", (owner_filter,))
         else:
-            cur.execute("SELECT id, name, description, content, followup_1, followup_2, followup_3, attachment_file, subject, cc FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND owner_username IS NULL ORDER BY id ASC")
+            cur.execute("SELECT id, name, description, content, followup_1, followup_2, followup_3, attachment_file, subject, cc, followup_count FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND owner_username IS NULL ORDER BY id ASC")
         rows = cur.fetchall()
         logger.info(f"{len(rows)} templates found for user_id={user_id} (owner_filter={owner_filter}, is_admin={is_admin})")
         cur.close()

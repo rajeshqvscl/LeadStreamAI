@@ -13,7 +13,7 @@ const Prompts = () => {
   const [deleting, setDeleting] = useState(null);
   const [preview, setPreview] = useState({ show: false, content: '', label: '', subject: '' });
   const [attaching, setAttaching] = useState(null);
-  const [form, setForm] = useState({ name: '', content: '', description: '', followup_1: '', followup_2: '', followup_3: '', subject: '', cc: '' });
+  const [form, setForm] = useState({ name: '', content: '', description: '', followup_1: '', followup_2: '', followup_3: '', subject: '', cc: '', followup_count: 3 });
   const [saveField, setSaveField] = useState({ id: null, field: null });
   const [saveFieldSuccess, setSaveFieldSuccess] = useState({ id: null, field: null });
 
@@ -42,7 +42,7 @@ const Prompts = () => {
     if (!form.name.trim() || !form.content.trim()) return alert('Name and Body are required');
     try {
       await api.post('/api/custom-draft-templates', form, { headers: { 'X-User-Id': userId } });
-      setForm({ name: '', content: '', description: '', followup_1: '', followup_2: '', followup_3: '', subject: '', cc: '' });
+      setForm({ name: '', content: '', description: '', followup_1: '', followup_2: '', followup_3: '', subject: '', cc: '', followup_count: 3 });
       setShowForm(false);
       fetchPrompts();
     } catch (err) {
@@ -111,26 +111,16 @@ const Prompts = () => {
     if (!text) return '<p class="text-slate-500 italic">(empty)</p>';
     const backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
     text = text.replace(/\[\[BACKEND_URL\]\]/g, backendUrl);
-    text = text.replace(/\{\{First Name\}\}/g, 'Harsh');
-    text = text.replace(/\{\{Company Name\}\}/g, 'ABC Corp');
-    text = text.replace(/\{\{Sender First Name\}\}/g, userSenderName.split(' ')[0] || 'Your');
-    text = text.replace(/\{\{Sender Name\}\}/g, userSenderName);
-    text = text.replace(/\{\{Sender Title\}\}/g, userTitle);
-    text = text.replace(/\{\{Sender LinkedIn\}\}/g, userLinkedin);
-    text = text.replace(/\{\{Sender Phone\}\}/g, userPhone);
 
     // Strip SIG_START...SIG_END from display
     const sigStartIdx = text.indexOf('SIG_START');
     const sigEndIdx = text.indexOf('SIG_END');
     let mainText = text;
-    let afterSig = '';
     if (sigStartIdx !== -1) {
       mainText = text.substring(0, sigStartIdx);
-      if (sigEndIdx !== -1) {
-        afterSig = text.substring(sigEndIdx + 8).trim();
-      }
     }
 
+    // Convert markdown to HTML — keep {{placeholders}} as-is
     const paragraphs = mainText.split('\n\n');
     let htmlParts = [];
     paragraphs.forEach(p => {
@@ -159,20 +149,13 @@ const Prompts = () => {
         htmlParts.push(listHtml);
       } else {
         let content = trimmed.replace(/\n/g, '<br />');
-        content = content.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/_(.*?)_/g, '<em>$1</em>').replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>');
+        content = content.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/_(.*?)_/g, '<em>$1</em>').replace(/\*(.*?)\*/g, '<em>$1</em>');
+        // Handle markdown images ![alt](url) and links [text](url)
+        content = content.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0;" />');
+        content = content.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>');
         htmlParts.push(`<p style="margin-bottom: 1em; color: #cbd5e1;">${content}</p>`);
       }
     });
-
-    let afterHtml = '';
-    if (afterSig) {
-      const afterParagraphs = afterSig.split('\n\n').filter(p => p.trim());
-      afterHtml = afterParagraphs.map(p => {
-        let content = p.replace(/\n/g, '<br />');
-        content = content.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/_(.*?)_/g, '<em>$1</em>').replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>');
-        return `<p style="margin-top:1.2em; color:#94a3b8; font-size:12px;">${content}</p>`;
-      }).join('');
-    }
 
     // Auto signature
     let autoSigHtml = '';
@@ -190,7 +173,7 @@ const Prompts = () => {
         </div>`;
     }
 
-    let finalHtml = htmlParts.join('') + afterHtml + autoSigHtml;
+    let finalHtml = htmlParts.join('') + autoSigHtml;
     finalHtml = finalHtml.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>').replace(/\*\*(.*?)\*\*/g, '<strong style="color: white; font-weight: 800;">$1</strong>').replace(/_(.*?)_/g, '<em style="font-style:italic">$1</em>').replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color: #60a5fa; text-decoration: underline; font-weight: 700;">$1</a>');
     return finalHtml;
   };
@@ -236,9 +219,17 @@ const Prompts = () => {
               <input value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="Brief description" className="w-full bg-black/40 border border-white/5 rounded-xl p-4 text-sm text-white focus:border-blue-500/50 outline-none" />
             </div>
             <div className="border-t border-white/5 pt-6">
-              <h3 className="text-sm font-bold text-white mb-4">Follow-up Emails</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-bold text-white">Follow-up Emails</h3>
+                <div className="flex items-center gap-2">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Count:</label>
+                  {[1, 2, 3].map(n => (
+                    <button key={n} onClick={() => setForm({...form, followup_count: n})} className={`px-3 py-1 rounded-lg text-[11px] font-bold border transition-all ${form.followup_count === n ? 'bg-blue-600 text-white border-blue-500' : 'bg-white/5 text-slate-400 border-white/10 hover:text-white'}`}>{n}</button>
+                  ))}
+                </div>
+              </div>
               <p className="text-[10px] text-slate-600 mb-4">Write your own follow-ups. Same placeholders work here too.</p>
-              {[1, 2, 3].map(i => (
+              {Array.from({ length: form.followup_count || 3 }, (_, i) => i + 1).map(i => (
                 <div key={i} className="mb-3">
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">Follow-up {i}</label>
                   <div className="flex gap-2">
@@ -320,7 +311,22 @@ const Prompts = () => {
                         </div>
                       </div>
                     </div>
-                    {[1, 2, 3].map(i => (
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-[12px] font-bold text-white">Follow-ups</h4>
+                      <div className="flex items-center gap-2">
+                        <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Count:</label>
+                        {[1, 2, 3].map(n => (
+                          <button key={n} onClick={() => {
+                            handleFieldSave(tpl.id, 'followup_count', n);
+                            const updated = [...prompts];
+                            const idx = updated.findIndex(p => p.id === tpl.id);
+                            updated[idx] = {...updated[idx], followup_count: n};
+                            setPrompts(updated);
+                          }} className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all ${(tpl.followup_count || 3) === n ? 'bg-blue-600 text-white border-blue-500' : 'bg-white/5 text-slate-400 border-white/10 hover:text-white'}`}>{n}</button>
+                        ))}
+                      </div>
+                    </div>
+                    {Array.from({ length: tpl.followup_count || 3 }, (_, i) => i + 1).map(i => (
                       <div key={i}>
                         <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Follow-up {i}</label>
                         <div className="flex gap-2">
@@ -358,7 +364,7 @@ const Prompts = () => {
                       </div>
                     </div>
                     <div className="flex justify-end pt-2">
-                      <button onClick={() => handleUpdate(tpl.id, { subject: tpl.subject || null, cc: tpl.cc || null, content: tpl.content, followup_1: tpl.followup_1, followup_2: tpl.followup_2, followup_3: tpl.followup_3 })} disabled={isSaving === tpl.id} className={`btn h-auto py-2.5 px-8 rounded-xl text-[12px] font-black transition-all flex items-center gap-2 border-none shadow-lg ${saveSuccess === tpl.id ? 'bg-emerald-600 text-white' : 'bg-blue-600 hover:bg-blue-500 text-white'}`}>
+                      <button onClick={() => handleUpdate(tpl.id, { subject: tpl.subject || null, cc: tpl.cc || null, content: tpl.content, followup_1: tpl.followup_1, followup_2: tpl.followup_2, followup_3: tpl.followup_3, followup_count: tpl.followup_count || 3 })} disabled={isSaving === tpl.id} className={`btn h-auto py-2.5 px-8 rounded-xl text-[12px] font-black transition-all flex items-center gap-2 border-none shadow-lg ${saveSuccess === tpl.id ? 'bg-emerald-600 text-white' : 'bg-blue-600 hover:bg-blue-500 text-white'}`}>
                         {isSaving === tpl.id ? <Loader2 className="w-4 h-4 animate-spin" /> : saveSuccess === tpl.id ? <><CheckCircle2 className="w-4 h-4" /> SAVED</> : <><Save className="w-4 h-4" /> SAVE ALL</>}
                       </button>
                     </div>
