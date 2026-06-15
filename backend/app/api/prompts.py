@@ -1,9 +1,14 @@
-from fastapi import APIRouter, HTTPException, Header
+import os
+import shutil
+from fastapi import APIRouter, HTTPException, Header, UploadFile, File
 from typing import Optional
 from pydantic import BaseModel
 from app.models.prompt import get_all_prompts, create_prompt, update_prompt, delete_prompt
 from app.database import get_db_connection
 import psycopg2.extras
+
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets")
+os.makedirs(ASSETS_DIR, exist_ok=True)
 
 router = APIRouter()
 
@@ -84,6 +89,23 @@ def edit_prompt(prompt_id: int, prompt_data: PromptUpdate):
     if not success:
         raise HTTPException(status_code=404, detail="Prompt not found")
     return {"message": "Prompt updated successfully"}
+
+@router.post("/prompts/{prompt_id}/attachment")
+def upload_prompt_attachment(prompt_id: int, file: UploadFile = File(...)):
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files allowed")
+    ext = os.path.splitext(file.filename)[1]
+    dest_name = f"prompt_{prompt_id}_attachment{ext}"
+    dest_path = os.path.join(ASSETS_DIR, dest_name)
+    with open(dest_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE prompts SET attachment_file = %s WHERE id = %s", (dest_name, prompt_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"filename": dest_name, "message": "Attachment uploaded"}
 
 @router.delete("/prompts/{prompt_id}")
 def remove_prompt(prompt_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):

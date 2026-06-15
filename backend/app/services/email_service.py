@@ -163,9 +163,29 @@ _TEMPLATE_ATTACHMENT_MAP = {
 }
 
 def _get_attachment_files_for_subject(subject: str, template_name: Optional[str] = None) -> list:
-    """Return the list of PDF filenames to attach, chosen based on the email subject or template name."""
+    """Return the list of PDF filenames to attach, chosen based on the email subject or template name.
+    Checks hardcoded _TEMPLATE_ATTACHMENT_MAP first, then falls back to
+    prompts.attachment_file for custom user-uploaded PDFs.
+    """
     if template_name and template_name in _TEMPLATE_ATTACHMENT_MAP:
         return _TEMPLATE_ATTACHMENT_MAP[template_name]
+    if template_name:
+        try:
+            from app.database import get_db_connection
+            import psycopg2.extras
+            conn = get_db_connection()
+            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cur.execute(
+                "SELECT attachment_file FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE",
+                (template_name,)
+            )
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            if row and row['attachment_file']:
+                return [row['attachment_file']]
+        except Exception:
+            pass
     if subject and _HOSPITAL_SUBJECT_MARKER in subject:
         return ["QVSCL Company Profile.pdf", _HOSPITAL_TEASER_FILE]
     return ["QVSCL Company Profile.pdf", "Lalit_Huria_Profile.pdf"]

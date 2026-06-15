@@ -26,12 +26,25 @@ const FILTERS = ['ALL', 'MEETING_REQUESTED', 'INTERESTED', 'NEEDS_MORE_INFO', 'N
 
 const stripHtml = (html) => {
   if (!html) return '';
-  return html.replace(/<[^>]*>?/gm, '');
+  let cleaned = html;
+  cleaned = cleaned.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+  cleaned = cleaned.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+  cleaned = cleaned.replace(/<!--\[if[\s\S]*?<!\[endif\]-->/gi, '');
+  cleaned = cleaned.replace(/<\?xml[\s\S]*?\?>/gi, '');
+  cleaned = cleaned.replace(/<xml[^>]*>[\s\S]*?<\/xml>/gi, '');
+  cleaned = cleaned.replace(/<[^>]*>?/gm, '');
+  cleaned = cleaned.replace(/&nbsp;/g, ' ');
+  return cleaned;
 };
 
 const extractReply = (text) => {
   if (!text) return '';
-  const cleaned = stripHtml(text);
+  const cleaned = stripHtml(text)
+    .replace(/v\\:\*\s*\{[^}]*\}/gi, '')
+    .replace(/o\\:\*\s*\{[^}]*\}/gi, '')
+    .replace(/w\\:\*\s*\{[^}]*\}/gi, '')
+    .replace(/\.shape\s*\{[^}]*\}/gi, '')
+    .replace(/[a-zA-Z][a-zA-Z0-9,.#:_>\-]*\s*\{[^}]*\}/g, '');
   const patterns = [
     /\n-+\s*Original Message\s*-+\s*\n/i,
     /\nOn\s+.*?\d{4},\s+at\s+.*?\d{2}:\d{2}.*?wrote:\s*\n/i,

@@ -428,8 +428,8 @@ def create_tables():
     );
     """)
 
-    # Ensure owner_username + followup columns exist on prompts table
-    for prompts_col in [("owner_username", "TEXT"), ("followup_1", "TEXT"), ("followup_2", "TEXT"), ("followup_3", "TEXT")]:
+    # Ensure owner_username + followup + attachment columns exist on prompts table
+    for prompts_col in [("owner_username", "TEXT"), ("followup_1", "TEXT"), ("followup_2", "TEXT"), ("followup_3", "TEXT"), ("attachment_file", "TEXT")]:
         try:
             cur.execute(f"ALTER TABLE prompts ADD COLUMN IF NOT EXISTS {prompts_col[0]} {prompts_col[1]};")
             conn.commit()

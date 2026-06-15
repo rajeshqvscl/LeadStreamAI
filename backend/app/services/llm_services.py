@@ -4,7 +4,6 @@ import os
 import json
 import structlog
 from anthropic import Anthropic
-import google.generativeai as genai
 from groq import Groq
 
 from pathlib import Path
@@ -54,6 +53,7 @@ class EmailGenerator:
         self.gemini_model = None
         if self.gemini_key:
             try:
+                import google.generativeai as genai
                 genai.configure(api_key=self.gemini_key)
                 self.gemini_model = genai.GenerativeModel(GEMINI_MODEL)
             except Exception as e: logger.error("gemini_init_failed", error=str(e))

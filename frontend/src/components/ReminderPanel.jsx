@@ -48,17 +48,6 @@ const ReminderPanel = () => {
       const { data } = await api.get('/api/reminders/due', { headers });
       if (data && data.length > 0) {
         setDueAlerts(data);
-        setShowAlerts(true);
-        // Play sound
-        try {
-          const ctx = new (window.AudioContext || window.webkitAudioContext)();
-          const osc = ctx.createOscillator();
-          osc.type = 'sine';
-          osc.frequency.value = 800;
-          osc.connect(ctx.destination);
-          osc.start();
-          setTimeout(() => { osc.stop(); ctx.close(); }, 300);
-        } catch {}
       }
     } catch (e) {
       console.error('Failed to check due reminders', e);

@@ -1578,6 +1578,48 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 conn.close()
             except:
                 pass
+def _detect_campaign_key(template_name: str, content: str, description: str) -> str:
+    name = template_name.lower()
+    desc = description.lower() if description else ""
+    subj = ""
+    if content and "Subject:" in content:
+        subj = content.split("Subject:", 1)[1].split("\n", 1)[0].strip().lower()
+    text = (subj + " " + desc).lower()
+
+    if name in ("palak_mam_corporate_advisory", "palak_mam_mna_fundraising", "palak_mam_draft_1"):
+        return "INVESTOR_PALAK_ADVISORY"
+    if name == "kajal_mam_health_ecosystem":
+        return "INVESTOR_KAJAL_HEALTH_ECOSYSTEM"
+    if name in ("kajal_mam_jv", "kajal_mam_hyphen", "kajal_mam_agritech", "kajal_mam_qvscl_intro"):
+        return "INVESTOR_KAJAL_GENERIC"
+    if name == "ayush_sir_hospital_draft" or "hospital" in text:
+        return "INVESTOR_HEALTHTECH"
+    if name == "vismaya_leadstream" or "leadstream" in text:
+        return "INVESTOR_GENERIC"
+    if any(kw in text for kw in ("agritech", "climate")):
+        return "INVESTOR_AGRITECH"
+    if any(kw in text for kw in ("hiring", "recruitment", "ai-powered")):
+        return "INVESTOR_AI_HIRING"
+    if any(kw in text for kw in ("defence", "deeptech", "idex")):
+        return "INVESTOR_DEFENCE"
+    if any(kw in text for kw in ("health", "diagnostic")):
+        return "INVESTOR_HEALTHTECH"
+    return "INVESTOR_GENERIC"
+
+def _fill_hardcoded_followups(template: dict) -> dict:
+    if template.get("followup_1"):
+        return template
+    from app.services.followup_service import FOLLOWUP_TEMPLATES
+    owner = template.get("owner_username") or ""
+    sender_name = owner.capitalize() if owner else "{{Sender Name}}"
+    sig = f"\n\n--\nRegards,\n***{sender_name}***"
+    tpl = FOLLOWUP_TEMPLATES.get(_detect_campaign_key(template["name"], template.get("content", ""), template.get("description", "")), {})
+    for i in (1, 2, 3):
+        stage_text = tpl.get(i, "").replace("{name}", "{{First Name}}")
+        if stage_text:
+            template[f"followup_{i}"] = stage_text + sig
+    return template
+
 # --- List Custom Draft Templates (for template picker modal) ---
 @router.get("/custom-draft-templates")
 def list_custom_draft_templates(user_id: Optional[str] = Header(None, alias="X-User-Id")):
@@ -2124,16 +2166,17 @@ SIG_END"""
 
         if is_admin:
             # Admin sees all custom templates
-            cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
+            cur.execute("SELECT id, name, description, content, followup_1, followup_2, followup_3, attachment_file FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE ORDER BY id ASC")
         elif owner_filter:
-            cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND owner_username = %s ORDER BY id ASC", (owner_filter,))
+            cur.execute("SELECT id, name, description, content, followup_1, followup_2, followup_3, attachment_file FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND owner_username = %s ORDER BY id ASC", (owner_filter,))
         else:
-            cur.execute("SELECT id, name, description, content FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND owner_username IS NULL ORDER BY id ASC")
+            cur.execute("SELECT id, name, description, content, followup_1, followup_2, followup_3, attachment_file FROM prompts WHERE prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE AND owner_username IS NULL ORDER BY id ASC")
         rows = cur.fetchall()
         logger.info(f"{len(rows)} templates found for user_id={user_id} (owner_filter={owner_filter}, is_admin={is_admin})")
         cur.close()
         conn.close()
-        return [dict(r) for r in rows]
+        result = [_fill_hardcoded_followups(dict(r)) for r in rows]
+        return result
     except Exception as e:
         traceback.print_exc()
         return []
@@ -2300,7 +2343,7 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
                 msg['subject'] = final_subject
                 # Attach PDFs based on template name
                 try:
-                    tpl_attachments = TEMPLATE_ATTACHMENT_MAP.get(template_name, [])
+                    tpl_attachments = _get_template_attachments(template_name)
                     if tpl_attachments:
                         assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets")
                         for att in tpl_attachments:
@@ -2465,10 +2508,29 @@ _DEFAULT_ATTACHMENTS = [
 ]
 
 def _get_template_attachments(template_name: Optional[str]) -> list:
-    """Return the correct attachment metadata list for the given template name."""
+    """Return the correct attachment metadata list for the given template name.
+    Checks hardcoded TEMPLATE_ATTACHMENT_MAP first, then falls back to
+    prompts.attachment_file for custom user-uploaded PDFs.
+    """
     if not template_name:
         return _DEFAULT_ATTACHMENTS
-    return TEMPLATE_ATTACHMENT_MAP.get(template_name, _DEFAULT_ATTACHMENTS)
+    if template_name in TEMPLATE_ATTACHMENT_MAP:
+        return TEMPLATE_ATTACHMENT_MAP[template_name]
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute(
+            "SELECT attachment_file FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE",
+            (template_name,)
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row and row['attachment_file']:
+            return [{"name": row['attachment_file'], "size": "", "type": "application/pdf"}]
+    except Exception:
+        pass
+    return _DEFAULT_ATTACHMENTS
 
 @router.get("/pending-drafts")
 @router.get("/emails")

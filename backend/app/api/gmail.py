@@ -210,6 +210,15 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         # Clean HTML tags first if it looks like HTML content to prevent HTML leaks
         if full_body and "<" in full_body and ">" in full_body:
             import re as _re
+            # Remove entire <style> blocks (Outlook VML/CSS garbage)
+            full_body = _re.sub(r'(?is)<style[^>]*>.*?</style>', '', full_body)
+            # Remove entire <script> blocks
+            full_body = _re.sub(r'(?is)<script[^>]*>.*?</script>', '', full_body)
+            # Remove Outlook conditional comments <!--[if gte mso 9]>...<![endif]-->
+            full_body = _re.sub(r'(?is)<!--\[if.*?\]>.*?<!\[endif\]-->', '', full_body)
+            # Remove XML blocks
+            full_body = _re.sub(r'(?is)<\?xml.*?\?>', '', full_body)
+            full_body = _re.sub(r'(?is)<xml[^>]*>.*?</xml>', '', full_body)
             # Replace common block elements with newlines to preserve spacing
             full_body_clean = _re.sub(r'(?i)<br\s*/?>|<p[^>]*>|</div>|</tr>|</table>', '\n', full_body)
             # Strip all remaining HTML tags
