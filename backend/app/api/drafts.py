@@ -634,14 +634,34 @@ I would be happy to schedule a brief call at your convenience and discuss potent
 
 Looking forward to connecting."""
 
+    kajal_qvscl_followup1 = """Dear {{First Name}},
+
+I am following up on my previous email regarding the investment opportunity. Please let me know if you are open to a brief introductory call or if I should send the pitch deck for your review.
+
+Additionally, Would you like to share your investment thesis so that I can share relevant deals in the future?
+
+Looking forward to connecting."""
+
+    kajal_qvscl_followup2 = """Hi {{First Name}},
+
+Just checking in regarding the opportunity I shared earlier. I'd appreciate any initial thoughts or feedback on the opportunity when you have a moment.
+
+Thank you for your time."""
+
+    kajal_qvscl_followup3 = """Hi {{First Name}},
+
+This will be my final follow-up regarding the opportunity I shared earlier. If it's not a fit at the moment, I completely understand. If there is any interest, I'd be happy to share further details or schedule a brief discussion.
+
+Thank you again for your consideration."""
+
     cur.execute(
-        "UPDATE prompts SET content = %s, description = %s WHERE name = 'kajal_mam_qvscl_intro'",
-        (kajal_qvscl_content, kajal_qvscl_description)
+        "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s, followup_3 = %s WHERE name = 'kajal_mam_qvscl_intro'",
+        (kajal_qvscl_content, kajal_qvscl_description, kajal_qvscl_followup1, kajal_qvscl_followup2, kajal_qvscl_followup3)
     )
     if cur.rowcount == 0:
         cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type, owner_username) VALUES ('kajal_mam_qvscl_intro', %s, %s, 'CUSTOM_DRAFT', 'kajal')",
-            (kajal_qvscl_description, kajal_qvscl_content)
+            "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1, followup_2, followup_3) VALUES ('kajal_mam_qvscl_intro', %s, %s, 'CUSTOM_DRAFT', 'kajal', %s, %s, %s)",
+            (kajal_qvscl_description, kajal_qvscl_content, kajal_qvscl_followup1, kajal_qvscl_followup2, kajal_qvscl_followup3)
         )
     conn.commit()
 
@@ -1590,7 +1610,9 @@ def _detect_campaign_key(template_name: str, content: str, description: str) -> 
         return "INVESTOR_PALAK_ADVISORY"
     if name == "kajal_mam_health_ecosystem":
         return "INVESTOR_KAJAL_HEALTH_ECOSYSTEM"
-    if name in ("kajal_mam_jv", "kajal_mam_hyphen", "kajal_mam_agritech", "kajal_mam_qvscl_intro"):
+    if name in ("kajal_mam_jv", "kajal_mam_qvscl_intro"):
+        return "INVESTOR_KAJAL_JV"
+    if name in ("kajal_mam_hyphen", "kajal_mam_agritech"):
         return "INVESTOR_KAJAL_GENERIC"
     if name == "ayush_sir_hospital_draft" or "hospital" in text:
         return "INVESTOR_HEALTHTECH"

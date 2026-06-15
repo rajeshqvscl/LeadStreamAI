@@ -134,6 +134,11 @@ Thank you sincerely for your time and consideration."""
         1: "Dear {name},\n\nI am following up on my previous email regarding the investment opportunity. Please let me know if you are open to a brief introductory call or if I should send the pitch deck for your review.\n\nAdditionally, Would you like to share your investment thesis so that I can share relevant deals in the future?\n\nLooking forward to connecting.",
         2: "Hi {name},\n\nJust checking in regarding the opportunity I shared earlier. I'd appreciate any initial thoughts or feedback on the opportunity when you have a moment.\n\nThank you for your time.",
         3: "Hi {name},\n\nThis will be my final follow-up regarding the opportunity I shared earlier. If it's not a fit at the moment, I completely understand. If there is any interest, I'd be happy to share further details or schedule a brief discussion.\n\nThank you again for your consideration.",
+    },
+    "INVESTOR_KAJAL_JV": {
+        1: "Just following up on my earlier note.\n\nWe would be keen to explore how QVSCL can support your portfolio companies through capital raising, strategic advisory, M&A, and growth initiatives.\n\nIf relevant, we'd also be happy to share curated deal flow aligned with your investment thesis and stage focus.\n\nWould you be available for a brief 15-minute call sometime next week?\n\nLooking forward to your thoughts.\n\nBest regards,",
+        2: "Hi {name},\n\nJust checking in regarding the opportunity I shared earlier. I'd appreciate any initial thoughts or feedback on the opportunity when you have a moment.\n\nThank you for your time.",
+        3: "Hi {name},\n\nThis will be my final follow-up regarding the opportunity I shared earlier. If it's not a fit at the moment, I completely understand. If there is any interest, I'd be happy to share further details or schedule a brief discussion.\n\nThank you again for your consideration.",
     }
 }
 
@@ -171,7 +176,9 @@ def get_template_followup(lead: dict, stage: int) -> str:
         campaign_key = "INVESTOR_PALAK_ADVISORY"
     elif draft_template == 'kajal_mam_health_ecosystem':
         campaign_key = "INVESTOR_KAJAL_HEALTH_ECOSYSTEM"
-    elif draft_template in ('kajal_mam_jv', 'kajal_mam_hyphen', 'kajal_mam_agritech', 'kajal_mam_qvscl_intro'):
+    elif draft_template in ('kajal_mam_jv', 'kajal_mam_qvscl_intro'):
+        campaign_key = "INVESTOR_KAJAL_JV"
+    elif draft_template in ('kajal_mam_hyphen', 'kajal_mam_agritech'):
         campaign_key = "INVESTOR_KAJAL_GENERIC"
     else:
         # Dynamic campaign detection based on subject/draft/persona/sector (not lead_type)
@@ -224,9 +231,16 @@ def get_template_followup(lead: dict, stage: int) -> str:
                 ("corporate advisory" in draft_text.lower() and "m&a" not in draft_text.lower() and "partnership" not in draft_text.lower())
             )
         )
+        
+        is_kajal_jv = (
+            "jv & investment" in original_subject.lower() or
+            "strategic partnership opportunity" in original_subject.lower()
+        )
 
         if is_palak_advisory:
             campaign_key = "INVESTOR_PALAK_ADVISORY"
+        elif is_kajal_jv:
+            campaign_key = "INVESTOR_KAJAL_JV"
         elif is_ai_hiring:
             campaign_key = "INVESTOR_AI_HIRING"
         elif is_healthtech:
