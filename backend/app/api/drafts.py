@@ -1629,6 +1629,15 @@ def _detect_campaign_key(template_name: str, content: str, description: str) -> 
     return "INVESTOR_GENERIC"
 
 def _fill_hardcoded_followups(template: dict) -> dict:
+    # Extract subject from content if template has no subject yet (migration for old templates)
+    content = template.get("content") or ""
+    if not template.get("subject") and "Subject:" in content:
+        first_line = content.split("\n")[0].strip()
+        if first_line.lower().startswith("subject:"):
+            template["subject"] = first_line.split(":", 1)[1].strip()
+            # Strip Subject line from body content so it shows clean in UI
+            rest = content.split("\n", 1)
+            template["content"] = rest[1].lstrip("\n").strip() if len(rest) > 1 else ""
     if template.get("followup_1"):
         return template
     from app.services.followup_service import FOLLOWUP_TEMPLATES
@@ -1636,7 +1645,7 @@ def _fill_hardcoded_followups(template: dict) -> dict:
     sender_name = owner.capitalize() if owner else "{{Sender Name}}"
     sig = f"\n\n--\nRegards,\n***{sender_name}***"
     followup_count = template.get("followup_count") or 3
-    tpl = FOLLOWUP_TEMPLATES.get(_detect_campaign_key(template["name"], template.get("content", ""), template.get("description", "")), {})
+    tpl = FOLLOWUP_TEMPLATES.get(_detect_campaign_key(template["name"], content, template.get("description", "")), {})
     for i in range(1, followup_count + 1):
         stage_text = tpl.get(i, "").replace("{name}", "{{First Name}}")
         if stage_text:
