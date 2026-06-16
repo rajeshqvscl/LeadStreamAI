@@ -588,7 +588,8 @@ def check_scheduled_emails():
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
         cur.execute("""
-            SELECT l.id, l.email, l.email_draft, l.cc_email, l.user_id, u.email as sender_email, u.full_name, u.username
+            SELECT l.id, l.email, l.email_draft, l.cc_email, l.user_id, l.draft_template_used,
+                   u.email as sender_email, u.full_name, u.username
             FROM leads_raw l
             LEFT JOIN users u ON l.user_id = u.id
             WHERE l.email_status = 'SCHEDULED' AND l.scheduled_at <= NOW()
@@ -634,7 +635,8 @@ def check_scheduled_emails():
                 from_name=sender_name,
                 lead_id=lead_id,
                 user_id=user_id,
-                cc=cc_email
+                cc=cc_email,
+                template_name=lead.get('draft_template_used')
             )
             
             if success:

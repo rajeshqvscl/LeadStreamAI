@@ -110,8 +110,8 @@ def api_add_leads_to_campaign(id: int, req: CampaignAddLeads):
 
 from app.services.campaign_tracking import CampaignTrackingService
 
-# Tracking endpoints
-@router.get("/track/open/{token}")
+# Tracking endpoints (prefixed with /campaigns to avoid conflict with leads tracking in tracking.py)
+@router.get("/campaigns/track/open/{token}")
 async def track_open(token: str, request: Request):
     recipient = CampaignTrackingService.get_recipient_by_token(token)
     if recipient:
@@ -125,7 +125,7 @@ async def track_open(token: str, request: Request):
     # Return a 1x1 transparent pixel (simulated as JSON for now)
     return {"message": "Open tracked"}
 
-@router.get("/track/click/{token}")
+@router.get("/campaigns/track/click/{token}")
 async def track_click(token: str, request: Request, url: str):
     recipient = CampaignTrackingService.get_recipient_by_token(token)
     if recipient:

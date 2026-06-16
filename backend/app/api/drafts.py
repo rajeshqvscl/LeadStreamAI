@@ -3282,7 +3282,7 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     else:
         where_clause += " AND user_id IS NULL"
     
-    cur.execute(f"SELECT id, email, email_draft, cc_email FROM leads_raw {where_clause}", params)
+    cur.execute(f"SELECT id, email, email_draft, cc_email, draft_template_used FROM leads_raw {where_clause}", params)
     leads_to_send = cur.fetchall()
     
     if leads_to_send and not check_daily_email_limit(user_id, len(leads_to_send)):
@@ -3313,7 +3313,8 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
                 from_name=sender_name,
                 lead_id=lead['id'],
                 user_id=int(uid_val),
-                cc=lead['cc_email']
+                cc=lead['cc_email'],
+                template_name=lead.get('draft_template_used')
             )
 
             if success:
@@ -3379,7 +3380,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
 
     # 2. Fetch the requested leads
     cur.execute(
-        "SELECT id, email, email_draft, gmail_draft_id, cc_email FROM leads_raw WHERE id = ANY(%s)",
+        "SELECT id, email, email_draft, gmail_draft_id, cc_email, draft_template_used FROM leads_raw WHERE id = ANY(%s)",
         (req.lead_ids,)
     )
     leads_to_send = cur.fetchall()
@@ -3414,7 +3415,8 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
                 from_name=sender_name,
                 lead_id=lead['id'],
                 user_id=uid,
-                cc=lead['cc_email']
+                cc=lead['cc_email'],
+                template_name=lead.get('draft_template_used')
             )
 
             if success:
@@ -3667,7 +3669,7 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
             where_clause = f"WHERE id IN ({format_strings}) AND user_id IS NULL"
             params = tuple(req.lead_ids)
 
-        cur.execute(f"SELECT id, first_name, email, email_draft, domain, company_name, cc_email FROM leads_raw {where_clause}", params)
+        cur.execute(f"SELECT id, first_name, email, email_draft, domain, company_name, cc_email, draft_template_used FROM leads_raw {where_clause}", params)
         leads = cur.fetchall()
         
         sent_count = 0
@@ -3705,7 +3707,8 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                     from_name=sender_name,
                     lead_id=lead['id'],
                     user_id=int(uid),
-                    cc=req.cc or lead['cc_email']
+                    cc=req.cc or lead['cc_email'],
+                    template_name=lead.get('draft_template_used')
                 )
 
                 if success:
