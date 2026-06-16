@@ -927,6 +927,9 @@ def markdown_to_html(text, gmail_style=False):
     # Using a more specific regex to avoid catching already-converted HTML tags
     text = re.sub(r'(?<!href=")(?<!src=")\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', text)
     
+    # 2a. Convert bare URLs (not already inside <a> tag) to clickable links
+    text = re.sub(r'(?<!href=")(https?://[^\s<]+)', r'<a href="\1" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', text)
+    
     # 3. Smart Signature Styling (Grey & Italic)
     signature_html = ""
     sig_start_marker = "--"
@@ -973,6 +976,10 @@ def markdown_to_html(text, gmail_style=False):
             elif "<div" in line or "<img" in line or (not gmail_style and ("<span" in line or "<a" in line or "<strong" in line)):
                 pass
             else:
+                # Handle links before wrapping in span
+                line = re.sub(r'(?<!href=")(?<!src=")\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', line)
+                if "Website" in line and "<a" not in line:
+                    line = line.replace("Website", '<a href="https://qvscl.com" style="color: #0066cc; text-decoration: underline;">Website</a>')
                 # Handle names/titles in signature (bold them if they are in ***)
                 line = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong>\1</strong>', line)
                 line = f'<span style="color: #666; font-style: italic; display: block; margin-bottom: 0px; font-size: 13px;">{line}</span>'
@@ -2130,8 +2137,8 @@ A one-stop renewable energy platform addressing access, affordability and adopti
 
 **Traction**
 
-• **Revenue:** ₹5.1 Cr achieved till Feb'26
-• **Growth:** ~105% YoY
+• **Revenue FY'26:** ₹5.1 Cr
+• **Growth:** 105% YoY
 • **Advance Orders:** ₹2 Cr pipeline for FY27
 • **Scale:** 84+ Renewable Energy Stores across 527+ villages
 • **Reach:** 20+ lakh farmers and rural households served through awareness, advisory and deployment initiatives
@@ -2139,14 +2146,16 @@ A one-stop renewable energy platform addressing access, affordability and adopti
 
 **Fundraise**
 
-• **Raising:** USD 500K - 1M
+• **Currently Raising:** USD 500K - 1M
+• **Previously Raised:** USD 262K (in the form of Govt. Grants & Angel Investors)
 • **Use of Funds:** Expansion, technology development, AgriVoltaics initiatives, team growth and market expansion
 
 If this aligns with your portfolio focus and does not conflict with it, I'd be happy to share the full presentation or connect over a virtual meeting at your convenience. I have attached the QVSCL Profile. You may also share your investment thesis with us so we can send relevant deal flow in the future.
 
-For more details about our services: [Website](https://qvscl.com) | [Linkedin](https://www.linkedin.com/company/qvscl/)
-
 Looking forward to your response.
+
+QVSCL Profile: [Company Profile](https://drive.google.com/file/d/1Z2QPI0M9hBGjLx9Vu_wktfLp6aTvhD1S/view)
+Managing Partner Profile: [Mr. Lalit Hhuria](https://drive.google.com/file/d/1zoXE6-m1AUMpvJkm31EZZOclKd7w-DZM/view)
 
 SIG_START
 --
@@ -2160,14 +2169,34 @@ Thanks & Regards,
 Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you.
 SIG_END"""
 
+        yashika_agritech_followup1 = """Hi {{First Name}},
+
+I hope you're doing well.
+
+I'm just following up on the Climate Agritech platform opportunity we shared earlier. The company reported ₹5.1 crore revenue in FY26 and has previously raised ₹2.37 crore through government grants and angel investors. Please let me know if you have had a chance to review this or if I can provide any additional information.
+
+Looking forward to hearing from you."""
+
+        yashika_agritech_followup2 = """Hi {{First Name}},
+
+Just checking in regarding the Climate Agritech Platform opportunity I shared earlier. I'd appreciate any initial thoughts or feedback on the opportunity when you have a moment.
+
+Thank you for your time."""
+
+        yashika_agritech_followup3 = """Hi {{First Name}},
+
+This will be my final follow-up regarding the Climate Agritech Platform opportunity. If it's not a fit at the moment, I completely understand. If there is any interest, I'd be happy to share further details or schedule a brief discussion.
+
+Thank you again for your consideration."""
+
         cur.execute(
-            "UPDATE prompts SET content = %s, description = %s WHERE name = 'yashika_draft_agritech'",
-            (agritech_content, agritech_description)
+            "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s, followup_3 = %s WHERE name = 'yashika_draft_agritech'",
+            (agritech_content, agritech_description, yashika_agritech_followup1, yashika_agritech_followup2, yashika_agritech_followup3)
         )
         if cur.rowcount == 0:
             cur.execute(
-                "INSERT INTO prompts (name, description, content, prompt_type) VALUES ('yashika_draft_agritech', %s, %s, 'CUSTOM_DRAFT')",
-                (agritech_description, agritech_content)
+                "INSERT INTO prompts (name, description, content, prompt_type, followup_1, followup_2, followup_3) VALUES ('yashika_draft_agritech', %s, %s, 'CUSTOM_DRAFT', %s, %s, %s)",
+                (agritech_description, agritech_content, yashika_agritech_followup1, yashika_agritech_followup2, yashika_agritech_followup3)
             )
         conn.commit()
 
@@ -2517,10 +2546,7 @@ TEMPLATE_ATTACHMENT_MAP = {
         {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
         {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
     ],
-    "yashika_draft_agritech": [
-        {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
-        {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
-    ],
+    "yashika_draft_agritech": [],
     "kajal_mam_agritech": [
         {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
         {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},

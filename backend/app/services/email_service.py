@@ -160,6 +160,7 @@ _TEMPLATE_ATTACHMENT_MAP = {
         "Lalit_Huria_Profile.pdf",
     ],
     "vismaya_leadstream": [],
+    "yashika_draft_agritech": [],
 }
 
 def _get_attachment_files_for_subject(subject: str, template_name: Optional[str] = None) -> list:

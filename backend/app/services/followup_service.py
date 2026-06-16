@@ -40,6 +40,8 @@ def is_generic_followup(body: Optional[str]) -> bool:
         return True
     if len(cleaned) < 120 and "following up" in cleaned and ("questions" in cleaned or "previous email" in cleaned):
         return True
+    if "just following up on the climate agritech platform opportunity shared earlier" in cleaned:
+        return True
         
     return False
 
@@ -51,6 +53,11 @@ FOLLOWUP_TEMPLATES = {
     },
     "INVESTOR_AGRITECH": {
         1: "Hi {name},\n\nI hope you're doing well.\n\nJust following up on the Climate Agritech Platform opportunity shared earlier. Please let me know if you've had a chance to review it or if I can provide any additional information.\n\nLooking forward to hearing from you.",
+        2: "Hi {name},\n\nJust checking in regarding the Climate Agritech Platform opportunity I shared earlier. I'd appreciate any initial thoughts or feedback on the opportunity when you have a moment.\n\nThank you for your time.",
+        3: "Hi {name},\n\nThis will be my final follow-up regarding the Climate Agritech Platform opportunity. If it's not a fit at the moment, I completely understand. If there is any interest, I'd be happy to share further details or schedule a brief discussion.\n\nThank you again for your consideration.",
+    },
+    "INVESTOR_YASHIKA_AGRITECH": {
+        1: "Hi {name},\n\nI hope you're doing well.\n\nI'm just following up on the Climate Agritech platform opportunity we shared earlier. The company reported ₹5.1 crore revenue in FY26 and has previously raised ₹2.37 crore through government grants and angel investors. Please let me know if you have had a chance to review this or if I can provide any additional information.\n\nLooking forward to hearing from you.",
         2: "Hi {name},\n\nJust checking in regarding the Climate Agritech Platform opportunity I shared earlier. I'd appreciate any initial thoughts or feedback on the opportunity when you have a moment.\n\nThank you for your time.",
         3: "Hi {name},\n\nThis will be my final follow-up regarding the Climate Agritech Platform opportunity. If it's not a fit at the moment, I completely understand. If there is any interest, I'd be happy to share further details or schedule a brief discussion.\n\nThank you again for your consideration.",
     },
@@ -248,7 +255,11 @@ def get_template_followup(lead: dict, stage: int) -> str:
         elif is_defence:
             campaign_key = "INVESTOR_DEFENCE"
         elif is_agritech:
-            campaign_key = "INVESTOR_AGRITECH"
+            sender_info = f"{lead.get('sender_name') or ''} {lead.get('sender_email') or ''} {draft_template}".lower()
+            if "yashika" in sender_info:
+                campaign_key = "INVESTOR_YASHIKA_AGRITECH"
+            else:
+                campaign_key = "INVESTOR_AGRITECH"
         else:
             lead_type_raw = str(lead.get('lead_type') or lead.get('sector') or lead.get('persona') or '').upper()
             type_key = "CLIENT" if ('CLIENT' in lead_type_raw or 'CUSTOMER' in lead_type_raw) else "INVESTOR"

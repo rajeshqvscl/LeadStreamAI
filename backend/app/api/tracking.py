@@ -39,7 +39,7 @@ def inject_click_tracking(html_content: str, tracking_token: str, backend_url: s
         # Skip mailto:, tel:, #anchor, and already-tracked links
         if any(url.startswith(x) for x in ['mailto:', 'tel:', '#', 'javascript:']) or '/api/track/click/' in url:
             return match.group(0)
-        tracked = f'{prefix}"{backend_url}/api/track/click/{tracking_token}?url={quote(url, safe="")}"'
+        tracked = f'{prefix}{backend_url}/api/track/click/{tracking_token}?url={quote(url, safe="")}{match.group(3)}'
         return tracked
 
     # Match <a href="url"> or <a href='url'>
