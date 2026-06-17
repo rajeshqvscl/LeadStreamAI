@@ -1447,16 +1447,12 @@ const Leads = () => {
                       <p className="text-slate-500 text-[11px] mt-0.5">{tpl.description || 'Custom template with lead name & company auto-filled.'}</p>
                       <p className="text-slate-600 text-[10px] mt-1.5 font-mono truncate">
                         SUBJECT: {(() => {
-                          if (!tpl.content) return "No Subject";
+                          if (tpl.subject) return tpl.subject;
+                          if (!tpl.content) return "—";
                           const lines = tpl.content.split('\n');
                           const subLine = lines.find(l => l.trim().toLowerCase().startsWith('subject:'));
-                          if (subLine) return subLine.replace(/subject:/i, '').trim();
-                          // Fallback if Subject: tag is missing from memory cache
-                          const firstLine = lines.map(l => l.trim()).find(l => l.length > 0) || "";
-                          if (firstLine.toLowerCase().startsWith('dear') || firstLine.toLowerCase().startsWith('hi') || firstLine.toLowerCase().startsWith('hello') || firstLine.toLowerCase().startsWith("i'm") || firstLine.toLowerCase().startsWith("i hope")) {
-                            return "AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |";
-                          }
-                          return firstLine.replace(/subject:/i, '').trim() || "AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |";
+                          if (subLine) return subLine.replace(/^subject:/i, '').trim();
+                          return "—";
                         })()}
                       </p>
                     </div>
