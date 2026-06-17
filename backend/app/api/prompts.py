@@ -99,6 +99,32 @@ def edit_prompt(prompt_id: int, prompt_data: PromptUpdate):
         raise HTTPException(status_code=404, detail="Prompt not found")
     return {"message": "Prompt updated successfully"}
 
+ALLOWED_IMAGE_TYPES = {
+    'image/png': '.png',
+    'image/jpeg': '.jpg',
+    'image/jpg': '.jpg',
+    'image/gif': '.gif',
+    'image/webp': '.webp',
+    'image/svg+xml': '.svg',
+}
+
+@router.post("/upload-image")
+def upload_image(file: UploadFile = File(...)):
+    """Upload an image to the assets folder and return its URL path."""
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid image type: {file.content_type}. Allowed: PNG, JPG, GIF, WebP, SVG")
+    ext = ALLOWED_IMAGE_TYPES[file.content_type]
+    # Generate unique filename
+    import time, random
+    ts = int(time.time() * 1000)
+    rn = random.randint(1000, 9999)
+    dest_name = f"upload_{ts}_{rn}{ext}"
+    dest_path = os.path.join(ASSETS_DIR, dest_name)
+    with open(dest_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+    return {"filename": dest_name, "url": f"{backend_url}/assets/{dest_name}"}
+
 @router.post("/prompts/{prompt_id}/attachment")
 def upload_prompt_attachment(prompt_id: int, file: UploadFile = File(...)):
     if not file.filename.lower().endswith('.pdf'):

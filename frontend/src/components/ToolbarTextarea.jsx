@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
-import { Bold, Italic, List, ListOrdered, Link, Heading, FileText } from 'lucide-react';
+import { Bold, Italic, List, ListOrdered, Link, Heading, Image } from 'lucide-react';
+import api from '../services/api';
 
 const ToolButton = ({ icon: Icon, title, onClick }) => (
   <button
@@ -46,6 +47,26 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className }) => {
     }, 0);
   };
 
+  const handleImageUpload = async () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/png,image/jpeg,image/jpg,image/gif,image/webp,image/svg+xml';
+    input.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const res = await api.post('/api/upload-image', formData);
+        const imgUrl = res.data.url;
+        insert(`![](${imgUrl})\n`);
+      } catch (err) {
+        alert('Failed to upload image');
+      }
+    };
+    input.click();
+  };
+
   const handleLink = () => {
     const ta = textareaRef.current;
     if (!ta) return;
@@ -74,6 +95,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className }) => {
     { icon: ListOrdered, title: 'Numbered List', onClick: () => insertLinePrefix('1. ') },
     { type: 'separator' },
     { icon: Link, title: 'Insert Link', onClick: handleLink },
+    { icon: Image, title: 'Insert Image', onClick: handleImageUpload },
     { icon: Heading, title: 'Heading', onClick: handleHeading },
   ];
 

@@ -11,7 +11,7 @@ const Prompts = () => {
   const [showForm, setShowForm] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [deleting, setDeleting] = useState(null);
-  const [preview, setPreview] = useState({ show: false, content: '', label: '', subject: '' });
+  const [preview, setPreview] = useState({ show: false, content: '', label: '', subject: '', isFollowup: false });
   const [attaching, setAttaching] = useState(null);
   const [form, setForm] = useState({ name: '', content: '', description: '', followup_1: '', followup_2: '', followup_3: '', subject: '', cc: '', followup_count: 3 });
   const [saveField, setSaveField] = useState({ id: null, field: null });
@@ -107,21 +107,37 @@ const Prompts = () => {
     }
   };
 
-  const renderEmailPreview = (text, showSigDisc = true) => {
+  const renderEmailPreview = (text, showSigDisc = true, isFollowup = false) => {
     if (!text) return '<p class="text-slate-500 italic">(empty)</p>';
     const backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
     text = text.replace(/\[\[BACKEND_URL\]\]/g, backendUrl);
 
-    // Strip SIG_START...SIG_END from display
-    const sigStartIdx = text.indexOf('SIG_START');
-    const sigEndIdx = text.indexOf('SIG_END');
-    let mainText = text;
-    if (sigStartIdx !== -1) {
-      mainText = text.substring(0, sigStartIdx);
+    if (!isFollowup) {
+      // Main body: keep all content, just remove SIG_START/SIG_END markers
+      // and resolve common placeholders with actual user data
+      text = text.replace(/^SIG_START\n?/gm, '');
+      text = text.replace(/\n?SIG_END\n?/gm, '');
+      // Resolve sender placeholders
+      const firstName = userSenderName.split(' ')[0] || userSenderName;
+      text = text.replace(/\{\{Sender Name\}\}/g, userSenderName);
+      text = text.replace(/\{\{Sender First Name\}\}/g, firstName);
+      text = text.replace(/\{\{Sender Title\}\}/g, userTitle);
+      text = text.replace(/\{\{Sender LinkedIn\}\}/g, userLinkedin);
+      text = text.replace(/\{\{Sender Phone\}\}/g, userPhone);
+      // Also resolve {{First Name}} (generic lead placeholder stays as-is for preview)
+    } else {
+      // Follow-up: strip SIG_START...SIG_END entirely
+      const sigStartIdx = text.indexOf('SIG_START');
+      if (sigStartIdx !== -1) {
+        const sigEndIdx = text.indexOf('SIG_END', sigStartIdx);
+        if (sigEndIdx !== -1) {
+          text = text.substring(0, sigStartIdx) + text.substring(sigEndIdx + 7);
+        }
+      }
     }
 
     // Convert markdown to HTML — keep {{placeholders}} as-is
-    const paragraphs = mainText.split('\n\n');
+    const paragraphs = text.split('\n\n');
     let htmlParts = [];
     paragraphs.forEach(p => {
       const trimmed = p.trim();
@@ -157,19 +173,14 @@ const Prompts = () => {
       }
     });
 
-    // Auto signature
+    // Auto signature (only for follow-ups — main body has signature in SIG content)
     let autoSigHtml = '';
-    if (showSigDisc) {
+    if (isFollowup) {
       autoSigHtml = `
         <div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px; font-family: sans-serif;">
           <div style="color: #475569; margin-bottom: 2px;">--</div>
+          <div style="color: #e2e8f0; font-weight: 700; margin-top: 2px;">Regards,</div>
           <div style="color: #e2e8f0; font-weight: 700;">${userSenderName}</div>
-          <div style="color: #94a3b8; font-size: 12px;">${userTitle}</div>
-          <a href="${userLinkedin}" target="_blank" style="color: #3b82f6; font-weight: 700; font-size: 12px; text-decoration: underline; display: block; margin-top: 2px;">LinkedIn</a>
-          <div style="color: #94a3b8; font-size: 12px;">${userPhone}</div>
-          <div style="margin-top: 12px; padding: 10px; background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.12); border-radius: 8px; color: #94a3b8; font-size: 10px; line-height: 1.5;">
-            Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you.
-          </div>
         </div>`;
     }
 
@@ -234,7 +245,7 @@ const Prompts = () => {
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">Follow-up {i}</label>
                   <div className="flex gap-2">
                     <ToolbarTextarea value={form[`followup_${i}`]} onChange={e => setForm({...form, [`followup_${i}`]: e.target.value})} rows={3} placeholder={`Follow-up ${i} content...`} />
-                    <button onClick={() => setPreview({ show: true, content: form[`followup_${i}`], label: `Follow-up ${i}`, attachment: null })} className="self-start px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-[10px] font-bold border border-blue-500/20 whitespace-nowrap transition-all">Preview</button>
+                    <button onClick={() => setPreview({ show: true, content: form[`followup_${i}`], label: `Follow-up ${i}`, isFollowup: true })} className="self-start px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-[10px] font-bold border border-blue-500/20 whitespace-nowrap transition-all">Preview</button>
                   </div>
                 </div>
               ))}
@@ -332,7 +343,7 @@ const Prompts = () => {
                         <div className="flex gap-2">
                           <ToolbarTextarea value={tpl[`followup_${i}`] || ''} onChange={e => { const updated = [...prompts]; const idx = updated.findIndex(p => p.id === tpl.id); updated[idx] = {...updated[idx], [`followup_${i}`]: e.target.value}; setPrompts(updated); }} rows={2} placeholder="(empty)" />
                           <div className="flex flex-col gap-2">
-                            <button onClick={() => setPreview({ show: true, content: tpl[`followup_${i}`] || '', label: `Follow-up ${i}`, subject: tpl.subject, attachment: null })} className="px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-[10px] font-bold border border-blue-500/20 whitespace-nowrap transition-all">Preview</button>
+                          <button onClick={() => setPreview({ show: true, content: tpl[`followup_${i}`] || '', label: `Follow-up ${i}`, subject: tpl.subject, isFollowup: true })} className="px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-[10px] font-bold border border-blue-500/20 whitespace-nowrap transition-all">Preview</button>
                             <button onClick={() => handleFieldSave(tpl.id, `followup_${i}`, tpl[`followup_${i}`] || '')} disabled={saveField.id === tpl.id && saveField.field === `followup_${i}`} className={`px-3 py-2 rounded-lg text-[10px] font-bold border whitespace-nowrap transition-all ${saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === `followup_${i}` ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/30' : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 border-white/10'}`}>
                               {saveField.id === tpl.id && saveField.field === `followup_${i}` ? <Loader2 className="w-3 h-3 animate-spin" /> : saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === `followup_${i}` ? <CheckCircle2 className="w-3 h-3" /> : 'Save'}
                             </button>
@@ -397,7 +408,7 @@ const Prompts = () => {
                   <span className="text-blue-400/50 ml-auto">attached</span>
                 </div>
               )}
-              <div className="email-preview text-slate-300 text-[14px] leading-relaxed" dangerouslySetInnerHTML={{ __html: renderEmailPreview(preview.content) }} />
+              <div className="email-preview text-slate-300 text-[14px] leading-relaxed" dangerouslySetInnerHTML={{ __html: renderEmailPreview(preview.content, true, preview.isFollowup) }} />
             </div>
           </div>
         </div>
