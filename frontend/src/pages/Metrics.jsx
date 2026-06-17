@@ -129,11 +129,10 @@ const Metrics = () => {
     return rows;
   }, [data, search, sortKey, sortDir]);
 
-  const hasFilter = !!(dateFrom || dateTo || range !== 'all');
   const stats = data ? [
     { label: 'Replies', value: data.reverted },
-    { label: 'Emails Sent', value: hasFilter ? (data.period_email_sent || data.sent) : data.sent },
-    { label: 'Follow-ups', value: hasFilter ? (data.period_followups || data.total_followups) : data.total_followups },
+    { label: 'Emails Sent', value: data.sent },
+    { label: 'Follow-ups', value: (dateFrom || dateTo) ? data.period_followups : data.total_followups },
     { label: 'Drafts', value: data.drafts_generated },
     { label: 'Registry', value: data.total_registry },
     { label: 'Bounces', value: data.bounces },
