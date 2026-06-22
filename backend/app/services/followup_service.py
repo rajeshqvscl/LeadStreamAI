@@ -474,7 +474,7 @@ def process_outreach_sequences():
                     _sender = (lead.get('sender_name') or "").lower()
                     _template = (lead.get('draft_template_used') or "").strip()
                     _is_kajal_jv = "kajal" in _sender and _template == "kajal_mam_jv"
-                    _max_stage = 2 if any(name in _sender for name in ["palak", "vismaya"]) or _is_kajal_jv else 3
+                    _max_stage = 2 if any(name in _sender for name in ["palak", "vismaya", "yashika"]) or _is_kajal_jv else 3
                     if stage >= _max_stage:
                         logger.info(f"Lead {lead_id} at stage {stage} >= max {_max_stage} for {lead.get('sender_name')} — skipping")
                         try:

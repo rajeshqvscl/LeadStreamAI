@@ -541,7 +541,7 @@ def list_followups(
             else:
                 lead_dict['last_milestone'] = 'Initial Outreach'
                 lead_dict['last_action_type'] = 'Outreach'
-            lead_dict['max_followup_stage'] = 2 if (is_palak or is_vismaya) else 3
+            lead_dict['max_followup_stage'] = 2 if (is_palak or is_vismaya or is_yashika) else 3
             results.append(lead_dict)
             
         return {"leads": results, "total": total}
