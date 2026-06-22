@@ -281,7 +281,15 @@ const EditEmail = () => {
       setDraft(lead);
       setSubject(sub);
       setBody(bd);
-      setCc(lead.cc_email || 'lalit.h@qvscl.com');
+      const userStr = localStorage.getItem('user') || localStorage.getItem('user_admin');
+      let isVismaya = false;
+      if (userStr) {
+        try {
+          const user = JSON.parse(userStr);
+          isVismaya = ((user.username || user.full_name || '').toLowerCase()).includes('vismaya');
+        } catch (e) {}
+      }
+      setCc(lead.cc_email || (isVismaya ? 'rajesh.s@qvscl.com' : 'lalit.h@qvscl.com'));
       setRemarks(lead.remarks || '');
     } catch (err) {
       console.error('Failed to fetch draft', err);
