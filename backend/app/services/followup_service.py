@@ -632,12 +632,8 @@ def process_outreach_sequences():
                         dup_cur.close()
                         dup_conn.close()
                         if dup_count > 0:
-                            # If stage was reset (e.g. by approve_draft), re-send even if activity_log has old entry
-                            if stage == 0 and next_stage == 1:
-                                logger.info(f"Lead {lead_id}: Stage {next_stage} was in log but stage reset to 0 — allowing re-send")
-                            else:
-                                logger.info(f"Lead {lead_id}: Stage {next_stage} already sent ({dup_count}x in log) — skipping duplicate")
-                                continue
+                            logger.info(f"Lead {lead_id}: Stage {next_stage} already sent ({dup_count}x in log) — skipping duplicate")
+                            continue
                     except Exception as dup_err:
                         logger.warning(f"Duplicate check failed for lead {lead_id}: {dup_err}")
 
