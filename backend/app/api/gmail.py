@@ -452,19 +452,21 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                         AND followup_status = 'ACTIVE' AND is_responded = FALSE
                     """, (company_name, lead_id))
                 else:
-                    # Fallback: match by email domain base (e.g. merakventure.com → merakventure.in)
-                    sender_domain_base = None
+                    # Fallback: exact domain match only (e.g. merakventure.com matches merakventure.com, not merakventure.in)
+                    # Skip common personal email domains to avoid stopping unrelated leads
+                    personal_domains = {'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'rediffmail.com', 'live.com', 'msn.com', 'icloud.com', 'ymail.com', 'protonmail.com', 'mail.com', 'zoho.com', 'aol.com'}
                     if '@' in sender_email:
-                        domain_part = sender_email.split('@')[1]
-                        sender_domain_base = domain_part.split('.')[0].lower()
-                    if sender_domain_base:
-                        domain_pattern = f"{sender_domain_base}.%"
-                        cur.execute("""
-                            SELECT id, first_name, last_name, email FROM leads_raw
-                            WHERE id != %s
-                            AND followup_status = 'ACTIVE' AND is_responded = FALSE
-                            AND LOWER(split_part(email, '@', 2)) LIKE %s
-                        """, (lead_id, domain_pattern))
+                        full_domain = sender_email.split('@')[1].lower()
+                        if full_domain not in personal_domains:
+                            cur.execute("""
+                                SELECT id, first_name, last_name, email FROM leads_raw
+                                WHERE id != %s
+                                AND user_id = %s
+                                AND followup_status = 'ACTIVE' AND is_responded = FALSE
+                                AND LOWER(split_part(email, '@', 2)) = %s
+                            """, (lead_id, user_id, full_domain))
+                        else:
+                            cur.execute("SELECT id, first_name, last_name, email FROM leads_raw WHERE FALSE", ())
                     else:
                         cur.execute("SELECT id, first_name, last_name, email FROM leads_raw WHERE FALSE", ())
                 same_company_leads = cur.fetchall()
