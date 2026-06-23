@@ -376,7 +376,8 @@ def process_outreach_sequences():
     Background worker that identifies leads due for follow-ups.
     Enforces 'Working Days Only' and sequential 'Drip Sending' with a 30-second gap
     and enforces a daily limit per user (default 200) to prevent spam flagging.
-    Uses FOR UPDATE SKIP LOCKED to prevent duplicate sends across multiple workers.
+    Uses atomic UPDATE ... WHERE followup_stage = old to claim leads across
+    workers, preventing duplicate sends.
     """
     if not _is_working_hours():
         IST = timezone(timedelta(hours=5, minutes=30))
@@ -385,8 +386,7 @@ def process_outreach_sequences():
         return
 
     conn = get_db_connection()
-    conn.autocommit = False
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur = conn.cursor()
 
     try:
         cur.execute("""
@@ -401,18 +401,12 @@ def process_outreach_sequences():
             AND COALESCE(l.email_status, '') NOT IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED', 'NOT_INTERESTED', 'BOUNCED')
             AND l.followup_stage < 3
             ORDER BY LOWER(l.email), l.last_outreach_at ASC
-            FOR UPDATE SKIP LOCKED
         """)
 
         leads = cur.fetchall()
-
-        # Immediately commit to release FOR UPDATE locks — we only needed them
-        # to atomically claim leads across workers. Duplicate prevention after this
-        # is handled by activity_log check + followup_stage WHERE guard.
-        conn.commit()
+        cur.close()
 
         if not leads:
-            cur.close()
             conn.close()
             return
 
@@ -668,6 +662,25 @@ def process_outreach_sequences():
 
                     logger.info(f"PREVIEW [{lead['email']}]: body=\"{body}\"")
 
+                    # Atomically claim this stage across all workers.
+                    # Only the first worker to UPDATE gets rowcount=1 — others skip.
+                    claim_conn = get_db_connection()
+                    claim_cur = claim_conn.cursor()
+                    new_status = 'COMPLETED' if next_stage >= _max_stage else 'ACTIVE'
+                    claim_cur.execute("""
+                        UPDATE leads_raw
+                        SET followup_stage = %s, followup_status = %s, updated_at = NOW()
+                        WHERE id = %s AND followup_stage = %s AND followup_status = 'ACTIVE'
+                    """, (next_stage, new_status, lead_id, stage))
+                    claim_conn.commit()
+                    claimed = claim_cur.rowcount > 0
+                    claim_cur.close()
+                    claim_conn.close()
+
+                    if not claimed:
+                        logger.info(f"Lead {lead_id}: stage {stage} already claimed by another worker — skipping")
+                        continue
+
                     success, msg, new_thread_id, new_rfc_msg_id = send_email(
                         to_email=lead['email'],
                         subject=subject,
@@ -681,26 +694,20 @@ def process_outreach_sequences():
                     )
 
                     if success:
-                        conn = get_db_connection()
-                        cur = conn.cursor()
-                        new_status = 'COMPLETED' if next_stage >= _max_stage else 'ACTIVE'
-                        cur.execute("""
-                            UPDATE leads_raw 
-                            SET followup_stage = %s, followup_status = %s, email_status = 'SENT',
-                                last_outreach_at = NOW(), last_outreach_subject = %s,
+                        update_conn = get_db_connection()
+                        update_cur = update_conn.cursor()
+                        update_cur.execute("""
+                            UPDATE leads_raw
+                            SET last_outreach_at = NOW(), last_outreach_subject = %s,
+                                email_status = 'SENT',
                                 gmail_thread_id = COALESCE(%s, gmail_thread_id),
                                 gmail_message_id = COALESCE(%s, gmail_message_id),
                                 updated_at = NOW()
-                            WHERE id = %s AND followup_stage = %s
-                        """, (next_stage, new_status, subject, new_thread_id, new_rfc_msg_id, lead_id, stage))
-                        conn.commit()
-                        updated_count = cur.rowcount
-                        cur.close()
-                        conn.close()
-
-                        if updated_count == 0:
-                            logger.warning(f"Lead {lead_id} stage already changed — email sent but stage not updated to avoid duplicate")
-                            continue
+                            WHERE id = %s
+                        """, (subject, new_thread_id, new_rfc_msg_id, lead_id))
+                        update_conn.commit()
+                        update_cur.close()
+                        update_conn.close()
 
                         add_activity_log(lead_id, "AUTO_FOLLOWUP_SENT", f"Stage {next_stage} auto-sent", "system", uid)
                         sent_count += 1
@@ -714,10 +721,6 @@ def process_outreach_sequences():
     except Exception as e:
         logger.error(f"Error in process_outreach_sequences: {e}")
     finally:
-        try:
-            cur.close()
-        except Exception:
-            pass
         try:
             conn.close()
         except Exception:
