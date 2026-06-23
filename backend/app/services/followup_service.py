@@ -4,7 +4,6 @@ from typing import List, Optional
 import json
 import psycopg2.extras
 import re
-import threading
 
 from app.database import get_db_connection
 from app.services.email_service import send_email
@@ -13,8 +12,6 @@ from app.services.llm_services import LLMService
 from app.models.lead import add_activity_log
 
 logger = logging.getLogger(__name__)
-
-_followup_lock = threading.Lock()
 
 def is_generic_followup(body: Optional[str]) -> bool:
     """Detects legacy, standard, or HTML-wrapped default placeholder follow-ups to allow dynamic healing."""
@@ -379,20 +376,19 @@ def process_outreach_sequences():
     Background worker that identifies leads due for follow-ups.
     Enforces 'Working Days Only' and sequential 'Drip Sending' with a 30-second gap
     and enforces a daily limit per user (default 200) to prevent spam flagging.
+    Uses FOR UPDATE SKIP LOCKED to prevent duplicate sends across multiple workers.
     """
-    if not _followup_lock.acquire(blocking=False):
-        logger.info("process_outreach_sequences already running — skipping overlapping run")
+    if not _is_working_hours():
+        IST = timezone(timedelta(hours=5, minutes=30))
+        now = datetime.now(IST).replace(tzinfo=None)
+        logger.info(f"Outreach paused: Weekend/hours protection active (IST). Current: {now.strftime('%A %Y-%m-%d %H:%M:%S')}")
         return
+
+    conn = get_db_connection()
+    conn.autocommit = False
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
     try:
-        if not _is_working_hours():
-            IST = timezone(timedelta(hours=5, minutes=30))
-            now = datetime.now(IST).replace(tzinfo=None)
-            logger.info(f"Outreach paused: Weekend/hours protection active (IST). Current: {now.strftime('%A %Y-%m-%d %H:%M:%S')}")
-            return
-
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
         cur.execute("""
             SELECT DISTINCT ON (LOWER(l.email)) l.*, u.id as sender_id, u.email as sender_email, u.full_name as sender_name,
                    u.auto_followup, u.outreach_daily_limit, u.google_refresh_token
@@ -405,13 +401,19 @@ def process_outreach_sequences():
             AND COALESCE(l.email_status, '') NOT IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED', 'NOT_INTERESTED', 'BOUNCED')
             AND l.followup_stage < 3
             ORDER BY LOWER(l.email), l.last_outreach_at ASC
+            FOR UPDATE SKIP LOCKED
         """)
 
         leads = cur.fetchall()
-        cur.close()
-        conn.close()
+
+        # Immediately commit to release FOR UPDATE locks — we only needed them
+        # to atomically claim leads across workers. Duplicate prevention after this
+        # is handled by activity_log check + followup_stage WHERE guard.
+        conn.commit()
 
         if not leads:
+            cur.close()
+            conn.close()
             return
 
         import time
@@ -712,4 +714,11 @@ def process_outreach_sequences():
     except Exception as e:
         logger.error(f"Error in process_outreach_sequences: {e}")
     finally:
-        _followup_lock.release()
+        try:
+            cur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
