@@ -445,7 +445,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 company_name = company_row['company_name'] if isinstance(company_row, dict) else company_row[0]
                 company_name_clean = company_name.strip().upper() if company_name else ''
 
-                if company_name_clean and company_name_clean not in ('', 'INDEPENDENT', 'N/A', 'NONE', '-'):
+                if company_name_clean and company_name_clean not in ('', 'INDEPENDENT', 'N/A', 'NONE', '-', '—', '–'):
                     cur.execute("""
                         SELECT id, first_name, last_name, email FROM leads_raw
                         WHERE company_name ILIKE %s AND id != %s
