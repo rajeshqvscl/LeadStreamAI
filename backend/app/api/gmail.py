@@ -188,6 +188,18 @@ def process_gmail_history(user_id: int, start_history_id: str):
     except Exception as e:
         print(f"Error listing history for user {user_id}: {e}")
 
+def _is_valid_company_name(name: str) -> bool:
+    """Returns True only if company_name looks like a real company name (has actual alphabetic characters)."""
+    if not name:
+        return False
+    clean = name.strip().upper()
+    for ch in ['-', '—', '–', '_', '.', ',', '/', '\\', '|', '~', '?', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=', '{', '}', '[', ']', ':', ';', '"', "'", '<', '>', '`']:
+        clean = clean.replace(ch, '')
+    if not clean:
+        return False
+    alpha_count = sum(c.isalpha() for c in clean)
+    return alpha_count >= 2
+
 def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
     """Correlates a new Gmail message with a lead and performs AI intent analysis."""
     conn = get_db_connection()
@@ -445,7 +457,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 company_name = company_row['company_name'] if isinstance(company_row, dict) else company_row[0]
                 company_name_clean = company_name.strip().upper() if company_name else ''
 
-                if company_name_clean and company_name_clean not in ('', 'INDEPENDENT', 'N/A', 'NONE', '-', '—', '–'):
+                if company_name_clean and _is_valid_company_name(company_name_clean):
                     cur.execute("""
                         SELECT id, first_name, last_name, email FROM leads_raw
                         WHERE company_name ILIKE %s AND id != %s
