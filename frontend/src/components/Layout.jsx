@@ -209,7 +209,7 @@ const Layout = () => {
         <div className="p-3 pb-0">
           <div className="text-[10px] font-semibold uppercase tracking-[1px] text-[#475569] px-2 pt-2.5 pb-1.5">Settings</div>
           <Link to="/dashboard/prompts" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'prompts' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>
-            <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'prompts' ? 'text-white' : 'text-[#94a3b8]'}`}>🧠</span> AI Prompts
+            <span className={`text-[16px] w-[22px] text-center shrink-0 ${activePage === 'prompts' ? 'text-white' : 'text-[#94a3b8]'}`}>🧠</span> Template
           </Link>
           {user.role === 'ADMIN' && (
             <Link to="/dashboard/users" className={`flex items-center gap-2.5 px-2.5 py-[9px] rounded-lg text-[13px] font-medium transition-all mb-px ${activePage === 'users' ? 'bg-blue-600 text-white font-semibold' : 'text-[#94a3b8] hover:bg-white/5 hover:text-white'}`}>

@@ -39,7 +39,7 @@ def login(req: LoginRequest):
     cur = conn.cursor()
     
     # Query user by username (case-insensitive)
-    cur.execute("SELECT id, username, email, full_name, password_hash, role, is_active, is_approved FROM users WHERE LOWER(username) = LOWER(%s)", (username,))
+    cur.execute("SELECT id, username, email, full_name, password_hash, role, team, is_active, is_approved FROM users WHERE LOWER(username) = LOWER(%s)", (username,))
 
     user = cur.fetchone()
     
@@ -68,6 +68,7 @@ def login(req: LoginRequest):
             "email": user['email'],
             "full_name": user['full_name'],
             "role": user['role'],
+            "team": user.get('team') or 'CLIENT',
             "is_approved": user['is_approved']
         }
     }
@@ -109,11 +110,42 @@ def get_current_user(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
-        cur.execute("SELECT id, username, email, full_name, role, is_active, is_approved, google_linked_at, google_email, credits_used, COALESCE(credits_limit, 200) as credits_limit FROM users WHERE id = %s", (real_uid,))
+        cur.execute("SELECT id, username, email, full_name, role, team, is_active, is_approved, google_linked_at, google_email, credits_used, COALESCE(credits_limit, 200) as credits_limit FROM users WHERE id = %s", (real_uid,))
         user = cur.fetchone()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-            
+        
+        result = dict(user)
+        if not result.get('team'):
+            result['team'] = 'CLIENT'
+        return result
+    finally:
+        cur.close()
+        conn.close()
+
+class TeamUpdateRequest(BaseModel):
+    team: str
+
+@router.put("/auth/team")
+def update_team(req: TeamUpdateRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Updates the current user's team (CLIENT/INVESTOR)."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    team = req.team.upper()
+    if team not in ('CLIENT', 'INVESTOR'):
+        raise HTTPException(status_code=400, detail="Team must be CLIENT or INVESTOR")
+    
+    real_uid = user_id if user_id and user_id.isdigit() else "1"
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        cur.execute("UPDATE users SET team = %s, updated_at = NOW() WHERE id = %s RETURNING id, username, email, full_name, role, team, is_active, is_approved", (team, real_uid))
+        user = cur.fetchone()
+        conn.commit()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
         return dict(user)
     finally:
         cur.close()

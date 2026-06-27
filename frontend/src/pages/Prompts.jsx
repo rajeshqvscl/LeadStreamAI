@@ -1,7 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Loader2, CheckCircle2, AlertCircle, Trash2, ChevronDown, ChevronUp, Save, Upload, Paperclip, AtSign } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Plus, Loader2, CheckCircle2, AlertCircle, Trash2, ChevronDown, ChevronUp, Save, Upload, Paperclip, AtSign, FileText } from 'lucide-react';
 import api from '../services/api';
 import ToolbarTextarea from '../components/ToolbarTextarea';
+import mammoth from 'mammoth';
+import * as pdfjsLib from 'pdfjs-dist';
+import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 const Prompts = () => {
   const [prompts, setPrompts] = useState([]);
@@ -13,11 +17,14 @@ const Prompts = () => {
   const [deleting, setDeleting] = useState(null);
   const [preview, setPreview] = useState({ show: false, content: '', label: '', subject: '', isFollowup: false });
   const [attaching, setAttaching] = useState(null);
+  const fileInputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({ name: '', content: '', description: '', followup_1: '', followup_2: '', followup_3: '', subject: '', cc: '', followup_count: 3 });
   const [saveField, setSaveField] = useState({ id: null, field: null });
   const [saveFieldSuccess, setSaveFieldSuccess] = useState({ id: null, field: null });
-
   const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const [userTeam, setUserTeam] = useState('CLIENT');
+  const isAdmin = user.role === 'ADMIN';
   const userId = user.id || 'admin';
   const userSenderName = user.name || user.full_name || user.username || 'Your Name';
   const userTitle = user.job_title || user.designation || 'Analyst';
@@ -37,6 +44,53 @@ const Prompts = () => {
   };
 
   useEffect(() => { fetchPrompts(); }, []);
+
+  useEffect(() => {
+    const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+    if (storedUser.team) {
+      setUserTeam(storedUser.team.toUpperCase());
+    } else {
+      api.get('/api/auth/me', { headers: { 'X-User-Id': storedUser.id || '1' } }).then(res => {
+        const team = (res.data.team || 'CLIENT').toUpperCase();
+        setUserTeam(team);
+        storedUser.team = team;
+        localStorage.setItem('user', JSON.stringify(storedUser));
+      }).catch(() => {});
+    }
+  }, []);
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      let html = '';
+      if (file.name.endsWith('.docx')) {
+        const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
+        html = result.value;
+      } else if (file.name.endsWith('.pdf')) {
+        const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+        const pages = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const text = content.items.map(item => item.str).join(' ');
+          pages.push(text);
+        }
+        html = pages.join('\n\n');
+      }
+      if (html) {
+        setForm(prev => ({ ...prev, content: (prev.content ? prev.content + '\n\n' : '') + html }));
+      }
+    } catch (err) {
+      console.error('File upload error:', err);
+      alert('Failed to read file. Make sure it is a valid .docx or .pdf.');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   const handleCreate = async () => {
     if (!form.name.trim() || !form.content.trim()) return alert('Name and Body are required');
@@ -193,15 +247,45 @@ const Prompts = () => {
     <div className="max-w-[1200px] mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div className="flex justify-between items-start mb-10">
         <div>
-          <h1 className="text-[28px] font-black text-white tracking-tight">My Templates</h1>
+          <h1 className="text-[28px] font-black text-white tracking-tight">Template</h1>
           <p className="text-slate-400 text-sm mt-1 font-medium italic">
             Create and manage your own draft templates with follow-ups
           </p>
         </div>
-        <button onClick={() => setShowForm(!showForm)} className="btn bg-blue-600 hover:bg-blue-500 text-white border-none py-2.5 px-6 rounded-xl flex items-center gap-2 shadow-[0_0_20px_rgba(37,99,235,0.3)] transition-all hover:scale-105 active:scale-95">
-          <Plus className="w-4 h-4" />
-          <span className="text-[13px] font-bold">{showForm ? 'Cancel' : 'New Template'}</span>
-        </button>
+        <div className="flex items-center gap-3">
+          {!isAdmin && (
+            <div className="flex bg-slate-900/80 p-0.5 rounded-xl border border-white/10">
+              <button
+                onClick={async () => {
+                  setUserTeam('CLIENT');
+                  const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+                  storedUser.team = 'CLIENT';
+                  localStorage.setItem('user', JSON.stringify(storedUser));
+                  try { await api.put('/api/auth/team', { team: 'CLIENT' }, { headers: { 'X-User-Id': storedUser.id || '1' } }); } catch(e) {}
+                }}
+                className={`px-4 py-2 rounded-lg text-[12px] font-bold transition-all ${userTeam === 'CLIENT' ? 'bg-emerald-600 text-white shadow-[0_0_12px_rgba(16,185,129,0.3)]' : 'text-slate-400 hover:text-white'}`}
+              >
+                Client
+              </button>
+              <button
+                onClick={async () => {
+                  setUserTeam('INVESTOR');
+                  const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+                  storedUser.team = 'INVESTOR';
+                  localStorage.setItem('user', JSON.stringify(storedUser));
+                  try { await api.put('/api/auth/team', { team: 'INVESTOR' }, { headers: { 'X-User-Id': storedUser.id || '1' } }); } catch(e) {}
+                }}
+                className={`px-4 py-2 rounded-lg text-[12px] font-bold transition-all ${userTeam === 'INVESTOR' ? 'bg-violet-600 text-white shadow-[0_0_12px_rgba(139,92,246,0.3)]' : 'text-slate-400 hover:text-white'}`}
+              >
+                Investor
+              </button>
+            </div>
+          )}
+          <button onClick={() => setShowForm(!showForm)} className="btn bg-blue-600 hover:bg-blue-500 text-white border-none py-2.5 px-6 rounded-xl flex items-center gap-2 shadow-[0_0_20px_rgba(37,99,235,0.3)] transition-all hover:scale-105 active:scale-95">
+            <Plus className="w-4 h-4" />
+            <span className="text-[13px] font-bold">{showForm ? 'Cancel' : 'New Template'}</span>
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -213,7 +297,21 @@ const Prompts = () => {
               <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="e.g. My Custom Draft" className="w-full bg-black/40 border border-white/5 rounded-xl p-4 text-sm text-white focus:border-blue-500/50 outline-none" />
             </div>
             <div>
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Email Body</label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Email Body</label>
+                <div className="flex items-center gap-2">
+                  <input ref={fileInputRef} type="file" accept=".docx,.pdf" onChange={handleFileUpload} className="hidden" />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-600/20 border border-blue-500/30 text-blue-400 hover:bg-blue-600/30 text-[10px] font-bold uppercase tracking-wider transition-all disabled:opacity-50"
+                  >
+                    {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
+                    {uploading ? 'Reading...' : 'Upload .docx / .pdf'}
+                  </button>
+                </div>
+              </div>
               <p className="text-[10px] text-slate-600 mb-2">Use placeholders: {'{{First Name}}'}, {'{{Company Name}}'}, {'{{Sender Name}}'}</p>
               <ToolbarTextarea value={form.content} onChange={e => setForm({...form, content: e.target.value})} rows={8} placeholder="Write your email body here..." />
             </div>

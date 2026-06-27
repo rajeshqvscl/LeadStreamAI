@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Plus, UserCircle, Shield, ShieldCheck, ShieldAlert, Mail, MoreHorizontal, Edit2, Trash2, X, Loader2, Check, AlertCircle, Play, RotateCcw } from 'lucide-react';
+import { Search, Plus, UserCircle, Shield, ShieldCheck, ShieldAlert, Mail, MoreHorizontal, Edit2, Trash2, X, Loader2, Check, AlertCircle, Play, RotateCcw, UserPlus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
@@ -30,7 +30,8 @@ const Users = () => {
     has_db_access: false,
     job_title: '',
     phone: '',
-    linkedin_url: ''
+    linkedin_url: '',
+    team: 'CLIENT'
   });
 
   const fetchUsers = async () => {
@@ -65,7 +66,8 @@ const Users = () => {
         has_db_access: user.has_db_access,
         job_title: user.job_title || '',
         phone: user.phone || '',
-        linkedin_url: user.linkedin_url || ''
+        linkedin_url: user.linkedin_url || '',
+        team: user.team || 'CLIENT'
       });
     } else {
       setEditingUser(null);
@@ -75,11 +77,12 @@ const Users = () => {
         full_name: '',
         password: '',
         role: 'USER',
-        is_approved: true, // Manual creation defaults to approved
+        is_approved: true,
         has_db_access: false,
         job_title: '',
         phone: '',
-        linkedin_url: ''
+        linkedin_url: '',
+        team: 'CLIENT'
       });
     }
     setShowDrawer(true);
@@ -188,14 +191,15 @@ const Users = () => {
                 <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Approval Status</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Last Change</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Team</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider text-right">Settings</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5 text-[13px]">
               {isLoading ? (
-                <tr><td colSpan="6" className="px-6 py-20 text-center"><Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto" /></td></tr>
+                <tr><td colSpan="7" className="px-6 py-20 text-center"><Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto" /></td></tr>
               ) : users.length === 0 ? (
-                <tr><td colSpan="6" className="px-6 py-20 text-center text-slate-500">No users found match the current criteria.</td></tr>
+                <tr><td colSpan="7" className="px-6 py-20 text-center text-slate-500">No users found match the current criteria.</td></tr>
               ) : users.map(user => (
                 <tr key={user.id} className="hover:bg-white/5 transition-colors group">
                   <td className="px-6 py-4">
@@ -253,6 +257,11 @@ const Users = () => {
                         {user.is_active ? 'Active' : 'Suspended'}
                       </span>
                     </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className={`inline-block px-2 py-1 rounded text-[9px] font-black uppercase ${user.team === 'INVESTOR' ? 'bg-violet-500/10 text-violet-400 border border-violet-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
+                      {user.team || 'CLIENT'}
+                    </span>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -398,6 +407,30 @@ const Users = () => {
                         onChange={(e) => setFormData({ ...formData, linkedin_url: e.target.value })}
                       />
                     </div>
+                  </div>
+                </div>
+
+                <div className="form-group border-t border-white/5 pt-6 mt-6">
+                  <div className="flex items-center gap-2 mb-4">
+                    <UserPlus className="w-4 h-4 text-slate-400" />
+                    <span className="text-[11px] font-black text-white uppercase tracking-widest">Team Assignment</span>
+                  </div>
+                  <div className="flex gap-3">
+                    {['CLIENT', 'INVESTOR'].map(t => (
+                      <button
+                        key={t}
+                        onClick={() => setFormData({ ...formData, team: t })}
+                        className={`flex-1 px-4 py-3 rounded-xl border text-[11px] font-black uppercase tracking-wider transition-all ${
+                          formData.team === t
+                            ? t === 'INVESTOR'
+                              ? 'bg-violet-600/20 border-violet-500/40 text-violet-400 shadow-[0_0_15px_rgba(139,92,246,0.15)]'
+                              : 'bg-emerald-600/20 border-emerald-500/40 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.15)]'
+                            : 'bg-slate-900/50 border-white/5 text-slate-500 hover:text-white hover:border-white/20'
+                        }`}
+                      >
+                        {t}
+                      </button>
+                    ))}
                   </div>
                 </div>
 

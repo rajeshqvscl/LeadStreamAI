@@ -1,101 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   History, Mail, CheckCircle, Clock, AlertCircle, X,
-  ChevronRight, Loader2, Search, Filter, ChevronLeft, ChevronRight as ChevronRightIcon,
-  Zap, Calendar, User, Rocket, Building2, CheckSquare, Square,
-  ChevronsRight, Cpu, Save
+  ChevronRight, Loader2, Search, Filter, Zap, Calendar, User,
+  Building2, CheckSquare, Square, Cpu, Save
 } from 'lucide-react';
 import api from '../services/api';
-
-const TYPE_FILTERS = ['All', 'Investor', 'Client'];
-
-const STAGE_CONFIGS = {
-  All: [
-    { label: '2nd Day', stage: 0, type: 'Client' },
-    { label: '4th Day', stage: 1, type: 'Client' },
-    { label: '7th Day', stage: 0, type: 'Investor' },
-    { label: '10th Day', stage: 2, type: 'Client' },
-    { label: '14th Day', stage: 1, type: 'Investor' },
-    { label: '30th Day', stage: 2, type: 'Investor' },
-  ],
-  Investor: [
-    { label: '7th Day', stage: 0 },
-    { label: '14th Day', stage: 1 },
-    { label: '30th Day', stage: 2 },
-  ],
-  Client: [
-    { label: '2nd Day', stage: 0 },
-    { label: '4th Day', stage: 1 },
-    { label: '10th Day', stage: 2 },
-  ]
-};
-
-const getLeadType = (lead) => {
-  // FORCE INVESTOR FOR YASHIKA & GUPTA: They don't deal with clients
-  try {
-    const userStr = localStorage.getItem('user');
-    if (userStr) {
-      const user = JSON.parse(userStr);
-      const name = String(user.username || user.full_name || '').toLowerCase();
-      if (name.includes('yashika') || name.includes('gupta') || name.includes('kajal') || name.includes('ayush')) return 'Investor';
-    }
-  } catch (e) {}
-
-  const text = String(`${lead.company_name || lead.company || ''} ${lead.sector || ''} ${lead.persona || ''}`).toUpperCase();
-  
-  const investorKeywords = [
-    "VENTURE", "CAPITAL", "EQUITY", "INVEST", "PARTNER", "ASSET", 
-    "FAMILY OFFICE", "ANGEL", "CIRCLE", "NETWORK", "FUND", "VC", "PE", "ADVISORY",
-    "HOLDING", "SFO", "OFFICE", "MANAGEMENT", "PRIVATE", "TRUST", "WEALTH",
-    "ASSOCIATES", "GROUP", "PARTNERS", "ADVISORS", "FOUNDATION"
-  ];
-  
-  // High Priority: Keyword matching in company name/sector
-  if (investorKeywords.some(kw => text.includes(kw))) return 'Investor';
-  
-  // Secondary: Explicit lead_type field
-  if (lead.lead_type) {
-    const lt = String(lead.lead_type).toUpperCase();
-    if (lt.includes('CLIENT')) return 'Client';
-    if (lt.includes('INVESTOR')) return 'Investor';
-  }
-  
-  const clientKeywords = ["SAAS", "FINTECH", "SOFTWARE", "CLIENT", "CUSTOMER", "PRODUCT", "SERVICES"];
-  if (clientKeywords.some(kw => text.includes(kw))) return 'Client';
-
-  return 'Investor';
-};
-
-const getStageLabel = (stage, lead, status = 'DUE') => {
-  const isInvestor = getLeadType(lead) === 'Investor';
-  
-  // If we are in the SENT tab, we want to show the badge for what was JUST sent.
-  // If we are in the DUE tab, we show the badge for what is ABOUT to be sent.
-  let displayStage = stage;
-  if (status === 'SENT' && stage > 0) displayStage = stage - 1;
-
-  if (displayStage === 0) return isInvestor ? 'Day 7' : 'Day 2';
-  if (displayStage === 1) return isInvestor ? 'Day 14' : 'Day 4';
-  if (displayStage === 2) return isInvestor ? 'Day 30' : 'Day 10';
-  return `${displayStage + 1}th Follow-up`;
-};
-
-const getStageColor = (stage) => {
-  if (stage === 0) return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
-  if (stage === 1) return 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20';
-  if (stage === 2) return 'bg-violet-500/10 text-violet-400 border-violet-500/20';
-  if (stage === 3) return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
-  if (stage === 4) return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
-  if (stage >= 5) return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
-  return 'bg-slate-500/10 text-slate-400 border-slate-500/20';
-};
+import { FOLLOWUP_CONFIG, LEAD_TYPES, STATUS_OPTIONS, getLeadType, getStageColor, getStageConfigs, getStageLabel } from '../services/followupConfig';
 
 const Followups = () => {
   const navigate = useNavigate();
+
   const [followups, setFollowups] = useState([]);
-  
-  const parseUtcDate = (dateStr) => {
+  const abortRef = useRef(null);
+  const searchDebounceRef = useRef(null);
+
+  const parseUtcDate = useCallback((dateStr) => {
     if (!dateStr) return null;
     let cleanStr = dateStr;
     if (typeof cleanStr === 'string' && !cleanStr.endsWith('Z') && !cleanStr.includes('+') && !/-[0-9]{2}:[0-9]{2}$/.test(cleanStr)) {
@@ -103,88 +23,92 @@ const Followups = () => {
     }
     const d = new Date(cleanStr);
     return isNaN(d.getTime()) ? null : d;
-  };
+  }, []);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isBulkSending, setIsBulkSending] = useState(false);
   const [progress, setProgress] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [notification, setNotification] = useState(null);
   const [selectedLead, setSelectedLead] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [typeFilter, setTypeFilter] = useState(() => {
-    try {
-      const userStr = localStorage.getItem('user');
-      if (userStr) {
-        const user = JSON.parse(userStr);
-        if (user.username?.toLowerCase() === 'yashika') return 'Investor';
-      }
-    } catch (e) {}
-    return 'All';
-  });
+  const [typeFilter, setTypeFilter] = useState('All');
+  const [userTeam, setUserTeam] = useState('');
   const [stageFilter, setStageFilter] = useState('All');
-  const [statusFilter, setStatusFilter] = useState('DUE'); // DUE, SENT, REPLIED
+  const [statusFilter, setStatusFilter] = useState('DUE');
   const [selectedIds, setSelectedIds] = useState([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
   const [editedDraft, setEditedDraft] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [systemSettings, setSystemSettings] = useState({ auto_followup: false, outreach_daily_limit: 999999 });
+  const [systemSettings, setSystemSettings] = useState({ auto_followup: false, outreach_daily_limit: 2000 });
   const perPage = 100;
 
-  useEffect(() => { 
-    if (page === 1) {
-      fetchFollowups(1); 
-    } else {
-      setPage(1); 
-    }
+  const showNotification = useCallback((type, message) => {
+    setNotification({ type, message });
+    setTimeout(() => setNotification(null), 5000);
+  }, []);
+
+  // Debounce search query
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [searchQuery]);
+
+  // Read user's team from localStorage (set by login endpoint or Prompts page toggle)
+  useEffect(() => {
+    const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const resolvedTeam = (storedUser.team || 'CLIENT').toUpperCase();
+    setUserTeam(resolvedTeam);
+    if (resolvedTeam === 'INVESTOR') setTypeFilter('Investor');
+    else if (resolvedTeam === 'CLIENT') setTypeFilter('Client');
+  }, []);
+
+  // Fetch system settings once on mount
+  useEffect(() => {
+    const fetchSystemSettings = async () => {
+      try {
+        const res = await api.get('/api/admin/stats/settings');
+        setSystemSettings({
+          auto_followup: res.data.auto_followup,
+          outreach_daily_limit: res.data.outreach_daily_limit || 2000
+        });
+      } catch {
+        showNotification('error', 'Failed to load system settings');
+      }
+    };
     fetchSystemSettings();
-  }, [searchQuery, typeFilter, stageFilter, statusFilter]);
+  }, []);
 
-  const fetchSystemSettings = async () => {
-    try {
-      const res = await api.get('/api/admin/stats/settings');
-      setSystemSettings({
-        auto_followup: res.data.auto_followup,
-        outreach_daily_limit: 999999
-      });
-    } catch {}
-  };
+  // Fetch followups when filters, search, or page change
+  const fetchFollowups = useCallback(async (pageNum = 1) => {
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
-  const handleUpdateSettings = async (auto) => {
-    setSystemSettings({ auto_followup: auto, outreach_daily_limit: 999999 });
-    try {
-      await api.post('/api/admin/stats/settings', { 
-        auto_followup: auto, 
-        outreach_daily_limit: 999999
-      });
-      showNotification('success', `Auto-Pilot ${auto ? 'ON' : 'OFF'}`);
-    } catch {
-      showNotification('error', 'Failed to update settings');
-    }
-  };
-
-  useEffect(() => { fetchFollowups(page); }, [page]);
-
-  const fetchFollowups = async (pageNum = 1) => {
     try {
       setIsLoading(true);
       const params = {
         page: pageNum,
         per_page: perPage,
-        search: searchQuery || undefined,
+        search: debouncedSearch || undefined,
         type: typeFilter === 'All' ? undefined : typeFilter,
         status: statusFilter === 'DUE' ? undefined : statusFilter,
       };
 
-      // Map stage filter to numeric stage
       if (stageFilter !== 'All') {
         if (statusFilter === 'IN_PROGRESS') {
           const match = stageFilter.match(/Stage (\d+)/);
           if (match) params.stage = parseInt(match[1]);
         } else {
-          const currentConfigs = STAGE_CONFIGS[typeFilter];
+          const currentConfigs = getStageConfigs(typeFilter);
           const config = currentConfigs.find(c => c.label === stageFilter);
           if (config) {
             params.stage = config.stage;
@@ -193,94 +117,118 @@ const Followups = () => {
         }
       }
 
-      const res = await api.get('/api/leads/followups', { params });
+      const res = await api.get('/api/leads/followups', { params, signal: controller.signal });
       setFollowups(res.data.leads || []);
       setTotal(res.data.total || 0);
-      setSelectedIds([]); 
+      setSelectedIds([]);
     } catch (err) {
-      showNotification('error', 'Failed to load active follow-ups');
+      if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED') {
+        showNotification('error', 'Failed to load active follow-ups');
+      }
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [debouncedSearch, typeFilter, stageFilter, statusFilter, perPage, showNotification]);
 
-  const handleSaveDraft = async () => {
+  // Reset to page 1 and fetch when filters change
+  useEffect(() => {
+    setPage(1);
+    fetchFollowups(1);
+  }, [debouncedSearch, typeFilter, stageFilter, statusFilter, fetchFollowups]);
+
+  // Fetch when page changes (but not on initial page=1, handled by filter effect)
+  useEffect(() => {
+    if (page > 1) {
+      fetchFollowups(page);
+    }
+  }, [page]);
+
+  const handleUpdateSettings = useCallback(async (auto) => {
+    setSystemSettings(prev => ({ ...prev, auto_followup: auto }));
+    try {
+      await api.post('/api/admin/stats/settings', {
+        auto_followup: auto,
+        outreach_daily_limit: systemSettings.outreach_daily_limit
+      });
+      showNotification('success', `Auto-Pilot ${auto ? 'ON' : 'OFF'}`);
+    } catch {
+      showNotification('error', 'Failed to update settings');
+      setSystemSettings(prev => ({ ...prev, auto_followup: !auto }));
+    }
+  }, [systemSettings.outreach_daily_limit, showNotification]);
+
+  const handleSaveDraft = useCallback(async () => {
     if (!selectedLead) return;
     try {
       setIsSaving(true);
-      await api.post(`/api/leads/${selectedLead.id}/save-followup-draft`, { 
-        custom_body: editedDraft 
+      await api.post(`/api/leads/${selectedLead.id}/save-followup-draft`, {
+        custom_body: editedDraft
       });
-      
-      // Re-fetch preview to show the updated HTML with signature
       const res = await api.get(`/api/leads/${selectedLead.id}/followup-preview`);
       if (res.data?.full_html) {
-        setSelectedLead(prev => ({ 
-          ...prev, 
+        setSelectedLead(prev => ({
+          ...prev,
           followup_draft: res.data.full_html,
           followup_subject: res.data.subject || prev.followup_subject || 'Following up'
         }));
       }
-      
       showNotification('success', 'Draft saved successfully');
       setIsEditing(false);
-    } catch { showNotification('error', 'Failed to save draft'); }
-    finally { setIsSaving(false); }
-  };
+    } catch {
+      showNotification('error', 'Failed to save draft');
+    } finally {
+      setIsSaving(false);
+    }
+  }, [selectedLead, editedDraft, showNotification]);
 
-  const handleApproveFollowup = async (leadId) => {
+  const handleApproveFollowup = useCallback(async (leadId) => {
     try {
-      await api.post(`/api/leads/${leadId}/approve-followup`, { 
-        custom_body: isEditing ? editedDraft : undefined 
+      await api.post(`/api/leads/${leadId}/approve-followup`, {
+        custom_body: isEditing ? editedDraft : undefined
       });
       showNotification('success', 'Follow-up sent successfully!');
       fetchFollowups(page);
       setIsModalOpen(false);
       setIsEditing(false);
-    } catch { showNotification('error', 'Failed to send follow-up.'); }
-  };
+    } catch {
+      showNotification('error', 'Failed to send follow-up.');
+    }
+  }, [isEditing, editedDraft, page, showNotification, fetchFollowups]);
 
-  const handleBulkSend = async () => {
+  const handleBulkSend = useCallback(async () => {
     if (selectedIds.length === 0) return;
-    const idsToSend = [...selectedIds]; // Keep local copy for the API call
+    const idsToSend = [...selectedIds];
     try {
       setIsBulkSending(true);
-      setSelectedIds([]); // Clear selection immediately
       setProgress(10);
-      
-      // Simulate progress while calling API
+
       const interval = setInterval(() => {
         setProgress(prev => prev < 90 ? prev + 5 : prev);
       }, 300);
 
       const res = await api.post('/api/leads/bulk-approve-followups', { lead_ids: idsToSend });
-      
+
       clearInterval(interval);
       setProgress(100);
-      
+      setSelectedIds([]);
+
       const successCount = res.data.success?.length || 0;
       const failCount = res.data.failed?.length || 0;
-      
+
       setTimeout(() => {
         setIsBulkSending(false);
         setProgress(0);
-        showNotification('success', `Matrix Dispatch Complete: ${successCount} sent.`);
+        showNotification('success', `Matrix Dispatch Complete: ${successCount} sent${failCount > 0 ? `, ${failCount} failed` : ''}.`);
         fetchFollowups();
       }, 1000);
-      
     } catch (err) {
       setIsBulkSending(false);
       setProgress(0);
       showNotification('error', err?.response?.data?.detail || 'Matrix Dispatch Error');
     }
-  };
+  }, [selectedIds, showNotification, fetchFollowups]);
 
-  const showNotification = (type, message) => {
-    setNotification({ type, message });
-    setTimeout(() => setNotification(null), 5000);
-  };
-
-  const openLeadDetails = async (lead) => {
+  const openLeadDetails = useCallback(async (lead) => {
     setSelectedLead({
       ...lead,
       followup_subject: lead.last_outreach_subject || 'Following up'
@@ -290,40 +238,43 @@ const Followups = () => {
     try {
       const res = await api.get(`/api/leads/${lead.id}/followup-preview`);
       if (res.data?.full_html) {
-        setSelectedLead(prev => ({ 
-          ...prev, 
+        setSelectedLead(prev => ({
+          ...prev,
           followup_draft: res.data.full_html,
           followup_subject: res.data.subject || prev.followup_subject || 'Following up'
         }));
         setEditedDraft(res.data.body || '');
       }
-    } catch {}
-  };
-
-  const toggleSelect = (id) => {
-    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  };
-
-  const toggleSelectAll = (filteredLeads) => {
-    if (selectedIds.length === filteredLeads.length) {
-      setSelectedIds([]);
-    } else {
-      setSelectedIds(filteredLeads.map(f => f.id));
+    } catch {
+      showNotification('error', 'Failed to load follow-up preview');
     }
-  };
+  }, [showNotification]);
 
-  const leadsToDisplay = followups; // Now handled by server-side filtering
+  const toggleSelect = useCallback((id) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds(prev => prev.length === followups.length ? [] : followups.map(f => f.id));
+  }, [followups]);
+
+  const formatDate = useCallback((dateStr, options = {}) => {
+    const d = parseUtcDate(dateStr);
+    if (!d) return 'Never';
+    return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', ...options });
+  }, [parseUtcDate]);
+
+  const totalPages = Math.ceil(total / perPage);
 
   return (
     <div className="min-h-screen bg-[#0a0f1a] text-slate-200 pb-24">
-      {/* Matrix Dispatch Drawer */}
       {isBulkSending && (
         <div className="fixed top-0 right-0 w-[400px] h-full bg-[#0f172a] border-l border-white/10 z-[100] shadow-2xl animate-in slide-in-from-right duration-500 flex flex-col">
           <div className="p-8 border-b border-white/5 bg-[#131b2e]">
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-xl font-black text-white tracking-tighter italic uppercase">System Matrix Dispatch</h2>
               <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center">
-                <ChevronsRight className="w-4 h-4 text-slate-400" />
+                <Cpu className="w-4 h-4 text-slate-400" />
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -347,14 +298,14 @@ const Followups = () => {
                 </div>
                 <span className="text-sm font-black text-indigo-400 italic">{progress}%</span>
               </div>
-              
+
               <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                <div 
+                <div
                   className="h-full bg-gradient-to-r from-indigo-600 to-purple-600 transition-all duration-500 ease-out shadow-[0_0_20px_rgba(79,70,229,0.5)]"
                   style={{ width: `${progress}%` }}
                 />
               </div>
-              
+
               <div className="mt-4 flex items-center gap-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">In Progress</span>
@@ -385,7 +336,6 @@ const Followups = () => {
         </div>
       )}
 
-      {/* Header */}
       <div className="border-b border-white/[0.05] bg-[#0f172a]/50 backdrop-blur-xl sticky top-0 z-40">
         <div className="max-w-[1600px] mx-auto px-8 h-24 flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -397,9 +347,8 @@ const Followups = () => {
               <p className="text-[11px] text-slate-500 font-bold uppercase tracking-[2px] mt-0.5">Manual Approval Required</p>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-6">
-            {/* Auto-Pilot Settings Panel */}
             <div className="bg-[#131722] border border-white/[0.05] rounded-xl px-4 py-2 flex items-center gap-4 shadow-xl">
               <div className="flex items-center gap-3">
                 <div className={`w-2 h-2 rounded-full ${systemSettings.auto_followup ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`} />
@@ -412,32 +361,18 @@ const Followups = () => {
                 </button>
               </div>
             </div>
-
-            <div className="relative group">
-              <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-                <Search className="w-4 h-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
-              </div>
-              <input
-                type="text"
-                placeholder="Search sequences..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-[#131722] border border-white/[0.05] rounded-xl pl-12 pr-6 py-3 w-[280px] text-[13px] font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/30 transition-all placeholder:text-slate-600"
-              />
-            </div>
           </div>
         </div>
       </div>
 
       <div className="max-w-[1600px] mx-auto px-8 py-8">
-        {/* Filters */}
         <div className="flex flex-wrap items-center gap-6 mb-6 p-5 bg-[#0f172a] border border-white/[0.05] rounded-2xl">
           <div className="flex items-center gap-2">
             <Filter className="w-4 h-4 text-slate-500" />
             <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">Lead Type</span>
           </div>
           <div className="flex gap-2">
-            {TYPE_FILTERS.map(t => (
+            {(userTeam ? LEAD_TYPES.filter(t => t.toUpperCase() === userTeam) : LEAD_TYPES).map(t => (
               <button
                 key={t}
                 onClick={() => { setTypeFilter(t); setStageFilter('All'); }}
@@ -463,7 +398,7 @@ const Followups = () => {
             <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">Status</span>
           </div>
           <div className="flex gap-2">
-            {['DUE', 'SENT', 'REPLIED', 'IN PROGRESS', 'STOPPED'].map(s => (
+            {STATUS_OPTIONS.map(s => (
               <button
                 key={s}
                 onClick={() => { setStatusFilter(s === 'IN PROGRESS' ? 'IN_PROGRESS' : s); setStageFilter('All'); }}
@@ -497,7 +432,7 @@ const Followups = () => {
             >
               All
             </button>
-            {(statusFilter === 'IN_PROGRESS' ? [1,2,3].map(s => ({ label: `Stage ${s}`, stage: s })) : STAGE_CONFIGS[typeFilter]).map(s => (
+            {(statusFilter === 'IN_PROGRESS' ? [1,2,3].map(s => ({ label: `Stage ${s}`, stage: s })) : getStageConfigs(typeFilter)).map(s => (
               <button
                 key={s.label}
                 onClick={() => setStageFilter(s.label)}
@@ -519,7 +454,6 @@ const Followups = () => {
           )}
         </div>
 
-        {/* Search Bar */}
         <div className="relative mb-4">
           <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
             <Search className="w-4 h-4 text-slate-500" />
@@ -533,15 +467,14 @@ const Followups = () => {
           />
         </div>
 
-        {/* List Actions */}
         <div className="flex items-center justify-between mb-4 px-2">
           <div className="flex items-center gap-3">
             <button
-              onClick={() => toggleSelectAll(leadsToDisplay)}
+              onClick={toggleSelectAll}
               className="flex items-center gap-2 text-[11px] font-black text-slate-500 uppercase tracking-widest hover:text-white transition-colors cursor-pointer"
             >
-              {selectedIds.length === leadsToDisplay.length && leadsToDisplay.length > 0 ? <CheckSquare className="w-4 h-4 text-indigo-400" /> : <Square className="w-4 h-4" />}
-              {selectedIds.length === leadsToDisplay.length && leadsToDisplay.length > 0 ? 'Deselect All' : 'Select All'}
+              {selectedIds.length === followups.length && followups.length > 0 ? <CheckSquare className="w-4 h-4 text-indigo-400" /> : <Square className="w-4 h-4" />}
+              {selectedIds.length === followups.length && followups.length > 0 ? 'Deselect All' : 'Select All'}
             </button>
             <span className="text-slate-700">|</span>
             <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
@@ -551,13 +484,12 @@ const Followups = () => {
           </div>
         </div>
 
-        {/* Content */}
         {isLoading ? (
           <div className="h-[400px] flex flex-col items-center justify-center gap-4">
             <Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />
             <p className="text-xs font-bold text-slate-500 uppercase tracking-[2px]">Syncing pipeline...</p>
           </div>
-        ) : leadsToDisplay.length === 0 ? (
+        ) : followups.length === 0 ? (
           <div className="bg-[#0f172a] border border-white/[0.05] rounded-3xl p-20 flex flex-col items-center justify-center text-center space-y-6">
             <History className="w-10 h-10 text-slate-600" />
             <h3 className="text-lg font-black text-white uppercase italic">No Sequences Found</h3>
@@ -565,10 +497,22 @@ const Followups = () => {
         ) : (
           <>
           <div className="grid grid-cols-1 gap-3">
-            {leadsToDisplay.map((lead) => {
+            {followups.map((lead) => {
               const lt = getLeadType(lead);
+              const ltUpper = lt.toUpperCase();
               const isInvestor = lt === 'Investor';
               const isSelected = selectedIds.includes(lead.id);
+              const maxStage = lead.max_followup_stage || FOLLOWUP_CONFIG[ltUpper]?.maxStages || 3;
+              const isCompleted = lead.followup_status === 'COMPLETED' || lead.followup_stage >= maxStage;
+              const config = FOLLOWUP_CONFIG[ltUpper];
+              const stageLabel = lead.followup_status === 'COMPLETED' || lead.followup_stage >= maxStage
+                ? 'Completed'
+                : statusFilter === 'IN_PROGRESS'
+                  ? `Stage ${lead.followup_stage}/${maxStage}`
+                  : config
+                    ? config.getStageLabel(lead.followup_stage)
+                    : getStageLabel(lead);
+
               return (
                 <div
                   key={lead.id}
@@ -592,27 +536,25 @@ const Followups = () => {
                           <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${isInvestor ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20'}`}>
                             {lt}
                           </span>
-                          <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-md border ${lead.followup_status === 'COMPLETED' || lead.followup_stage >= (lead.max_followup_stage || 3) ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : getStageColor(statusFilter === 'SENT' ? Math.max(0, lead.followup_stage - 1) : lead.followup_stage)}`}>
-                            {lead.followup_status === 'COMPLETED' || lead.followup_stage >= (lead.max_followup_stage || 3) ? 'Completed' : statusFilter === 'IN_PROGRESS' ? `Stage ${lead.followup_stage}/${lead.max_followup_stage || 3}` : getStageLabel(lead.followup_stage, lead, statusFilter)}
+                          <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-md border ${isCompleted ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : getStageColor(lead.followup_stage)}`}>
+                            {stageLabel}
                           </span>
                           {statusFilter === 'IN_PROGRESS' && (
-                            <>
-                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border ${lead.followup_stage >= (lead.max_followup_stage || 3) ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}`}>
-                                {lead.followup_stage}x sent
-                              </span>
-                              {(lead.first_outreach_at || lead.last_outreach_at) && (
-                                <span className="text-[10px] font-black px-2 py-0.5 rounded-md border bg-amber-500/10 text-amber-400 border-amber-500/20">
-                                  {(() => {
-                                    const d = new Date(lead.first_outreach_at || lead.last_outreach_at);
-                                    if (isNaN(d.getTime())) return '';
-                                    const now = new Date();
-                                    const diff = now.getTime() - d.getTime();
-                                    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-                                    return `${days}d`;
-                                  })()}
-                                </span>
-                              )}
-                            </>
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border ${isCompleted ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}`}>
+                              {lead.followup_stage}x sent
+                            </span>
+                          )}
+                          {(lead.first_outreach_at || lead.last_outreach_at) && (
+                            <span className="text-[10px] font-black px-2 py-0.5 rounded-md border bg-amber-500/10 text-amber-400 border-amber-500/20">
+                              {(() => {
+                                const d = new Date(lead.first_outreach_at || lead.last_outreach_at);
+                                if (isNaN(d.getTime())) return '';
+                                const now = new Date();
+                                const diff = now.getTime() - d.getTime();
+                                const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                                return `${days}d`;
+                              })()}
+                            </span>
                           )}
                         </div>
                         {lead.last_outreach_subject && (
@@ -623,18 +565,18 @@ const Followups = () => {
                         )}
                         <div className="flex items-center gap-3 text-[12px] font-bold text-slate-500">
                           <span className="flex items-center gap-1.5 text-slate-300">
-                            <Building2 className="w-3.5 h-3.5 text-indigo-400" /> 
+                            <Building2 className="w-3.5 h-3.5 text-indigo-400" />
                             {lead.company_name || 'Independent'}
                           </span>
                           <span className="w-1 h-1 rounded-full bg-slate-700" />
                           <div className="flex flex-col gap-1 py-1 px-2 rounded-lg bg-white/[0.03]">
                             <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500">
                               <Calendar className="w-3 h-3 text-slate-600" />
-                              <span>Initial Outreach: {lead.first_outreach_at ? parseUtcDate(lead.first_outreach_at)?.toLocaleString('en-IN', { day: '2-digit', month: 'short' }) : 'Never'}</span>
+                              <span>Initial Outreach: {formatDate(lead.first_outreach_at)}</span>
                             </div>
                             <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400">
                               <Clock className="w-3 h-3 text-slate-600" />
-                              <span>Last Outreach: {lead.last_outreach_at ? parseUtcDate(lead.last_outreach_at)?.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Never'}</span>
+                              <span>Last Outreach: {formatDate(lead.last_outreach_at, { hour: '2-digit', minute: '2-digit' })}</span>
                             </div>
                           </div>
                         </div>
@@ -642,20 +584,22 @@ const Followups = () => {
                     </div>
 
                     <div className="flex items-center gap-3">
-                      {statusFilter === 'IN_PROGRESS' && (
-                        <div className="flex flex-col items-end gap-1">
-                          <div className="flex items-center gap-1">
-                            {[...Array(lead.max_followup_stage || 3)].map((_, i) => { const s = i + 1; const isComplete = lead.followup_status === 'COMPLETED' || lead.followup_stage >= (lead.max_followup_stage || 3); return (
-                              <div key={s} className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black border transition-all ${isComplete ? 'bg-emerald-500/30 border-emerald-500/60 text-emerald-300' : lead.followup_stage >= s ? 'bg-indigo-500/30 border-indigo-500/60 text-indigo-300' : 'bg-white/5 border-white/10 text-slate-600'}`}>
+                      <div className="flex flex-col items-end gap-1">
+                        <div className="flex items-center gap-1">
+                          {[...Array(maxStage)].map((_, i) => {
+                            const s = i + 1;
+                            const isStageComplete = isCompleted || lead.followup_stage >= s;
+                            return (
+                              <div key={s} className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black border transition-all ${isStageComplete ? 'bg-emerald-500/30 border-emerald-500/60 text-emerald-300' : lead.followup_stage >= s ? 'bg-indigo-500/30 border-indigo-500/60 text-indigo-300' : 'bg-white/5 border-white/10 text-slate-600'}`}>
                                 {s}
                               </div>
-                            )})}
-                          </div>
-                          <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md ${lead.followup_status === 'COMPLETED' || lead.followup_stage >= (lead.max_followup_stage || 3) ? 'bg-emerald-500/10 text-emerald-400' : lead.followup_stage >= 2 ? 'bg-amber-500/10 text-amber-400' : 'bg-indigo-500/10 text-indigo-400'}`}>
-                            {lead.followup_status === 'COMPLETED' || lead.followup_stage >= (lead.max_followup_stage || 3) ? 'Completed' : `Stage ${lead.followup_stage}/${lead.max_followup_stage || 3}`}
-                          </span>
+                            );
+                          })}
                         </div>
-                      )}
+                        <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md ${isCompleted ? 'bg-emerald-500/10 text-emerald-400' : lead.followup_stage >= 2 ? 'bg-amber-500/10 text-amber-400' : 'bg-indigo-500/10 text-indigo-400'}`}>
+                          {isCompleted ? 'Completed' : `Stage ${lead.followup_stage}/${maxStage}`}
+                        </span>
+                      </div>
                       <button
                         onClick={(e) => { e.stopPropagation(); openLeadDetails(lead); }}
                         className="p-2.5 bg-[#1a2235] text-slate-400 rounded-xl border border-white/[0.05] hover:text-white hover:border-white/20 transition-all cursor-pointer"
@@ -677,8 +621,7 @@ const Followups = () => {
             })}
           </div>
 
-          {/* Pagination */}
-          {total > perPage && (
+          {totalPages > 1 && (
             <div className="mt-8 flex items-center justify-center gap-4">
               <button
                 disabled={page === 1}
@@ -688,7 +631,7 @@ const Followups = () => {
                 Previous
               </button>
               <div className="flex items-center gap-2">
-                {[...Array(Math.ceil(total / perPage))].map((_, i) => (
+                {[...Array(totalPages)].map((_, i) => (
                   <button
                     key={i}
                     onClick={() => setPage(i + 1)}
@@ -703,7 +646,7 @@ const Followups = () => {
                 ))}
               </div>
               <button
-                disabled={page === Math.ceil(total / perPage)}
+                disabled={page === totalPages}
                 onClick={() => setPage(p => p + 1)}
                 className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all text-[11px] font-black uppercase tracking-widest cursor-pointer"
               >
@@ -715,7 +658,6 @@ const Followups = () => {
         )}
       </div>
 
-      {/* Modal */}
       {isModalOpen && selectedLead && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center px-4">
           <div className="absolute inset-0 bg-black/90 backdrop-blur-md" onClick={() => setIsModalOpen(false)} />
@@ -732,7 +674,7 @@ const Followups = () => {
                       {getLeadType(selectedLead)}
                     </span>
                     <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-md border ${getStageColor(selectedLead.followup_stage)}`}>
-                      {getStageLabel(selectedLead.followup_stage, selectedLead)}
+                      {getStageLabel(selectedLead)}
                     </span>
                   </div>
                 </div>
@@ -743,7 +685,6 @@ const Followups = () => {
             </div>
 
             <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto">
-              {/* Display Subject Line */}
               <div className="bg-white/[0.02] border border-white/[0.05] rounded-2xl px-6 py-4 flex flex-col gap-1.5 relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500/60" />
                 <span className="text-[10px] font-black text-slate-500 uppercase tracking-[2px]">Email Subject</span>
@@ -754,14 +695,14 @@ const Followups = () => {
 
               <div className="flex items-center justify-between px-2">
                 <span className="text-[10px] font-black text-slate-500 uppercase tracking-[2px]">Message Draft</span>
-                <button 
+                <button
                   onClick={() => setIsEditing(!isEditing)}
                   className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase transition-all ${isEditing ? 'bg-indigo-500 text-white' : 'bg-white/5 text-slate-400 hover:text-white'}`}
                 >
-                  {isEditing ? 'Preview Mode' : '✏️ Edit Draft'}
+                  {isEditing ? 'Preview Mode' : 'Edit Draft'}
                 </button>
               </div>
-              
+
               {isEditing ? (
                 <textarea
                   value={editedDraft}
@@ -808,7 +749,6 @@ const Followups = () => {
         </div>
       )}
 
-      {/* Floating Bottom Action Bar */}
       {selectedIds.length > 0 && !isBulkSending && (
         <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[50] animate-in slide-in-from-bottom-10 duration-300">
           <div className="bg-[#131b2e]/80 backdrop-blur-2xl border border-indigo-500/30 rounded-2xl px-6 py-4 shadow-[0_0_50px_rgba(79,70,229,0.3)] flex items-center gap-6">
@@ -836,7 +776,7 @@ const Followups = () => {
       )}
 
       {notification && (
-        <div className={`fixed bottom-8 left-1/2 -translate-x-1/2 px-8 py-4 rounded-2xl border backdrop-blur-xl shadow-2xl flex items-center gap-4 z-[100] animate-in fade-in slide-in-from-bottom-5 duration-500 ${notification.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'}`}>
+        <div className={`fixed bottom-8 left-1/2 -translate-x-1/2 px-8 py-4 rounded-2xl border backdrop-blur-xl shadow-2xl flex items-center gap-4 z-[110] animate-in fade-in slide-in-from-bottom-5 duration-500 ${notification.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'}`}>
           {notification.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
           <p className="text-sm font-black uppercase tracking-wide">{notification.message}</p>
         </div>

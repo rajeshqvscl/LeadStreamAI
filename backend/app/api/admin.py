@@ -292,10 +292,11 @@ async def dispatch_admin_report(user_id: Optional[str] = Header(None, alias="X-U
                 <div>🚀 {sent_line}</div>
               </div>
               <div style="display:table;width:100%;margin-top:16px;border-top:1px solid #21262d;padding-top:14px;">
-                {''.join(f"""<div style="display:table-cell;text-align:center;">
-                  <div style="font-size:9px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;font-weight:800;">{lbl}</div>
-                  <div style="font-size:18px;font-weight:900;color:{clr};margin-top:4px;">{val}</div>
-                </div>""" for lbl, val, clr in [
+                {''.join(
+                  '<div style="display:table-cell;text-align:center;">'
+                  '<div style="font-size:9px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;font-weight:800;">' + lbl + '</div>'
+                  '<div style="font-size:18px;font-weight:900;color:' + clr + ';margin-top:4px;">' + str(val) + '</div>'
+                  '</div>' for lbl, val, clr in [
                     ('Total', total, '#c9d1d9'),
                     ('Drafted', drafted, '#a371f7'),
                     ('Pending', pending, '#e3b341'),
