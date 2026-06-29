@@ -144,10 +144,7 @@ _TEMPLATE_ATTACHMENT_MAP = {
         "QVSCL Company Profile.pdf",
         _HOSPITAL_TEASER_FILE,
     ],
-    "yashika_draft_ai_tech": [
-        "QVSCL Company Profile.pdf",
-        "Lalit_Huria_Profile.pdf",
-    ],
+    "yashika_draft_ai_tech": [],
     "palak_mam_corporate_advisory": [
         "QVSCL Company Profile.pdf",
     ],

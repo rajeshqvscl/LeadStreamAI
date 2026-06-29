@@ -109,6 +109,9 @@ For more details about our services:
 
 Looking forward to your response.
 
+QVSCL Profile: [Company Profile](https://drive.google.com/file/d/1Z2QPI0M9hBGjLx9Vu_wktfLp6aTvhD1S/view)
+Managing Partner Profile: [Mr. Lalit Hhuria](https://drive.google.com/file/d/1zoXE6-m1AUMpvJkm31EZZOclKd7w-DZM/view)
+
 SIG_START
 --
 Thanks & Regards,

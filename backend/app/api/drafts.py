@@ -150,6 +150,9 @@ For more details about our services:
 
 Looking forward to your response.
 
+QVSCL Profile: [Company Profile](https://drive.google.com/file/d/1Z2QPI0M9hBGjLx9Vu_wktfLp6aTvhD1S/view)
+Managing Partner Profile: [Mr. Lalit Hhuria](https://drive.google.com/file/d/1zoXE6-m1AUMpvJkm31EZZOclKd7w-DZM/view)
+
 SIG_START
 --
 Thanks & Regards,
@@ -1792,6 +1795,9 @@ For more details about our services:
 
 Looking forward to your response.
 
+QVSCL Profile: [Company Profile](https://drive.google.com/file/d/1Z2QPI0M9hBGjLx9Vu_wktfLp6aTvhD1S/view)
+Managing Partner Profile: [Mr. Lalit Hhuria](https://drive.google.com/file/d/1zoXE6-m1AUMpvJkm31EZZOclKd7w-DZM/view)
+
 SIG_START
 --
 Thanks & Regards,
@@ -2542,10 +2548,7 @@ TEMPLATE_ATTACHMENT_MAP = {
         {"name": "QVSCL Company Profile.pdf",                                        "size": "1.7 MB",  "type": "application/pdf"},
         {"name": "eastern_up_hospital_investor_teaser_v5b_investorfriendly (2).pdf", "size": "202 KB", "type": "application/pdf"},
     ],
-    "yashika_draft_ai_tech": [
-        {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
-        {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
-    ],
+    "yashika_draft_ai_tech": [],
     "yashika_draft_agritech": [],
     "kajal_mam_agritech": [
         {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
