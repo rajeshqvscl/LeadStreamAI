@@ -39,7 +39,7 @@ def login(req: LoginRequest):
     cur = conn.cursor()
     
     # Query user by username (case-insensitive)
-    cur.execute("SELECT id, username, email, full_name, password_hash, role, team, is_active, is_approved FROM users WHERE LOWER(username) = LOWER(%s)", (username,))
+    cur.execute("SELECT id, username, email, full_name, password_hash, role, team, is_active, is_approved, signature, signature_mode FROM users WHERE LOWER(username) = LOWER(%s)", (username,))
 
     user = cur.fetchone()
     
@@ -60,7 +60,7 @@ def login(req: LoginRequest):
     # Verification removed: Users stay approved once an admin activates them.
 
     return {
-        "access_token": "dummy_token", # In a real app, generate a JWT here
+        "access_token": "dummy_token",
         "token_type": "bearer",
         "user": {
             "id": user['id'],
@@ -69,7 +69,9 @@ def login(req: LoginRequest):
             "full_name": user['full_name'],
             "role": user['role'],
             "team": user.get('team') or 'CLIENT',
-            "is_approved": user['is_approved']
+            "is_approved": user['is_approved'],
+            "signature": user.get('signature'),
+            "signature_mode": user.get('signature_mode') or 'custom'
         }
     }
 
@@ -110,7 +112,7 @@ def get_current_user(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
-        cur.execute("SELECT id, username, email, full_name, role, team, is_active, is_approved, google_linked_at, google_email, credits_used, COALESCE(credits_limit, 200) as credits_limit FROM users WHERE id = %s", (real_uid,))
+        cur.execute("SELECT id, username, email, full_name, role, team, is_active, is_approved, google_linked_at, google_email, credits_used, COALESCE(credits_limit, 200) as credits_limit, signature, signature_mode FROM users WHERE id = %s", (real_uid,))
         user = cur.fetchone()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
@@ -141,12 +143,59 @@ def update_team(req: TeamUpdateRequest, user_id: Optional[str] = Header(None, al
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
-        cur.execute("UPDATE users SET team = %s, updated_at = NOW() WHERE id = %s RETURNING id, username, email, full_name, role, team, is_active, is_approved", (team, real_uid))
+        cur.execute("UPDATE users SET team = %s, updated_at = NOW() WHERE id = %s RETURNING id, username, email, full_name, role, team, is_active, is_approved, signature, signature_mode", (team, real_uid))
         user = cur.fetchone()
         conn.commit()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         return dict(user)
+    finally:
+        cur.close()
+        conn.close()
+
+class SignatureUpdateRequest(BaseModel):
+    signature: str
+
+@router.put("/auth/signature")
+def update_signature(req: SignatureUpdateRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Updates the current user's custom signature."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    real_uid = user_id if user_id and user_id.isdigit() else "1"
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("UPDATE users SET signature = %s WHERE id = %s", (req.signature, real_uid))
+        conn.commit()
+        return {"message": "Signature updated successfully"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+class SignatureModeUpdateRequest(BaseModel):
+    signature_mode: str
+
+@router.put("/auth/signature-mode")
+def update_signature_mode(req: SignatureModeUpdateRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Sets whether to use the custom signature or the auto-generated one."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    mode = req.signature_mode
+    if mode not in ('custom', 'auto'):
+        raise HTTPException(status_code=400, detail="signature_mode must be 'custom' or 'auto'")
+    real_uid = user_id if user_id and user_id.isdigit() else "1"
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("UPDATE users SET signature_mode = %s WHERE id = %s", (mode, real_uid))
+        conn.commit()
+        return {"message": "Signature mode updated", "signature_mode": mode}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
         conn.close()

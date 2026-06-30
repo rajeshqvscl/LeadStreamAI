@@ -232,29 +232,32 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     # Detect follow-up by thread_id OR by Re: prefix in subject (handles case where thread_id is NULL in DB)
     is_followup = bool(thread_id or in_reply_to or (subject and subject.strip().lower().startswith('re:')))
     
-    if not attachments:
-        attachments = []
-        if not is_followup:
-            asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
-            profile_files = [] if is_vismaya else _get_attachment_files_for_subject(subject, template_name)
-            
-            logger.info(f"Looking for attachments in: {asset_dir}")
-            for filename in profile_files:
-                path = asset_dir / filename
-                if path.exists():
-                    import base64
-                    with open(path, "rb") as f:
-                        content_bytes = f.read()
-                        content_b64 = base64.b64encode(content_bytes).decode('utf-8')
-                    attachments.append({
-                        "content": content_b64,
-                        "filename": filename
-                    })
-                    logger.info(f"Loaded attachment successfully: {filename}")
-                else:
-                    logger.error(f"Attachment NOT FOUND directly at: {path}")
-        else:
-            logger.info("Outreach is a follow-up email thread. Default PDF attachments skipped.")
+    # Merge any provided attachments with default profile attachments
+    merged_attachments = list(attachments) if attachments else []
+    if not is_followup:
+        asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
+        profile_files = [] if is_vismaya else _get_attachment_files_for_subject(subject, template_name)
+        
+        logger.info(f"Looking for attachments in: {asset_dir}")
+        for filename in profile_files:
+            if any(a.get('filename') == filename for a in merged_attachments):
+                continue
+            path = asset_dir / filename
+            if path.exists():
+                import base64
+                with open(path, "rb") as f:
+                    content_bytes = f.read()
+                    content_b64 = base64.b64encode(content_bytes).decode('utf-8')
+                merged_attachments.append({
+                    "content": content_b64,
+                    "filename": filename
+                })
+                logger.info(f"Loaded attachment successfully: {filename}")
+            else:
+                logger.error(f"Attachment NOT FOUND directly at: {path}")
+    else:
+        logger.info("Outreach is a follow-up email thread. Default PDF attachments skipped.")
+    attachments = merged_attachments
 
     # 2. Attempt Gmail API Dispatch (Highly Preferred for Outreach)
     if user_id and not is_system_email:
@@ -530,32 +533,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                     "List-Unsubscribe": f"<{unsub_url}>"
                 }
             
-            # Attach default profiles from assets
-            if not attachments:
-                attachments = []
-                # Correct path: email_service.py is in backend/app/services/
-                # .parent = backend/app/services/
-                # .parent.parent = backend/app/
-                # .parent.parent.parent = backend/
-                asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
-                profile_files = [] if is_vismaya else _get_attachment_files_for_subject(subject, template_name)
-                
-                logger.info(f"Looking for attachments in: {asset_dir}")
-                
-                for filename in profile_files:
-                    path = asset_dir / filename
-                    if path.exists():
-                        import base64
-                        with open(path, "rb") as f:
-                            content_bytes = f.read()
-                            content_b64 = base64.b64encode(content_bytes).decode()
-                        attachments.append({
-                            "content": content_b64,
-                            "filename": filename
-                        })
-                        logger.info(f"Attached successfully: {filename}")
-                    else:
-                        logger.error(f"Attachment NOT FOUND directly at: {path}")
+            # Attachments already merged above with profile defaults
 
             if attachments:
                 params["attachments"] = attachments

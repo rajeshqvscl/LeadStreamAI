@@ -108,6 +108,14 @@ ALLOWED_IMAGE_TYPES = {
     'image/svg+xml': '.svg',
 }
 
+ALLOWED_DOCUMENT_TYPES = {
+    'application/pdf': '.pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+    'application/msword': '.doc',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+    'application/vnd.ms-excel': '.xls',
+}
+
 @router.post("/upload-image")
 def upload_image(file: UploadFile = File(...)):
     """Upload an image to the assets folder and return its URL path."""
@@ -124,6 +132,208 @@ def upload_image(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, f)
     backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
     return {"filename": dest_name, "url": f"{backend_url}/assets/{dest_name}"}
+
+@router.post("/upload-file")
+def upload_file(file: UploadFile = File(...)):
+    """Upload a document file (PDF, DOCX, XLSX) to the assets folder and return its URL."""
+    if file.content_type not in ALLOWED_DOCUMENT_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid document type: {file.content_type}. Allowed: PDF, DOC, DOCX, XLS, XLSX")
+    ext = ALLOWED_DOCUMENT_TYPES[file.content_type]
+    import time, random
+    ts = int(time.time() * 1000)
+    rn = random.randint(1000, 9999)
+    safe_name = "".join(c for c in file.filename.rsplit('.', 1)[0] if c.isalnum() or c in ' _-')[:60]
+    dest_name = f"{safe_name}_{ts}_{rn}{ext}"
+    dest_path = os.path.join(ASSETS_DIR, dest_name)
+    with open(dest_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+    return {"filename": dest_name, "url": f"{backend_url}/assets/{dest_name}"}
+
+@router.post("/upload-signature-doc")
+def upload_signature_doc(file: UploadFile = File(...)):
+    """Upload a Word/PDF document and extract formatted text to use as signature.
+    
+    Preserves: bold, italic, headings, hyperlinks, images, lists.
+    Images from DOCX are extracted to the assets folder and embedded as data URIs
+    so they render reliably in signature preview and sent emails.
+    """
+    import tempfile, re, uuid
+    name_lower = (file.filename or '').lower()
+    if not any(name_lower.endswith(ext) for ext in ['.docx', '.pdf', '.doc']):
+        raise HTTPException(status_code=400, detail="Only DOCX, PDF, and DOC files are allowed")
+    ext = name_lower.rsplit('.', 1)[-1]
+    tmp = tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False)
+    try:
+        shutil.copyfileobj(file.file, tmp)
+        tmp.close()
+
+        if ext == 'docx':
+            from docx import Document
+            from docx.oxml.ns import qn
+            doc = Document(tmp.name)
+            lines = []
+            # Extract images from the DOCX and save as assets
+            img_map = {}  # blip_id -> markdown image tag
+            for rel_id, rel in doc.part.rels.items():
+                if "image" in rel.reltype:
+                    image_blob = rel.target_part.blob
+                    ext_map = {'image/png': '.png', 'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/gif': '.gif', 'image/bmp': '.bmp', 'image/tiff': '.tiff', 'image/webp': '.webp'}
+                    mime = rel.target_part.content_type
+                    img_ext = ext_map.get(mime, '.png')
+                    img_name = f"sig_{uuid.uuid4().hex[:12]}{img_ext}"
+                    img_path = os.path.join(ASSETS_DIR, img_name)
+                    with open(img_path, "wb") as imgf:
+                        imgf.write(image_blob)
+                    import base64 as _b64
+                    b64data = _b64.b64encode(image_blob).decode()
+                    data_uri = f"data:{mime};base64,{b64data}"
+                    img_map[rel_id] = f"![image]({data_uri})"
+
+            for para in doc.paragraphs:
+                txt = para.text.strip()
+                style = para.style.name.lower() if para.style else ''
+
+                # Handle images
+                # Check for inline images in this paragraph
+                for run in para.runs:
+                    for child in run._element:
+                        if child.tag.endswith('}drawing'):
+                            blip_fill = child.find('.//' + qn('a:blip'))
+                            if blip_fill is not None:
+                                embed_id = blip_fill.get(qn('r:embed'))
+                                if embed_id and embed_id in img_map:
+                                    lines.append('')
+                                    lines.append(img_map[embed_id])
+                                    lines.append('')
+
+                # Skip empty paragraphs that are just spacers (unless they contain images)
+                if not txt:
+                    if para.paragraph_format.space_before or para.paragraph_format.space_after:
+                        lines.append('')
+                    continue
+
+                if 'heading' in style:
+                    level = re.search(r'heading\s*(\d+)', style)
+                    if level:
+                        prefix = '#' * int(level.group(1))
+                        lines.append(f'{prefix} {_build_run_text(para)}')
+                    else:
+                        lines.append(f'**{_build_run_text(para)}**')
+                elif para.style and 'list' in style:
+                    lines.append(f'- {_build_run_text(para)}')
+                else:
+                    lines.append(_build_run_text(para))
+
+            text = '\n'.join(lines).strip()
+        elif ext == 'pdf':
+            from PyPDF2 import PdfReader
+            reader = PdfReader(tmp.name)
+            lines = []
+            for page in reader.pages:
+                txt = page.extract_text().strip()
+                if txt:
+                    lines.append(txt)
+            text = '\n'.join(lines)
+        else:
+            text = f'[Uploaded file: {file.filename}]({os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")}/assets/{uuid.uuid4().hex}.pdf)'
+        return {"text": text, "filename": file.filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to extract text: {str(e)}")
+    finally:
+        os.unlink(tmp.name)
+
+
+def _build_run_text(para) -> str:
+    """Build a markdown string from paragraph runs, preserving per-run formatting and hyperlinks.
+    
+    Supports: bold, italic, underline, font name, font size, font color.
+    Adjacent runs inside the same hyperlink are merged into a single markdown link.
+    """
+    parts = []
+    link_map = {}
+    for hyperlink in para.hyperlinks:
+        url = getattr(hyperlink, 'url', None) or getattr(hyperlink, 'address', None) or ''
+        link_map[id(hyperlink._hyperlink)] = url
+
+    link_buf = []
+    link_url = None
+
+    def _flush_link():
+        nonlocal link_buf, link_url
+        if link_buf:
+            txt = ''.join(link_buf)
+            parts.append(f'[{txt}]({link_url})')
+            link_buf = []
+            link_url = None
+
+    for run in para.runs:
+        txt = run.text
+        if not txt:
+            _flush_link()
+            continue
+
+        parent = run._element.getparent()
+        run_link_url = None
+        if parent is not None and id(parent) in link_map:
+            run_link_url = link_map[id(parent)]
+
+        if link_url is not None and (run_link_url is None or run_link_url != link_url):
+            _flush_link()
+        if link_url is None and run_link_url is not None:
+            link_url = run_link_url
+
+        # Build rich formatting: extract all font properties
+        styles = []
+        has_extra = False
+
+        # Underline
+        if run.font.underline:
+            has_extra = True
+            styles.append('text-decoration:underline')
+
+        # Font size (in points)
+        if run.font.size:
+            sz = run.font.size.pt
+            if sz:
+                has_extra = True
+                styles.append(f'font-size:{int(sz)}pt')
+
+        # Font color
+        if run.font.color:
+            try:
+                rgb = run.font.color.rgb
+                if rgb:
+                    has_extra = True
+                    styles.append(f'color:#{rgb}')
+            except Exception:
+                pass
+
+        # Font name
+        if run.font.name:
+            has_extra = True
+            fn = run.font.name
+            if ' ' in fn and not fn.startswith('"'):
+                fn = f'"{fn}"'
+            styles.append(f'font-family:{fn}')
+
+        # Apply markdown formatting
+        if run.bold:
+            txt = f'**{txt}**'
+        if run.italic:
+            txt = f'*{txt}*'
+
+        # If there are extra font properties, wrap in a <span>
+        if has_extra:
+            txt = f'<span style="{"; ".join(styles)};">{txt}</span>'
+
+        if link_url is not None:
+            link_buf.append(txt)
+        else:
+            parts.append(txt)
+
+    _flush_link()
+    return ''.join(parts)
 
 @router.post("/prompts/{prompt_id}/attachment")
 def upload_prompt_attachment(prompt_id: int, file: UploadFile = File(...)):

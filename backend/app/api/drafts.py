@@ -866,6 +866,60 @@ def check_daily_email_limit(user_id: Optional[str], batch_size: int = 1) -> bool
 
 _INLINED_IMAGE_CACHE = {}
 
+def _extract_body_attachments(body: str, user_id: Optional[int] = None) -> tuple:
+    """Parse body for links pointing at uploaded files in /assets/ (both markdown and HTML forms).
+    
+    Scans for:
+      - Markdown: [text](url)
+      - HTML: <a href="url">
+    
+    Returns (attachments, url_replacements) where:
+    - attachments: list of dicts with base64-encoded content for MIME inclusion
+    - url_replacements: dict mapping original URLs -> Google Drive share links (or original if upload fails)
+    """
+    import re
+    attachments = []
+    url_replacements = {}
+    asset_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets")
+    backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+
+    # Collect all unique asset URLs from both markdown and HTML links
+    found_urls = set()
+
+    # Markdown links: [text](url)
+    for _, url in re.findall(r'\[([^\]]+)\]\(([^)]+)\)', body):
+        if f"{backend_url}/assets/" in url or "/assets/" in url:
+            found_urls.add(url)
+
+    # HTML links: <a href="url">
+    for url in re.findall(r'<a[^>]*href="([^"]+)"[^>]*>', body):
+        if f"{backend_url}/assets/" in url or "/assets/" in url:
+            found_urls.add(url)
+
+    for url in found_urls:
+        filename = url.rsplit("/", 1)[-1] if "/" in url else url
+        filepath = os.path.join(asset_dir, filename)
+        if os.path.exists(filepath):
+            import base64
+            with open(filepath, "rb") as f:
+                content_bytes = f.read()
+            attachments.append({
+                "content": base64.b64encode(content_bytes).decode('utf-8'),
+                "filename": filename
+            })
+            logger.info(f"Body attachment found and loaded: {filename}")
+            # Upload to Google Drive if user_id is provided
+            if user_id is not None:
+                try:
+                    from app.services.google_service import upload_to_drive
+                    drive_link = upload_to_drive(user_id, filename, content_bytes)
+                    if drive_link:
+                        url_replacements[url] = drive_link
+                        logger.info(f"Uploaded to Drive: {filename} -> {drive_link}")
+                except Exception as e:
+                    logger.warning(f"Drive upload failed for {filename}: {e}")
+    return attachments, url_replacements
+
 def markdown_to_html(text, gmail_style=False):
     import re
     # Normalize newlines
@@ -875,6 +929,14 @@ def markdown_to_html(text, gmail_style=False):
     # 1a. Resolve [[BACKEND_URL]] placeholder so images work in send flow
     backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
     text = text.replace("[[BACKEND_URL]]", backend_url)
+    
+    # Rewrite any localhost/127.0.0.1 asset URLs to the actual BACKEND_URL so links work
+    # in sent emails regardless of where the file was uploaded from
+    text = re.sub(
+        r'https?://(?:localhost|127\.0\.0\.1)(?::\d+)?/assets/',
+        f"{backend_url}/assets/",
+        text
+    )
     
     # Convert known asset images to inline base64 data URIs for reliable rendering in email clients
     def _inline_img(m):
@@ -918,7 +980,8 @@ def markdown_to_html(text, gmail_style=False):
                     if img_name == "qvscllogo.png":
                         return f'<img src="{new_src}" alt="{alt_text}" style="width:110px;height:auto;display:block;margin-top:10px;" />'
                     return f'<div style="width: 100%; margin-top: 25px; margin-bottom: 25px;"><img src="{new_src}" alt="{alt_text}" width="420" height="126" style="display: block;" /></div>'
-        return m.group(0)
+        # Fallback: convert any unknown image markdown to an <img> tag
+        return f'<img src="{src}" alt="{alt_text}" style="max-width:100%;height:auto;display:block;" />'
     
     text = re.sub(r'!\[(.*?)\]\((.*?)\)', _inline_md_img, text)
     text = re.sub(r'<img[^>]+>', _inline_img, text, flags=re.DOTALL | re.IGNORECASE)
@@ -932,6 +995,11 @@ def markdown_to_html(text, gmail_style=False):
     
     # 2a. Convert bare URLs (not already inside <a> tag) to clickable links
     text = re.sub(r'(?<!href=")(https?://[^\s<]+)', r'<a href="\1" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', text)
+    
+    # 2b. Headings (### / ## / # at start of a line)
+    text = re.sub(r'^###\s+(.*?)$', r'<h3 style="margin:0 0 6px 0;font-size:15px;font-weight:700;">\1</h3>', text, flags=re.MULTILINE)
+    text = re.sub(r'^##\s+(.*?)$', r'<h2 style="margin:0 0 6px 0;font-size:17px;font-weight:700;">\1</h2>', text, flags=re.MULTILINE)
+    text = re.sub(r'^#\s+(.*?)$', r'<h1 style="margin:0 0 6px 0;font-size:19px;font-weight:700;">\1</h1>', text, flags=re.MULTILINE)
     
     # 3. Smart Signature Styling (Grey & Italic)
     signature_html = ""
@@ -1063,7 +1131,7 @@ def markdown_to_html(text, gmail_style=False):
                     html_parts.append(p.strip())
                 else:
                     content = p.replace("\n", "<br>")
-                    p_style = "margin-top: 0; margin-bottom: 18px; line-height: 1.6; font-family: Arial, sans-serif;" if gmail_style else "margin-top: 0; margin-bottom: 8px; line-height: 1.4; font-family: Arial, sans-serif;"
+                    p_style = "margin-top: 0; margin-bottom: 18px; line-height: 1.6;" if gmail_style else "margin-top: 0; margin-bottom: 8px; line-height: 1.4;"
                     html_parts.append(f"<p style='{p_style}'>{content}</p>")
     
     result = "".join(html_parts)
@@ -1202,7 +1270,7 @@ def get_sender_profile(user_id: Optional[str]) -> dict:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         # Select all relevant signature fields
-        cur.execute("SELECT full_name, username, job_title, phone, linkedin_url FROM users WHERE id = %s", (uid,))
+        cur.execute("SELECT full_name, username, job_title, phone, linkedin_url, signature, signature_mode FROM users WHERE id = %s", (uid,))
         user = cur.fetchone()
         cur.close()
         conn.close()
@@ -1294,26 +1362,47 @@ def heal_draft_content(email_draft: str, user_id: Optional[str], profile: Option
                 
     return healed
 
+def _md_to_html(text: str) -> str:
+    """Convert simple markdown to HTML for signature content."""
+    text = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong><em>\1</em></strong>', text)
+    text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
+    text = re.sub(r'_(.*?)_', r'<em>\1</em>', text)
+    text = re.sub(r'\*(.*?)\*', r'<em>\1</em>', text)
+    text = re.sub(r'!\[(.*?)\]\((.*?)\)', r'<img src="\2" alt="\1" style="max-width:100%;height:auto;border-radius:4px;" />', text)
+    text = re.sub(r'(?<!href=")(?<!src=")\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color:#3b82f6;text-decoration:underline;">\1</a>', text)
+    # Convert headings before replacing newlines so ^/$ anchoring works
+    text = re.sub(r'^###\s+(.*?)$', r'<h3 style="margin:0 0 6px 0;font-size:15px;font-weight:700;">\1</h3>', text, flags=re.MULTILINE)
+    text = re.sub(r'^##\s+(.*?)$', r'<h2 style="margin:0 0 6px 0;font-size:17px;font-weight:700;">\1</h2>', text, flags=re.MULTILINE)
+    text = re.sub(r'^#\s+(.*?)$', r'<h1 style="margin:0 0 6px 0;font-size:19px;font-weight:700;">\1</h1>', text, flags=re.MULTILINE)
+    text = text.replace('\n', '<br>')
+    return text
+
 def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     """Appends a premium standardized signature and mandatory unsubscribe link."""
     import re
     body_text = body.strip()
 
-    # Aggressive strip: remove any existing signature/unsubscribe block to prevent duplication
+    custom_sig = profile.get('signature')
+    sig_mode = profile.get('signature_mode') or 'custom'
+    use_custom = sig_mode == 'custom' and custom_sig and custom_sig.strip()
+
+    # Strip any existing signature block to prevent duplication.
+    # Remove any "Click here to unsubscribe" link and everything after it.
     body_text = re.sub(r'<a\s[^>]*>Click here to unsubscribe</a>.*$', '', body_text, flags=re.DOTALL | re.IGNORECASE)
     body_text = re.sub(r'Click here to unsubscribe.*$', '', body_text, flags=re.DOTALL | re.IGNORECASE)
-    body_text = re.sub(r'<div\s+style="font-family:\s*Calibri.*?</div>\s*</div>\s*$', '', body_text, flags=re.DOTALL | re.IGNORECASE)
+    # Remove trailing signature divs from previous inject calls
     body_text = re.sub(r'<div\s+style="color:\s*#666666;.*?</div>\s*$', '', body_text, flags=re.DOTALL | re.IGNORECASE)
     body_text = body_text.strip()
 
-    # 1. Strip existing signature to allow replacement by the current logged-in user
+    # Strip from last -- only if followed by signature-like content
     if "--" in body_text:
         parts = body_text.rsplit("--", 1)
         after_sep = parts[1].lower() if len(parts) > 1 else ""
-        if any(x in after_sep for x in ["regards", "sincerely", "thanks", "analyst"]):
+        sig_markers = ["regards", "sincerely", "thanks", "analyst", "unsubscribe", "disclaimer"]
+        if any(x in after_sep for x in sig_markers):
             body_text = parts[0].strip()
 
-    # 2. Strip any trailing sign-offs to prevent duplication
+    # Strip trailing sign-offs
     body_lower = body_text.lower()
     sign_offs = ["thanks & regards", "sincerely", "best regards", "thanks,", "regards,", "thanks and regards"]
     for s in sign_offs:
@@ -1338,13 +1427,28 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 
     is_palak = (profile.get('full_name') or '').strip().lower() == 'palak jain'
 
-    # Load qvscllogo.png as base64 once — used in both Palak and Vismaya signatures
+    # Load qvscllogo.png as base64 once
     try:
         with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", "qvscllogo.png"), "rb") as _f:
             _b64_logo = base64.b64encode(_f.read()).decode()
         _logo_data_uri = f"data:image/png;base64,{_b64_logo}"
     except Exception:
         _logo_data_uri = ""
+
+    # Use custom signature if mode is 'custom' — convert markdown to HTML
+    if use_custom:
+        sig_html_content = _md_to_html(custom_sig.strip())
+        sig_html = f"""
+<div style="color: #666666; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
+<a href="{unsub_link}" style="color: #666666; text-decoration: underline;">Click here to unsubscribe</a><br>
+--<br>
+{sig_html_content}
+<div style="font-size: 10px; color: #999999; line-height: 1.2; margin-top: 6px;">
+{disclaimer}
+</div>
+</div>
+"""
+        return body_text + "\n\n" + sig_html
 
     if is_vismaya:
         dis_text_vis = "Important: This message is intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."
@@ -1513,8 +1617,13 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
             subject = email_data.get("subject")
             body = email_data.get("body")
         
+        custom_sig = profile.get('signature')
+        sig_mode = profile.get('signature_mode') or 'custom'
+        use_custom = sig_mode == 'custom' and custom_sig and custom_sig.strip()
         if "SIG_START" in body or "SIG_END" in body:
             body_with_sig = body
+        elif use_custom:
+            body_with_sig = inject_signature(body, profile, req.lead_id)
         else:
             body_lower = body.lower()
             if "thanks & regards" in body_lower or "best regards" in body_lower:
@@ -2891,7 +3000,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         current_uid = normalize_user_id(user_id)
         
         if user_id:
-            cur.execute("SELECT email, full_name, username, google_id, job_title, phone, linkedin_url FROM users WHERE id = %s", (current_uid,))
+            cur.execute("SELECT email, full_name, username, google_id, job_title, phone, linkedin_url, signature, signature_mode FROM users WHERE id = %s", (current_uid,))
             u = cur.fetchone()
             if u:
                 sender_email = u['email']
@@ -2970,16 +3079,19 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         # signature block with banner image and custom disclaimer.
         profile = {
             "full_name": sender_name,
-            "job_title": "Analyst", # Default if not found
-            "phone": "8527083798", # Default if not found
-            "linkedin_url": "https://www.linkedin.com/company/qvscl/"
+            "job_title": "Analyst",
+            "phone": "8527083798",
+            "linkedin_url": "https://www.linkedin.com/company/qvscl/",
+            "signature": None,
+            "signature_mode": 'auto'
         }
         
-        # Try to get more details from profile
         if u:
             profile["job_title"] = u.get('job_title') or profile["job_title"]
             profile["phone"] = u.get('phone') or profile["phone"]
             profile["linkedin_url"] = u.get('linkedin_url') or profile["linkedin_url"]
+            profile["signature"] = u.get('signature')
+            profile["signature_mode"] = u.get('signature_mode') or 'custom'
         
         # Skip signature re-injection for templates with embedded SIG_START/SIG_END markers
         # to preserve their custom banner image, disclaimer, and formatting
@@ -2993,6 +3105,11 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         else:
             body = inject_signature(body, profile, draft_id)
         
+        user_id_int = int(uid) if uid else None
+        body_attachments, url_replacements = _extract_body_attachments(body, user_id=user_id_int)
+        # Replace asset URLs in body with Google Drive share links
+        for old_url, new_url in url_replacements.items():
+            body = body.replace(old_url, new_url)
         success, error_msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=email,
             subject=subject,
@@ -3002,7 +3119,8 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             lead_id=draft_id,
             user_id=int(uid),
             cc=cc_email,
-            template_name=template_name
+            template_name=template_name,
+            attachments=body_attachments
         )
         
         dispatch_method = "Gmail API" if has_gmail else "Resend/SMTP"

@@ -564,6 +564,78 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
     import threading
     all_rows_lock = threading.Lock()
 
+    def _infer_column_names(sample_rows, num_cols):
+        """Infer column names by analyzing sample data values using content heuristics."""
+        inferred = []
+        for col_idx in range(num_cols):
+            values = []
+            for row in sample_rows:
+                if col_idx < len(row) and row[col_idx].strip():
+                    values.append(row[col_idx].strip())
+            n = len(values)
+            if not values:
+                inferred.append(None)
+                continue
+            email_hits = sum(1 for v in values if '@' in v and '.' in v.split('@')[-1])
+            if email_hits > n * 0.5:
+                inferred.append('Email')
+                continue
+            linkedin_hits = sum(1 for v in values if 'linkedin.com' in v.lower())
+            if linkedin_hits > n * 0.5:
+                inferred.append('LinkedIn Profile')
+                continue
+            url_hits = sum(1 for v in values if v.startswith(('http://', 'https://', 'www.')))
+            if url_hits > n * 0.5:
+                inferred.append('Website')
+                continue
+            phone_hits = 0
+            for v in values:
+                if '@' not in v and not v.startswith(('http://', 'https://', 'www.')):
+                    digits = re.sub(r'\D', '', v)
+                    if len(digits) >= 7:
+                        phone_hits += 1
+            if phone_hits > n * 0.5:
+                inferred.append('Phone')
+                continue
+            designation_kw = ['partner', 'director', 'president', 'vice president', 'vp', 'head', 'lead',
+                             'chief', 'officer', 'founder', 'ceo', 'cto', 'cfo', 'coo', 'manager', 'advisor',
+                             'engineer', 'analyst', 'associate', 'consultant', 'chairman', 'board',
+                             'owner', 'principal', 'senior', 'junior', 'intern']
+            designation_hits = sum(1 for v in values if any(kw in v.lower() for kw in designation_kw))
+            company_kw = ['ltd', 'inc', 'corp', 'llc', 'fund', 'capital', 'ventures', 'partners',
+                         'limited', 'company', 'group', 'holdings', 'enterprises', 'industries',
+                         'technologies', 'solutions', 'services', 'investments', 'advisors']
+            company_hits = sum(1 for v in values if any(kw in v.lower() for kw in company_kw))
+            name_hits = 0
+            for v in values:
+                words = v.split()
+                if 2 <= len(words) <= 4 and all(w[0].isupper() for w in words if w):
+                    if '@' not in v and '://' not in v:
+                        if not any(kw in v.lower() for kw in company_kw + designation_kw):
+                            name_hits += 1
+            if designation_hits > n * 0.4:
+                inferred.append('Designation')
+            elif company_hits > n * 0.25:
+                inferred.append('Company Name')
+            elif name_hits > n * 0.4:
+                inferred.append('Person Name')
+            else:
+                label_kw = ['name', 'email', 'company', 'designation', 'role', 'phone',
+                           'mobile', 'linkedin', 'website', 'domain', 'sector', 'industry',
+                           'address', 'city', 'state', 'country', 'source', 'status',
+                           'contact', 'member', 'person', 'investor', 'firm', 'organization',
+                           'url', 'link', 'profile', 'mail', 'title', 'job']
+                first_val = values[0] if values else ''
+                matched = [kw for kw in label_kw if kw in first_val.lower()]
+                if matched:
+                    inferred.append(matched[0].title())
+                elif any(c.isalpha() for c in first_val):
+                    # Looks like a text column but unknown type
+                    inferred.append('Text')
+                else:
+                    inferred.append(None)
+        return inferred
+
     def process_single_tab(tab):
         try:
             import sys
@@ -599,10 +671,13 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
             keywords = ['name', 'email', 'company', 'website', 'contact', 'member', 'person', 'designation', 'role', 'phone', 'mobile']
             for i in range(min(15, len(lines))):
                 lower_line = lines[i].lower()
+                parts = lines[i].split(',')
+                # Skip rows where any cell is a fragment (<3 chars) — not a real column header
+                has_fragment = any(p.strip() and len(p.strip()) < 3 for p in parts)
                 matches = sum(1 for kw in keywords if kw in lower_line)
-                has_long_number = any(len(re.sub(r'\D', '', part)) > 9 for part in lines[i].split(','))
-                has_real_email = any('@' in part and '.' in part and len(part) > 5 for part in lines[i].split(','))
-                if matches >= 1 and not has_long_number and not has_real_email:
+                has_long_number = any(len(re.sub(r'\D', '', part)) > 9 for part in parts)
+                has_real_email = any('@' in part and '.' in part and len(part) > 5 for part in parts)
+                if not has_fragment and matches >= 1 and not has_long_number and not has_real_email:
                     header_index = i
                     break
             
@@ -632,7 +707,18 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
                         col_name = string.ascii_uppercase[temp_i % 26] + col_name
                         temp_i = (temp_i // 26) - 1
                     header_row.append(f"Column {col_name}")
-                data_reader = csv.reader(io.StringIO(cleaned_csv))
+                # Collect all rows into memory for column name inference
+                all_parsed_rows = [first_row]
+                for row in data_reader:
+                    if any(val.strip() for val in row):
+                        all_parsed_rows.append(row)
+                # Infer column names from sample data (skip first row which may be merged)
+                sample_rows = all_parsed_rows[1:21]
+                inferred = _infer_column_names(sample_rows, num_cols)
+                for idx, name in enumerate(inferred):
+                    if name:
+                        header_row[idx] = name
+                data_reader = all_parsed_rows
 
             for row_data in data_reader:
                 if not any(val.strip() for val in row_data): continue
