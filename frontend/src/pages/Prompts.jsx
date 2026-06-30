@@ -23,6 +23,8 @@ const Prompts = () => {
   const [form, setForm] = useState({ name: '', content: '', description: '', followup_1: '', followup_2: '', followup_3: '', subject: '', cc: '', followup_count: 3 });
   const [saveField, setSaveField] = useState({ id: null, field: null });
   const [saveFieldSuccess, setSaveFieldSuccess] = useState({ id: null, field: null });
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const [userTeam, setUserTeam] = useState('CLIENT');
   const isAdmin = user.role === 'ADMIN';
@@ -375,7 +377,44 @@ const Prompts = () => {
                 <div className="p-6 flex items-center justify-between cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : tpl.id)}>
                   <div className="flex-1">
                     <div className="flex items-center gap-3">
-                      <h3 className="text-base font-bold text-white">{tpl.name}</h3>
+                      {renamingId === tpl.id ? (
+                        <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                          <input
+                            value={renameValue}
+                            onChange={e => setRenameValue(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                e.currentTarget.blur();
+                              } else if (e.key === 'Escape') {
+                                setRenamingId(null);
+                              }
+                            }}
+                            onBlur={() => {
+                              if (renameValue.trim() && renameValue !== tpl.name) {
+                                handleFieldSave(tpl.id, 'name', renameValue.trim());
+                              }
+                              setRenamingId(null);
+                            }}
+                            autoFocus
+                            className="bg-black/60 border border-blue-500/50 rounded-lg px-3 py-1.5 text-base font-bold text-white outline-none w-64"
+                          />
+                          {saveField.id === tpl.id && saveField.field === 'name' ? (
+                            <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+                          ) : saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === 'name' ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 cursor-pointer group" onClick={e => { e.stopPropagation(); setRenamingId(tpl.id); setRenameValue(tpl.name); }}>
+                          <h3 className="text-base font-bold text-white group-hover:text-blue-400 transition-colors">{tpl.name}</h3>
+                          {saveField.id === tpl.id && saveField.field === 'name' ? (
+                            <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+                          ) : saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === 'name' ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          ) : null}
+                          <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-slate-500 font-medium">click to rename</span>
+                        </div>
+                      )}
                       <span className="px-2 py-0.5 rounded text-[9px] font-black tracking-[1px] border uppercase bg-purple-500/10 text-purple-500 border-purple-500/20">Custom Draft</span>
                     </div>
                     {tpl.description && <p className="text-xs text-slate-500 mt-1">{tpl.description}</p>}
