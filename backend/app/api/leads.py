@@ -353,48 +353,26 @@ def list_followups(
         
         # Base query depends on status
         if status_val == 'SENT':
-            base_query = " FROM leads_raw lr WHERE email_status = 'SENT' AND COALESCE(followup_stage, 0) > 0 "
+            base_query = " FROM leads_raw lr WHERE email_status IN ('SENT', 'OPENED', 'CLICKED') AND COALESCE(followup_stage, 0) > 0 AND followup_status != 'STOPPED' AND last_outreach_at >= NOW() - INTERVAL '7 days' "
         elif status_val == 'REPLIED':
             base_query = " FROM leads_raw lr WHERE COALESCE(is_responded, FALSE) = TRUE "
         elif status_val == 'IN_PROGRESS':
-            base_query = " FROM leads_raw lr WHERE followup_status IN ('ACTIVE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED', 'IDLE') AND COALESCE(followup_stage, 0) > 0 AND COALESCE(is_responded, FALSE) = FALSE AND last_outreach_at IS NOT NULL "
+            base_query = " FROM leads_raw lr WHERE followup_status IN ('ACTIVE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED') AND COALESCE(followup_stage, 0) > 0 AND COALESCE(is_responded, FALSE) = FALSE AND last_outreach_at IS NOT NULL "
         elif status_val == 'STOPPED':
             base_query = " FROM leads_raw lr WHERE followup_status = 'STOPPED' AND COALESCE(followup_stage, 0) > 0 "
+        elif status_val == 'COMPLETED':
+            base_query = " FROM leads_raw lr WHERE (followup_status = 'COMPLETED' OR (COALESCE(followup_stage, 0) >= 3 AND followup_status != 'STOPPED')) AND COALESCE(is_responded, FALSE) = FALSE "
         else: # DUE
-            investor_kw = ["VENTURE", "CAPITAL", "EQUITY", "INVEST", "PARTNER", "ASSET", "FAMILY OFFICE", "ANGEL", "CIRCLE", "NETWORK", "FUND", "VC", "PE", "HOLDING", "SFO", "OFFICE", "ADVISORY", "MANAGEMENT", "PRIVATE", "TRUST", "WEALTH", "ASSOCIATES", "GROUP", "PARTNERS", "ADVISORS", "FOUNDATION"]
-            kw_conditions = " OR ".join([f"company_name ILIKE '%%{kw}%%' OR sector ILIKE '%%{kw}%%'" for kw in investor_kw])
-            
-            # Pre-check for Yashika to use in the SQL string
-            uid = normalize_user_id(user_id)
-            is_yashika_sql = "FALSE"
-            if uid:
-                cur.execute("SELECT username, full_name FROM users WHERE id = %s", (uid,))
-                u_row = cur.fetchone()
-                if u_row:
-                    uname = str(u_row.get('username') or '').lower()
-                    fname = str(u_row.get('full_name') or '').lower()
-                    if 'yashika' in uname or 'yashika' in fname or 'gupta' in uname or 'gupta' in fname:
-                        is_yashika_sql = "TRUE"
-
-            base_query = f"""
+            base_query = """
                 FROM leads_raw lr
-                WHERE (followup_status IN ('ACTIVE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED', 'IDLE') OR email_status = 'SENT')
+                WHERE (followup_status IN ('ACTIVE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED', 'IDLE') OR email_status IN ('SENT', 'OPENED', 'CLICKED', 'SCHEDULED'))
                 AND COALESCE(is_responded, FALSE) = FALSE
                 AND last_outreach_at IS NOT NULL
+                AND followup_status != 'STOPPED'
                 AND (
-                    -- INVESTOR Rules: 7, 14, 30 days total timeline
-                    (({is_yashika_sql} OR LOWER(lead_type) = 'investor' OR lead_type IS NULL OR {kw_conditions}) AND (
-                        (COALESCE(followup_stage, 0) = 0 AND last_outreach_at <= NOW() - INTERVAL '7 days') OR
-                        (followup_stage = 1 AND last_outreach_at <= NOW() - INTERVAL '7 days') OR
-                        (followup_stage = 2 AND last_outreach_at <= NOW() - INTERVAL '16 days')
-                    ))
-                    OR
-                    -- CLIENT Rules (Only if NOT Yashika and NOT Investor)
-                    (NOT {is_yashika_sql} AND LOWER(lead_type) = 'client' AND NOT ({kw_conditions}) AND (
-                        (COALESCE(followup_stage, 0) = 0 AND last_outreach_at <= NOW() - INTERVAL '2 days') OR
-                        (followup_stage = 1 AND last_outreach_at <= NOW() - INTERVAL '2 days') OR
-                        (followup_stage = 2 AND last_outreach_at <= NOW() - INTERVAL '6 days')
-                    ))
+                    (COALESCE(followup_stage, 0) = 0 AND last_outreach_at <= NOW() - INTERVAL '2 days') OR
+                    (followup_stage = 1 AND last_outreach_at <= NOW() - INTERVAL '5 days') OR
+                    (followup_stage = 2 AND last_outreach_at <= NOW() - INTERVAL '8 days')
                 )
             """
         
@@ -428,10 +406,11 @@ def list_followups(
         investor_kw = ["VENTURE", "CAPITAL", "EQUITY", "INVEST", "PARTNER", "ASSET", "FAMILY OFFICE", "ANGEL", "CIRCLE", "NETWORK", "FUND", "VC", "PE", "HOLDING", "SFO", "OFFICE", "ADVISORY", "MANAGEMENT", "PRIVATE", "TRUST", "WEALTH", "ASSOCIATES", "GROUP", "PARTNERS", "ADVISORS", "FOUNDATION"]
         kw_conditions = " OR ".join([f"company_name ILIKE '%%{kw}%%' OR sector ILIKE '%%{kw}%%'" for kw in investor_kw])
 
-        # FORCE INVESTOR FOR YASHIKA / GUPTA: Scoped check
+        # FORCE INVESTOR FOR YASHIKA / GUPTA / KAJAL: Scoped check
         is_yashika = False
         is_palak = False
         is_vismaya = False
+        is_kajal = False
         if uid:
             cur.execute("SELECT username, full_name FROM users WHERE id = %s", (uid,))
             user_row = cur.fetchone()
@@ -444,25 +423,27 @@ def list_followups(
                     is_palak = True
                 if 'vismaya' in uname or 'vismaya' in fname:
                     is_vismaya = True
+                if 'kajal' in uname or 'kajal' in fname:
+                    is_kajal = True
 
         if type:
             t_upper = type.upper()
             if t_upper == 'INVESTOR':
-                if is_yashika:
-                    # She only has investors, so no extra filter needed if she asks for them
+                if is_yashika or is_kajal:
+                    # They only have investors, so no extra filter needed if they ask for them
                     pass
                 else:
                     base_query += f" AND (LOWER(lead_type) = 'investor' OR lead_type IS NULL OR {kw_conditions})"
             elif t_upper == 'CLIENT':
-                if is_yashika:
-                    # She has zero clients, so return nothing if she filters for them
+                if is_yashika or is_kajal:
+                    # They have zero clients, so return nothing if they filter for them
                     base_query += " AND 1=0 "
                 else:
                     base_query += f" AND (LOWER(lead_type) = 'client' OR lead_type IS NULL) AND NOT ({kw_conditions})"
             else:
                 base_query += " AND LOWER(lead_type) = LOWER(%s)"
                 params.append(type)
-        elif is_yashika:
+        elif is_yashika or is_kajal:
             # If no type filter, but it's Yashika, we still treat all as Investors for timing rules in base_query if needed
             # (The base_query already handles the interval logic, but we must ensure it uses Investor rules)
             pass
@@ -541,7 +522,10 @@ def list_followups(
             else:
                 lead_dict['last_milestone'] = 'Initial Outreach'
                 lead_dict['last_action_type'] = 'Outreach'
-            lead_dict['max_followup_stage'] = 2 if (is_palak or is_vismaya or is_yashika) else 3
+            lead_dict['max_followup_stage'] = 3
+            # Force INVESTOR lead_type for investor-users so frontend labels stages correctly (Day 7/14/30 not Day 2/4)
+            if is_yashika or is_kajal:
+                lead_dict['lead_type'] = 'Investor'
             results.append(lead_dict)
             
         return {"leads": results, "total": total}

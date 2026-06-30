@@ -9,9 +9,9 @@ export const FOLLOWUP_CONFIG = {
   },
   INVESTOR: {
     maxStages: 3,
-    scheduleDays: [7, 14, 30],
+    scheduleDays: [2, 5, 8],
     getStageLabel: (stage) => {
-      const labels = ['Day 7', 'Day 14', 'Day 30'];
+      const labels = ['Day 2', 'Day 5', 'Day 8'];
       return labels[stage] || `${stage + 1}th Follow-up`;
     }
   }
@@ -19,7 +19,7 @@ export const FOLLOWUP_CONFIG = {
 
 export const LEAD_TYPES = ['All', 'Investor', 'Client'];
 
-export const STATUS_OPTIONS = ['DUE', 'SENT', 'REPLIED', 'IN_PROGRESS', 'STOPPED'];
+export const STATUS_OPTIONS = ['DUE', 'SENT', 'REPLIED', 'IN_PROGRESS', 'STOPPED', 'COMPLETED'];
 
 const INVESTOR_KEYWORDS = [
   'VENTURE', 'CAPITAL', 'EQUITY', 'INVEST', 'PARTNER', 'ASSET',
@@ -59,11 +59,9 @@ export const getStageColor = (stage) => {
 export const getStageConfigs = (typeFilter) => {
   if (typeFilter === 'All') {
     return [
-      { label: 'Day 2', stage: 0, type: 'Client' },
-      { label: 'Day 4', stage: 1, type: 'Client' },
-      { label: 'Day 7', stage: 0, type: 'Investor' },
-      { label: 'Day 14', stage: 1, type: 'Investor' },
-      { label: 'Day 30', stage: 2, type: 'Investor' },
+      { label: 'Day 2', stage: 0, type: 'Investor' },
+      { label: 'Day 5', stage: 1, type: 'Investor' },
+      { label: 'Day 8', stage: 2, type: 'Investor' },
     ];
   }
   const config = FOLLOWUP_CONFIG[typeFilter.toUpperCase()];

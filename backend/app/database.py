@@ -216,6 +216,15 @@ def create_tables():
     except psycopg2.Error:
         conn.rollback()
 
+    try:
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_leads_raw_lower_email
+            ON leads_raw (LOWER(email));
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
     cur.execute("""
     CREATE TABLE IF NOT EXISTS activity_log (
         id SERIAL PRIMARY KEY,

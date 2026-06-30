@@ -458,21 +458,13 @@ def process_outreach_sequences():
                         last_sent_ist = last_sent.replace(tzinfo=timezone.utc).astimezone(IST).replace(tzinfo=None)
 
                     now = datetime.now(IST).replace(tzinfo=None)
-                    lead_type_raw = str(lead.get('lead_type') or lead.get('company_name') or lead.get('sector') or lead.get('persona') or '').upper()
-                    investor_kw = ["VENTURE", "CAPITAL", "EQUITY", "INVEST", "PARTNER", "ASSET", "FAMILY OFFICE", "ANGEL", "CIRCLE", "NETWORK", "FUND", "VC", "PE"]
-                    is_investor = any(kw in lead_type_raw for kw in investor_kw) or not ('CLIENT' in lead_type_raw or 'CUSTOMER' in lead_type_raw)
                     days_since_last = (now - last_sent_ist).days
 
                     should_action = False
                     next_stage = stage + 1
 
-                    # Per-user max follow-up override (Palak sirf 2 followups)
-                    _sender = (lead.get('sender_name') or "").lower()
-                    _template = (lead.get('draft_template_used') or "").strip()
-                    _is_kajal_jv = "kajal" in _sender and _template == "kajal_mam_jv"
-                    _max_stage = 2 if any(name in _sender for name in ["palak", "vismaya", "yashika"]) or _is_kajal_jv else 3
-                    if stage >= _max_stage:
-                        logger.info(f"Lead {lead_id} at stage {stage} >= max {_max_stage} for {lead.get('sender_name')} — skipping")
+                    if stage >= 3:
+                        logger.info(f"Lead {lead_id} at stage {stage} >= max 3 — skipping")
                         try:
                             comp_conn = get_db_connection()
                             comp_cur = comp_conn.cursor()
@@ -484,12 +476,8 @@ def process_outreach_sequences():
                             pass
                         continue
 
-                    if is_investor:
-                        if (stage == 0 and days_since_last >= 7) or (stage == 1 and days_since_last >= 14) or (stage == 2 and days_since_last >= 30):
-                            should_action = True
-                    else:
-                        if (stage == 0 and days_since_last >= 2) or (stage == 1 and days_since_last >= 4) or (stage == 2 and days_since_last >= 10):
-                            should_action = True
+                    if (stage == 0 and days_since_last >= 2) or (stage == 1 and days_since_last >= 5) or (stage == 2 and days_since_last >= 8):
+                        should_action = True
 
                     if not should_action:
                         continue
@@ -666,7 +654,7 @@ def process_outreach_sequences():
                     # Only the first worker to UPDATE gets rowcount=1 — others skip.
                     claim_conn = get_db_connection()
                     claim_cur = claim_conn.cursor()
-                    new_status = 'COMPLETED' if next_stage >= _max_stage else 'ACTIVE'
+                    new_status = 'COMPLETED' if next_stage >= 3 else 'ACTIVE'
                     claim_cur.execute("""
                         UPDATE leads_raw
                         SET followup_stage = %s, followup_status = %s, updated_at = NOW()

@@ -36,7 +36,7 @@ const Followups = () => {
   const [typeFilter, setTypeFilter] = useState('All');
   const [userTeam, setUserTeam] = useState('');
   const [stageFilter, setStageFilter] = useState('All');
-  const [statusFilter, setStatusFilter] = useState('DUE');
+  const [statusFilter, setStatusFilter] = useState('IN_PROGRESS');
   const [selectedIds, setSelectedIds] = useState([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -406,6 +406,7 @@ const Followups = () => {
                   statusFilter === (s === 'IN PROGRESS' ? 'IN_PROGRESS' : s)
                     ? s === 'IN PROGRESS' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
                     : s === 'STOPPED' ? 'bg-red-500/20 text-red-300 border-red-500/40'
+                    : s === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                     : 'bg-blue-500/20 text-blue-300 border-blue-500/40'
                     : 'bg-white/[0.03] text-slate-500 border-white/[0.05] hover:border-white/20'
                 }`}
@@ -503,15 +504,18 @@ const Followups = () => {
               const isInvestor = lt === 'Investor';
               const isSelected = selectedIds.includes(lead.id);
               const maxStage = lead.max_followup_stage || FOLLOWUP_CONFIG[ltUpper]?.maxStages || 3;
-              const isCompleted = lead.followup_status === 'COMPLETED' || lead.followup_stage >= maxStage;
+              const isStopped = lead.followup_status === 'STOPPED';
+              const isCompleted = !isStopped && (lead.followup_status === 'COMPLETED' || lead.followup_stage >= maxStage);
               const config = FOLLOWUP_CONFIG[ltUpper];
-              const stageLabel = lead.followup_status === 'COMPLETED' || lead.followup_stage >= maxStage
-                ? 'Completed'
-                : statusFilter === 'IN_PROGRESS'
-                  ? `Stage ${lead.followup_stage}/${maxStage}`
-                  : config
-                    ? config.getStageLabel(lead.followup_stage)
-                    : getStageLabel(lead);
+              const stageLabel = isStopped
+                ? 'Stopped'
+                : isCompleted
+                  ? 'Completed'
+                  : statusFilter === 'IN_PROGRESS'
+                    ? `Stage ${lead.followup_stage}/${maxStage}`
+                    : config
+                      ? config.getStageLabel(lead.followup_stage)
+                      : getStageLabel(lead);
 
               return (
                 <div
@@ -596,8 +600,8 @@ const Followups = () => {
                             );
                           })}
                         </div>
-                        <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md ${isCompleted ? 'bg-emerald-500/10 text-emerald-400' : lead.followup_stage >= 2 ? 'bg-amber-500/10 text-amber-400' : 'bg-indigo-500/10 text-indigo-400'}`}>
-                          {isCompleted ? 'Completed' : `Stage ${lead.followup_stage}/${maxStage}`}
+                          <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md ${isStopped ? 'bg-red-500/10 text-red-400' : isCompleted ? 'bg-emerald-500/10 text-emerald-400' : lead.followup_stage >= 2 ? 'bg-amber-500/10 text-amber-400' : 'bg-indigo-500/10 text-indigo-400'}`}>
+                            {isStopped ? 'Stopped' : isCompleted ? 'Completed' : `Stage ${lead.followup_stage}/${maxStage}`}
                         </span>
                       </div>
                       <button
@@ -606,7 +610,7 @@ const Followups = () => {
                       >
                         <Mail className="w-4 h-4" />
                       </button>
-                      {statusFilter !== 'IN_PROGRESS' && (
+                      {statusFilter !== 'IN_PROGRESS' && !isStopped && !isCompleted && (
                       <button
                         onClick={(e) => { e.stopPropagation(); handleApproveFollowup(lead.id); }}
                         className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-[11px] font-black uppercase tracking-wider hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-600/20 cursor-pointer"

@@ -182,6 +182,18 @@ def process_gmail_history(user_id: int, start_history_id: str):
                 labels = full_msg.get('labelIds', [])
                 
                 if 'INBOX' in labels and 'SENT' not in labels:
+                    # Dedup: skip if already processed via polling
+                    from app.database import get_db_connection as _get_db
+                    _dedup_conn = _get_db()
+                    _dedup_cur = _dedup_conn.cursor()
+                    _dedup_cur.execute("SELECT 1 FROM gmail_processed_messages WHERE message_id = %s", (msg_id,))
+                    _already_done = _dedup_cur.fetchone()
+                    _dedup_cur.close()
+                    _dedup_conn.close()
+
+                    if _already_done:
+                        continue
+
                     # Potential reply! Detect if it matches any of our leads
                     handle_potential_reply(user_id, thread_id, full_msg)
 
@@ -270,19 +282,26 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         # --- STRICT OUTREACH-ONLY FILTER ---
         # ONLY process replies from leads we actually emailed through this platform.
         # Skip all random inbox emails (marketing, newsletters, unknown senders, etc.)
-        conn_check = get_db_connection()
-        cur_check = conn_check.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cur_check.execute(
-            "SELECT id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND user_id = %s AND email_status IN ('SENT', 'REPLIED', 'CLOSED', 'SCHEDULED')",
+        cur.execute(
+            "SELECT id, user_id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND user_id = %s AND email_status IN ('SENT', 'REPLIED', 'CLOSED', 'SCHEDULED')",
             (sender_email, user_id)
         )
-        lead_exists = cur_check.fetchone()
-        cur_check.close()
-        conn_check.close()
+        lead_exists = cur.fetchone()
         
         if not lead_exists:
-            print(f"DEBUG: Skipping {sender_email} — not a lead we contacted through this platform.")
-            return  # Hard stop — don't process random inbox mail
+            # Cross-account fallback: search for this email under any user
+            cur.execute(
+                "SELECT id, user_id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND email_status IN ('SENT', 'REPLIED', 'CLOSED', 'SCHEDULED') AND is_responded = FALSE LIMIT 1",
+                (sender_email,)
+            )
+            cross_lead = cur.fetchone()
+            if cross_lead:
+                user_id = cross_lead['user_id']
+                lead_exists = cross_lead
+                print(f"DEBUG: Cross-account reply — retargeted to user {user_id}")
+            else:
+                print(f"DEBUG: Skipping {sender_email} — not a lead we contacted through this platform.")
+                return  # Hard stop — don't process random inbox mail
         
         lead_id = lead_exists['id']
         # Step 1: AI Intent Classification
@@ -473,10 +492,9 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                             cur.execute("""
                                 SELECT id, first_name, last_name, email FROM leads_raw
                                 WHERE id != %s
-                                AND user_id = %s
                                 AND followup_status = 'ACTIVE' AND is_responded = FALSE
                                 AND LOWER(split_part(email, '@', 2)) = %s
-                            """, (lead_id, user_id, full_domain))
+                            """, (lead_id, full_domain))
                         else:
                             cur.execute("SELECT id, first_name, last_name, email FROM leads_raw WHERE FALSE", ())
                     else:
@@ -495,6 +513,33 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 conn.commit()
             except Exception as company_err:
                 logger.warning(f"Company-level followup stop failed: {company_err}")
+
+            # Stop followups for the SAME email across ALL other accounts/users
+            try:
+                cur.execute("""
+                    SELECT id, first_name, last_name, email, user_id FROM leads_raw
+                    WHERE LOWER(email) = LOWER(%s) AND id != %s
+                    AND followup_status = 'ACTIVE' AND is_responded = FALSE
+                """, (sender_email, lead_id))
+                same_email_leads = cur.fetchall()
+                for se_lead in same_email_leads:
+                    se_id = se_lead['id']
+                    se_name = f"{se_lead['first_name'] or ''} {se_lead['last_name'] or ''}".strip() or se_lead['email']
+                    cur.execute("""
+                        UPDATE leads_raw
+                        SET is_responded = TRUE,
+                            email_status = %s,
+                            reply_intent = %s,
+                            followup_status = 'STOPPED',
+                            updated_at = NOW()
+                        WHERE id = %s
+                    """, (final_status, intent, se_id))
+                    from app.models.lead import add_activity_log
+                    add_activity_log(se_id, 'FOLLOWUP_STOPPED', f'Reply received from same email ({sender_email}) on another account — auto-stopped', 'system')
+                    logger.info(f"Stopped followup for {se_name} ({se_lead['email']}) under user {se_lead['user_id']} — same email replied on another account")
+                conn.commit()
+            except Exception as same_email_err:
+                logger.warning(f"Cross-account same-email followup stop failed: {same_email_err}")
 
             # Step 3: Auto-create a reminder when MEETING_REQUESTED
             if intent == 'MEETING_REQUESTED':
@@ -1279,17 +1324,20 @@ def poll_all_users_for_replies():
                                     if failed_email_raw:
                                         failed_email = failed_email_raw.group(0).lower()
                                         cur.execute("""
-                                            SELECT id, email_status FROM leads_raw 
+                                            UPDATE leads_raw
+                                            SET email_status = 'BOUNCED',
+                                                followup_status = 'STOPPED',
+                                                is_responded = TRUE,
+                                                updated_at = NOW()
                                             WHERE LOWER(email) = %s AND email_status != 'BOUNCED'
-                                            LIMIT 1
+                                            RETURNING id
                                         """, (failed_email,))
-                                        bounced_lead = cur.fetchone()
-                                        if bounced_lead:
-                                            cur.execute("UPDATE leads_raw SET email_status = 'BOUNCED', followup_status = 'STOPPED', updated_at = NOW() WHERE id = %s", (bounced_lead['id'],))
-                                            conn.commit()
-                                            from app.models.lead import add_activity_log
-                                            add_activity_log(bounced_lead['id'], 'BOUNCED', f'Email bounced — {bounce_reason}', 'system')
-                                            logger.info(f"Marked lead {bounced_lead['id']} ({failed_email}) as BOUNCED. Reason: {bounce_reason}")
+                                        bounced_ids = cur.fetchall()
+                                        conn.commit()
+                                        from app.models.lead import add_activity_log
+                                        for row in bounced_ids:
+                                            add_activity_log(row['id'], 'BOUNCED', f'Email bounced — {bounce_reason}', 'system')
+                                            logger.info(f"Marked lead {row['id']} ({failed_email}) as BOUNCED. Reason: {bounce_reason}")
                                 except Exception as bounce_err:
                                     logger.warning(f"Bounce processing failed for msg {m_id}: {bounce_err}")
                                 cur.execute("INSERT INTO gmail_processed_messages (message_id, user_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (m_id, uid))
