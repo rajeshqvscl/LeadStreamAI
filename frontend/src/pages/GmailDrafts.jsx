@@ -193,6 +193,20 @@ const GmailDrafts = () => {
         });
         listHtml += '</ul>';
         htmlParts.push(listHtml);
+      } else if (lines.length >= 2 && lines.every(l => !l.trim() || (l.trim().startsWith('|') && l.trim().endsWith('|')))) {
+        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:13px;">';
+        const dataLines = lines.filter(l => l.trim() && !l.trim().match(/^\|[-:\s]+\|$/));
+        dataLines.forEach((line, i) => {
+          const cells = line.trim().split('|').slice(1, -1).map(c => c.trim());
+          const tag = i === 0 ? 'th' : 'td';
+          const cellStyle = tag === 'th'
+            ? 'border:1px solid #475569;padding:8px 10px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:12px;text-transform:uppercase;'
+            : 'border:1px solid #475569;padding:8px 10px;text-align:left;color:#cbd5e1;font-size:13px;';
+          const cellHtml = cells.map(c => `<${tag} style="${cellStyle}">${c}</${tag}>`).join('');
+          tableHtml += `<tr>${cellHtml}</tr>`;
+        });
+        tableHtml += '</table>';
+        htmlParts.push(tableHtml);
       } else {
         // Paragraph: preserve single newlines as line breaks
         const content = trimmed.replace(/\n/g, '<br />');

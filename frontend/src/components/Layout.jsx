@@ -88,7 +88,7 @@ const Layout = () => {
       setTasks(prev => {
         const existing = prev.find(t => t.id === id);
         if (existing) {
-          if (status === 'COMPLETED') {
+          if (status === 'COMPLETED' || status === 'CANCELLED') {
             setTimeout(() => {
               setTasks(current => current.filter(t => t.id !== id));
             }, 4000);
@@ -444,13 +444,21 @@ const Layout = () => {
 
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                   <div className={`w-1 h-1 rounded-full ${task.status === 'COMPLETED' ? 'bg-emerald-500' : 'bg-blue-500 animate-pulse'}`} />
+                   <div className={`w-1 h-1 rounded-full ${task.status === 'COMPLETED' ? 'bg-emerald-500' : task.status === 'CANCELLED' ? 'bg-red-500' : 'bg-blue-500 animate-pulse'}`} />
                    <span className="text-[9px] font-black uppercase tracking-tighter text-slate-400">
-                    {task.status === 'COMPLETED' ? 'Dispatched' : 'In Progress'}
+                    {task.status === 'COMPLETED' ? 'Dispatched' : task.status === 'CANCELLED' ? 'Cancelled' : 'In Progress'}
                    </span>
                 </div>
                 {task.status === 'COMPLETED' && (
                   <span className="text-[9px] font-black text-emerald-500 uppercase italic">Finalizing...</span>
+                )}
+                {task.status === 'RUNNING' && (
+                  <button
+                    onClick={() => window.dispatchEvent(new CustomEvent('TASK_CANCEL', { detail: { id: task.id } }))}
+                    className="text-[9px] font-black uppercase tracking-wider text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 px-2 py-0.5 rounded-md border border-red-500/20 transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
                 )}
               </div>
             </div>

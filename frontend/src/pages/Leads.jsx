@@ -41,6 +41,9 @@ const Leads = () => {
   const [customTemplates, setCustomTemplates] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState('ai'); // 'ai' or template name
   const [isTemplateGenerating, setIsTemplateGenerating] = useState(false);
+  const abortControllerRef = useRef(null);
+  const pollIntervalRef = useRef(null);
+  const currentTaskIdRef = useRef(null);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [isCreatingLead, setIsCreatingLead] = useState(false);
@@ -163,6 +166,40 @@ const Leads = () => {
 
   useEffect(() => {
     api.get('/api/custom-draft-templates').then(r => setCustomTemplates(r.data || [])).catch(() => {});
+  }, []);
+
+  // Listen for cancel requests from the system dispatch (Layout.jsx task drawer)
+  useEffect(() => {
+    const handleCancel = (e) => {
+      if (e.detail.id !== currentTaskIdRef.current) return;
+      // Abort AI draft POST
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      // Stop polling for custom template progress
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      window.dispatchEvent(new CustomEvent('TASK_UPDATE', {
+        detail: { id: currentTaskIdRef.current, title: 'Generation Cancelled', subtitle: 'Draft generation was cancelled', progress: 0, status: 'CANCELLED' }
+      }));
+      currentTaskIdRef.current = null;
+    };
+    window.addEventListener('TASK_CANCEL', handleCancel);
+    return () => {
+      window.removeEventListener('TASK_CANCEL', handleCancel);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      currentTaskIdRef.current = null;
+    };
   }, []);
 
   const handleFilterChange = (e) => {
@@ -380,6 +417,7 @@ const Leads = () => {
     if (selectedLeads.size === 0) return;
     const taskId = `lead-gen-${Date.now()}`;
     setShowTemplatePicker(false);
+    currentTaskIdRef.current = taskId;
     
     window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
       detail: { id: taskId, title: 'AI Lead Generation', subtitle: `Processing ${selectedLeads.size} leads...`, progress: 10, status: 'RUNNING' } 
@@ -390,7 +428,11 @@ const Leads = () => {
     
     try {
       if (selectedTemplate === 'ai') {
-        await api.post('/api/generate-bulk-domain-drafts', { lead_ids: leadIds });
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+        await api.post('/api/generate-bulk-domain-drafts', { lead_ids: leadIds }, { signal: controller.signal });
+        abortControllerRef.current = null;
+        if (currentTaskIdRef.current !== taskId) return; // was cancelled
         window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
           detail: { id: taskId, title: 'Generation Complete', subtitle: `Drafted ${leadIds.length} leads`, progress: 100, status: 'COMPLETED' } 
         }));
@@ -406,27 +448,39 @@ const Leads = () => {
           }));
         } else {
           const pollInterval = setInterval(async () => {
+            if (currentTaskIdRef.current !== taskId) { clearInterval(pollInterval); return; }
             try {
               const prog = await api.get(`/api/bulk-progress/${batchId}`);
               const p = prog.data;
+              if (currentTaskIdRef.current !== taskId) { clearInterval(pollInterval); return; }
               window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
                 detail: { id: taskId, title: `Applying: ${selectedTemplate}`, subtitle: `${p.processed}/${p.total} leads...`, progress: Math.round((p.processed / p.total) * 100), status: p.status === 'running' ? 'RUNNING' : 'COMPLETED' } 
               }));
               if (p.status === 'done') {
                 clearInterval(pollInterval);
+                pollIntervalRef.current = null;
                 showNotification('success', `Template "${selectedTemplate}" applied to ${p.success} lead(s).`);
                 fetchLeads();
               } else if (p.status === 'error') {
                 clearInterval(pollInterval);
+                pollIntervalRef.current = null;
                 showNotification('error', 'Template generation failed');
                 fetchLeads();
               }
-            } catch { clearInterval(pollInterval); }
+            } catch { clearInterval(pollInterval); pollIntervalRef.current = null; }
           }, 1500);
+          pollIntervalRef.current = pollInterval;
         }
       }
-      fetchLeads();
+      if (currentTaskIdRef.current === taskId) {
+        fetchLeads();
+      }
     } catch (err) {
+      if (axios.isCancel(err)) {
+        currentTaskIdRef.current = null;
+        abortControllerRef.current = null;
+        return;
+      }
       window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
         detail: { id: taskId, title: 'Generation Failed', subtitle: 'AI matrix encountered an error', progress: 0, status: 'FAILED' } 
       }));
