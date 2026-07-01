@@ -87,7 +87,8 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cur.execute("SELECT is_approved, is_active, credits_used, COALESCE(credits_limit, 200) as c_limit, role, full_name, username FROM users WHERE id = %s", (user_id,))
+        uid = user_id if user_id and user_id.isdigit() else "1"
+        cur.execute("SELECT is_approved, is_active, credits_used, COALESCE(credits_limit, 200) as c_limit, role, full_name, username FROM users WHERE id = %s", (uid,))
         user_record = cur.fetchone()
         cur.close()
         conn.close()

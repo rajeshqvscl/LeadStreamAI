@@ -27,19 +27,26 @@ async def maintenance_loop():
             logger.error(f"Maintenance loop error: {e}")
         await asyncio.sleep(86400) # Run every 24 hours
 
+_scheduler_lock = asyncio.Lock()
+
 async def scheduler_loop():
     from app.services.email_service import check_scheduled_emails
     from app.services.followup_service import process_outreach_sequences
     from app.api.gmail import poll_all_users_for_replies
     while True:
-        try:
-            # Move synchronous blocking calls to threads
-            # Reply check first, then follow-ups — prevents sending follow-up to someone who already replied
-            await asyncio.to_thread(poll_all_users_for_replies)
-            await asyncio.to_thread(check_scheduled_emails)
-            await asyncio.to_thread(process_outreach_sequences)
-        except Exception as e:
-            print(f"Scheduler error: {e}")
+        if _scheduler_lock.locked():
+            logger.warning("Scheduler: previous iteration still running, skipping this cycle")
+            await asyncio.sleep(10)
+            continue
+        async with _scheduler_lock:
+            try:
+                # Move synchronous blocking calls to threads
+                # Reply check first, then follow-ups — prevents sending follow-up to someone who already replied
+                await asyncio.to_thread(poll_all_users_for_replies)
+                await asyncio.to_thread(check_scheduled_emails)
+                await asyncio.to_thread(process_outreach_sequences)
+            except Exception as e:
+                print(f"Scheduler error: {e}")
         await asyncio.sleep(10)
 
 @asynccontextmanager

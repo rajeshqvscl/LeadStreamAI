@@ -1135,6 +1135,36 @@ def markdown_to_html(text, gmail_style=False):
                     html_parts.append(f"<p style='{p_style}'>{content}</p>")
     
     result = "".join(html_parts)
+
+    # Ensure all table cells have visible borders (handles HTML tables from DOCX/pasted HTML)
+    def ensure_cell_border(m):
+        tag = m.group(1)
+        attrs = m.group(2) or ''
+        if 'border' in attrs:
+            return f'<{tag}{attrs}>'
+        if 'style=' in attrs:
+            attrs = attrs.replace('style="', 'style="border:1px solid #475569;')
+            attrs = attrs.replace("style='", "style='border:1px solid #475569;")
+        else:
+            attrs += ' style="border:1px solid #475569;padding:6px 10px;text-align:left;"'
+        return f'<{tag}{attrs}>'
+
+    result = re.sub(r'<(th|td)([^>]*)>', ensure_cell_border, result, flags=re.IGNORECASE)
+
+    # Ensure tables have border-collapse
+    def ensure_table_collapse(m):
+        attrs = m.group(1) or ''
+        if 'border-collapse' in attrs:
+            return f'<table{attrs}>'
+        if 'style=' in attrs:
+            attrs = attrs.replace('style="', 'style="border-collapse:collapse;')
+            attrs = attrs.replace("style='", "style='border-collapse:collapse;")
+        else:
+            attrs += ' style="border-collapse:collapse;width:100%;"'
+        return f'<table{attrs}>'
+
+    result = re.sub(r'<table([^>]*)>', ensure_table_collapse, result, flags=re.IGNORECASE)
+
     if gmail_style:
         result = f"<div style='padding: 0 40px; font-family: Arial, sans-serif;'>{result}</div>"
     return result
@@ -3382,11 +3412,14 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     sender_email = None
     sender_name = "the team"
     if user_id:
-        cur.execute("SELECT email, full_name, username FROM users WHERE id = %s", (user_id,))
-        u = cur.fetchone()
-        if u:
-            sender_email = u['email']
-            sender_name = u['full_name'] or u['username']
+        from app.api.drafts import normalize_user_id
+        uid_val = normalize_user_id(user_id)
+        if uid_val and str(uid_val).isdigit():
+            cur.execute("SELECT email, full_name, username FROM users WHERE id = %s", (int(uid_val),))
+            u = cur.fetchone()
+            if u:
+                sender_email = u['email']
+                sender_name = u['full_name'] or u['username']
 
     # Pre-fetch sender profile once for all heal_draft_content calls
     from app.api.drafts import get_sender_profile

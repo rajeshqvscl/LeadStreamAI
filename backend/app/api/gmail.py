@@ -89,7 +89,7 @@ def normalize_user_id(user_id: Optional[str]) -> str:
     except Exception as e:
         print(f"Error resolving user identity {user_id}: {e}")
         
-    return user_id
+    return "1"
 
 class AIRefineRequest(BaseModel):
     content: str
@@ -283,7 +283,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         # ONLY process replies from leads we actually emailed through this platform.
         # Skip all random inbox emails (marketing, newsletters, unknown senders, etc.)
         cur.execute(
-            "SELECT id, user_id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND user_id = %s AND email_status IN ('SENT', 'REPLIED', 'CLOSED', 'SCHEDULED')",
+            "SELECT id, user_id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND user_id = %s AND email_status IN ('SENT', 'OPENED', 'CLICKED', 'REPLIED', 'CLOSED', 'SCHEDULED')",
             (sender_email, user_id)
         )
         lead_exists = cur.fetchone()
@@ -291,7 +291,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         if not lead_exists:
             # Cross-account fallback: search for this email under any user
             cur.execute(
-                "SELECT id, user_id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND email_status IN ('SENT', 'REPLIED', 'CLOSED', 'SCHEDULED') AND is_responded = FALSE LIMIT 1",
+                "SELECT id, user_id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND email_status IN ('SENT', 'OPENED', 'CLICKED', 'REPLIED', 'CLOSED', 'SCHEDULED') AND is_responded = FALSE LIMIT 1",
                 (sender_email,)
             )
             cross_lead = cur.fetchone()
@@ -479,9 +479,9 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 if company_name_clean and _is_valid_company_name(company_name_clean):
                     cur.execute("""
                         SELECT id, first_name, last_name, email FROM leads_raw
-                        WHERE company_name ILIKE %s AND id != %s
+                        WHERE company_name ILIKE %s AND id != %s AND user_id = %s
                         AND followup_status = 'ACTIVE' AND is_responded = FALSE
-                    """, (company_name, lead_id))
+                    """, (company_name, lead_id, user_id))
                 else:
                     # Fallback: exact domain match only (e.g. merakventure.com matches merakventure.com, not merakventure.in)
                     # Skip common personal email domains to avoid stopping unrelated leads
@@ -491,10 +491,10 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                         if full_domain not in personal_domains:
                             cur.execute("""
                                 SELECT id, first_name, last_name, email FROM leads_raw
-                                WHERE id != %s
+                                WHERE id != %s AND user_id = %s
                                 AND followup_status = 'ACTIVE' AND is_responded = FALSE
                                 AND LOWER(split_part(email, '@', 2)) = %s
-                            """, (lead_id, full_domain))
+                            """, (lead_id, user_id, full_domain))
                         else:
                             cur.execute("SELECT id, first_name, last_name, email FROM leads_raw WHERE FALSE", ())
                     else:
@@ -525,15 +525,14 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 for se_lead in same_email_leads:
                     se_id = se_lead['id']
                     se_name = f"{se_lead['first_name'] or ''} {se_lead['last_name'] or ''}".strip() or se_lead['email']
+                    # Only stop followup — don't set email_status to REPLIED/CLOSED
+                    # since this lead under a different account may never have been contacted
                     cur.execute("""
                         UPDATE leads_raw
-                        SET is_responded = TRUE,
-                            email_status = %s,
-                            reply_intent = %s,
-                            followup_status = 'STOPPED',
+                        SET followup_status = 'STOPPED',
                             updated_at = NOW()
                         WHERE id = %s
-                    """, (final_status, intent, se_id))
+                    """, (se_id,))
                     from app.models.lead import add_activity_log
                     add_activity_log(se_id, 'FOLLOWUP_STOPPED', f'Reply received from same email ({sender_email}) on another account — auto-stopped', 'system')
                     logger.info(f"Stopped followup for {se_name} ({se_lead['email']}) under user {se_lead['user_id']} — same email replied on another account")

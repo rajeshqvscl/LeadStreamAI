@@ -390,17 +390,17 @@ def process_outreach_sequences():
 
     try:
         cur.execute("""
-            SELECT DISTINCT ON (LOWER(l.email)) l.*, u.id as sender_id, u.email as sender_email, u.full_name as sender_name,
+            SELECT DISTINCT ON (l.user_id, LOWER(l.email)) l.*, u.id as sender_id, u.email as sender_email, u.full_name as sender_name,
                    u.auto_followup, u.outreach_daily_limit, u.google_refresh_token
             FROM leads_raw l
             JOIN users u ON l.user_id = u.id
             WHERE l.followup_status = 'ACTIVE'
-            AND l.email_status = 'SENT'
+            AND l.email_status IN ('SENT', 'OPENED', 'CLICKED')
             AND COALESCE(l.is_responded, FALSE) = FALSE
             AND COALESCE(l.reply_intent, '') NOT IN ('INTERESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED')
             AND COALESCE(l.email_status, '') NOT IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED', 'NOT_INTERESTED', 'BOUNCED')
             AND l.followup_stage < 3
-            ORDER BY LOWER(l.email), l.last_outreach_at ASC
+            ORDER BY l.user_id, LOWER(l.email), l.last_outreach_at ASC
         """)
 
         leads = cur.fetchall()
@@ -650,25 +650,7 @@ def process_outreach_sequences():
 
                     logger.info(f"PREVIEW [{lead['email']}]: body=\"{body}\"")
 
-                    # Atomically claim this stage across all workers.
-                    # Only the first worker to UPDATE gets rowcount=1 — others skip.
-                    claim_conn = get_db_connection()
-                    claim_cur = claim_conn.cursor()
-                    new_status = 'COMPLETED' if next_stage >= 3 else 'ACTIVE'
-                    claim_cur.execute("""
-                        UPDATE leads_raw
-                        SET followup_stage = %s, followup_status = %s, updated_at = NOW()
-                        WHERE id = %s AND followup_stage = %s AND followup_status = 'ACTIVE'
-                    """, (next_stage, new_status, lead_id, stage))
-                    claim_conn.commit()
-                    claimed = claim_cur.rowcount > 0
-                    claim_cur.close()
-                    claim_conn.close()
-
-                    if not claimed:
-                        logger.info(f"Lead {lead_id}: stage {stage} already claimed by another worker — skipping")
-                        continue
-
+                    # Send the email first
                     success, msg, new_thread_id, new_rfc_msg_id = send_email(
                         to_email=lead['email'],
                         subject=subject,
@@ -681,29 +663,42 @@ def process_outreach_sequences():
                         lead_id=lead_id
                     )
 
-                    if success:
-                        update_conn = get_db_connection()
-                        update_cur = update_conn.cursor()
-                        update_cur.execute("""
-                            UPDATE leads_raw
-                            SET last_outreach_at = NOW(), last_outreach_subject = %s,
-                                email_status = 'SENT',
-                                gmail_thread_id = COALESCE(%s, gmail_thread_id),
-                                gmail_message_id = COALESCE(%s, gmail_message_id),
-                                updated_at = NOW()
-                            WHERE id = %s
-                        """, (subject, new_thread_id, new_rfc_msg_id, lead_id))
-                        update_conn.commit()
-                        update_cur.close()
-                        update_conn.close()
-
-                        add_activity_log(lead_id, "AUTO_FOLLOWUP_SENT", f"Stage {next_stage} auto-sent", "system", uid)
-                        sent_count += 1
-
-                        logger.info(f"Auto-followup sent from {first_lead['sender_name']} ({first_lead['sender_email']}) to {lead['email']}. Enforcing 5s cool-down...")
-                        time.sleep(5)
-                    else:
+                    if not success:
                         logger.error(f"Auto-Pilot failed for {lead['email']}: {msg}")
+                        continue
+
+                    # Atomically claim this stage AND update last_outreach_at in a single operation.
+                    # Using one connection/transaction ensures followup_stage and last_outreach_at
+                    # are always consistent — preventing cascading follow-ups when the update fails.
+                    new_status = 'COMPLETED' if next_stage >= 3 else 'ACTIVE'
+                    claim_conn = get_db_connection()
+                    claim_cur = claim_conn.cursor()
+                    claim_cur.execute("""
+                        UPDATE leads_raw
+                        SET followup_stage = %s,
+                            followup_status = %s,
+                            last_outreach_at = NOW(),
+                            last_outreach_subject = %s,
+                            email_status = 'SENT',
+                            gmail_thread_id = COALESCE(%s, gmail_thread_id),
+                            gmail_message_id = COALESCE(%s, gmail_message_id),
+                            updated_at = NOW()
+                        WHERE id = %s AND followup_stage = %s AND followup_status = 'ACTIVE'
+                    """, (next_stage, new_status, subject, new_thread_id, new_rfc_msg_id, lead_id, stage))
+                    claim_conn.commit()
+                    claimed = claim_cur.rowcount > 0
+                    claim_cur.close()
+                    claim_conn.close()
+
+                    if not claimed:
+                        logger.warning(f"Lead {lead_id}: stage {stage} already claimed by another worker after send — possible duplicate")
+                        continue
+
+                    add_activity_log(lead_id, "AUTO_FOLLOWUP_SENT", f"Stage {next_stage} auto-sent", "system", uid)
+                    sent_count += 1
+
+                    logger.info(f"Auto-followup sent from {first_lead['sender_name']} ({first_lead['sender_email']}) to {lead['email']}. Enforcing 5s cool-down...")
+                    time.sleep(5)
                 except Exception as ex:
                     logger.error(f"Error dispatching auto-followup for lead {lead.get('id')}: {ex}")
     except Exception as e:

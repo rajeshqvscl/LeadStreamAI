@@ -110,7 +110,14 @@ def create_tables():
         ("cc_email", "TEXT"),
         ("gmail_draft_id", "TEXT"),
         ("draft_template_used", "TEXT"),
-        ("tracking_token", "TEXT")
+        ("tracking_token", "TEXT"),
+        # Reply analysis columns (used by gmail.py handle_potential_reply)
+        ("check_size", "TEXT"),
+        ("rag_advice", "TEXT"),
+        ("rag_intelligence", "TEXT"),
+        ("sentiment_score", "INTEGER"),
+        ("urgency_level", "TEXT"),
+        ("rejection_reason", "TEXT")
     ]
     # Skip ALTER TABLEs if all columns already exist (saves ~11s on Neon)
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'leads_raw'")
@@ -441,7 +448,7 @@ def create_tables():
     """)
 
     # Ensure owner_username + followup + attachment columns exist on prompts table
-    for prompts_col in [("owner_username", "TEXT"), ("followup_1", "TEXT"), ("followup_2", "TEXT"), ("followup_3", "TEXT"), ("attachment_file", "TEXT")]:
+    for prompts_col in [("owner_username", "TEXT"), ("followup_1", "TEXT"), ("followup_2", "TEXT"), ("followup_3", "TEXT"), ("attachment_file", "TEXT"), ("subject", "TEXT"), ("cc", "TEXT"), ("followup_count", "INTEGER DEFAULT 3")]:
         try:
             cur.execute(f"ALTER TABLE prompts ADD COLUMN IF NOT EXISTS {prompts_col[0]} {prompts_col[1]};")
             conn.commit()

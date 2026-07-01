@@ -906,7 +906,7 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
                     last_outreach_subject = %s,
                     gmail_thread_id = %s,
                     gmail_message_id = %s,
-                    is_responded = FALSE,
+                    is_responded = COALESCE(is_responded, FALSE),
                     updated_at = NOW()
                 WHERE id = %s
             """, (saved_subject, save_thread, save_msg_id, lead_id))

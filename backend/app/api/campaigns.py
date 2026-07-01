@@ -47,7 +47,8 @@ def api_create_campaign(campaign: CampaignCreate, user_id: Optional[str] = Heade
         if user_id:
             conn = get_db_connection()
             cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-            cur.execute("SELECT full_name, username FROM users WHERE id = %s", (user_id,))
+            uid = user_id if user_id.isdigit() else "1"
+            cur.execute("SELECT full_name, username FROM users WHERE id = %s", (uid,))
             u = cur.fetchone()
             if u:
                 data['user_name'] = u['full_name'] or u['username']

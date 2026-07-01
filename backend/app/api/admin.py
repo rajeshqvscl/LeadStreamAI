@@ -16,7 +16,9 @@ router = APIRouter()
 def normalize_user_id(user_id: Optional[str]) -> str:
     if not user_id or user_id.strip() == "" or user_id.lower() == "admin":
         return "1"
-    return user_id
+    if user_id.isdigit():
+        return user_id
+    return "1"
 
 @router.get("/admin/stats")
 async def get_admin_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
