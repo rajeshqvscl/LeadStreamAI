@@ -3,12 +3,14 @@ import {
   Search, Upload, Download, Trash2, Loader2, Sparkles,
   Table, FileSpreadsheet, Plus, CheckCircle2, AlertCircle, X, Send, Mail, Pencil, PanelRightClose, Save, Layout, Tag, Building2, Filter, ChevronDown, User, Globe, Calendar, Eye, EyeOff
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
 import api from '../services/api';
 import DraftTemplatePicker from '../components/DraftTemplatePicker';
 
 const CompanyDatabase = () => {
+  const navigate = useNavigate();
   const [companies, setCompanies] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isImporting, setIsImporting] = useState(false);
@@ -284,7 +286,8 @@ const CompanyDatabase = () => {
     try {
       await api.post(`/api/companies/${id}/generate-draft`);
       showNotification('success', '✓ Lead moved to pipeline. Draft added to Email Queue.');
-      fetchCompanies(); // Refresh — company is removed from registry
+      fetchCompanies();
+      navigate('/dashboard/emails?status=PENDING_APPROVAL');
     } catch (err) {
       showNotification('error', 'Draft Generation Fault: ' + (err.response?.data?.detail || err.message));
     } finally {
@@ -329,6 +332,7 @@ const CompanyDatabase = () => {
               clearInterval(pollInterval);
               fetchCompanies();
               showNotification('success', `✓ ${p.success} lead${p.success > 1 ? 's' : ''} moved to pipeline. Drafts added to Email Queue.`);
+              navigate('/dashboard/emails?status=PENDING_APPROVAL');
             } else if (p.status === 'error') {
               clearInterval(pollInterval);
               fetchCompanies();
@@ -385,6 +389,7 @@ const CompanyDatabase = () => {
               clearInterval(pollInterval);
               fetchCompanies();
               showNotification('success', `Template "${templateName}" applied to ${p.success} lead${p.success > 1 ? 's' : ''}.`);
+              navigate('/dashboard/emails?status=PENDING_APPROVAL');
             } else if (p.status === 'error') {
               clearInterval(pollInterval);
               fetchCompanies();

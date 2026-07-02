@@ -882,6 +882,14 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
         orig_subject = get_original_outreach_subject(lead)
         saved_subject = f"Re: {orig_subject}"
 
+        # Stop any old pending drafts for this lead before sending new follow-up
+        cur.execute("""
+            UPDATE leads_raw
+            SET email_status = 'STOPPED',
+                updated_at = NOW()
+            WHERE id = %s AND email_status IN ('PENDING_APPROVAL', 'APPROVED', 'SCHEDULED')
+        """, (lead_id,))
+
         success, msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=lead['email'],
             subject=saved_subject,
@@ -893,14 +901,20 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
             in_reply_to=existing_message_id
         )
         
+        lead_type = str(lead.get('lead_type') or '').upper()
+        max_followup_stage = 2 if lead_type == 'CLIENT' else 3
+        current_stage = lead['followup_stage'] or 0
+        next_stage = current_stage + 1
+        new_followup_status = 'COMPLETED' if next_stage >= max_followup_stage else 'ACTIVE'
+
         if success:
             # Save the thread/message IDs so next follow-up can reply in the same thread
             save_thread = new_thread_id or existing_thread_id
             save_msg_id = new_rfc_message_id or existing_message_id
             cur.execute("""
                 UPDATE leads_raw 
-                SET followup_stage = COALESCE(followup_stage, 0) + 1,
-                    followup_status = 'ACTIVE',
+                SET followup_stage = %s,
+                    followup_status = %s,
                     email_status = 'SENT',
                     last_outreach_at = NOW(),
                     last_outreach_subject = %s,
@@ -909,7 +923,7 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
                     is_responded = COALESCE(is_responded, FALSE),
                     updated_at = NOW()
                 WHERE id = %s
-            """, (saved_subject, save_thread, save_msg_id, lead_id))
+            """, (next_stage, new_followup_status, saved_subject, save_thread, save_msg_id, lead_id))
             
             from app.models.lead import add_activity_log
             add_activity_log(lead_id, "FOLLOWUP_APPROVED", f"Manual follow-up approved and sent via Gmail", "user", uid)

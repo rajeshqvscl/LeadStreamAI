@@ -263,7 +263,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         user_record = cur_user.fetchone()
         cur_user.close()
         
-        if user_record and user_record['email'].lower() in sender_email.lower():
+        if user_record and user_record['email'].lower() == sender_email.lower():
             print(f"DEBUG: Skipping {sender_email} — this is a sent message, not a reply.")
             return
 
@@ -422,9 +422,9 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             print(f"Warning: RAG error: {rag_err}")
  
         # Step 2: Update Lead Status
-        all_intents = ["INTERESTED", "MEETING_REQUESTED", "NEEDS_MORE_INFO", "NOT_INTERESTED"]
+        from app.services.reply_workflow_service import determine_followup_status
+
         final_status = 'REPLIED'
-        should_show_in_intel = intent in all_intents
         if intent == 'NOT_INTERESTED':
             final_status = 'CLOSED'
             
@@ -436,9 +436,17 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
 
         rejection_reason = ai_data.get("rejection_reason")
 
-        cur.execute("""
+        # Centralized business logic: map intent → followup_status
+        new_followup_status = determine_followup_status(intent)
+
+        # Reset last_outreach_at for PENDING (ACTIVE) replies so the follow-up
+        # interval restarts from the reply date. Harmless for STOPPED/MEETING_REQUIRED
+        # since the scheduler won't pick those up.
+        reset_timer = "last_outreach_at = NOW()," if new_followup_status == 'ACTIVE' else ""
+
+        cur.execute(f"""
             UPDATE leads_raw 
-            SET is_responded = %s, 
+            SET is_responded = TRUE,
                 email_status = %s,
                 reply_intent = %s,
                 check_size = COALESCE(%s, check_size),
@@ -451,11 +459,12 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 urgency_level = %s,
                 remarks = %s,
                 rejection_reason = %s,
-                updated_at = NOW(),
-                followup_status = 'STOPPED'
+                followup_status = %s,
+                {reset_timer}
+                updated_at = NOW()
             WHERE LOWER(email) = LOWER(%s) AND user_id = %s
             RETURNING id, first_name, last_name, user_id
-        """, (should_show_in_intel, final_status, intent, check_size, deal_size, pitch_deck_url, rag_advice, rag_intel_json, rag_category, ai_data.get("sentiment_score"), ai_data.get("urgency_level"), body, rejection_reason, sender_email, user_id))
+        """, (final_status, intent, check_size, deal_size, pitch_deck_url, rag_advice, rag_intel_json, rag_category, ai_data.get("sentiment_score"), ai_data.get("urgency_level"), body, rejection_reason, new_followup_status, sender_email, user_id))
 
         
         lead = cur.fetchone()
@@ -1268,7 +1277,7 @@ def poll_all_users_for_replies():
                         sender = next((h['value'] for h in headers if h['name'].lower() == 'from'), "")
                         
                         # Extract pure email from "Name <email@site.com>"
-                        email_match = re.search(r'[\w\.-]+@[\w\.-]+', sender)
+                        email_match = re.search(r'[\w.+-]+@[\w.-]+', sender)
                         if email_match:
                             sender_email = email_match.group(0).lower()
                             subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), "")
@@ -1280,7 +1289,7 @@ def poll_all_users_for_replies():
                                 try:
                                     # Use snippet from Gmail API (text preview) to extract failed recipient
                                     snippet = msg.get('snippet', '')
-                                    failed_email_raw = re.search(r'[\w\.-]+@[\w\.-]+', snippet)
+                                    failed_email_raw = re.search(r'[\w.+-]+@[\w.-]+', snippet)
                                     bounce_reason = "Mail server rejected the message (Undeliverable)"
                                     
                                     # Fetch full message to get more details and extract recipient more reliably
@@ -1295,7 +1304,7 @@ def poll_all_users_for_replies():
                                         
                                         # Extract failed recipient from body if snippet failed
                                         if not failed_email_raw:
-                                            failed_email_raw = re.search(r'[\w\.-]+@[\w\.-]+', clean_body)
+                                            failed_email_raw = re.search(r'[\w.+-]+@[\w.-]+', clean_body)
                                         
                                         # Map common SMTP error codes to simple human-readable reasons
                                         raw_reason = ""
@@ -1411,7 +1420,7 @@ def retro_sync_pdfs(request: Request, x_user_id: Optional[str] = Header(None)):
                     headers = msg_data.get('payload', {}).get('headers', [])
                     sender = next((h['value'] for h in headers if h['name'].lower() == 'from'), "")
                     
-                    match = re.search(r'[\w\.-]+@[\w\.-]+', sender)
+                    match = re.search(r'[\w.+-]+@[\w.-]+', sender)
                     sender_email = match.group(0).lower() if match else sender.lower()
                     
                     payload = msg_data.get('payload', {})

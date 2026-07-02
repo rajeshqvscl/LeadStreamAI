@@ -203,6 +203,7 @@ const BulkSearch = () => {
         setSingleLeadId(null);
         if (singleLeadId === null) setSelectedLeads(new Set());
         fetchBulkLeads(pagination.page);
+        navigate('/dashboard/emails?status=PENDING_APPROVAL');
       } else {
         const res = await api.post('/api/bulk-generate-draft-from-template', {
           lead_ids: leadIds,
@@ -231,6 +232,7 @@ const BulkSearch = () => {
               setSingleLeadId(null);
               if (singleLeadId === null) setSelectedLeads(new Set());
               fetchBulkLeads(pagination.page);
+              navigate('/dashboard/emails?status=PENDING_APPROVAL');
             }
           } catch {
             clearInterval(pollInterval);
@@ -298,6 +300,7 @@ const BulkSearch = () => {
       await api.post('/api/generate-draft', { lead_id: id });
       showNotification('success', 'Lead moved to Email Drafts.');
       fetchBulkLeads(pagination.page);
+      navigate('/dashboard/emails?status=PENDING_APPROVAL');
     } catch (err) {
       showNotification('error', 'Failed to generate draft');
     } finally {

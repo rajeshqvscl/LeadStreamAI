@@ -436,6 +436,7 @@ const Leads = () => {
         window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
           detail: { id: taskId, title: 'Generation Complete', subtitle: `Drafted ${leadIds.length} leads`, progress: 100, status: 'COMPLETED' } 
         }));
+        navigate('/dashboard/emails?status=PENDING_APPROVAL');
       } else {
         const res = await api.post('/api/bulk-generate-draft-from-template', {
           lead_ids: leadIds,
@@ -461,6 +462,7 @@ const Leads = () => {
                 pollIntervalRef.current = null;
                 showNotification('success', `Template "${selectedTemplate}" applied to ${p.success} lead(s).`);
                 fetchLeads();
+                navigate('/dashboard/emails?status=PENDING_APPROVAL');
               } else if (p.status === 'error') {
                 clearInterval(pollInterval);
                 pollIntervalRef.current = null;
