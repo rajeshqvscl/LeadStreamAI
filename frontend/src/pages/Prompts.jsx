@@ -34,6 +34,49 @@ const Prompts = () => {
   const userPhone = user.phone || '+91-9876543210';
   const userLinkedin = user.linkedin_url || 'https://www.linkedin.com/company/qvscl/';
 
+  const getFollowupLabel = (index) => {
+    const scheduleMap = {
+      CLIENT: { 1: '2H', 2: '4H' },
+      INVESTOR: { 1: '2H', 2: '5H', 3: '8H' },
+    };
+    const labels = scheduleMap[userTeam] || scheduleMap.CLIENT;
+    const timing = labels[index] || `${index}H`;
+    return `Follow-up ${index} (${timing})`;
+  };
+
+  const handleFollowupFileUpload = async (e, followupKey) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      let html = '';
+      if (file.name.endsWith('.docx')) {
+        const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
+        html = result.value;
+      } else if (file.name.endsWith('.pdf')) {
+        const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+        const pages = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const text = content.items.map(item => item.str).join(' ');
+          pages.push(text);
+        }
+        html = pages.join('\n\n');
+      }
+      if (html) {
+        setForm(prev => ({ ...prev, [followupKey]: (prev[followupKey] ? prev[followupKey] + '\n\n' : '') + html }));
+      }
+    } catch (err) {
+      console.error('Follow-up file upload error:', err);
+      alert('Failed to read file. Make sure it is a valid .docx or .pdf.');
+    } finally {
+      setUploading(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
   const fetchPrompts = async () => {
     setIsLoading(true);
     try {
@@ -132,6 +175,45 @@ const Prompts = () => {
       alert('Failed to save');
     } finally {
       setSaveField({ id: null, field: null });
+    }
+  };
+
+  const handleFollowupFileUploadExisting = async (e, tplId, followupKey) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      let html = '';
+      if (file.name.endsWith('.docx')) {
+        const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
+        html = result.value;
+      } else if (file.name.endsWith('.pdf')) {
+        const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+        const pages = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const text = content.items.map(item => item.str).join(' ');
+          pages.push(text);
+        }
+        html = pages.join('\n\n');
+      }
+      if (html) {
+        const updated = [...prompts];
+        const idx = updated.findIndex(p => p.id === tplId);
+        if (idx !== -1) {
+          const existing = updated[idx][followupKey] || '';
+          updated[idx] = { ...updated[idx], [followupKey]: existing ? existing + '\n\n' + html : html };
+          setPrompts(updated);
+        }
+      }
+    } catch (err) {
+      console.error('Follow-up file upload error:', err);
+      alert('Failed to read file.');
+    } finally {
+      setUploading(false);
+      if (e.target) e.target.value = '';
     }
   };
 
@@ -376,15 +458,31 @@ const Prompts = () => {
                 </div>
               </div>
               <p className="text-[10px] text-slate-600 mb-4">Write your own follow-ups. Same placeholders work here too.</p>
-              {Array.from({ length: form.followup_count || 3 }, (_, i) => i + 1).map(i => (
+              {Array.from({ length: form.followup_count || 3 }, (_, i) => i + 1).map(i => {
+                const followupKey = `followup_${i}`;
+                const fuploading = uploading;
+                return (
                 <div key={i} className="mb-3">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">Follow-up {i}</label>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">{getFollowupLabel(i)}</label>
                   <div className="flex gap-2">
-                    <ToolbarTextarea value={form[`followup_${i}`]} onChange={e => setForm({...form, [`followup_${i}`]: e.target.value})} rows={3} placeholder={`Follow-up ${i} content...`} />
-                    <button onClick={() => setPreview({ show: true, content: form[`followup_${i}`], label: `Follow-up ${i}`, isFollowup: true })} className="self-start px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-[10px] font-bold border border-blue-500/20 whitespace-nowrap transition-all">Preview</button>
+                    <ToolbarTextarea value={form[followupKey]} onChange={e => setForm({...form, [followupKey]: e.target.value})} rows={3} placeholder={`Follow-up ${i} content...`} />
+                    <div className="flex flex-col gap-1.5">
+                      <button onClick={() => setPreview({ show: true, content: form[followupKey], label: followupKey, isFollowup: true })} className="px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-[10px] font-bold border border-blue-500/20 whitespace-nowrap transition-all">Preview</button>
+                      <label className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-white/10 text-slate-400 hover:text-white hover:border-blue-500/50 cursor-pointer transition-all text-[10px] font-bold ${fuploading ? 'opacity-50' : ''}`}>
+                        {fuploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                        {fuploading ? '' : 'Draft'}
+                        <input type="file" accept=".docx,.pdf" className="hidden" disabled={fuploading} onChange={e => handleFollowupFileUpload(e, followupKey)} />
+                      </label>
+                      {form[followupKey] && (
+                        <button onClick={() => setForm(prev => ({ ...prev, [followupKey]: '' }))} className="px-3 py-2 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 text-[10px] font-bold whitespace-nowrap transition-all">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
             <button onClick={handleCreate} className="btn bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3 px-8 rounded-xl text-sm font-bold">Save Template</button>
           </div>
@@ -510,20 +608,33 @@ const Prompts = () => {
                         ))}
                       </div>
                     </div>
-                    {Array.from({ length: tpl.followup_count || 3 }, (_, i) => i + 1).map(i => (
+                    {Array.from({ length: tpl.followup_count || 3 }, (_, i) => i + 1).map(i => {
+                      const fkey = `followup_${i}`;
+                      return (
                       <div key={i}>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Follow-up {i}</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">{getFollowupLabel(i)}</label>
                         <div className="flex gap-2">
-                          <ToolbarTextarea value={tpl[`followup_${i}`] || ''} onChange={e => { const updated = [...prompts]; const idx = updated.findIndex(p => p.id === tpl.id); updated[idx] = {...updated[idx], [`followup_${i}`]: e.target.value}; setPrompts(updated); }} rows={2} placeholder="(empty)" />
-                          <div className="flex flex-col gap-2">
-                          <button onClick={() => setPreview({ show: true, content: tpl[`followup_${i}`] || '', label: `Follow-up ${i}`, subject: tpl.subject, isFollowup: true })} className="px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-[10px] font-bold border border-blue-500/20 whitespace-nowrap transition-all">Preview</button>
-                            <button onClick={() => handleFieldSave(tpl.id, `followup_${i}`, tpl[`followup_${i}`] || '')} disabled={saveField.id === tpl.id && saveField.field === `followup_${i}`} className={`px-3 py-2 rounded-lg text-[10px] font-bold border whitespace-nowrap transition-all ${saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === `followup_${i}` ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/30' : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 border-white/10'}`}>
-                              {saveField.id === tpl.id && saveField.field === `followup_${i}` ? <Loader2 className="w-3 h-3 animate-spin" /> : saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === `followup_${i}` ? <CheckCircle2 className="w-3 h-3" /> : 'Save'}
+                          <ToolbarTextarea value={tpl[fkey] || ''} onChange={e => { const updated = [...prompts]; const idx = updated.findIndex(p => p.id === tpl.id); updated[idx] = {...updated[idx], [fkey]: e.target.value}; setPrompts(updated); }} rows={2} placeholder="(empty)" />
+                          <div className="flex flex-col gap-1.5">
+                            <button onClick={() => setPreview({ show: true, content: tpl[fkey] || '', label: fkey, subject: tpl.subject, isFollowup: true })} className="px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-[10px] font-bold border border-blue-500/20 whitespace-nowrap transition-all">Preview</button>
+                            <button onClick={() => handleFieldSave(tpl.id, fkey, tpl[fkey] || '')} disabled={saveField.id === tpl.id && saveField.field === fkey} className={`px-3 py-2 rounded-lg text-[10px] font-bold border whitespace-nowrap transition-all ${saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === fkey ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/30' : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 border-white/10'}`}>
+                              {saveField.id === tpl.id && saveField.field === fkey ? <Loader2 className="w-3 h-3 animate-spin" /> : saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === fkey ? <CheckCircle2 className="w-3 h-3" /> : 'Save'}
                             </button>
+                            <label className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-white/10 text-slate-400 hover:text-white hover:border-blue-500/50 cursor-pointer transition-all text-[10px] font-bold ${uploading ? 'opacity-50' : ''}`}>
+                              {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                              {uploading ? '' : 'Draft'}
+                              <input type="file" accept=".docx,.pdf" className="hidden" disabled={uploading} onChange={e => handleFollowupFileUploadExisting(e, tpl.id, fkey)} />
+                            </label>
+                            {tpl[fkey] && (
+                              <button onClick={() => { const updated = [...prompts]; const idx = updated.findIndex(p => p.id === tpl.id); updated[idx] = {...updated[idx], [fkey]: ''}; setPrompts(updated); }} className="px-3 py-2 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 text-[10px] font-bold whitespace-nowrap transition-all">
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                     <div className="border-t border-white/5 pt-4">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2">Attachment</label>
                       <div className="flex items-center gap-3">
