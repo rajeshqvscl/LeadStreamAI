@@ -204,7 +204,7 @@ def get_metrics(
     if user_id and user_id != 'all' and resolved_name:
         uname = (resolved_name or '').lower()
         _is_investor_user = any(kw in uname for kw in ['yashika', 'kajal', 'ayush'])
-        _is_client_user = 'palak' in uname
+        _is_client_user = any(kw in uname for kw in ['palak', 'vismaya'])
     else:
         _is_investor_user = False
         _is_client_user = False
