@@ -1243,6 +1243,7 @@ def get_bulk_company_progress(batch_id: str):
 @router.post("/companies/{row_id}/send")
 def send_company_email(row_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Generates and actually dispatches an email for a company record."""
+    uid = normalize_user_id(user_id)
     if not check_daily_email_limit(user_id, 1):
         raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this email would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
         
@@ -1250,7 +1251,7 @@ def send_company_email(row_id: int, user_id: Optional[str] = Header(None, alias=
     from app.api.drafts import markdown_to_html
     
     # 1. Generate the draft and lead record
-    res = generate_company_draft(row_id, user_id)
+    res = generate_company_draft(row_id, user_id=user_id)
     lead_id = res["lead_id"]
     
     conn = get_db_connection()
@@ -1263,8 +1264,8 @@ def send_company_email(row_id: int, user_id: Optional[str] = Header(None, alias=
         # 3. Fetch Sender Identity
         sender_email = None
         sender_name = "the team"
-        if user_id:
-            cur.execute("SELECT email, full_name, username FROM users WHERE id = %s", (normalize_user_id(user_id),))
+        if uid:
+            cur.execute("SELECT email, full_name, username FROM users WHERE id = %s", (uid,))
             u = cur.fetchone()
             if u:
                 sender_email = u['email']
