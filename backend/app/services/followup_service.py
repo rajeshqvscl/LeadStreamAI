@@ -485,7 +485,7 @@ def process_outreach_sequences():
                         continue
 
                     interval_days = intervals.get(stage)
-                    if interval_days is not None and days_since_last == interval_days:
+                    if interval_days is not None and days_since_last >= interval_days:
                         should_action = True
 
                     if not should_action:
