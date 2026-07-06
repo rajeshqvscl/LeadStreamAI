@@ -47,7 +47,7 @@ const ToolButton = ({ icon: Icon, title, onClick }) => (
   </button>
 );
 
-const ToolbarTextarea = ({ value, onChange, rows, placeholder, className }) => {
+const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOnly }) => {
   const textareaRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [showTextColors, setShowTextColors] = useState(false);
@@ -282,6 +282,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className }) => {
         onChange={onChange}
         rows={rows}
         placeholder={placeholder}
+        readOnly={readOnly}
         className={`w-full bg-black/40 border border-white/5 rounded-b-xl p-3 text-xs text-white font-mono focus:border-blue-500/50 outline-none resize-none ${className || ''}`}
         style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}
       />

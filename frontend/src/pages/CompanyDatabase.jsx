@@ -53,7 +53,7 @@ const CompanyDatabase = () => {
     setIsLoading(true);
     try {
       const filtersCopy = { ...columnFilters };
-      if (activeBrowsingTab !== 'ALL DATA') {
+      if (activeBrowsingTab !== 'ALL DATA' && !search) {
         filtersCopy['_source_tab'] = activeBrowsingTab;
       }
 
@@ -159,22 +159,28 @@ const CompanyDatabase = () => {
     const file = acceptedFiles[0];
     const reader = new FileReader();
 
-    reader.onload = async (e) => {
+      reader.onload = async (e) => {
       setIsImporting(true);
       try {
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+        const allRows = [];
+        for (const sheetName of workbook.SheetNames) {
+          const worksheet = workbook.Sheets[sheetName];
+          const rows = XLSX.utils.sheet_to_json(worksheet);
+          for (const row of rows) {
+            row._source_tab = sheetName;
+            allRows.push(row);
+          }
+        }
 
-        if (jsonData.length === 0) {
+        if (allRows.length === 0) {
           showNotification('error', 'Import Aborted: The spreadsheet is empty.');
           return;
         }
 
-        await api.post('/api/companies/import', jsonData);
-        showNotification('success', `Dataset Synced: ${jsonData.length} records integrated.`);
+        await api.post('/api/companies/import', allRows);
+        showNotification('success', `Dataset Synced: ${allRows.length} records integrated across ${workbook.SheetNames.length} sheet(s).`);
         fetchCompanies();
         fetchTabs();
       } catch (err) {
@@ -342,10 +348,11 @@ const CompanyDatabase = () => {
         }, 1500);
       }
     } catch (err) {
+      const detail = err.response?.data?.detail || err.message;
       window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
-        detail: { id: taskId, title: 'Bulk Generation Failed', subtitle: err.response?.data?.detail || err.message, progress: 0, status: 'FAILED' } 
+        detail: { id: taskId, title: 'Bulk Generation Failed', subtitle: detail, progress: 0, status: 'FAILED' } 
       }));
-      showNotification('error', 'Bulk generation failed');
+      showNotification('error', 'Bulk generation failed: ' + detail);
     }
   };
 
@@ -398,13 +405,14 @@ const CompanyDatabase = () => {
           } catch { clearInterval(pollInterval); }
         }, 1500);
       }
-    } catch (err) {
-      console.error("Bulk template failure:", err);
-      window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
-        detail: { id: taskId, title: 'Template Failed', subtitle: err.response?.data?.detail || err.message, progress: 0, status: 'FAILED' } 
-      }));
-      showNotification('error', 'Template generation failed');
-    }
+      } catch (err) {
+        console.error("Bulk template failure:", err);
+        const detail = err.response?.data?.detail || err.message;
+        window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
+          detail: { id: taskId, title: 'Template Failed', subtitle: detail, progress: 0, status: 'FAILED' } 
+        }));
+        showNotification('error', 'Draft generation failed: ' + detail);
+      }
   };
 
   const handleSendEmail = async (id) => {

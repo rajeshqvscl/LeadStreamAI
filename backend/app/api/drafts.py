@@ -147,7 +147,6 @@ If this aligns with your portfolio focus and does not conflict with it, I'd be h
 For more details about our services:
 
 [Website](https://qvscl.com) | [Linkedin](https://www.linkedin.com/company/qvscl/)
-
 Looking forward to your response.
 
 QVSCL Profile: [Company Profile](https://drive.google.com/file/d/1Z2QPI0M9hBGjLx9Vu_wktfLp6aTvhD1S/view)
@@ -574,9 +573,7 @@ If this aligns with your portfolio focus and does not conflict with it, I'd be h
 
 For more details about our services:
 [Website](https://qvscl.com) | [Linkedin]({{Sender LinkedIn}})
-
 Looking forward to your response.
-
 SIG_START
 [Click here to unsubscribe](https://qvscl.com/unsubscribe)
 
@@ -720,7 +717,6 @@ Just following up on my earlier note.
 Given your growth journey, we thought it may be worthwhile to connect and exchange perspectives around future M&A expansion and Funding opportunities.
 
 Please let us know a suitable time for a brief discussion if this would be of interest.
-
 Looking forward to your response.
 
 Best regards,
@@ -1431,14 +1427,41 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
         sig_markers = ["regards", "sincerely", "thanks", "analyst", "unsubscribe", "disclaimer"]
         if any(x in after_sep for x in sig_markers):
             body_text = parts[0].strip()
+            body_lower = body_text.lower()
+        else:
+            body_lower = body_text.lower()
+    else:
+        body_lower = body_text.lower()
 
-    # Strip trailing sign-offs
-    body_lower = body_text.lower()
+    # Strip trailing sign-offs and any remaining signature lines (name, title, logo, links)
     sign_offs = ["thanks & regards", "sincerely", "best regards", "thanks,", "regards,", "thanks and regards"]
     for s in sign_offs:
         if body_lower.endswith(s):
-            body_text = body_text[:-(len(s))].strip()
+            # Strip the sign-off line AND everything after it (name, title, logo, links)
+            cutoff = body_text[:-(len(s))].rstrip()
+            remaining = body_text[-(len(s)):].strip()
+            # If sign-off was the last meaningful text, cut before it
+            body_lines = body_text.rstrip().split('\n')
+            # Find the sign-off line and drop it and all lines after
+            sig_line_idx = None
+            for i, ln in enumerate(body_lines):
+                if s in ln.strip().lower():
+                    sig_line_idx = i
+                    break
+            if sig_line_idx is not None and sig_line_idx > 0:
+                body_text = '\n'.join(body_lines[:sig_line_idx]).strip()
+            else:
+                body_text = body_text[:-(len(s))].strip()
             break
+
+    # Strip any remaining markdown images of known logos from the body
+    # (prevents duplicates when the template has embedded logo but -- separator was missing)
+    body_text = re.sub(
+        r'!\[.*?\]\(.*?qvscllogo.*?\)\s*\n*',
+        '',
+        body_text,
+        flags=re.IGNORECASE
+    )
 
     raw_name = profile.get('full_name') or profile.get('username') or 'The Team'
     name = " ".join([p.capitalize() for p in raw_name.split()])
@@ -1931,7 +1954,6 @@ If this aligns with your portfolio focus and does not conflict with it, I'd be h
 For more details about our services:
 
 [Website](https://qvscl.com) | [Linkedin](https://www.linkedin.com/company/qvscl/)
-
 Looking forward to your response.
 
 QVSCL Profile: [Company Profile](https://drive.google.com/file/d/1Z2QPI0M9hBGjLx9Vu_wktfLp6aTvhD1S/view)
@@ -2296,7 +2318,6 @@ A one-stop renewable energy platform addressing access, affordability and adopti
 • **Use of Funds:** Expansion, technology development, AgriVoltaics initiatives, team growth and market expansion
 
 If this aligns with your portfolio focus and does not conflict with it, I'd be happy to share the full presentation or connect over a virtual meeting at your convenience. I have attached the QVSCL Profile. You may also share your investment thesis with us so we can send relevant deal flow in the future.
-
 Looking forward to your response.
 
 QVSCL Profile: [Company Profile](https://drive.google.com/file/d/1Z2QPI0M9hBGjLx9Vu_wktfLp6aTvhD1S/view)

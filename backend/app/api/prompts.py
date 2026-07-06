@@ -171,10 +171,10 @@ def upload_signature_doc(file: UploadFile = File(...)):
         if ext == 'docx':
             from docx import Document
             from docx.oxml.ns import qn
+            from docx.oxml import parse_xml
             doc = Document(tmp.name)
             lines = []
-            # Extract images from the DOCX and save as assets
-            img_map = {}  # blip_id -> markdown image tag
+            img_map = {}
             for rel_id, rel in doc.part.rels.items():
                 if "image" in rel.reltype:
                     image_blob = rel.target_part.blob
@@ -190,12 +190,23 @@ def upload_signature_doc(file: UploadFile = File(...)):
                     data_uri = f"data:{mime};base64,{b64data}"
                     img_map[rel_id] = f"![image]({data_uri})"
 
+            for table in doc.tables:
+                table_html = '<table style="border-collapse:collapse;width:100%;border:1px solid #d0d0d0;">'
+                for row in table.rows:
+                    table_html += '<tr>'
+                    for cell in row.cells:
+                        cell_text = cell.text.strip()
+                        table_html += f'<td style="border:1px solid #d0d0d0;padding:4px 8px;text-align:left;vertical-align:top;">{cell_text}</td>'
+                    table_html += '</tr>'
+                table_html += '</table>'
+                lines.append(table_html)
+                lines.append('')
+
             for para in doc.paragraphs:
                 txt = para.text.strip()
                 style = para.style.name.lower() if para.style else ''
+                alignment = para.paragraph_format.alignment
 
-                # Handle images
-                # Check for inline images in this paragraph
                 for run in para.runs:
                     for child in run._element:
                         if child.tag.endswith('}drawing'):
@@ -207,23 +218,30 @@ def upload_signature_doc(file: UploadFile = File(...)):
                                     lines.append(img_map[embed_id])
                                     lines.append('')
 
-                # Skip empty paragraphs that are just spacers (unless they contain images)
                 if not txt:
                     if para.paragraph_format.space_before or para.paragraph_format.space_after:
-                        lines.append('')
+                        lines.append('<br>')
                     continue
+
+                para_text = _build_run_text(para)
+
+                if alignment is not None:
+                    align_map = {0: 'left', 1: 'center', 2: 'right', 3: 'justify'}
+                    align_val = align_map.get(alignment, 'left')
+                    if align_val != 'left':
+                        para_text = f'<div style="text-align:{align_val};">{para_text}</div>'
 
                 if 'heading' in style:
                     level = re.search(r'heading\s*(\d+)', style)
                     if level:
                         prefix = '#' * int(level.group(1))
-                        lines.append(f'{prefix} {_build_run_text(para)}')
+                        lines.append(f'{prefix} {para_text}')
                     else:
-                        lines.append(f'**{_build_run_text(para)}**')
+                        lines.append(f'**{para_text}**')
                 elif para.style and 'list' in style:
-                    lines.append(f'- {_build_run_text(para)}')
+                    lines.append(f'- {para_text}')
                 else:
-                    lines.append(_build_run_text(para))
+                    lines.append(para_text)
 
             text = '\n'.join(lines).strip()
         elif ext == 'pdf':

@@ -64,11 +64,12 @@ def invalidate_companies_cache(user_id: str = "*"):
 
 router = APIRouter()
 
-def normalize_user_id(user_id: Optional[str]) -> str:
+def normalize_user_id(user_id: Optional[str]) -> Optional[str]:
     """Normalizes the user ID from the header to a valid numeric database ID string.
     Handles 'admin' or string usernames by resolving them to their numeric database ID.
+    Returns None if no valid user_id (callers handle by showing all unscoped data).
     """
-    if not user_id or user_id.strip() == "":
+    if not user_id or str(user_id).strip() == "":
         return None
     
     u_str = str(user_id).strip()
@@ -78,7 +79,6 @@ def normalize_user_id(user_id: Optional[str]) -> str:
     if u_str.isdigit():
         return u_str
         
-    # If not digits, it's likely a username (e.g. "test"). Resolve to numeric ID.
     try:
         from app.database import get_db_connection
         conn = get_db_connection()
@@ -151,20 +151,21 @@ def list_companies(
     base_where = ""
     params = []
     
+    conditions = []
     if uid:
-        base_where = "WHERE user_id = %s"
+        conditions.append("user_id = %s")
         try:
             params.append(int(uid))
         except:
             params.append(uid)
-    else:
-        base_where = "WHERE user_id IS NULL"
         
-    # Apply Global Search
+    # Apply Global Search — split into individual terms so each can match in different fields
     if search:
-        search_term = f"%{search}%"
-        base_where += " AND (row_data::text ILIKE %s)"
-        params.append(search_term)
+        terms = search.strip().split()
+        for term in terms:
+            search_term = f"%{term}%"
+            conditions.append(f"row_data::text ILIKE %s")
+            params.append(search_term)
         
     # Apply Column Filters
     if filters:
@@ -173,16 +174,20 @@ def list_companies(
             for key, value in filter_map.items():
                 if value:
                     if key == "generated":
-                        # Handle BOOLEAN filter for _is_generated
                         if str(value).lower() == "true":
-                            base_where += " AND _is_generated = TRUE"
+                            conditions.append("_is_generated = TRUE")
                         elif str(value).lower() == "false":
-                            base_where += " AND _is_generated = FALSE"
+                            conditions.append("_is_generated = FALSE")
                     else:
-                        base_where += f" AND (row_data->>'{key}' ILIKE %s)"
-                        params.append(f"%{value}%")
+                        safe_key = re.sub(r'[^\w\s\-]', '', key)
+                        conditions.append(f"row_data->>%s ILIKE %s")
+                        params.extend([safe_key, f"%{value}%"])
         except:
-            pass # Ignore malformed filters
+            pass
+    
+    base_where = ""
+    if conditions:
+        base_where = "WHERE " + " AND ".join(conditions)
 
     try:
         # Total count with filters
@@ -199,6 +204,7 @@ def list_companies(
             ORDER BY id ASC 
             LIMIT %s OFFSET %s
         """
+
         cur.execute(fetch_query, fetch_params)
         rows = cur.fetchall()
         
@@ -237,28 +243,28 @@ def list_companies(
 def get_unique_tabs(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Returns a list of unique _source_tab values present in the registry."""
     conn = get_db_connection()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     
     uid = normalize_user_id(user_id)
     
-    where_clause = ""
+    conditions = []
     params = []
     if uid:
-        where_clause = "WHERE user_id = %s AND row_data->>'_source_tab' IS NOT NULL"
+        conditions.append("user_id = %s")
         try:
             params.append(int(uid))
         except:
             params.append(uid)
-    else:
-        where_clause = "WHERE user_id IS NULL AND row_data->>'_source_tab' IS NOT NULL"
+    conditions.append("row_data->>'_source_tab' IS NOT NULL")
+    where_clause = "WHERE " + " AND ".join(conditions)
         
     try:
-        query = f"SELECT DISTINCT row_data->>'_source_tab' FROM company_registry {where_clause}"
+        query = f"SELECT DISTINCT row_data->>'_source_tab' AS tab_name FROM company_registry {where_clause}"
         cur.execute(query, params)
-        tabs = [r[0] for r in cur.fetchall() if r[0]]
+        tabs = [r['tab_name'] for r in cur.fetchall() if r['tab_name']]
         return {"tabs": tabs}
     except Exception as e:
-        print(f"Error fetching unique tabs: {str(e)}")
+        logger.error(f"Error fetching unique tabs: {str(e)}")
         return {"tabs": []}
     finally:
         cur.close()
@@ -395,10 +401,14 @@ def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             clean_row[k_str] = val
         cleaned_rows.append(clean_row)
 
-    # Identify the first 30 rows that are missing email or phone and need parallel AI enrichment
+    # Identify the first 100 rows missing email/phone for parallel AI enrichment
     rows_to_enrich = []
-    for i in range(min(30, len(cleaned_rows))):
+    for i in range(min(100, len(cleaned_rows))):
         row = cleaned_rows[i]
+        # Skip rows that look like garbage header rows (no company name, no email, short values)
+        name_val = (row.get("Company Name") or row.get("Person Name") or '').strip()
+        if len(name_val) <= 2 and not any("@" in str(v) for v in row.values()):
+            continue
         has_email = any("@" in str(v) and "." in str(v) for v in row.values())
         has_phone = any(any(c.isdigit() for c in str(v)) and len(str(v)) > 7 for v in row.values())
         if not has_email or not has_phone:
@@ -453,10 +463,13 @@ def discover_gsheet_tabs(doc_id: str) -> List[Dict[str, str]]:
         # Primary Pattern: Modern Google Sheets bootstrap structure
         # Look for combinations of name and id/gid
         patterns = [
-            r'\{"name":"([^"]+)","id":(\d+)',           # Standard id
-            r'"sheetName":"([^"]+)","sheetId":(\d+)',   # Modern sheetId
-            r'"name":"([^"]+)","gid":(\d+)',            # Alternative gid
-            r'\{"1":"([^"]+)","2":(\d+)',               # Obfuscated internal
+            r'\{"name":"([^"]+)","id":(\d+)',              # Standard id
+            r'"sheetName":"([^"]+)","sheetId":(\d+)',      # Modern sheetId
+            r'"name":"([^"]+)","gid":(\d+)',               # Alternative gid
+            r'\{"1":"([^"]+)","2":(\d+)',                  # Obfuscated internal
+            r'{"label":"([^"]+)",.*?"id":(\d+)',           # Label pattern
+            r'{"name":"([^"]+)"[^}]*"id":(\d+)',           # Flexible name+id
+            r'sheets\[\d+\].*?gid["\']?\s*[:=]\s*["\']?(\d+)["\']?.*?title["\']?\s*[:=]\s*["\']([^"\']+)',  # JS format
         ]
         
         tabs_map = {} # Using map to prevent duplicates
@@ -469,8 +482,11 @@ def discover_gsheet_tabs(doc_id: str) -> List[Dict[str, str]]:
         tabs = [{"name": name, "gid": gid} for name, gid in tabs_map.items()]
         
         if not tabs:
-            # Final Fallback: If no numeric GIDs found, use name-based tabs from XLSX
-            print("DEBUG: HTML GID discovery failed. Falling back to XLSX sheet names.")
+            print("DEBUG: HTML GID discovery failed. Trying GViz API for tab metadata...")
+            tabs = discover_gsheet_tabs_gviz(doc_id)
+
+        if not tabs:
+            print("DEBUG: GViz also failed. Falling back to XLSX sheet names.")
             return discover_gsheet_tabs_xlsx(doc_id)
             
         print(f"DEBUG: Discovered {len(tabs)} tabs with real GIDs: {[t['name'] for t in tabs]}")
@@ -511,6 +527,39 @@ def discover_gsheet_tabs_xlsx(doc_id: str) -> List[Dict[str, str]]:
     except:
         return []
 
+def discover_gsheet_tabs_gviz(doc_id: str) -> List[Dict[str, str]]:
+    """Discover tabs using the Google Visualization API which returns sheet metadata in JSON."""
+    try:
+        import json as json_lib
+        url = f"https://docs.google.com/spreadsheets/d/{doc_id}/gviz/tq?tqx=reqId:0&tq=&_t={int(time.time())}"
+        resp = requests.get(url, timeout=20)
+        if resp.status_code != 200:
+            return []
+
+        text = resp.text
+        # GViz wraps response in: /*O_o*/ google.visualization.Query.setResponse({...});
+        json_start = text.find('{')
+        json_end = text.rfind('}')
+        if json_start == -1 or json_end == -1:
+            return []
+
+        body = text[json_start:json_end + 1]
+        data = json_lib.loads(body)
+        sheets = data.get('sheets') or data.get('table', {}).get('sheets', [])
+        if not sheets:
+            # Try alternative: look for sheet names in the response
+            raw_sheets = data.get('status', {}).get('warnings', [])
+            return []
+
+        tabs = []
+        for s in sheets:
+            name = s.get('label') or s.get('name', '')
+            gid = str(s.get('id', s.get('gid', '')))
+            if name and gid:
+                tabs.append({"name": name, "gid": gid})
+        return tabs
+    except:
+        return []
 
 
 @router.post("/companies/gsheet-tabs")
@@ -613,12 +662,17 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
                     if '@' not in v and '://' not in v:
                         if not any(kw in v.lower() for kw in company_kw + designation_kw):
                             name_hits += 1
+            # Detect long descriptive text (notes/descriptions, not company names)
+            long_text_hits = sum(1 for v in values if len(v.split()) >= 4 and not any(kw in v.lower() for kw in company_kw))
+            avg_word_count = sum(len(v.split()) for v in values) / n if n else 0
             if designation_hits > n * 0.4:
                 inferred.append('Designation')
-            elif company_hits > n * 0.25:
-                inferred.append('Company Name')
             elif name_hits > n * 0.4:
                 inferred.append('Person Name')
+            elif company_hits > n * 0.25 and avg_word_count < 3:
+                inferred.append('Company Name')
+            elif company_hits > n * 0.25:
+                inferred.append('Firm/Notes')
             else:
                 label_kw = ['name', 'email', 'company', 'designation', 'role', 'phone',
                            'mobile', 'linkedin', 'website', 'domain', 'sector', 'industry',
@@ -654,17 +708,31 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
             print(f"DEBUG: Syncing tab '{tab['name']}' (GID: {gid})")
             
             resp = requests.get(export_url, timeout=30)
-            if resp.status_code != 200 or len(resp.text) < 10:
-                print(f"DEBUG: GID export failed or empty for '{tab['name']}'. Falling back to GViz Name-based...")
-                export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/gviz/tq?tqx=out:csv&sheet={sheet_name_encoded}&_t={int(time.time())}"
-                resp = requests.get(export_url, timeout=30)
-            
-            if resp.status_code != 200:
-                print(f"ERROR: Both GID and Name-based sync failed for tab '{tab['name']}'. Skipping.")
-                return
-            
             csv_data = resp.text
-            if not csv_data or len(csv_data) < 5: return
+            if resp.status_code != 200 or len(csv_data) < 10:
+                print(f"DEBUG: GID export failed or empty for '{tab['name']}'. Falling back to GViz JSON Name-based...")
+                export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/gviz/tq?sheet={sheet_name_encoded}&headers=0&_t={int(time.time())}"
+                resp = requests.get(export_url, timeout=30)
+                if resp.status_code == 200:
+                    import json, io
+                    match = re.search(r'google\.visualization\.Query\.setResponse\((.*)\);', resp.text)
+                    if match:
+                        try:
+                            data = json.loads(match.group(1))
+                            rows = data.get('table', {}).get('rows', [])
+                            output = io.StringIO()
+                            writer = csv.writer(output)
+                            for row in rows:
+                                cols = row.get('c', [])
+                                parsed_row = [str(c.get('v', '')) if c and c.get('v') is not None else '' for c in cols]
+                                writer.writerow(parsed_row)
+                            csv_data = output.getvalue()
+                        except Exception as e:
+                            print(f"ERROR processing GViz JSON: {e}")
+                            
+            if not csv_data or len(csv_data) < 5:
+                print(f"ERROR: Sync failed for tab '{tab['name']}'. Skipping.")
+                return
 
             lines = csv_data.splitlines()
             header_index = -1
@@ -672,12 +740,13 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
             for i in range(min(15, len(lines))):
                 lower_line = lines[i].lower()
                 parts = lines[i].split(',')
-                # Skip rows where any cell is a fragment (<3 chars) — not a real column header
-                has_fragment = any(p.strip() and len(p.strip()) < 3 for p in parts)
+                short_cells = sum(1 for p in parts if p.strip() and len(p.strip()) < 3)
+                total_cells = sum(1 for p in parts if p.strip())
+                has_fragment = short_cells > total_cells * 0.4
                 matches = sum(1 for kw in keywords if kw in lower_line)
                 has_long_number = any(len(re.sub(r'\D', '', part)) > 9 for part in parts)
                 has_real_email = any('@' in part and '.' in part and len(part) > 5 for part in parts)
-                if not has_fragment and matches >= 1 and not has_long_number and not has_real_email:
+                if not has_fragment and matches >= 2 and not has_long_number and not has_real_email:
                     header_index = i
                     break
             
@@ -691,7 +760,18 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
                     if h.strip(): last_non_empty = idx
                 if last_non_empty != -1:
                     header_row = header_row[:last_non_empty + 1]
-                data_reader = reader
+                # Collect data rows for inference of empty/missing headers
+                all_rows_for_inference = []
+                for row in reader:
+                    if any(val.strip() for val in row):
+                        all_rows_for_inference.append(row)
+                if all_rows_for_inference:
+                    sample_rows = all_rows_for_inference[:20]
+                    inferred = _infer_column_names(sample_rows, len(header_row))
+                    for idx, name in enumerate(inferred):
+                        if not header_row[idx].strip():
+                            header_row[idx] = name if name else f"Column {chr(65 + idx) if idx < 26 else idx}"
+                data_reader = all_rows_for_inference
             else:
                 cleaned_csv = "\n".join(lines)
                 data_reader = csv.reader(io.StringIO(cleaned_csv))
@@ -845,7 +925,7 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
                     break
                     
         if not email:
-            raise HTTPException(status_code=400, detail="Profile is missing a valid email address. Use 'Fetch Details' (Globe Icon) to find it first.")
+            raise HTTPException(status_code=400, detail="Cannot generate draft: no email address found in this record. Add an email column (e.g. 'Email', 'Email Address') to your spreadsheet and re-import, or use the Edit button to add one.")
             
         # 2. Smart Name Detection
         name = (

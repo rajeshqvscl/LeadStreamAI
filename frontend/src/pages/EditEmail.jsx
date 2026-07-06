@@ -6,6 +6,57 @@ import 'react-datepicker/dist/react-datepicker.css';
 import api from '../services/api';
 import SignatureEditor from '../components/SignatureEditor';
 
+const mdToHtml = (md) => {
+  if (!md) return '';
+  // If already contains only HTML block-level tags, return as-is
+  if (/^<[a-z][^>]*>/i.test(md.trim()) && /<\/[a-z]+>\s*$/i.test(md.trim())) return md;
+  let html = md;
+  html = html.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/_(.*?)_/g, '<em>$1</em>');
+  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  html = html.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width:200px;height:auto;">');
+  html = html.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>');
+  html = html.replace(/^###\s+(.*?)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^##\s+(.*?)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^#\s+(.*?)$/gm, '<h1>$1</h1>');
+  html = html.replace(/\n/g, '<br>');
+  return html;
+};
+
+const htmlToMd = (html) => {
+  if (!html) return '';
+  let md = html;
+  md = md.replace(/<strong><em>(.*?)<\/em><\/strong>/g, '***$1***');
+  md = md.replace(/<strong>(.*?)<\/strong>/g, '**$1**');
+  md = md.replace(/<em>(.*?)<\/em>/g, '*$1*');
+  md = md.replace(/<b>(.*?)<\/b>/g, '**$1**');
+  md = md.replace(/<i>(.*?)<\/i>/g, '*$1*');
+  md = md.replace(/<u>(.*?)<\/u>/gi, '<u>$1</u>');
+  md = md.replace(/<h1>(.*?)<\/h1>/gi, '# $1\n');
+  md = md.replace(/<h2>(.*?)<\/h2>/gi, '## $1\n');
+  md = md.replace(/<h3>(.*?)<\/h3>/gi, '### $1\n');
+  md = md.replace(/<a\s+[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi, '[$2]($1)');
+  md = md.replace(/<img[^>]*src="([^"]*)"[^>]*>/gi, '![]($1)');
+  md = md.replace(/<br\s*\/?>/gi, '\n');
+  md = md.replace(/<\/div>/gi, '\n').replace(/<div[^>]*>/gi, '');
+  md = md.replace(/<\/p>/gi, '\n\n').replace(/<p[^>]*>/gi, '');
+  md = md.replace(/<\/li>/gi, '\n').replace(/<li[^>]*>/gi, '');
+  md = md.replace(/<\/ul>/gi, '\n').replace(/<ul[^>]*>/gi, '');
+  md = md.replace(/<\/ol>/gi, '\n').replace(/<ol[^>]*>/gi, '');
+  // Preserve <span> with style attributes (color, font-family, font-size, background-color)
+  md = md.replace(/<span\s+style="([^"]*)"[^>]*>/gi, (m, style) => {
+    if (style) return `<span style="${style}">`;
+    return '';
+  });
+  md = md.replace(/<\/span>/gi, '</span>');
+  md = md.replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&nbsp;/gi, ' ');
+  md = md.replace(/\n{3,}/g, '\n\n');
+  return md.trim();
+};
+
+const isHtml = (str) => /<[a-z][\s\S]*>/i.test(str);
+
 const EditEmail = () => {
   const { draftId } = useParams();
   const navigate = useNavigate();
@@ -25,7 +76,9 @@ const EditEmail = () => {
   const [showTextColors, setShowTextColors] = useState(false);
   const [showBgColors, setShowBgColors] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [showSource, setShowSource] = useState(false);
   const bodyRef = React.useRef(null);
+  const editorRef = React.useRef(null);
   const textColorBtnRef = React.useRef(null);
   const bgColorBtnRef = React.useRef(null);
   const [userSignature, setUserSignature] = useState('');
@@ -67,11 +120,29 @@ const EditEmail = () => {
     '#274e13', '#0c343d', '#1c4587', '#073763', '#20124d', '#4c1130',
   ];
 
+  const execWysiwyg = (cmd, value = null) => {
+    if (editorRef.current && !showSource) {
+      editorRef.current.focus();
+      document.execCommand(cmd, false, value);
+      setBody(editorRef.current.innerHTML);
+    }
+  };
+
   const applyFormat = (tag, attr = '') => {
+    if (editorRef.current && !showSource) {
+      // WYSIWYG mode - use document.execCommand
+      if (tag === 'b') execWysiwyg('bold');
+      else if (tag === 'i') execWysiwyg('italic');
+      else if (tag === 'list') execWysiwyg('insertUnorderedList');
+      else if (tag === 'ordered') execWysiwyg('insertOrderedList');
+      else if (tag === 'color') execWysiwyg('foreColor', attr);
+      return;
+    }
+
+    // Source mode - textarea manipulation
     const el = bodyRef.current;
     if (!el) return;
 
-    // Save history
     setHistory(prev => [...prev.slice(-29), body]);
 
     const start = el.selectionStart;
@@ -119,6 +190,11 @@ const EditEmail = () => {
   };
 
   const handleUndo = () => {
+    if (editorRef.current && !showSource) {
+      document.execCommand('undo');
+      setBody(editorRef.current.innerHTML);
+      return;
+    }
     if (history.length === 0) return;
     const prev = history[history.length - 1];
     setBody(prev);
@@ -145,35 +221,48 @@ const EditEmail = () => {
   const handleFontChange = (e) => {
     const font = e.target.value;
     if (!font) return;
+    if (editorRef.current && !showSource) {
+      editorRef.current.focus();
+      document.execCommand('fontName', false, font);
+      setBody(editorRef.current.innerHTML);
+      return;
+    }
     wrapSelection(`<span style="font-family:${font};">`, `</span>`);
   };
 
   const handleSizeChange = (e) => {
     const size = e.target.value;
     if (!size) return;
+    if (editorRef.current && !showSource) {
+      editorRef.current.focus();
+      document.execCommand('fontSize', false, '7');
+      // execCommand fontSize uses 1-7, so use span for precise size
+      const selection = window.getSelection();
+      if (selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const span = document.createElement('span');
+        span.style.fontSize = `${size}px`;
+        range.surroundContents(span);
+      }
+      setBody(editorRef.current.innerHTML);
+      return;
+    }
     wrapSelection(`<span style="font-size:${size}px;">`, `</span>`);
   };
 
   const applyTextColor = (color) => {
     setShowTextColors(false);
-    const el = bodyRef.current;
-    if (!el) return;
-    setHistory(prev => [...prev.slice(-29), body]);
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    const selected = body.substring(start, end);
-    const wrapped = `<span style="color:${color}">${selected || 'text'}</span>`;
-    const newBody = body.substring(0, start) + wrapped + body.substring(end);
-    setBody(newBody);
-    setTimeout(() => {
-      el.focus();
-      const newPos = start + wrapped.length;
-      el.setSelectionRange(newPos, newPos);
-    }, 0);
+    applyFormat('color', color);
   };
 
   const applyBgColor = (color) => {
     setShowBgColors(false);
+    if (editorRef.current && !showSource) {
+      editorRef.current.focus();
+      document.execCommand('hiliteColor', false, color);
+      setBody(editorRef.current.innerHTML);
+      return;
+    }
     const el = bodyRef.current;
     if (!el) return;
     setHistory(prev => [...prev.slice(-29), body]);
@@ -202,7 +291,13 @@ const EditEmail = () => {
       try {
         const res = await api.post('/api/upload-image', formData);
         const imgUrl = res.data.url;
-        wrapSelection(`![](${imgUrl})\n`, '');
+        if (editorRef.current && !showSource) {
+          editorRef.current.focus();
+          document.execCommand('insertImage', false, imgUrl);
+          setBody(editorRef.current.innerHTML);
+        } else {
+          wrapSelection(`![](${imgUrl})\n`, '');
+        }
       } catch (err) {
         alert('Failed to upload image');
       }
@@ -223,7 +318,14 @@ const EditEmail = () => {
       try {
         const res = await api.post('/api/upload-file', formData);
         const fileUrl = res.data.url;
-        wrapSelection(`[${file.name}](${fileUrl})`, '');
+        if (editorRef.current && !showSource) {
+          editorRef.current.focus();
+          const linkHtml = `<a href="${fileUrl}" target="_blank">${file.name}</a>`;
+          document.execCommand('insertHTML', false, linkHtml);
+          setBody(editorRef.current.innerHTML);
+        } else {
+          wrapSelection(`[${file.name}](${fileUrl})`, '');
+        }
       } catch (err) {
         alert('Failed to upload file');
       } finally {
@@ -234,6 +336,21 @@ const EditEmail = () => {
   };
 
   const handleLink = () => {
+    if (editorRef.current && !showSource) {
+      const url = window.prompt('Enter URL:', 'https://');
+      if (!url) return;
+      editorRef.current.focus();
+      const selected = window.getSelection().toString();
+      if (selected) {
+        document.execCommand('createLink', false, url);
+      } else {
+        const display = window.prompt('Enter link text:', 'link');
+        if (!display) return;
+        document.execCommand('insertHTML', false, `<a href="${url}">${display}</a>`);
+      }
+      setBody(editorRef.current.innerHTML);
+      return;
+    }
     const el = bodyRef.current;
     if (!el) return;
     const selected = body.substring(el.selectionStart, el.selectionEnd);
@@ -248,6 +365,13 @@ const EditEmail = () => {
     const prefix = e.target.value;
     if (!prefix) return;
     e.target.value = '';
+    if (editorRef.current && !showSource) {
+      editorRef.current.focus();
+      const tag = prefix.trim() === '#' ? 'h1' : prefix.trim() === '##' ? 'h2' : 'h3';
+      document.execCommand('formatBlock', false, tag);
+      setBody(editorRef.current.innerHTML);
+      return;
+    }
     const el = bodyRef.current;
     if (!el) return;
     setHistory(prev => [...prev.slice(-29), body]);
@@ -271,14 +395,26 @@ const EditEmail = () => {
       return;
     }
     setHistory(prev => [...prev.slice(-29), body]);
-    const sigBlock = `\n\n--\n${userSignature}`;
-    // Find -- sign-off in body and insert signature after the last one
-    const idx = body.lastIndexOf('\n--');
-    if (idx !== -1) {
-      const newBody = body.substring(0, idx) + '\n--\n' + userSignature + body.substring(idx + 3);
-      setBody(newBody);
+    // Render signature as HTML for WYSIWYG mode
+    const sigHtml = mdToHtml(userSignature);
+    const sigBlock = `<br><br>--<br>${sigHtml}`;
+    if (isHtml(body)) {
+      // Strip any existing signature block (everything from last -- separator onwards)
+      const lastDash = body.lastIndexOf('--');
+      if (lastDash !== -1) {
+        const beforeSig = body.substring(0, body.lastIndexOf('<br>', lastDash));
+        setBody((beforeSig || '') + sigBlock);
+      } else {
+        setBody(body + sigBlock);
+      }
     } else {
-      setBody(body + sigBlock);
+      const sigMdBlock = `\n\n--\n${userSignature}`;
+      const idx = body.lastIndexOf('\n--');
+      if (idx !== -1) {
+        setBody(body.substring(0, idx) + '\n--\n' + userSignature + body.substring(idx + 3));
+      } else {
+        setBody(body + sigMdBlock);
+      }
     }
   };
 
@@ -293,6 +429,11 @@ const EditEmail = () => {
     // Resolve [[BACKEND_URL]] so images show in preview
     const backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
     text = text.replace(/\[\[BACKEND_URL\]\]/g, backendUrl);
+
+    // If text is already HTML, wrap it in styled container and return
+    if (/<[a-z][\s\S]*>/i.test(text) && !text.includes('**') && !text.includes('\n--')) {
+      return `<div style="color: #cbd5e1; font-size: 13px; line-height: 1.6;">${text}</div>`;
+    }
 
     // Handle markdown images before other markdown processing
 
@@ -514,7 +655,8 @@ const EditEmail = () => {
       setSubject(sub);
       const sigUser = JSON.parse(localStorage.getItem('user') || '{}');
       setUserSignature(sigUser.signature || '');
-      setBody(bd);
+      // Convert markdown body to HTML for WYSIWYG editor
+      setBody(isHtml(bd) ? bd : mdToHtml(bd));
       const userStr = localStorage.getItem('user') || localStorage.getItem('user_admin');
       let isVismaya = false;
       if (userStr) {
@@ -537,6 +679,22 @@ const EditEmail = () => {
     fetchDraft();
   }, [draftId]);
 
+  // Sync editor content when body changes from non-editor sources (AI refine, insert signature)
+  useEffect(() => {
+    if (editorRef.current && !showSource) {
+      const cursor = window.getSelection();
+      const wasFocused = editorRef.current.contains(cursor?.anchorNode);
+      editorRef.current.innerHTML = body;
+      if (wasFocused && cursor) {
+        const range = document.createRange();
+        range.selectNodeContents(editorRef.current);
+        range.collapse(false);
+        cursor.removeAllRanges();
+        cursor.addRange(range);
+      }
+    }
+  }, [body, showSource]);
+
   const [isSavingTask, setIsSavingTask] = useState(false);
 
 
@@ -549,7 +707,8 @@ const EditEmail = () => {
     }
     setIsSaving(true);
     try {
-      const email_draft = `Subject: ${subject}\n\n${body}`;
+      const rawBody = isHtml(body) ? htmlToMd(body) : body;
+      const email_draft = `Subject: ${subject}\n\n${rawBody}`;
       await api.patch(`/api/leads/${draftId}`, { email_draft, remarks, cc_email: cc });
       if (!silent) {
         window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
@@ -577,12 +736,14 @@ const EditEmail = () => {
       detail: { id: taskId, title: 'AI Refinement', subtitle: 'Analyzing context...', progress: 30, status: 'RUNNING' } 
     }));
     
+    // Convert HTML body to markdown for AI processing
+    const bodyForAI = isHtml(body) ? htmlToMd(body) : body;
     setIsRefining(true);
     try {
       const response = await api.post(`/api/refine-email/${draftId}`, {
         instruction: finalInstruction,
         subject,
-        body
+        body: bodyForAI
       });
       if (response.data.error) {
         window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
@@ -597,7 +758,8 @@ const EditEmail = () => {
           detail: { id: taskId, title: 'Refinement Complete', subtitle: 'AI content applied', progress: 100, status: 'COMPLETED' } 
         }));
         setSubject(response.data.subject || '');
-        setBody(response.data.body || '');
+        const refinedBody = response.data.body || '';
+        setBody(isHtml(refinedBody) ? refinedBody : mdToHtml(refinedBody));
         setAiInstruction('');
       }
     } catch {
@@ -887,13 +1049,44 @@ const EditEmail = () => {
                   )}
                 </div>
               </div>
-              <textarea
-                ref={bodyRef}
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                placeholder="Generate AI draft to begin or write your own message..."
-                className="w-full h-full min-h-[300px] flex-1 bg-[#0a0f1a] border border-[#ffffff10] rounded-md px-4 py-3 text-[13px] text-white font-medium outline-none focus:border-blue-500/50 resize-none leading-relaxed"
-              />
+              <div className="flex items-center gap-2 mb-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSource(!showSource)}
+                  className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded ${showSource ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'text-slate-500 hover:text-slate-300'}`}
+                >
+                  {showSource ? 'Rich Text' : 'Source'}
+                </button>
+              </div>
+              {showSource ? (
+                <textarea
+                  ref={bodyRef}
+                  value={isHtml(body) ? htmlToMd(body) : body}
+                  onChange={(e) => setBody(mdToHtml(e.target.value))}
+                  placeholder="Generate AI draft to begin or write your own message..."
+                  className="w-full h-full min-h-[300px] flex-1 bg-[#0a0f1a] border border-[#ffffff10] rounded-md px-4 py-3 text-[13px] text-white font-medium outline-none focus:border-blue-500/50 resize-none leading-relaxed"
+                />
+              ) : (
+                <div
+                  ref={editorRef}
+                  contentEditable
+                  suppressContentEditableWarning
+                  onInput={(e) => {
+                    const html = e.currentTarget.innerHTML;
+                    if (html !== body) setBody(html);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.ctrlKey || e.metaKey) {
+                      if (e.key === 'b') { document.execCommand('bold'); e.preventDefault(); }
+                      if (e.key === 'i') { document.execCommand('italic'); e.preventDefault(); }
+                      if (e.key === 'u') { document.execCommand('underline'); e.preventDefault(); }
+                    }
+                  }}
+                  dangerouslySetInnerHTML={{ __html: body }}
+                  className="w-full h-full min-h-[300px] flex-1 bg-[#0a0f1a] border border-[#ffffff10] rounded-md px-4 py-3 text-[13px] text-white outline-none focus:border-blue-500/50 resize-none leading-relaxed overflow-y-auto [&:empty:before]:content-[attr(data-placeholder)] [&:empty:before]:text-slate-600 [&:empty:before]:italic"
+                  data-placeholder="Generate AI draft to begin or write your own message..."
+                />
+              )}
             </div>
 
             <div className="space-y-2">

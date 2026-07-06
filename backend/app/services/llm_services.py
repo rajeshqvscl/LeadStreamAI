@@ -198,7 +198,6 @@ A <b>one-stop, full-stack renewable energy platform</b> addressing access, affor
 If this aligns with your portfolio focus and does not conflict with it, I’d be happy to share the full presentation or connect over a virtual meeting at your convenience. I have attached the QVSCL Profile. You may also share your investment thesis with us so we can send relevant deal flow in the future.
 
 For more details about our services: [Website](https://qvscl.com) | [Linkedin]({sender_linkedin})
-
 Looking forward to your response.
 """
         return {
