@@ -760,7 +760,7 @@ Looking forward to hearing from you.
 
 SIG_START
 --
-***Thanks & Regards,***
+Thanks & Regards,
 ***{{Sender Name}}***
 {{Sender Title}}
 [Website](https://www.qvscl.com) | [LinkedIn]({{Sender LinkedIn}})
