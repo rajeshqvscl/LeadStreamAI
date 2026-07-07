@@ -1410,7 +1410,7 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 
     custom_sig = profile.get('signature')
     sig_mode = profile.get('signature_mode') or 'custom'
-    use_custom = sig_mode == 'custom' and custom_sig and custom_sig.strip()
+    use_custom = False  # custom signatures disabled by user request
 
     # Strip any existing signature block to prevent duplication.
     # Remove any "Click here to unsubscribe" link and everything after it.
