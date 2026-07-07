@@ -761,8 +761,10 @@ Looking forward to hearing from you.
 SIG_START
 --
 ***Thanks & Regards,***
-***Vismaya Rajeevan,***
-***Business Associate***
+***{{Sender Name}}***
+{{Sender Title}}
+[Website](https://www.qvscl.com) | [LinkedIn]({{Sender LinkedIn}})
+{{Sender Phone}}
 SIG_END"""
 
     vismaya_followup1 = """Dear {{First Name}},
