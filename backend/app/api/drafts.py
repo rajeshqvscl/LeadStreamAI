@@ -1471,11 +1471,6 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 
     disclaimer = """Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."""
 
-    is_vismaya = 'vismaya' in (profile.get('full_name') or '').strip().lower()
-    if is_vismaya:
-        disclaimer = disclaimer.replace(" and its attachments", "").replace("and its attachments ", "")
-        disclaimer = disclaimer.replace("are intended only", "is intended only")
-
     unsub_link = f"https://qvscl.com/unsubscribe?lead_id={lead_id}"
 
     is_palak = (profile.get('full_name') or '').strip().lower() == 'palak jain'
@@ -1503,20 +1498,7 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 """
         return body_text + "\n\n" + sig_html
 
-    if is_vismaya:
-        dis_text_vis = "Important: This message is intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."
-        sig_html = f"""<div style="font-family:Arial,sans-serif;color:#1a5276;line-height:1.3;">
-<a href="{unsub_link}" style="color:#555;font-size:10px;text-decoration:underline;">Click here to unsubscribe</a>
-<div style="color:#999;font-size:12px;">--</div>
-<div style="font-size:15px;font-weight:700;font-style:italic;margin:0;color:#1a5276;">Thanks &amp; Regards,</div>
-<div style="font-size:15px;font-weight:700;font-style:italic;margin:0;color:#1a5276;">{name},</div>
-<div style="font-size:14px;font-style:italic;margin:0;color:#1a5276;">{title}</div>
-<div style="font-size:14px;font-style:italic;margin:0;color:#1a5276;"><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> <span style="color:#1d5fd0;">/</span> <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></div>
-<div style="font-size:14px;font-style:italic;margin-top:2px;color:#1a5276;">{phone}</div>
-{f'<img src="{_logo_data_uri}" alt="QVSCL" width="110" style="margin-top:10px;width:110px;height:auto;display:block;">' if _logo_data_uri else ''}
-<div style="margin-top:10px;font-size:10px;line-height:1.4;color:#555555;max-width:600px;">{dis_text_vis}</div>
-</div>"""
-    elif is_palak:
+    if is_palak:
         dis_text = "Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."
         sig_html = f"""<div style="font-family:Arial,Calibri,sans-serif;color:#0B2A6F;line-height:1.15;">
 <a href="{unsub_link}" style="color:#0B2A6F;font-size:10px;text-decoration:underline;">Click here to unsubscribe</a>
