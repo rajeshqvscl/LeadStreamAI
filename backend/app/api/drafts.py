@@ -586,6 +586,7 @@ Thanks & Regards,
 {{Sender Title}}
 [LinkedIn]({{Sender LinkedIn}})
 {{Sender Phone}}
+[Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)
 <img src="[[BACKEND_URL]]/assets/kajal.png" style="width: 150px; height: auto; display: block; margin-top: 10px;" />
 
 Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at Quantum Value Strategic Consulting LLP by electronic mail message reply. Thank you.
@@ -2307,10 +2308,11 @@ A one-stop renewable energy platform addressing access, affordability and adopti
 • **Previously Raised:** USD 262K (in the form of Govt. Grants & Angel Investors)
 • **Use of Funds:** Expansion, technology development, AgriVoltaics initiatives, team growth and market expansion
 
-If this aligns with your portfolio focus and does not conflict with it, I'd be happy to share the full presentation or connect over a virtual meeting at your convenience. You may also share your investment thesis with us so we can send relevant deal flow in the future.
+If this aligns with your portfolio focus and does not conflict with it, I'd be happy to share the full presentation or connect over a virtual meeting at your convenience. I have attached the QVSCL Profile. You may also share your investment thesis with us so we can send relevant deal flow in the future.
 Looking forward to your response.
 
-You can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)
+QVSCL Profile: [Company Profile](https://drive.google.com/file/d/1Z2QPI0M9hBGjLx9Vu_wktfLp6aTvhD1S/view)
+Managing Partner Profile: [Mr. Lalit Hhuria](https://drive.google.com/file/d/1zoXE6-m1AUMpvJkm31EZZOclKd7w-DZM/view)
 
 SIG_START
 --
@@ -2355,10 +2357,20 @@ Thank you again for your consideration."""
             )
         conn.commit()
 
-        # Also update kajal_mam_agritech with same content
+        # Also update kajal_mam_agritech (separate content with Google Drive folder link)
+        kajal_agritech_content = agritech_content.replace(
+            "I have attached the QVSCL Profile. You may also share your investment thesis",
+            "You may also share your investment thesis"
+        ).replace(
+            "QVSCL Profile: [Company Profile](https://drive.google.com/file/d/1Z2QPI0M9hBGjLx9Vu_wktfLp6aTvhD1S/view)\nManaging Partner Profile: [Mr. Lalit Hhuria](https://drive.google.com/file/d/1zoXE6-m1AUMpvJkm31EZZOclKd7w-DZM/view)",
+            "You can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)"
+        ).replace(
+            "SIG_START\n--\nThanks & Regards,\n\n***{{Sender Name}}***\n{{Sender Title}}\n[LinkedIn]({{Sender LinkedIn}})\n{{Sender Phone}}\n\nImportant:",
+            "SIG_START\n--\nThanks & Regards,\n\n***{{Sender Name}}***\n{{Sender Title}}\n[LinkedIn]({{Sender LinkedIn}})\n{{Sender Phone}}\n[Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)\n\nImportant:"
+        )
         cur.execute(
             "UPDATE prompts SET content = %s, description = %s, owner_username = 'kajal' WHERE name = 'kajal_mam_agritech'",
-            (agritech_content, agritech_description)
+            (kajal_agritech_content, agritech_description)
         )
         conn.commit()
             
