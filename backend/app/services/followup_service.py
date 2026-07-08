@@ -81,7 +81,7 @@ FOLLOWUP_TEMPLATES = {
     "INVESTOR_PALAK_ADVISORY": {
         1: "Dear {name},\n\nI hope you are well.\n\nJust following up on my previous email. We would value the opportunity to connect and understand your growth roadmap and any potential capital/funding priorities that may be ahead.\n\nWould you be open to a short video call? Happy to coordinate as per your availability.\n\nLooking forward to hearing from you.",
         2: "Dear {name},\n\nJust following up on my earlier note.\n\nGiven your growth journey, we thought it may be worthwhile to connect and exchange perspectives around future expansion and funding opportunities.\n\nPlease let us know a suitable time for a brief discussion if this would be of interest.\n\nLooking forward to connecting.",
-        3: "Dear {name},\n\nI understand you are busy, so I'm reaching out one last time. If this isn't a fit for you right now, I'll move this to the back burner.\n\nThank you again for your time and consideration."
+        3: "Dear {name},\n\nI understand you are busy, so I'm reaching out one last time. If this isn't a fit for you right now, I'll move this to the back burner.\n\nThank you again for your time and consideration.",
     },
     "INVESTOR_KAJAL_HEALTH_ECOSYSTEM": {
         1: """Dear {name},
@@ -650,7 +650,7 @@ def process_outreach_sequences():
                     first_name = name.split()[0] if name else name
 
                     body_html = markdown_to_html(body)
-                    sig_html = f'<p style="margin-top: 4px;">--<br>Regards,<br>{first_name}</p>'
+                    sig_html = f'<p style="margin-top: 4px; font-size: 14px;">--<br>Regards,<br>{first_name}</p>'
                     full_body = body_html + sig_html
 
                     logger.info(f"PREVIEW [{lead['email']}]: body=\"{body}\"")

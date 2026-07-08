@@ -1129,7 +1129,8 @@ def markdown_to_html(text, gmail_style=False):
                     html_parts.append(p.strip())
                 else:
                     content = p.replace("\n", "<br>")
-                    p_style = "margin-top: 0; margin-bottom: 18px; line-height: 1.6;" if gmail_style else "margin-top: 0; margin-bottom: 8px; line-height: 1.4;"
+                    font_size = "15px" if gmail_style else "14px"
+                    p_style = f"margin-top: 0; margin-bottom: 18px; line-height: 1.6; font-size: {font_size};" if gmail_style else f"margin-top: 0; margin-bottom: 8px; line-height: 1.4; font-size: {font_size};"
                     html_parts.append(f"<p style='{p_style}'>{content}</p>")
     
     result = "".join(html_parts)
