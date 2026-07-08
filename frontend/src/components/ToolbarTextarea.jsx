@@ -3,6 +3,7 @@ import { Bold, Italic, Underline, List, ListOrdered, Link, Image, Paperclip, Pal
 import api from '../services/api';
 
 const FONTS = [
+  { label: 'Sans Serif', value: 'sans-serif' },
   { label: 'Arial', value: 'Arial, Helvetica, sans-serif' },
   { label: 'Times New Roman', value: '"Times New Roman", Times, serif' },
   { label: 'Georgia', value: 'Georgia, serif' },

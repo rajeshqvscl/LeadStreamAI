@@ -21,6 +21,7 @@ const Prompts = () => {
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({ name: '', content: '', description: '', followup_1: '', followup_2: '', followup_3: '', subject: '', cc: '', followup_count: 3 });
+  const [creating, setCreating] = useState(false);
   const [saveField, setSaveField] = useState({ id: null, field: null });
   const [saveFieldSuccess, setSaveFieldSuccess] = useState({ id: null, field: null });
   const [renamingId, setRenamingId] = useState(null);
@@ -140,6 +141,8 @@ const Prompts = () => {
 
   const handleCreate = async () => {
     if (!form.name.trim() || !form.content.trim()) return alert('Name and Body are required');
+    if (creating) return;
+    setCreating(true);
     try {
       await api.post('/api/custom-draft-templates', form, { headers: { 'X-User-Id': userId } });
       setForm({ name: '', content: '', description: '', followup_1: '', followup_2: '', followup_3: '', subject: '', cc: '', followup_count: 3 });
@@ -147,6 +150,8 @@ const Prompts = () => {
       fetchPrompts();
     } catch (err) {
       alert('Failed to create template');
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -275,6 +280,8 @@ const Prompts = () => {
       }
     }
 
+    // Normalize bullet characters
+    text = text.replace(/•/g, '*');
     // Convert markdown to HTML — keep {{placeholders}} as-is
     const paragraphs = text.split('\n\n');
     let htmlParts = [];
@@ -484,7 +491,7 @@ const Prompts = () => {
                 );
               })}
             </div>
-            <button onClick={handleCreate} className="btn bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3 px-8 rounded-xl text-sm font-bold">Save Template</button>
+            <button onClick={handleCreate} disabled={creating} className="btn bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3 px-8 rounded-xl text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed">{creating ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</> : 'Save Template'}</button>
           </div>
         </div>
       )}

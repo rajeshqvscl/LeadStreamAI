@@ -10,7 +10,7 @@ const mdToHtml = (md) => {
   if (!md) return '';
   // If already contains only HTML block-level tags, return as-is
   if (/^<[a-z][^>]*>/i.test(md.trim()) && /<\/[a-z]+>\s*$/i.test(md.trim())) return md;
-  let html = md;
+  let html = md.replace(/•/g, '*');
   html = html.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>');
   html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/_(.*?)_/g, '<em>$1</em>');
@@ -518,6 +518,8 @@ const EditEmail = () => {
       }
     }
 
+    // Normalize bullet characters
+    mainText = mainText.replace(/•/g, '*');
     // 2. Split main text into paragraphs
     const paragraphs = mainText.split('\n\n');
     let htmlParts = [];

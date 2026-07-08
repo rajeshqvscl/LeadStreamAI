@@ -86,8 +86,14 @@ def format_outreach_html(text: str) -> str:
     """
     import re
     
+    # Normalize bullet characters
+    text = text.replace('•', '*')
+    
+    # If content already has HTML structure, pass through (markdown already handled it)
+    if re.search(r'<(ul|ol|li|p|table)[>\s]', text, re.IGNORECASE):
+        return text
+    
     # 1. Convert markdown links [text](url) to <a href="url">text</a>
-    # Specifically targeting the blue accent for links
     text = re.sub(
         r'\[(.*?)\]\((.*?)\)', 
         r'<a href="\2" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', 
@@ -95,27 +101,22 @@ def format_outreach_html(text: str) -> str:
     )
 
     # 2. Convert bold/italic markdown into clean <strong> tags
-    # Handle Triple Stars (Bold + Italic)
     text = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong style="color: #ffffff; font-size: 15px;">\1</strong>', text)
-    # Handle Double Stars (Bold)
     text = re.sub(r'\*\*(.*?)\*\*', r'<strong style="color: #ffffff; font-size: 14px;">\1</strong>', text)
-    # Handle Single Stars (often used for headers by LLMs)
-    text = re.sub(r'(?m)^\* (.*?)$', r'<li style="margin-bottom: 4px;">\1</li>', text) # Handle list style bullets if they use * space
-    text = re.sub(r'\* (.*?)\n', r'<li style="margin-bottom: 4px;">\1</li>\n', text)
-    text = re.sub(r'\*(.*?)\*', r'<strong style="color: #ffffff; font-size: 14px;">\1</strong>', text)
+    text = re.sub(r'\*(.*?)\*', r'<em style="color: #cbd5e1;">\1</em>', text)
     
-    # 3. Convert bullet points • text to list items
+    # 3. Convert bullet points to proper list items
     lines = text.split('\n')
     formatted_lines = []
     in_list = False
     
     for line in lines:
         line = line.strip()
-        if line.startswith('•') or line.startswith('* '):
+        if line.startswith('* ') or line.startswith('- '):
             if not in_list:
                 formatted_lines.append('<ul style="padding-left: 20px; color: #cbd5e1; margin-top: 8px;">')
                 in_list = True
-            content = line.lstrip('•* ').strip()
+            content = line[2:].strip()
             formatted_lines.append(f'<li style="margin-bottom: 4px;">{content}</li>')
         else:
             if in_list:
@@ -207,9 +208,12 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
         cc = "rajesh.s@qvscl.com"
     
     import markdown
+    # Normalize bullet characters for markdown compatibility
+    html_content = html_content.replace('•', '*')
     # Convert markdown to HTML for a premium look
     if not html_content.strip().startswith('<'):
-        if any(marker in html_content for marker in ['**', '###', '[', '\n*', '|']):
+        has_bullet_lines = any(line.strip().startswith('* ') for line in html_content.split('\n'))
+        if any(marker in html_content for marker in ['**', '###', '[', '|']) or has_bullet_lines:
             html_content = markdown.markdown(html_content, extensions=['extra', 'nl2br'])
         else:
             # Plain text: wrap each paragraph in <p> tags
