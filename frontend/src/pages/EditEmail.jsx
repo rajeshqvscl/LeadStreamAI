@@ -11,6 +11,26 @@ const mdToHtml = (md) => {
   // If already contains only HTML block-level tags, return as-is
   if (/^<[a-z][^>]*>/i.test(md.trim()) && /<\/[a-z]+>\s*$/i.test(md.trim())) return md;
   let html = md.replace(/•/g, '*');
+  // Convert bullet lines to proper lists — join without newlines to avoid
+  // the downstream \n→<br> replacement from breaking <ul>/<li> structure
+  let lines = html.split('\n');
+  let result = [];
+  let inList = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (/^\*\s+/.test(line)) {
+      if (!inList) { result.push('<ul>'); inList = true; }
+      result.push('<li>' + line.replace(/^\*\s+/, '') + '</li>');
+    } else {
+      if (inList) { result.push('</ul>'); inList = false; }
+      result.push(line);
+    }
+  }
+  if (inList) result.push('</ul>');
+  html = result.join('\n');
+  // Protect <ul>/<li> from the \n→<br> conversion by removing newlines inside them
+  html = html.replace(/<ul>\n/g, '<ul>').replace(/\n<\/ul>/g, '</ul>');
+  html = html.replace(/<li>\n/g, '<li>').replace(/\n<\/li>/g, '</li>');
   html = html.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>');
   html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/_(.*?)_/g, '<em>$1</em>');
@@ -430,7 +450,32 @@ const EditEmail = () => {
     const backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
     text = text.replace(/\[\[BACKEND_URL\]\]/g, backendUrl);
 
-    // If text is already HTML, wrap it in styled container and return
+    // Normalize bullet characters & convert HTML-wrapped bullets to proper lists
+    text = text.replace(/•/g, '*');
+    let htmlLines = text.split('\n');
+    let convertedLines = [];
+    let inBulletGroup = false;
+    for (let i = 0; i < htmlLines.length; i++) {
+      const line = htmlLines[i];
+      const bulletMatch = line.match(/^\s*<(div|p)[^>]*>\s*\*\s+(.*?)<\/(div|p)>\s*$/i);
+      if (bulletMatch) {
+        if (!inBulletGroup) {
+          convertedLines.push('<ul style="margin: 0.8em 0; padding-left: 0; list-style: none;">');
+          inBulletGroup = true;
+        }
+        convertedLines.push(`<li style="margin-bottom: 0.4em; position: relative; padding-left: 14px; line-height: 1.6; color: #cbd5e1;"><span style="position: absolute; left: 0; color: #94a3b8; font-size: 9px; top: 0px; display: inline-block; vertical-align: middle;">•</span>${bulletMatch[2].trim()}</li>`);
+      } else {
+        if (inBulletGroup) {
+          convertedLines.push('</ul>');
+          inBulletGroup = false;
+        }
+        convertedLines.push(line);
+      }
+    }
+    if (inBulletGroup) convertedLines.push('</ul>');
+    text = convertedLines.join('\n');
+
+    // If text is already complex HTML, wrap it in styled container and return
     if (/<[a-z][\s\S]*>/i.test(text) && !text.includes('**') && !text.includes('\n--')) {
       return `<div style="color: #cbd5e1; font-size: 13px; line-height: 1.6;">${text}</div>`;
     }
