@@ -569,10 +569,12 @@ India's diagnostics sector is large but structurally fragmented.
 • Corporate and institutional partnerships
 • Operational and compliance infrastructure
 
-If this aligns with your portfolio focus and does not conflict with it, I'd be happy to share the full presentation or connect over a virtual meeting at your convenience. I have attached the QVSCL Profile. You may also share your investment thesis with us so we can send relevant deal flow in the future.
+If this aligns with your portfolio focus and does not conflict with it, I'd be happy to share the full presentation or connect over a virtual meeting at your convenience. You may also share your investment thesis with us so we can send relevant deal flow in the future.
 
 For more details about our services:
 [Website](https://qvscl.com) | [Linkedin]({{Sender LinkedIn}})
+
+You can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)
 Looking forward to your response.
 SIG_START
 [Click here to unsubscribe](https://qvscl.com/unsubscribe)
@@ -625,7 +627,7 @@ We would welcome the opportunity to explore how QVSCL can support your portfolio
 
 Additionally, if you could share your investment thesis, sector focus, and preferred investment stage, we would be pleased to share relevant deal flow opportunities aligned with your mandate.
 
-Please find attached the QVSCL company profile and founder profile for your reference.
+You can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)
 
 **For more information:**
 [Website](https://qvscl.com/) | [LinkedIn](https://www.linkedin.com/company/qvscl/)
@@ -1477,6 +1479,8 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     unsub_link = f"https://qvscl.com/unsubscribe?lead_id={lead_id}"
 
     is_palak = (profile.get('full_name') or '').strip().lower() == 'palak jain'
+    raw_name_lower = (profile.get('full_name') or profile.get('username') or '').strip().lower()
+    is_kajal = 'kajal' in raw_name_lower
 
     # Load qvscllogo.png as base64 once
     try:
@@ -1515,6 +1519,7 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 <div style="margin-top:10px;font-size:10px;line-height:1.4;color:#555555;max-width:600px;">{dis_text}</div>
 </div>"""
     else:
+        drive_link = '<i><a href="https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link" style="color: #0077b5; text-decoration: none;">Company Documents</a></i><br>' if is_kajal else ''
         sig_html = f"""
 <div style="color: #666666; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
 <a href="{unsub_link}" style="color: #666666; text-decoration: underline;">Click here to unsubscribe</a><br>
@@ -1524,7 +1529,7 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 <i>{title}</i><br>
 <i><a href="https://qvscl.com" style="color: #0077b5; text-decoration: none;">Website</a> | <a href="{linkedin}" style="color: #0077b5; text-decoration: none;">LinkedIn</a></i><br>
 <i>{phone}</i><br>
-<div style="font-size: 10px; color: #999999; line-height: 1.2; margin-top: 6px;">
+{drive_link}<div style="font-size: 10px; color: #999999; line-height: 1.2; margin-top: 6px;">
 {disclaimer}
 </div>
 </div>
@@ -2302,11 +2307,10 @@ A one-stop renewable energy platform addressing access, affordability and adopti
 • **Previously Raised:** USD 262K (in the form of Govt. Grants & Angel Investors)
 • **Use of Funds:** Expansion, technology development, AgriVoltaics initiatives, team growth and market expansion
 
-If this aligns with your portfolio focus and does not conflict with it, I'd be happy to share the full presentation or connect over a virtual meeting at your convenience. I have attached the QVSCL Profile. You may also share your investment thesis with us so we can send relevant deal flow in the future.
+If this aligns with your portfolio focus and does not conflict with it, I'd be happy to share the full presentation or connect over a virtual meeting at your convenience. You may also share your investment thesis with us so we can send relevant deal flow in the future.
 Looking forward to your response.
 
-QVSCL Profile: [Company Profile](https://drive.google.com/file/d/1Z2QPI0M9hBGjLx9Vu_wktfLp6aTvhD1S/view)
-Managing Partner Profile: [Mr. Lalit Hhuria](https://drive.google.com/file/d/1zoXE6-m1AUMpvJkm31EZZOclKd7w-DZM/view)
+You can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)
 
 SIG_START
 --
@@ -2695,14 +2699,11 @@ TEMPLATE_ATTACHMENT_MAP = {
     ],
     "yashika_draft_ai_tech": [],
     "yashika_draft_agritech": [],
-    "kajal_mam_agritech": [
-        {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
-        {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
-    ],
-    "kajal_mam_qvscl_intro": [
-        {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
-        {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
-    ],
+    "kajal_mam_agritech": [],
+    "kajal_mam_health_ecosystem": [],
+    "kajal_mam_jv": [],
+    "kajal_mam_hyphen": [],
+    "kajal_mam_qvscl_intro": [],
     "palak_mam_corporate_advisory": [
         {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
     ],

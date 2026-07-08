@@ -152,10 +152,11 @@ _TEMPLATE_ATTACHMENT_MAP = {
         "QVSCL Company Profile.pdf",
         "Lalit_Huria_Profile.pdf",
     ],
-    "kajal_mam_qvscl_intro": [
-        "QVSCL Company Profile.pdf",
-        "Lalit_Huria_Profile.pdf",
-    ],
+    "kajal_mam_qvscl_intro": [],
+    "kajal_mam_health_ecosystem": [],
+    "kajal_mam_jv": [],
+    "kajal_mam_hyphen": [],
+    "kajal_mam_agritech": [],
     "vismaya_leadstream": [],
     "yashika_draft_agritech": [],
 }
