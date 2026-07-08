@@ -1668,8 +1668,14 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         custom_sig = profile.get('signature')
         sig_mode = profile.get('signature_mode') or 'custom'
         use_custom = sig_mode == 'custom' and custom_sig and custom_sig.strip()
+        raw_name_lower = (profile.get('full_name') or profile.get('username') or '').strip().lower()
+        is_palak_user = raw_name_lower == 'palak jain'
+        is_kajal_user = 'kajal' in raw_name_lower
         if "SIG_START" in body or "SIG_END" in body:
             body_with_sig = body
+            if (is_palak_user or is_kajal_user) and "10kjiUJljms" not in body_with_sig:
+                drive_md = "\n\nYou can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)\n"
+                body_with_sig = body_with_sig.replace("SIG_START", drive_md + "SIG_START")
         elif use_custom:
             body_with_sig = inject_signature(body, profile, req.lead_id)
         else:
@@ -2531,8 +2537,11 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
         # Inject logged-in user's signature ONLY if the template doesn't already embed one
         profile = get_sender_profile(user_id)
         if "SIG_START" in final_body or "SIG_END" in final_body:
-            # Template already has an embedded signature block — keep as-is
             body_with_sig = final_body
+            raw_n = (profile.get('full_name') or profile.get('username') or '').strip().lower()
+            if (raw_n == 'palak jain' or 'kajal' in raw_n) and "10kjiUJljms" not in body_with_sig:
+                drive_md = "\n\nYou can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)\n"
+                body_with_sig = body_with_sig.replace("SIG_START", drive_md + "SIG_START")
         else:
             # Prevent double signature if the template body ended with a sign-off but no marker
             body_lower = final_body.lower().strip()
@@ -3151,6 +3160,11 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             body = body.replace("{{Sender Phone}}", profile["phone"])
             body = body.replace("{{Sender LinkedIn}}", profile["linkedin_url"])
             body = body.replace("{{Sender Linkedin}}", profile["linkedin_url"])
+            # Add Drive link for Kajal/Palak if not already present
+            raw_n = (profile.get('full_name') or profile.get('username') or '').strip().lower()
+            if (raw_n == 'palak jain' or 'kajal' in raw_n) and "10kjiUJljms" not in body:
+                drive_md = "\n\nYou can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)\n"
+                body = body.replace("SIG_START", drive_md + "SIG_START")
         else:
             body = inject_signature(body, profile, draft_id)
         
