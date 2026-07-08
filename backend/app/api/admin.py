@@ -331,7 +331,7 @@ async def dispatch_admin_report(user_id: Optional[str] = Header(None, alias="X-U
         html = f"""
 <!DOCTYPE html>
 <html>
-<body style="font-family:'Inter',Arial,sans-serif;background:#090c12;color:#c9d1d9;margin:0;padding:32px;">
+<body style="font-family:sans-serif;background:#090c12;color:#c9d1d9;margin:0;padding:32px;">
 <div style="max-width:820px;margin:0 auto;background:#0d1117;border-radius:16px;border:1px solid #30363d;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,0.8);">
 
   <!-- HEADER -->

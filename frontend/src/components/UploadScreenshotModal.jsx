@@ -165,7 +165,7 @@ const UploadScreenshotModal = ({ isOpen, onClose, onSaved }) => {
               </div>
               <div>
                 <label className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1.5 block">Email Body</label>
-                <textarea value={body} onChange={e => setBody(e.target.value)} rows={8} className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm font-mono leading-relaxed focus:outline-none focus:border-blue-500/50 transition-colors resize-y" />
+                <textarea value={body} onChange={e => setBody(e.target.value)} rows={8} className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm leading-relaxed focus:outline-none focus:border-blue-500/50 transition-colors resize-y" />
               </div>
 
               {/* Follow-ups */}
@@ -185,7 +185,7 @@ const UploadScreenshotModal = ({ isOpen, onClose, onSaved }) => {
                           <input ref={el => fupInputRefs[i] = el} type="file" accept={acceptedTypes} className="hidden" onChange={() => handleFupUpload(i)} />
                         </label>
                       </div>
-                      <textarea value={val} onChange={e => set(e.target.value)} rows={3} placeholder={`Follow-up ${i} content (or upload a file)...`} className="w-full px-3 py-2 rounded-lg bg-black/40 border border-white/5 text-white text-xs font-mono focus:outline-none focus:border-blue-500/50 transition-colors resize-y" />
+                      <textarea value={val} onChange={e => set(e.target.value)} rows={3} placeholder={`Follow-up ${i} content (or upload a file)...`} className="w-full px-3 py-2 rounded-lg bg-black/40 border border-white/5 text-white text-xs focus:outline-none focus:border-blue-500/50 transition-colors resize-y" />
                     </div>
                   );
                 })}

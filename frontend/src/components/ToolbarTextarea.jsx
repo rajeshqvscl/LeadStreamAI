@@ -283,7 +283,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
         rows={rows}
         placeholder={placeholder}
         readOnly={readOnly}
-        className={`w-full bg-black/40 border border-white/5 rounded-b-xl p-3 text-xs text-white font-mono focus:border-blue-500/50 outline-none resize-none ${className || ''}`}
+        className={`w-full bg-black/40 border border-white/5 rounded-b-xl p-3 text-xs text-white focus:border-blue-500/50 outline-none resize-none ${className || ''}`}
         style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}
       />
     </div>

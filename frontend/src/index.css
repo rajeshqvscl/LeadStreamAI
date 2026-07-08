@@ -52,7 +52,7 @@
 body {
   background-color: var(--bg-body);
   color: var(--text-primary);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: sans-serif;
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
   margin: 0;

@@ -360,7 +360,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
 
                 # Wrap in professional email template for consistent branding
                 html_content = f"""
-                <div style="font-family: 'Segoe UI', Roboto, -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1a202c; font-size: 14px;">
+                <div style="font-family: sans-serif; line-height: 1.6; color: #1a202c; font-size: 14px;">
                     {html_content}
                 </div>
                 """
@@ -493,7 +493,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
         
         # Wrap in a clean container
         final_html = f"""
-        <div style="font-family: 'Inter', sans-serif; background-color: #0f172a; color: #cbd5e1; padding: 40px; border-radius: 12px; max-width: 600px; margin: auto;">
+        <div style="font-family: sans-serif; background-color: #0f172a; color: #cbd5e1; padding: 40px; border-radius: 12px; max-width: 600px; margin: auto;">
             {formatted_html}
         </div>
         """
@@ -669,7 +669,7 @@ def send_admin_report(to_email: str, report_data: dict) -> bool:
     total_sent = sum(u.get('sent_count', 0) for u in user_stats)
     
     html_content = f"""
-    <div style="font-family: 'Inter', -apple-system, sans-serif; max-width: 650px; margin: auto; padding: 40px; border-radius: 16px; background-color: #0f172a; color: #f8fafc;">
+    <div style="font-family: sans-serif; max-width: 650px; margin: auto; padding: 40px; border-radius: 16px; background-color: #0f172a; color: #f8fafc;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; border-bottom: 1px solid #1e293b; padding-bottom: 20px;">
             <h2 style="color: #f8fafc; margin: 0; font-size: 22px; font-weight: 800;">Management Information System</h2>
             <span style="background-color: #3b82f620; color: #60a5fa; padding: 6px 14px; border-radius: 20px; font-size: 11px; font-weight: bold; border: 1px solid #3b82f640;">{report_data.get('environment', 'Production')}</span>
