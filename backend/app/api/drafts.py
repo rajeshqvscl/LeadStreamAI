@@ -451,7 +451,9 @@ To learn more about how we can support your growth ambitions, see our [website](
 
 We'd love to schedule a virtual meeting at your convenience to explore potential collaboration. Kindly share your availability, and we'll coordinate a suitable time.
 
-Attached, you'll find our company profile for your reference. Looking forward to connecting!
+You can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)
+
+Looking forward to connecting!
 
 SIG_START
 --
@@ -461,6 +463,7 @@ Thanks & Regards,
 {{Sender Title}}
 [Website](https://www.qvscl.com) | [LinkedIn]({{Sender LinkedIn}})
 {{Sender Phone}}
+[Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)
 
 <strong>Strictly Private and Confidential.</strong>
 
@@ -696,7 +699,7 @@ We're pleased to introduce QV Strategic Consulting, your trusted partner for dri
 
 If this aligns with your needs, we would be glad to connect and discuss how we can support your strategic objectives. Could we schedule a short video call at your convenience?
 
-Please find our Company Profile attached.
+You can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)
 
 Looking forward to connecting."""
 
@@ -1516,6 +1519,7 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 <div style="font-size:15px;font-style:italic;margin:0;color:#0B2A6F;">{title}</div>
 <div style="font-size:15px;font-style:italic;margin:0;color:#0B2A6F;"><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> <span style="color:#1d5fd0;">/</span> <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></div>
 <div style="font-size:15px;font-style:italic;margin-top:2px;color:#0B2A6F;">{phone}</div>
+<div style="font-size:15px;font-style:italic;margin-top:2px;color:#0B2A6F;"><a href="https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link" style="color:#1d5fd0;text-decoration:underline;">Company Documents</a></div>
 {f'<img src="{_logo_data_uri}" alt="QVSCL" width="110" style="margin-top:10px;width:110px;height:auto;display:block;">' if _logo_data_uri else ''}
 <div style="margin-top:10px;font-size:10px;line-height:1.4;color:#555555;max-width:600px;">{dis_text}</div>
 </div>"""
@@ -2716,13 +2720,9 @@ TEMPLATE_ATTACHMENT_MAP = {
     "kajal_mam_jv": [],
     "kajal_mam_hyphen": [],
     "kajal_mam_qvscl_intro": [],
-    "palak_mam_corporate_advisory": [
-        {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
-    ],
-    "palak_mam_mna_fundraising": [
-        {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
-        {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
-    ],
+    "palak_mam_corporate_advisory": [],
+    "palak_mam_mna_fundraising": [],
+    "palak_mam_Draft_1": [],
     "vismaya_leadstream": [],
 }
 
