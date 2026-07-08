@@ -1167,6 +1167,16 @@ def markdown_to_html(text, gmail_style=False):
 
     result = re.sub(r'<table([^>]*)>', ensure_table_collapse, result, flags=re.IGNORECASE)
 
+    # Strip any stray square brackets from non-HTML text (all legit markdown
+    # links/images should already be converted to <a>/<img> at this point)
+    def _strip_stray_brackets(html: str) -> str:
+        parts = re.split(r'(<[^>]+>)', html)
+        for i, p in enumerate(parts):
+            if not (p.startswith('<') and p.endswith('>')):
+                parts[i] = p.replace('[', '').replace(']', '')
+        return ''.join(parts)
+    result = _strip_stray_brackets(result)
+
     if gmail_style:
         result = f"<div style='padding: 0 40px; font-family: Arial, sans-serif;'>{result}</div>"
     return result

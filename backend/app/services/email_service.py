@@ -130,7 +130,14 @@ def format_outreach_html(text: str) -> str:
     if in_list:
         formatted_lines.append('</ul>')
         
-    return "\n".join(formatted_lines)
+    result = "\n".join(formatted_lines)
+    # Strip any stray square brackets from non-HTML text
+    import re as _re
+    parts = _re.split(r'(<[^>]+>)', result)
+    for i, p in enumerate(parts):
+        if not (p.startswith('<') and p.endswith('>')):
+            parts[i] = p.replace('[', '').replace(']', '')
+    return ''.join(parts)
 
 # ---------------------------------------------------------------------------
 # Template-aware attachment selection
