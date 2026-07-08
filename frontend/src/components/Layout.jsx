@@ -251,7 +251,7 @@ const Layout = () => {
                     await api.post('/api/auth/logout'); 
                   } catch (e) { console.error(e); } 
                   localStorage.clear();
-                  window.location.href = '/login?logout=success';
+                  navigate('/login?logout=success');
                 }} 
                 className="flex items-center gap-1.5 text-[10px] text-rose-500 font-black uppercase tracking-widest transition-all hover:text-rose-400 cursor-pointer bg-rose-500/5 hover:bg-rose-500/10 px-2 py-1 rounded-lg border border-rose-500/10"
               >
@@ -342,6 +342,7 @@ const Layout = () => {
                   <button
                     onClick={async () => {
                       try {
+                        const api = await import('../services/api').then(m => m.default);
                         await api.post('/api/auth/logout');
                       } catch (e) {
                         console.error('Logout API failed:', e);
@@ -350,7 +351,7 @@ const Layout = () => {
                       localStorage.removeItem('user');
                       localStorage.removeItem('token_admin');
                       localStorage.removeItem('user_admin');
-                      window.location.href = '/login?logout=success';
+                      navigate('/login?logout=success');
                     }}
                     className="block w-full text-left px-3.5 py-2.5 text-[13px] text-[#f43f5e] font-medium hover:bg-white/5 transition-colors"
                   >
