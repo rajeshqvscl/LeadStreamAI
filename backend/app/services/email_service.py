@@ -145,9 +145,13 @@ _TEMPLATE_ATTACHMENT_MAP = {
         _HOSPITAL_TEASER_FILE,
     ],
     "yashika_draft_ai_tech": [],
-    "palak_mam_corporate_advisory": [],
-    "palak_mam_mna_fundraising": [],
-    "palak_mam_Draft_1": [],
+    "palak_mam_corporate_advisory": [
+        "QVSCL Company Profile.pdf",
+    ],
+    "palak_mam_mna_fundraising": [
+        "QVSCL Company Profile.pdf",
+        "Lalit_Huria_Profile.pdf",
+    ],
     "kajal_mam_qvscl_intro": [],
     "kajal_mam_health_ecosystem": [],
     "kajal_mam_jv": [],

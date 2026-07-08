@@ -22,7 +22,7 @@ Identifying and evaluating relevant targets/opportunities
 Valuation and deal structuring
 Managing diligence and negotiations
 Ensuring smooth transaction closure and integration
-**We bring a hands-on, confidential approach backed by strong market access across sectors.** If this is relevant, I'm happy to schedule a quick discussion and share live opportunities currently in the market. You can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)
+**We bring a hands-on, confidential approach backed by strong market access across sectors.** If this is relevant, I'm happy to schedule a quick discussion and share live opportunities currently in the market. I am sharing our Company Profile attached to this email for your reference.
 
 Looking forward to connecting.
 
@@ -33,7 +33,6 @@ Palak Jain,
 Business Development Associate,
 SIG_LINK_LABEL:Add me on LinkedIn:https://www.linkedin.com/in/palak-jain-057b47229/
 9520372034
-[Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)
 SIG_END"""
 
 
