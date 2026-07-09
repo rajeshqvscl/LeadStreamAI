@@ -31,7 +31,8 @@ const Users = () => {
     job_title: '',
     phone: '',
     linkedin_url: '',
-    team: 'CLIENT'
+    team: 'CLIENT',
+    sector: ''
   });
 
   const fetchUsers = async () => {
@@ -67,7 +68,8 @@ const Users = () => {
         job_title: user.job_title || '',
         phone: user.phone || '',
         linkedin_url: user.linkedin_url || '',
-        team: user.team || 'CLIENT'
+        team: user.team || 'CLIENT',
+        sector: user.sector || ''
       });
     } else {
       setEditingUser(null);
@@ -82,7 +84,8 @@ const Users = () => {
         job_title: '',
         phone: '',
         linkedin_url: '',
-        team: 'CLIENT'
+        team: 'CLIENT',
+        sector: ''
       });
     }
     setShowDrawer(true);
@@ -192,14 +195,15 @@ const Users = () => {
                 <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Last Change</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Team</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">Sector</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider text-right">Settings</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5 text-[13px]">
               {isLoading ? (
-                <tr><td colSpan="7" className="px-6 py-20 text-center"><Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto" /></td></tr>
+                <tr><td colSpan="8" className="px-6 py-20 text-center"><Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto" /></td></tr>
               ) : users.length === 0 ? (
-                <tr><td colSpan="7" className="px-6 py-20 text-center text-slate-500">No users found match the current criteria.</td></tr>
+                <tr><td colSpan="8" className="px-6 py-20 text-center text-slate-500">No users found match the current criteria.</td></tr>
               ) : users.map(user => (
                 <tr key={user.id} className="hover:bg-white/5 transition-colors group">
                   <td className="px-6 py-4">
@@ -261,6 +265,11 @@ const Users = () => {
                   <td className="px-6 py-4">
                     <span className={`inline-block px-2 py-1 rounded text-[9px] font-black uppercase ${user.team === 'INVESTOR' ? 'bg-violet-500/10 text-violet-400 border border-violet-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
                       {user.team || 'CLIENT'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className="inline-block px-2 py-1 rounded text-[9px] font-black uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                      {user.sector || '—'}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-right">
@@ -413,9 +422,9 @@ const Users = () => {
                 <div className="form-group border-t border-white/5 pt-6 mt-6">
                   <div className="flex items-center gap-2 mb-4">
                     <UserPlus className="w-4 h-4 text-slate-400" />
-                    <span className="text-[11px] font-black text-white uppercase tracking-widest">Team Assignment</span>
+                    <span className="text-[11px] font-black text-white uppercase tracking-widest">Team & Sector Assignment</span>
                   </div>
-                  <div className="flex gap-3">
+                  <div className="flex gap-3 mb-4">
                     {['CLIENT', 'INVESTOR'].map(t => (
                       <button
                         key={t}
@@ -431,6 +440,16 @@ const Users = () => {
                         {t}
                       </button>
                     ))}
+                  </div>
+                  <div className="form-group">
+                    <label>Sector Focus</label>
+                    <input
+                      type="text"
+                      className="form-control bg-slate-900/50"
+                      placeholder="e.g. FinTech, Healthcare, SaaS, Defence"
+                      value={formData.sector}
+                      onChange={(e) => setFormData({ ...formData, sector: e.target.value })}
+                    />
                   </div>
                 </div>
 

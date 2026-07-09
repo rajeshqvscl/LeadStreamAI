@@ -121,7 +121,7 @@ const AdminDashboard = () => {
     { key: 'status', label: 'Status' }, { key: 'sent_draft', label: 'Sent/Draft' },
     { key: 'owner', label: 'Owner' }, { key: 'actions', label: 'Actions' },
   ];
-  const [visibleColumns, setVisibleColumns] = useState(new Set(['name', 'company', 'type', 'check_size', 'status', 'stage', 'followups', 'owner', 'sent_draft', 'actions']));
+  const [visibleColumns, setVisibleColumns] = useState(new Set(['name', 'company', 'type', 'sector', 'check_size', 'status', 'stage', 'followups', 'owner', 'sent_draft', 'actions']));
   const activeFilterCount = [filters.type, filters.status, filters.intent, filters.owner, filters.sector].filter(v => v !== 'ALL').length;
   const [chartRange, setChartRange] = useState('ALL');
 
@@ -277,7 +277,13 @@ const AdminDashboard = () => {
     const pollId = setInterval(() => {
       fetchData(currentPage, true);
       fetchGlobalStats();
-      api.get(`/api/admin/stats/breakdown`).then(res => setChartBreakdowns(res.data)).catch(() => {});
+      const bParams = new URLSearchParams({ _t: Date.now() });
+      if (filters.type !== 'ALL') bParams.set('type', filters.type);
+      if (filters.status !== 'ALL') bParams.set('status', filters.status);
+      if (filters.owner !== 'ALL') bParams.set('owner', filters.owner);
+      if (filters.sector !== 'ALL') bParams.set('sector', filters.sector);
+      if (chartRange !== 'ALL') bParams.set('period', chartRange);
+      api.get(`/api/admin/stats/breakdown?${bParams.toString()}`).then(res => setChartBreakdowns(res.data)).catch(() => {});
     }, 20000);
 
     return () => clearInterval(pollId);
@@ -339,79 +345,9 @@ const AdminDashboard = () => {
 
   const getDisplaySector = (lead) => {
     if (!lead) return 'OTHER';
-    
-    const template = lead.draft_template_used || '';
-    const textToSearch = [
-      lead.email_draft,
-      lead.remarks,
-      lead.persona,
-      lead.first_outreach_subject,
-      lead.last_outreach_subject
-    ].filter(Boolean).join(' ').toLowerCase();
-
-    // 1. Real Estate (Kajal Noida JV / leasing / investment)
-    if (textToSearch.includes('jv & investment') || textToSearch.includes('jv, investment') || textToSearch.includes('noida ncr') || textToSearch.includes('leasing | noida ncr')) {
-      return 'REAL ESTATE';
-    }
-    // 2. Logistics (Kajal Warehousing & Fulfilment)
-    if (textToSearch.includes('warehousing & fulfilment') || textToSearch.includes('67k+ warehouses')) {
-      return 'LOGISTICS';
-    }
-    // 3. AI Hiring (Gigin AI/Hiring platform)
-    if (textToSearch.includes('vertical ai-powered hiring') || textToSearch.includes('hiring intelligence') || textToSearch.includes('gigin') || textToSearch.includes('hiring platform')) {
-      return 'AI HIRING';
-    }
-    // 4. Corporate Advisory (Palak / Kajal intro)
-    if (template === 'palak_mam_corporate_advisory' || textToSearch.includes('corporate advisory/ equity fund raising') || textToSearch.includes('corporate advisory/equity fund') || textToSearch.includes('qvscl: capital & growth solutions')) {
-      return 'CORPORATE ADVISORY';
-    }
-    // 5. M&A / Fundraising (Palak)
-    if (template === 'palak_mam_mna_fundraising' || textToSearch.includes('supporting growth through m&a and fundraising') || textToSearch.includes('m&a and fundraising')) {
-      return 'M&A / FUNDRAISING';
-    }
-    // 6. M&A / Strategic Partnership (Palak)
-    if (template === 'palak_mam_draft_1' || template === 'palak_mam_Draft_1' || textToSearch.includes('india entry advisory') || textToSearch.includes('partnership opportunity') || textToSearch.includes('strategic partnership')) {
-      return 'M&A / STRATEGIC PARTNERSHIP';
-    }
-    // 7. LeadStream AI (Vismaya)
-    if (template === 'vismaya_leadstream' || textToSearch.includes('leadstreamai') || textToSearch.includes('autopilot') || textToSearch.includes('your business on autopilot')) {
-      return 'SAAS';
-    }
-
-    // Fallback to database value if it's set and not generic "Other/SaaS" or if none of the above specific templates matched
-    const cleanSector = (sec) => {
-      if (!sec) return '';
-      const s = sec.toString().trim().toUpperCase();
-      if (s === 'OTHER' || s === 'N/A' || s === '—' || s === '-' || s === 'SAAS') return '';
-      return s;
-    };
-    const existing = cleanSector(lead.sector) || cleanSector(lead.industry);
-    if (existing) return existing;
-
-    // Standard fallback matching
-    if (textToSearch.includes('climate') || textToSearch.includes('carbon') || textToSearch.includes('solar') || textToSearch.includes('renewable') || textToSearch.includes('green tech') || textToSearch.includes('clean tech') || textToSearch.includes('sustainability')) {
-      return 'CLIMATE TECH';
-    }
-    if (textToSearch.includes('hiring') || textToSearch.includes('recruitment') || textToSearch.includes('talent') || textToSearch.includes('staffing') || textToSearch.includes('hrtech')) {
-      return 'AI HIRING';
-    }
-    if (textToSearch.includes('hospital') || textToSearch.includes('healthcare') || textToSearch.includes('medical') || textToSearch.includes('health tech') || textToSearch.includes('clinical') || textToSearch.includes('pharma') || textToSearch.includes('clinic')) {
-      return 'HEALTHCARE';
-    }
-    if (textToSearch.includes('agri') || textToSearch.includes('agtech') || textToSearch.includes('farming') || textToSearch.includes('agriculture') || textToSearch.includes('agrivijay')) {
-      return 'AGRITECH';
-    }
-    if (textToSearch.includes('edtech') || textToSearch.includes('education') || textToSearch.includes('school') || textToSearch.includes('learning')) {
-      return 'EDTECH';
-    }
-    if (textToSearch.includes('fintech') || textToSearch.includes('banking') || textToSearch.includes('finance') || textToSearch.includes('payments')) {
-      return 'FINTECH';
-    }
-    if (textToSearch.includes('saas') || textToSearch.includes('software') || textToSearch.includes('b2b saas')) {
-      return 'SAAS';
-    }
-    
-    return 'OTHER';
+    const raw = lead.sector || lead.industry || '';
+    const s = raw.toString().trim();
+    return s || 'OTHER';
   };
 
 

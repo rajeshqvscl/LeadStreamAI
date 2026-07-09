@@ -385,7 +385,8 @@ def create_tables():
         ("google_token_expiry", "TIMESTAMP"),
         ("team", "TEXT DEFAULT 'CLIENT'"),
         ("signature", "TEXT"),
-        ("signature_mode", "TEXT DEFAULT 'custom'")
+        ("signature_mode", "TEXT DEFAULT 'custom'"),
+        ("sector", "TEXT")
     ]
     # Skip users ALTER TABLEs if all columns exist
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'users'")

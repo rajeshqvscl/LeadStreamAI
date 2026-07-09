@@ -76,7 +76,9 @@ allowed_origins = [o.strip().rstrip("/") for o in raw_origins.split(",") if o.st
 ALWAYS_ALLOWED = [
     "http://localhost:5173",
     "http://localhost:5174",
+    "http://localhost:5713",
     "http://127.0.0.1:5173",
+    "http://127.0.0.1:5713",
     "https://leadstreamai.onrender.com",
 ]
 for o in ALWAYS_ALLOWED:

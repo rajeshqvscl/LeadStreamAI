@@ -25,6 +25,7 @@ class UserBase(BaseModel):
     phone: Optional[str] = None
     linkedin_url: Optional[str] = None
     team: str = "CLIENT"
+    sector: Optional[str] = None
 
 class UserCreate(UserBase):
     password: str
@@ -42,6 +43,7 @@ class UserUpdate(BaseModel):
     linkedin_url: Optional[str] = None
     password: Optional[str] = None
     team: Optional[str] = None
+    sector: Optional[str] = None
 
 class ReportRequest(BaseModel):
     target_user_id: Optional[int] = None
@@ -51,7 +53,7 @@ def list_users(role: Optional[str] = None):
     conn = get_db_connection()
     cur = conn.cursor()
     
-    query = "SELECT id, username, email, full_name, role, team, is_active, is_approved, has_db_access, created_at, updated_at, job_title, phone, linkedin_url FROM users"
+    query = "SELECT id, username, email, full_name, role, team, sector, is_active, is_approved, has_db_access, created_at, updated_at, job_title, phone, linkedin_url FROM users"
     params = []
     if role:
         query += " WHERE role = %s"
@@ -75,10 +77,10 @@ def create_user(user: UserCreate):
     
     try:
         cur.execute("""
-            INSERT INTO users (username, email, full_name, password_hash, role, team, is_active, is_approved, has_db_access, job_title, phone, linkedin_url)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id, username, email, full_name, role, team, is_active, is_approved, has_db_access, created_at, updated_at, job_title, phone, linkedin_url
-        """, (user.username, user.email, user.full_name, password_hash, user.role, user.team, user.is_active, user.is_approved, user.has_db_access, user.job_title, user.phone, user.linkedin_url))
+            INSERT INTO users (username, email, full_name, password_hash, role, team, sector, is_active, is_approved, has_db_access, job_title, phone, linkedin_url)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id, username, email, full_name, role, team, sector, is_active, is_approved, has_db_access, created_at, updated_at, job_title, phone, linkedin_url
+        """, (user.username, user.email, user.full_name, password_hash, user.role, user.team, user.sector, user.is_active, user.is_approved, user.has_db_access, user.job_title, user.phone, user.linkedin_url))
         
         new_user = cur.fetchone()
         conn.commit()
@@ -107,7 +109,7 @@ def update_user(user_id: int, user: UserUpdate):
     params = list(update_data.values())
     params.append(user_id)
     
-    cur.execute(f"UPDATE users SET {set_clause}, updated_at = NOW() WHERE id = %s RETURNING id, username, email, full_name, role, team, is_active, is_approved, has_db_access, created_at, updated_at, job_title, phone, linkedin_url", params)
+    cur.execute(f"UPDATE users SET {set_clause}, updated_at = NOW() WHERE id = %s RETURNING id, username, email, full_name, role, team, sector, is_active, is_approved, has_db_access, created_at, updated_at, job_title, phone, linkedin_url", params)
     updated_user = cur.fetchone()
     
     if not updated_user:
