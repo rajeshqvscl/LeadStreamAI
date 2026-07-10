@@ -275,8 +275,8 @@ def get_all_leads_admin(
 
         offset = (page - 1) * limit
         
-        # 2. Build Dynamic WHERE Clause
-        where_clauses = ["(l.email_draft IS NOT NULL OR l.email_status IS NOT NULL)"]
+        # 2. Build Dynamic WHERE Clause — admin sees ALL leads (including freshly imported)
+        where_clauses = ["1=1"]
         params = []
         
         if type and type != 'ALL':
@@ -347,7 +347,7 @@ def get_all_leads_admin(
         # 5. Dynamic Filters — sectors including both derived + individual raw values
         cur.execute(f"""
             SELECT DISTINCT sector_name FROM (
-                SELECT ({SECTOR_CASE_SQL}) as sector_name FROM leads_raw
+                SELECT ({SECTOR_CASE_SQL}) as sector_name FROM leads_raw l
                 UNION
                 SELECT TRIM(BOTH FROM s) as sector_name
                 FROM leads_raw, regexp_split_to_table(COALESCE(sector, 'Other'), ',') as s
@@ -445,7 +445,7 @@ def export_all_leads_admin(
                    u.username as owner_name
             FROM leads_raw l
             LEFT JOIN users u ON l.user_id = u.id
-            WHERE (l.email_draft IS NOT NULL OR l.email_status IS NOT NULL) {range_clause}
+            WHERE 1=1 {range_clause}
             ORDER BY l.created_at DESC
         """
         cur.execute(query)
