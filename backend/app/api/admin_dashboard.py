@@ -298,8 +298,9 @@ def get_all_leads_admin(
             where_clauses.append("u.username ILIKE %s")
             params.append(owner)
         if sector and sector != 'ALL':
-            where_clauses.append(f"({SECTOR_CASE_SQL}) = %s")
+            where_clauses.append(f"( ({SECTOR_CASE_SQL}) = %s OR COALESCE(l.sector, '') ILIKE '%%' || %s || '%%' )")
             params.append(sector.upper())
+            params.append(sector)
         if search:
             where_clauses.append("(l.first_name ILIKE %s OR l.last_name ILIKE %s OR l.company_name ILIKE %s OR l.email ILIKE %s)")
             s_param = f"%{search}%"
@@ -343,8 +344,16 @@ def get_all_leads_admin(
         cur.execute(count_query, tuple(params))
         total_count = cur.fetchone()[0]
         
-        # 5. Dynamic Filters (Fetch all unique sectors and owners for the dropdowns)
-        cur.execute(f"SELECT DISTINCT ({SECTOR_CASE_SQL}) FROM leads_raw l ORDER BY 1 ASC")
+        # 5. Dynamic Filters — sectors including both derived + individual raw values
+        cur.execute(f"""
+            SELECT DISTINCT sector_name FROM (
+                SELECT ({SECTOR_CASE_SQL}) as sector_name FROM leads_raw
+                UNION
+                SELECT TRIM(BOTH FROM s) as sector_name
+                FROM leads_raw, regexp_split_to_table(COALESCE(sector, 'Other'), ',') as s
+                WHERE TRIM(BOTH FROM s) != '' AND TRIM(BOTH FROM s) != 'Other'
+            ) combined ORDER BY 1 ASC
+        """)
         all_sectors = [r[0] for r in cur.fetchall() if r[0]]
         
         cur.execute("SELECT DISTINCT username FROM users ORDER BY username ASC")
@@ -426,10 +435,10 @@ def export_all_leads_admin(
         elif period == 'YEARLY':
             range_clause = "AND l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '364 days'"
 
-        # 3. Fetch leads
+        # 3. Fetch leads with derived + raw sector
         query = f"""
             SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.company_name, l.family_office_name, l.designation, 
-                   l.sector, l.lead_type, l.reply_intent, l.sentiment_score, l.deal_size, l.check_size,
+                   ({SECTOR_CASE_SQL}) as sector, l.sector as raw_sector, l.lead_type, l.reply_intent, l.sentiment_score, l.deal_size, l.check_size,
                    l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
                    l.email_status, l.followup_status,
                    l.persona, l.email_draft, l.first_outreach_subject, l.last_outreach_subject,
@@ -761,8 +770,9 @@ def get_filtered_breakdowns(
             clauses.append("u.username ILIKE %s")
             params.append(owner)
         if sector and sector != 'ALL':
-            clauses.append(f"({SECTOR_CASE_SQL}) = %s")
+            clauses.append(f"( ({SECTOR_CASE_SQL}) = %s OR COALESCE(l.sector, '') ILIKE '%%' || %s || '%%' )")
             params.append(sector.upper())
+            params.append(sector)
         if period and period != 'ALL':
             if period == 'DAILY':
                 clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date")

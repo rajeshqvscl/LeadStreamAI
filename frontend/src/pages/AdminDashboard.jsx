@@ -343,11 +343,17 @@ const AdminDashboard = () => {
     return lead.draft_template_used || '—';
   };
 
-  const getDisplaySector = (lead) => {
-    if (!lead) return 'OTHER';
+  const getDisplaySectors = (lead) => {
+    if (!lead) return ['OTHER'];
     const raw = lead.sector || lead.industry || '';
     const s = raw.toString().trim();
-    return s || 'OTHER';
+    if (!s) return ['OTHER'];
+    return s.split(',').map(x => x.trim()).filter(x => x);
+  };
+
+  const getDisplaySector = (lead) => {
+    const sectors = getDisplaySectors(lead);
+    return sectors[0] || 'OTHER';
   };
 
 
@@ -398,8 +404,12 @@ const AdminDashboard = () => {
     }
     const counts = {};
     chartFilteredLeads.forEach(l => {
-      const s = getDisplaySector(l);
-      counts[s] = (counts[s] || 0) + 1;
+      const sectors = getDisplaySectors(l);
+      sectors.forEach(s => {
+        if (s !== 'OTHER' || sectors.length === 1) {
+          counts[s] = (counts[s] || 0) + 1;
+        }
+      });
     });
     return Object.entries(counts).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
   }, [chartFilteredLeads, chartBreakdowns]);
@@ -958,10 +968,17 @@ const AdminDashboard = () => {
                     </span>
                   </td>}
                   {visibleColumns.has('sector') && <td className="px-1 py-1 border border-white/5">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-indigo-500/5 border border-indigo-500/20 text-indigo-400">
-                      <Briefcase className="w-3 h-3" />
-                      {getDisplaySector(lead)}
-                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {getDisplaySectors(lead).slice(0, 3).map((s, i) => (
+                        <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-indigo-500/5 border border-indigo-500/20 text-indigo-400">
+                          <Briefcase className="w-2 h-2" />
+                          {s}
+                        </span>
+                      ))}
+                      {getDisplaySectors(lead).length > 3 && (
+                        <span className="text-[8px] font-black text-slate-500">+{getDisplaySectors(lead).length - 3}</span>
+                      )}
+                    </div>
                   </td>}
                   {visibleColumns.has('intent') && <td className="px-1 py-1 border border-white/5">
                     {lead.reply_intent ? (

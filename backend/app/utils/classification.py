@@ -1,5 +1,44 @@
 # app/utils/classification.py
 
+def normalize_sectors(sector_str):
+    """
+    Split comma-separated sector string into individual clean sector names.
+    Returns (primary_sector, [list of all sectors])
+    """
+    if not sector_str or str(sector_str).strip() in ("", "—", "-", "N/A"):
+        return None, []
+    
+    s = str(sector_str).strip()
+    
+    # Handle "Cross-sector (X, Y, Z)" pattern
+    import re
+    cross_match = re.match(r"^Cross-sector\s*\((.+)\)$", s, re.IGNORECASE)
+    if cross_match:
+        s = cross_match.group(1)
+    else:
+        s = re.sub(r"^Cross-sector\s*,\s*", "", s, flags=re.IGNORECASE)
+    
+    sectors = [x.strip() for x in s.split(",") if x.strip()]
+    
+    # Clean parenthetical qualifiers like "(debt)", "(impact)", "(govt)"
+    cleaned = []
+    for sec in sectors:
+        sec_clean = re.sub(r"\s*\(.*?\)\s*$", "", sec).strip()
+        if sec_clean:
+            cleaned.append(sec_clean)
+    
+    # Deduplicate while preserving order
+    seen = set()
+    unique = []
+    for sec in cleaned:
+        key = sec.lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(sec)
+    
+    return (unique[0], unique) if unique else (None, [])
+
+
 def infer_lead_classification(company_name, designation, remarks, current_sector=None, owner_name=None):
     """
     Unified logic to determine lead_type and sector based on keywords and owner assignments.
@@ -75,7 +114,27 @@ def infer_lead_classification(company_name, designation, remarks, current_sector
                 sector = ind
                 break
     
-    # FINAL GUARD: Ensure sector is NOT Investor or Client (confusing values)
+    # If sector has commas, extract primary sector
+    if sector and "," in sector:
+        primary, _ = normalize_sectors(sector)
+        if primary:
+            sector = primary
+    
+    # Re-check against keyword lists with the primary sector
+    if sector and sector.upper() not in ["INVESTOR", "CLIENT", "OTHER"]:
+        text_with_sector = f"{text} {sector}".lower()
+        if lead_type == "CLIENT":
+            for ind, tokens in client_sectors.items():
+                if any(t in text_with_sector for t in tokens):
+                    sector = ind
+                    break
+        elif lead_type == "INVESTOR":
+            for ind, tokens in investor_sectors.items():
+                if any(t in text_with_sector for t in tokens):
+                    sector = ind
+                    break
+    
+    # FINAL GUARD
     if sector and sector.upper() in ["INVESTOR", "CLIENT"]:
         sector = "Other"
     if not sector:

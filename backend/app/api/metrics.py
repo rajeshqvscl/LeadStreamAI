@@ -217,8 +217,20 @@ def get_metrics(
         persona_rows = cur.fetchall()
         persona_breakdown = { r['persona'].upper(): r['count'] for r in persona_rows }
 
-    # Sector breakdown
-    cur.execute(f"SELECT COALESCE(sector, 'Other') as industry, COUNT(*) as count FROM leads_raw {where_clause} GROUP BY COALESCE(sector, 'Other') ORDER BY count DESC LIMIT 10", full_params)
+    # Sector breakdown — split comma-separated sectors into individual counts
+    cur.execute(f"""
+        SELECT industry, COUNT(*) as count 
+        FROM (
+            SELECT TRIM(BOTH FROM s) as industry 
+            FROM leads_raw, 
+                 regexp_split_to_table(COALESCE(sector, 'Other'), ',') as s
+            {where_clause}
+        ) sub
+        WHERE industry != '' AND industry IS NOT NULL
+        GROUP BY industry 
+        ORDER BY count DESC 
+        LIMIT 10
+    """, full_params)
     industry_rows = cur.fetchall()
     industry_breakdown = { r['industry']: r['count'] for r in industry_rows }
 

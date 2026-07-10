@@ -147,7 +147,13 @@ const Metrics = () => {
 
   const personaData = data ? Object.entries(data.persona_breakdown || {}).map(([k, v]) => ({ name: k, value: v })) : [];
   const sectorCounts = {};
-  (data?.report || []).forEach(r => { const s = r.sector || 'Other'; sectorCounts[s] = (sectorCounts[s] || 0) + 1; });
+  (data?.report || []).forEach(r => {
+    const raw = (r.sector || 'Other');
+    const sectors = raw.split(',').map(s => s.trim()).filter(s => s);
+    (sectors.length ? sectors : ['Other']).forEach(s => {
+      sectorCounts[s] = (sectorCounts[s] || 0) + 1;
+    });
+  });
   const industryData = Object.entries(sectorCounts).map(([k, v]) => ({ name: k, value: v })).sort((a, b) => b.value - a.value);
   const countryData = data ? Object.entries(data.country_breakdown || {}).map(([k, v]) => ({ name: k, value: v })) : [];
 
@@ -259,7 +265,14 @@ const Metrics = () => {
                           <td className="px-4 py-3 text-sm text-slate-400">{row.email || '—'}</td>
                           <td className="px-4 py-3 text-sm text-slate-300 font-medium">{row.company || '—'}</td>
                           <td className="px-4 py-3">
-                            <span className="inline-flex px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-indigo-500/5 border border-indigo-500/20 text-indigo-400">{row.sector}</span>
+                            <div className="flex flex-wrap gap-1">
+                              {(row.sector || 'Other').split(',').slice(0, 3).map((s, i) => (
+                                <span key={i} className="inline-flex px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-indigo-500/5 border border-indigo-500/20 text-indigo-400">{s.trim()}</span>
+                              ))}
+                              {(row.sector || '').split(',').length > 3 && (
+                                <span className="text-[8px] font-black text-slate-500">+{(row.sector || '').split(',').length - 3}</span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-4 py-3">
                             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${actionStyle.bg} ${actionStyle.border} ${actionStyle.color}`}>

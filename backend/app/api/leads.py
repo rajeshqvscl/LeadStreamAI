@@ -303,6 +303,7 @@ def get_leads(
             "fit_score": r.get("fit_score", 0),
             "family_office_name": r.get("family_office_name", ""),
             "company_name": r["company_name"],
+            "sector": r.get("sector", ""),
             "industry": r.get("industry", ""),
             "city": city,
             "country": country,
@@ -576,6 +577,7 @@ def export_all_leads(user_id: Optional[str] = Header(None, alias="X-User-Id")):
             "phone": r.get("phone") or "",
             "city": r.get("city") or payload.get("city", ""),
             "country": r.get("country") or payload.get("country", ""),
+            "sector": r.get("sector") or "",
             "industry": r.get("industry") or "",
             "persona": r["persona"],
             "email_status": r.get("email_status", "PENDING"),
@@ -1329,8 +1331,31 @@ def bulk_import(
                 norm_lead.get("sector") or 
                 norm_lead.get("industry") or 
                 norm_lead.get("sectorindustry") or
-                norm_lead.get("sectororindustry")
+                norm_lead.get("sectororindustry") or
+                norm_lead.get("sectorfocus")
             )
+
+            # Also check for individual sector columns (Sector_1, Sector_2, etc.)
+            # These come from normalized Excel with sectors in separate columns
+            individual_sectors = []
+            for k, v in norm_lead.items():
+                if k.startswith("sector") and k not in ("sector", "sectorindustry", "sectororindustry", "sectorfocus"):
+                    if v and v.strip() and v.strip() not in ("—", "-", ""):
+                        individual_sectors.append(v.strip())
+            
+            if individual_sectors:
+                # Use individual sector columns to build/prefer them
+                if not sector:
+                    sector = ", ".join(individual_sectors)
+                else:
+                    # Merge with existing, deduplicate
+                    from app.utils.classification import normalize_sectors
+                    _, existing = normalize_sectors(sector)
+                    existing_lower = [s.lower() for s in existing]
+                    for s in individual_sectors:
+                        if s.lower() not in existing_lower:
+                            sector += f", {s}"
+                            existing_lower.append(s.lower())
 
             # Auto-infer classification using centralized utility
             from app.utils.classification import infer_lead_classification

@@ -101,7 +101,13 @@ const MisReportPage = () => {
   const { report = [], reverted, today_sent, today_followups, daily_limit, total_registry, bounces, drafts_generated } = data;
   const personaData = data.persona_breakdown ? Object.entries(data.persona_breakdown).map(([k, v]) => ({ name: k, value: v })) : [];
   const sectorCounts = {};
-  report.forEach(r => { const s = r.sector || 'Other'; sectorCounts[s] = (sectorCounts[s] || 0) + 1; });
+  report.forEach(r => {
+    const raw = (r.sector || 'Other');
+    const sectors = raw.split(',').map(s => s.trim()).filter(s => s);
+    (sectors.length ? sectors : ['Other']).forEach(s => {
+      sectorCounts[s] = (sectorCounts[s] || 0) + 1;
+    });
+  });
   const industryData = Object.entries(sectorCounts).map(([k, v]) => ({ name: k, value: v })).sort((a, b) => b.value - a.value);
   const countryData = data.country_breakdown ? Object.entries(data.country_breakdown).map(([k, v]) => ({ name: k, value: v })) : [];
 
