@@ -371,7 +371,7 @@ def get_metrics(
         else:
             subject = r.get('first_outreach_subject') or ''
             s_lower = subject.lower()
-            if 'climate' in s_lower or 'agri' in s_lower:
+            if 'climate' in s_lower or any(w in s_lower for w in ['agritech', 'agriculture', 'agri ', 'agricultural']):
                 sector = 'AgriTech'
             elif 'hiring' in s_lower or 'recruitment' in s_lower or 'talent' in s_lower:
                 sector = 'AI Hiring'

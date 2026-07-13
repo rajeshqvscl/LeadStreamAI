@@ -88,7 +88,7 @@ def infer_lead_classification(company_name, designation, remarks, current_sector
         "Cybersecurity": ["cybersecurity", "security", "privacy", "data protection", "infosec", "threat", "ゼロ信任"],
         "PropTech": ["proptech", "real estate", "property", "construction", "housing", "building", "reit"],
         "Manufacturing": ["manufacturing", "factory", "industrial", "robotics", "hardware", "machinery", "3d printing"],
-        "AgriTech": ["agritech", "agriculture", "farming", "crop", "agri", "foodtech", "livestock"],
+        "AgriTech": ["agritech", "agriculture", "farming", "crop", "foodtech", "livestock"],
         "Consulting": ["consulting", "advisory", "strategy", "management consulting", "consultant", "adviser"],
         "Media & Entertainment": ["media", "entertainment", "content", "streaming", "gaming", "creator economy"],
         "Food & Beverage": ["food", "beverage", "restaurant", "foodtech", "dark kitchen", "qsr"],

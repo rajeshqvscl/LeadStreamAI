@@ -108,13 +108,13 @@ CASE
       THEN 'M&A / STRATEGIC PARTNERSHIP'
 
     -- 7. Climate Tech
-    WHEN COALESCE(l.email_draft, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
-      OR COALESCE(l.remarks, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
-      OR COALESCE(l.persona, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
-      OR COALESCE(l.last_outreach_subject, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
-      OR COALESCE(l.sector, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
-      OR COALESCE(l.industry, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|sustainability'
+    WHEN COALESCE(l.email_draft, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|cleantech|sustainability'
+      OR COALESCE(l.remarks, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|cleantech|sustainability'
+      OR COALESCE(l.persona, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|cleantech|sustainability'
+      OR COALESCE(l.first_outreach_subject, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|cleantech|sustainability'
+      OR COALESCE(l.last_outreach_subject, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|cleantech|sustainability'
+      OR COALESCE(l.sector, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|cleantech|sustainability'
+      OR COALESCE(l.industry, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|cleantech|sustainability'
       THEN 'CLIMATE TECH'
 
     -- 8. AI Hiring (Fallback)
@@ -137,14 +137,14 @@ CASE
       OR COALESCE(l.industry, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
       THEN 'HEALTHCARE'
 
-    -- 10. Agritech
-    WHEN COALESCE(l.email_draft, '') ~* 'agri|agtech|farming|agriculture'
-      OR COALESCE(l.remarks, '') ~* 'agri|agtech|farming|agriculture'
-      OR COALESCE(l.persona, '') ~* 'agri|agtech|farming|agriculture'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'agri|agtech|farming|agriculture'
-      OR COALESCE(l.last_outreach_subject, '') ~* 'agri|agtech|farming|agriculture'
-      OR COALESCE(l.sector, '') ~* 'agri|agtech|farming|agriculture'
-      OR COALESCE(l.industry, '') ~* 'agri|agtech|farming|agriculture'
+    -- 10. Agritech — word-boundary matching to avoid over-matching
+    WHEN COALESCE(l.email_draft, '') ~* '\yagritech\y|\yagriculture\y|\yagri\y|\yfarming\y|\yfoodtech\y|\yagtech\y|\yagribusiness\y'
+      OR COALESCE(l.remarks, '') ~* '\yagritech\y|\yagriculture\y|\yagri\y|\yfarming\y|\yfoodtech\y|\yagtech\y|\yagribusiness\y'
+      OR COALESCE(l.persona, '') ~* '\yagritech\y|\yagriculture\y|\yagri\y|\yfarming\y|\yfoodtech\y|\yagtech\y|\yagribusiness\y'
+      OR COALESCE(l.first_outreach_subject, '') ~* '\yagritech\y|\yagriculture\y|\yagri\y|\yfarming\y|\yfoodtech\y|\yagtech\y|\yagribusiness\y'
+      OR COALESCE(l.last_outreach_subject, '') ~* '\yagritech\y|\yagriculture\y|\yagri\y|\yfarming\y|\yfoodtech\y|\yagtech\y|\yagribusiness\y'
+      OR COALESCE(l.sector, '') ~* '\yagritech\y|\yagriculture\y|\yagri\y|\yfarming\y|\yfoodtech\y|\yagtech\y|\yagribusiness\y'
+      OR COALESCE(l.industry, '') ~* '\yagritech\y|\yagriculture\y|\yagri\y|\yfarming\y|\yfoodtech\y|\yagtech\y|\yagribusiness\y'
       THEN 'AGRITECH'
 
     -- 11. Edtech
