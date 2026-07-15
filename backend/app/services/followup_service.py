@@ -405,6 +405,7 @@ def process_outreach_sequences():
             AND l.email_status IN ('SENT', 'OPENED', 'CLICKED', 'REPLIED')
             AND COALESCE(l.reply_intent, '') NOT IN ('INTERESTED', 'MEETING_REQUESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED')
             AND l.followup_stage < 3
+            AND (l.email_opt_in IS NULL OR l.email_opt_in = TRUE)
             AND (l.is_unsubscribed IS NULL OR l.is_unsubscribed = FALSE)
             AND l.email NOT IN (SELECT email FROM unsubscribe_list)
             ORDER BY l.user_id, LOWER(l.email), l.last_outreach_at ASC
@@ -517,7 +518,7 @@ def process_outreach_sequences():
                         verify_conn = get_db_connection()
                         verify_cur = verify_conn.cursor()
                         verify_cur.execute("""
-                            SELECT l.followup_stage, l.followup_status, l.reply_intent, l.email_status, l.is_unsubscribed, u.auto_followup
+                            SELECT l.followup_stage, l.followup_status, l.reply_intent, l.email_status, l.is_unsubscribed, l.email_opt_in, u.auto_followup
                             FROM leads_raw l
                             JOIN users u ON l.user_id = u.id
                             WHERE l.id = %s
@@ -531,7 +532,7 @@ def process_outreach_sequences():
                             current_status = verify_row['followup_status'] if isinstance(verify_row, dict) else verify_row[1]
                             current_reply_intent = verify_row['reply_intent'] if isinstance(verify_row, dict) else verify_row[2]
                             current_email_status = verify_row['email_status'] if isinstance(verify_row, dict) else verify_row[3]
-                            current_auto = verify_row['auto_followup'] if isinstance(verify_row, dict) else verify_row[4]
+                            current_auto = verify_row['auto_followup'] if isinstance(verify_row, dict) else verify_row[6]
                             
                             if current_stage is not None and current_stage != stage:
                                 logger.info(f"Lead {lead_id} stage changed from {stage} to {current_stage} — skipping")
@@ -545,7 +546,7 @@ def process_outreach_sequences():
                             if current_email_status in ('BOUNCED',):
                                 logger.info(f"Lead {lead_id} email_status is '{current_email_status}' — skipping")
                                 continue
-                            if current_stage is not None and verify_row.get('is_unsubscribed'):
+                            if current_stage is not None and (verify_row.get('email_opt_in') is False or verify_row.get('is_unsubscribed')):
                                 logger.info(f"Lead {lead_id} has unsubscribed — skipping")
                                 continue
                             if not current_auto:

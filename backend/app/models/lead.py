@@ -1,6 +1,7 @@
 # from app.database import get_db_connection
 from app.database import get_db_connection
 import json
+import secrets
 
 
 def insert_lead(first_name, last_name, email, domain, linkedin, company, source, payload, fit_score=0, persona="OTHER", phone=None, user_id=None, user_name=None, lead_type="CLIENT", sector=None, intent_level="Warm", ai_score=85, system_confidence=90):
@@ -38,8 +39,8 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
 
     update_query = """
         INSERT INTO leads_raw
-        (first_name, last_name, email, domain, linkedin_url, company_name, source, raw_payload, fit_score, persona, phone, user_id, user_name, designation, lead_type, sector, intent_level, ai_score, system_confidence)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        (first_name, last_name, email, domain, linkedin_url, company_name, source, raw_payload, fit_score, persona, phone, user_id, user_name, designation, lead_type, sector, intent_level, ai_score, system_confidence, unsubscribe_token)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (email, COALESCE(user_id, -1)) DO UPDATE SET
             first_name = EXCLUDED.first_name,
             last_name = EXCLUDED.last_name,
@@ -59,19 +60,43 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
             intent_level = COALESCE(leads_raw.intent_level, EXCLUDED.intent_level),
             ai_score = COALESCE(leads_raw.ai_score, EXCLUDED.ai_score),
             system_confidence = COALESCE(leads_raw.system_confidence, EXCLUDED.system_confidence),
-            created_at = CURRENT_TIMESTAMP
+            created_at = CURRENT_TIMESTAMP,
+            unsubscribe_token = COALESCE(leads_raw.unsubscribe_token, EXCLUDED.unsubscribe_token)
     """
+    
+    _token = secrets.token_urlsafe(32)
     
     cur.execute(update_query, (
         first_name, last_name, email, domain, linkedin, company, source, 
         json.dumps(payload), fit_score, persona, phone, user_id, user_name, designation, 
-        lead_type, sector, intent_level, ai_score, system_confidence
+        lead_type, sector, intent_level, ai_score, system_confidence, _token
     ))
 
 
     conn.commit()
     cur.close()
     conn.close()
+
+def get_or_create_unsubscribe_token(lead_id: int, conn=None, cur=None) -> str:
+    """Returns the existing unsubscribe_token for a lead, or generates a new secure one if missing."""
+    owned_conn = False
+    if conn is None or cur is None:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        owned_conn = True
+    try:
+        cur.execute("SELECT unsubscribe_token FROM leads_raw WHERE id = %s", (lead_id,))
+        row = cur.fetchone()
+        if row and row[0]:
+            return row[0]
+        token = secrets.token_urlsafe(32)
+        cur.execute("UPDATE leads_raw SET unsubscribe_token = %s, updated_at = NOW() WHERE id = %s", (token, lead_id))
+        conn.commit()
+        return token
+    finally:
+        if owned_conn:
+            cur.close()
+            conn.close()
 
 
 def get_lead_by_id(lead_id):

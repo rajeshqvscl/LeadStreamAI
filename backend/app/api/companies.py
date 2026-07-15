@@ -1287,6 +1287,7 @@ def send_company_email(row_id: int, user_id: Optional[str] = Header(None, alias=
             html_content=markdown_to_html(body),
             from_email=sender_email,
             from_name=sender_name,
+            lead_id=lead_id,
             user_id=uid
         )
         

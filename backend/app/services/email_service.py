@@ -221,11 +221,11 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
             guard_conn = get_db_connection()
             guard_cur = guard_conn.cursor()
             guard_cur.execute(
-                "SELECT is_unsubscribed FROM leads_raw WHERE id = %s",
+                "SELECT email_opt_in, is_unsubscribed FROM leads_raw WHERE id = %s",
                 (lead_id,)
             )
             guard_row = guard_cur.fetchone()
-            if guard_row and guard_row.get('is_unsubscribed'):
+            if guard_row and (guard_row.get('email_opt_in') is False or guard_row.get('is_unsubscribed')):
                 guard_cur.close()
                 guard_conn.close()
                 logger.info(f"Unsubscribe guard blocked send to lead {lead_id} ({to_email}) — lead is unsubscribed")
@@ -402,8 +402,16 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 
                 # Add List-Unsubscribe headers for One-Click Unsubscribe
                 if lead_id:
+                    from app.models.lead import get_or_create_unsubscribe_token
+                    try:
+                        unsub_token = get_or_create_unsubscribe_token(lead_id)
+                    except Exception:
+                        unsub_token = None
                     base_url = os.getenv("BACKEND_URL", "https://lead-backend-g9de.onrender.com")
-                    unsub_url = f"{base_url.rstrip('/')}/api/leads/unsubscribe/{lead_id}"
+                    if unsub_token:
+                        unsub_url = f"{base_url.rstrip('/')}/unsubscribe?token={unsub_token}"
+                    else:
+                        unsub_url = f"{base_url.rstrip('/')}/api/leads/unsubscribe/{lead_id}"
                     # Extract clean sender email for mailto unsubscribe
                     import re as _unsub_re
                     _sender_mail = _unsub_re.search(r'[\w.+-]+@[\w.-]+', clean_from)
@@ -608,8 +616,16 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 params["cc"] = cc
 
             if lead_id:
+                from app.models.lead import get_or_create_unsubscribe_token
+                try:
+                    unsub_token = get_or_create_unsubscribe_token(lead_id)
+                except Exception:
+                    unsub_token = None
                 base_url = os.getenv("BACKEND_URL", "https://lead-backend-g9de.onrender.com")
-                unsub_url = f"{base_url.rstrip('/')}/api/leads/unsubscribe/{lead_id}"
+                if unsub_token:
+                    unsub_url = f"{base_url.rstrip('/')}/unsubscribe?token={unsub_token}"
+                else:
+                    unsub_url = f"{base_url.rstrip('/')}/api/leads/unsubscribe/{lead_id}"
                 import re as _unsub_re
                 _sender_mail = _unsub_re.search(r'[\w.+-]+@[\w.-]+', from_email or '')
                 _mailto_addr = _sender_mail.group(0) if _sender_mail else (from_email or '')
@@ -654,6 +670,7 @@ def check_scheduled_emails():
             LEFT JOIN users u ON l.user_id = u.id
             WHERE l.email_status = 'SCHEDULED'
               AND l.scheduled_at <= NOW()
+              AND (l.email_opt_in IS NULL OR l.email_opt_in = TRUE)
               AND (l.is_unsubscribed IS NULL OR l.is_unsubscribed = FALSE)
               AND l.email NOT IN (SELECT email FROM unsubscribe_list)
         """)

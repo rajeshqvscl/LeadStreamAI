@@ -117,7 +117,10 @@ def create_tables():
         ("rag_intelligence", "TEXT"),
         ("sentiment_score", "INTEGER"),
         ("urgency_level", "TEXT"),
-        ("rejection_reason", "TEXT")
+        ("rejection_reason", "TEXT"),
+        # Unsubscribe token for secure token-based opt-out
+        ("email_opt_in", "BOOLEAN DEFAULT TRUE"),
+        ("unsubscribe_token", "TEXT")
     ]
     # Skip ALTER TABLEs if all columns already exist (saves ~11s on Neon)
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'leads_raw'")
@@ -191,6 +194,15 @@ def create_tables():
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_leads_raw_updated_at
             ON leads_raw (updated_at DESC);
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
+    try:
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_leads_raw_unsubscribe_token
+            ON leads_raw (unsubscribe_token);
         """)
         conn.commit()
     except psycopg2.Error:
