@@ -214,6 +214,43 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     if is_vismaya:
         cc = "rajesh.s@qvscl.com"
     
+    # Unsubscribe guard: skip sending if lead or email is blacklisted
+    if lead_id:
+        try:
+            from app.database import get_db_connection
+            guard_conn = get_db_connection()
+            guard_cur = guard_conn.cursor()
+            guard_cur.execute(
+                "SELECT is_unsubscribed FROM leads_raw WHERE id = %s",
+                (lead_id,)
+            )
+            guard_row = guard_cur.fetchone()
+            if guard_row and guard_row.get('is_unsubscribed'):
+                guard_cur.close()
+                guard_conn.close()
+                logger.info(f"Unsubscribe guard blocked send to lead {lead_id} ({to_email}) — lead is unsubscribed")
+                return False, "Lead has unsubscribed", None, None
+            guard_cur.close()
+            guard_conn.close()
+        except Exception as guard_err:
+            logger.warning(f"Unsubscribe guard check failed for lead {lead_id}: {guard_err}")
+    else:
+        # Check global unsubscribe_list when no lead_id is provided
+        try:
+            from app.database import get_db_connection
+            guard_conn = get_db_connection()
+            guard_cur = guard_conn.cursor()
+            guard_cur.execute("SELECT 1 FROM unsubscribe_list WHERE email = %s", (to_email,))
+            if guard_cur.fetchone():
+                guard_cur.close()
+                guard_conn.close()
+                logger.info(f"Unsubscribe guard blocked send to {to_email} — email is in global blacklist")
+                return False, "Email is unsubscribed globally", None, None
+            guard_cur.close()
+            guard_conn.close()
+        except Exception:
+            pass
+    
     import markdown
     # Normalize bullet characters for markdown compatibility
     html_content = html_content.replace('•', '*')
@@ -336,14 +373,44 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                     if not clean_reply_to.startswith('<'):
                         clean_reply_to = f"<{clean_reply_to}>"
                     msg['In-Reply-To'] = clean_reply_to
-                    msg['References'] = clean_reply_to
+                    # Accumulate References from the existing thread so non-Gmail clients thread correctly
+                    if thread_id:
+                        try:
+                            thread_detail = service.users().threads().get(
+                                userId='me',
+                                id=thread_id,
+                                format='metadata',
+                                metadataHeaders=['References', 'Message-ID']
+                            ).execute()
+                            thread_msgs = thread_detail.get('messages', [])
+                            if thread_msgs:
+                                last_headers = thread_msgs[-1].get('payload', {}).get('headers', [])
+                                existing_refs = next((h['value'] for h in last_headers if h['name'].lower() == 'references'), '')
+                                if existing_refs.strip():
+                                    msg['References'] = f"{existing_refs.strip()} {clean_reply_to}"
+                                else:
+                                    msg['References'] = clean_reply_to
+                        except Exception as ref_err:
+                            logger.warning(f"Failed to accumulate References from thread {thread_id}: {ref_err}")
+                            msg['References'] = clean_reply_to
+                    else:
+                        msg['References'] = clean_reply_to
                 
                 if cc:
                     clean_cc = cc.replace('\n', ', ').replace('\r', '').strip()
                     msg['Cc'] = clean_cc
                 
-                # Generate tracking token & inject tracking pixel
+                # Add List-Unsubscribe headers for One-Click Unsubscribe
                 if lead_id:
+                    base_url = os.getenv("BACKEND_URL", "https://lead-backend-g9de.onrender.com")
+                    unsub_url = f"{base_url.rstrip('/')}/api/leads/unsubscribe/{lead_id}"
+                    # Extract clean sender email for mailto unsubscribe
+                    import re as _unsub_re
+                    _sender_mail = _unsub_re.search(r'[\w.+-]+@[\w.-]+', clean_from)
+                    _mailto_addr = _sender_mail.group(0) if _sender_mail else clean_from
+                    msg['List-Unsubscribe'] = f"<{unsub_url}>, <mailto:{_mailto_addr}?subject=unsub_{lead_id}>"
+                    msg['List-Unsubscribe-Post'] = "List-Unsubscribe=One-Click"
+
                     import uuid
                     from app.database import get_db_connection
                     tracking_token = str(uuid.uuid4())
@@ -410,6 +477,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 send_body = {'raw': raw_message}
                 if thread_id:
                     send_body['threadId'] = thread_id
+                logger.info(f"📧 send_email: thread_id={thread_id!r}, in_reply_to={in_reply_to!r}, lead_id={lead_id}, to={clean_to}, subject={clean_subject}")
                 
                 # Gmail API send with SSL retry + thread recovery
                 try:
@@ -432,6 +500,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                     else:
                         raise
                 sent_thread_id = sent.get('threadId')
+                logger.info(f"📧 send_email result: sent_thread_id={sent_thread_id!r}, expected_thread_id={thread_id!r}, match={sent_thread_id == thread_id}")
                 
                 # Robustly get the RFC Message-ID from the sent message for future In-Reply-To chaining
                 import time as py_time
@@ -539,10 +608,14 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 params["cc"] = cc
 
             if lead_id:
-                base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
-                unsub_url = f"{base_url}/api/leads/unsubscribe/{lead_id}"
+                base_url = os.getenv("BACKEND_URL", "https://lead-backend-g9de.onrender.com")
+                unsub_url = f"{base_url.rstrip('/')}/api/leads/unsubscribe/{lead_id}"
+                import re as _unsub_re
+                _sender_mail = _unsub_re.search(r'[\w.+-]+@[\w.-]+', from_email or '')
+                _mailto_addr = _sender_mail.group(0) if _sender_mail else (from_email or '')
                 params["headers"] = {
-                    "List-Unsubscribe": f"<{unsub_url}>"
+                    "List-Unsubscribe": f"<{unsub_url}>, <mailto:{_mailto_addr}?subject=unsub_{lead_id}>",
+                    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
                 }
             
             # Attachments already merged above with profile defaults
@@ -579,7 +652,10 @@ def check_scheduled_emails():
                    u.email as sender_email, u.full_name, u.username
             FROM leads_raw l
             LEFT JOIN users u ON l.user_id = u.id
-            WHERE l.email_status = 'SCHEDULED' AND l.scheduled_at <= NOW()
+            WHERE l.email_status = 'SCHEDULED'
+              AND l.scheduled_at <= NOW()
+              AND (l.is_unsubscribed IS NULL OR l.is_unsubscribed = FALSE)
+              AND l.email NOT IN (SELECT email FROM unsubscribe_list)
         """)
         
         due_leads = cur.fetchall()

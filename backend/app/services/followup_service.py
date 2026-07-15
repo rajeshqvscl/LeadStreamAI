@@ -405,6 +405,8 @@ def process_outreach_sequences():
             AND l.email_status IN ('SENT', 'OPENED', 'CLICKED', 'REPLIED')
             AND COALESCE(l.reply_intent, '') NOT IN ('INTERESTED', 'MEETING_REQUESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED')
             AND l.followup_stage < 3
+            AND (l.is_unsubscribed IS NULL OR l.is_unsubscribed = FALSE)
+            AND l.email NOT IN (SELECT email FROM unsubscribe_list)
             ORDER BY l.user_id, LOWER(l.email), l.last_outreach_at ASC
         """)
 
@@ -515,7 +517,7 @@ def process_outreach_sequences():
                         verify_conn = get_db_connection()
                         verify_cur = verify_conn.cursor()
                         verify_cur.execute("""
-                            SELECT l.followup_stage, l.followup_status, l.reply_intent, l.email_status, u.auto_followup
+                            SELECT l.followup_stage, l.followup_status, l.reply_intent, l.email_status, l.is_unsubscribed, u.auto_followup
                             FROM leads_raw l
                             JOIN users u ON l.user_id = u.id
                             WHERE l.id = %s
@@ -543,6 +545,9 @@ def process_outreach_sequences():
                             if current_email_status in ('BOUNCED',):
                                 logger.info(f"Lead {lead_id} email_status is '{current_email_status}' — skipping")
                                 continue
+                            if current_stage is not None and verify_row.get('is_unsubscribed'):
+                                logger.info(f"Lead {lead_id} has unsubscribed — skipping")
+                                continue
                             if not current_auto:
                                 logger.info(f"Lead {lead_id} auto-pilot turned off — skipping")
                                 continue
@@ -552,7 +557,8 @@ def process_outreach_sequences():
 
                     existing_thread_id = lead.get('gmail_thread_id')
                     existing_msg_id = lead.get('gmail_message_id')
-
+                    logger.info(f"🔍 process_outreach_sequences lead {lead_id}: gmail_thread_id={existing_thread_id!r}, gmail_message_id={existing_msg_id!r}, stage={stage}, next_stage={next_stage}")
+ 
                     if not existing_thread_id:
                         try:
                             import re as _re

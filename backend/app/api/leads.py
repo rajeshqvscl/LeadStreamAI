@@ -878,6 +878,7 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
         # Use original thread/message IDs to reply in the same Gmail thread
         existing_thread_id = lead.get('gmail_thread_id')
         existing_message_id = lead.get('gmail_message_id')
+        logger.info(f"🔍 approve_followup lead {lead_id}: gmail_thread_id={existing_thread_id!r}, gmail_message_id={existing_message_id!r}")
 
         # Use original subject, keep Re: prefix
         from app.services.followup_service import get_original_outreach_subject
@@ -898,6 +899,7 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
             html_content=markdown_to_html(body),
             from_email=profile.get('sender_email') or profile.get('username'),
             from_name=profile.get('full_name') or profile.get('username'),
+            lead_id=lead_id,
             user_id=uid,
             thread_id=existing_thread_id,
             in_reply_to=existing_message_id
@@ -1157,42 +1159,8 @@ def bulk_approve(req: List[int]):
 @router.get("/leads/unsubscribe/{lead_id}")
 @router.get("/leads/{lead_id}/unsubscribe")
 def unsubscribe_lead_get(lead_id: int):
-    """Public GET endpoint for email unsubscribe links."""
-    return process_unsubscribe(lead_id)
-
-@router.post("/leads/unsubscribe/{lead_id}")
-@router.post("/leads/{lead_id}/unsubscribe")
-def unsubscribe_lead_post(lead_id: int):
-    """API POST endpoint for manual unsubscribe actions."""
-    return process_unsubscribe(lead_id)
-
-def process_unsubscribe(lead_id: int):
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    try:
-        cur.execute("SELECT email, source FROM leads_raw lr WHERE id = %s", (lead_id,))
-        lead = cur.fetchone()
-        if not lead:
-            raise HTTPException(status_code=404, detail="Lead not found")
-        
-        cur.execute("UPDATE leads_raw SET is_unsubscribed = TRUE WHERE id = %s", (lead_id,))
-        
-        if lead['email']:
-            cur.execute("""
-                INSERT INTO unsubscribe_list (email, reason, source)
-                VALUES (%s, 'Manual opt-out from lead details', %s)
-                ON CONFLICT (email) DO NOTHING
-            """, (lead['email'], lead['source']))
-        
-        conn.commit()
-        add_activity_log(lead_id, "UNSUBSCRIBED", "Lead opted out and email blacklisted manually", "admin")
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        cur.close()
-        conn.close()
-        
+    """Public GET endpoint for email unsubscribe links — opened in browser."""
+    process_unsubscribe(lead_id)
     from fastapi.responses import HTMLResponse
     return HTMLResponse(content="""
         <div style="font-family: sans-serif; text-align: center; padding: 50px;">
@@ -1201,6 +1169,65 @@ def process_unsubscribe(lead_id: int):
             <p style="color: #64748b; font-size: 14px;">You can now close this window.</p>
         </div>
     """)
+
+@router.post("/leads/unsubscribe/{lead_id}")
+@router.post("/leads/{lead_id}/unsubscribe")
+async def unsubscribe_lead_post(lead_id: int):
+    """API POST endpoint for one-click unsubscribe (RFC 8058) — email clients call this silently."""
+    process_unsubscribe(lead_id)
+    from fastapi.responses import Response
+    return Response(status_code=200, content="ok")
+
+def process_unsubscribe(lead_id: int):
+    """Core unsubscribe logic: marks lead + all instances of the same email, stops follow-ups, adds to global blacklist."""
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        cur.execute("SELECT id, email, source FROM leads_raw WHERE id = %s", (lead_id,))
+        lead = cur.fetchone()
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+
+        email = lead['email']
+
+        # Mark this lead as unsubscribed and stop follow-ups
+        cur.execute("""
+            UPDATE leads_raw
+            SET is_unsubscribed = TRUE,
+                followup_status = 'STOPPED',
+                followup_stage = 0,
+                email_status = 'STOPPED',
+                updated_at = NOW()
+            WHERE id = %s
+        """, (lead_id,))
+
+        # Mark all other instances of the same email across all users
+        if email:
+            cur.execute("""
+                UPDATE leads_raw
+                SET is_unsubscribed = TRUE,
+                    followup_status = 'STOPPED',
+                    followup_stage = 0,
+                    email_status = 'STOPPED',
+                    updated_at = NOW()
+                WHERE email = %s AND id != %s AND (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)
+            """, (email, lead_id))
+
+            # Add to global unsubscribe blacklist (blocks re-import)
+            cur.execute("""
+                INSERT INTO unsubscribe_list (email, reason, source)
+                VALUES (%s, 'Opted out via email unsubscribe link', %s)
+                ON CONFLICT (email) DO NOTHING
+            """, (email, lead['source']))
+
+        conn.commit()
+        add_activity_log(lead_id, "UNSUBSCRIBED", "Lead opted out — unsubscribed, follow-ups stopped, email blacklisted globally", lead.get('source') or 'lead')
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
 
 @router.post("/leads/bulk-delete")
 def bulk_delete(req: List[int]):

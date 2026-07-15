@@ -1378,6 +1378,40 @@ def poll_all_users_for_replies():
                     except Exception as msg_err:
                         print(f"Error processing single message {m_id}: {msg_err}")
                         continue
+
+                # ── Mailto Unsubscribe Detection ──────────────────────────
+                # Gmail sends an email with "unsub_{lead_id}" in the subject
+                # when the user clicks Unsubscribe via mailto List-Unsubscribe.
+                try:
+                    _unsub_results = service.users().messages().list(
+                        userId='me',
+                        q='subject:unsub_',
+                        maxResults=20
+                    ).execute()
+                    for _unsub_meta in _unsub_results.get('messages', []):
+                        _u_id = _unsub_meta['id']
+                        cur.execute("SELECT 1 FROM gmail_processed_messages WHERE message_id = %s", (_u_id,))
+                        if cur.fetchone():
+                            continue
+                        _u_msg = service.users().messages().get(userId='me', id=_u_id, format='metadata').execute()
+                        _u_headers = _u_msg.get('payload', {}).get('headers', [])
+                        _u_subject = next((h['value'] for h in _u_headers if h['name'].lower() == 'subject'), '')
+                        import re as _unsub_re
+                        _unsub_match = _unsub_re.search(r'unsub_(\d+)', _u_subject)
+                        if _unsub_match:
+                            _lead_id = int(_unsub_match.group(1))
+                            try:
+                                from app.api.leads import process_unsubscribe as _proc_unsub
+                                _proc_unsub(_lead_id)
+                                logger.info(f"Processed mailto unsubscribe for lead {_lead_id} (user {uid})")
+                            except Exception as _pu_err:
+                                logger.warning(f"Failed to process mailto unsubscribe for lead {_lead_id}: {_pu_err}")
+                        cur.execute("INSERT INTO gmail_processed_messages (message_id, user_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (_u_id, uid))
+                        conn.commit()
+                except Exception as _unsub_err:
+                    logger.warning(f"Unsubscribe poll error for user {uid}: {_unsub_err}")
+                # ── End Mailto Unsubscribe Detection ──────────────────────
+
             except Exception as e:
                 print(f"Error polling for user {uid}: {e}")
                 
