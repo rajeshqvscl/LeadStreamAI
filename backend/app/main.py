@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Form
 from fastapi.responses import JSONResponse
 import logging
 
@@ -64,6 +64,80 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/")
 def root():
     return {"status": "ok", "message": "LeadStreamAI Backend is running"}
+
+# Public unsubscribe endpoint — token-based, no auth required
+# Step 7: Confirmation page — prevents accidental unsubscribe from bot/scanner prefetch
+@app.get("/unsubscribe")
+async def unsubscribe_get(token: str, request: Request):
+    from app.api.leads import validate_unsubscribe_token, process_unsubscribe_by_token
+    try:
+        lead = validate_unsubscribe_token(token)
+    except Exception:
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content="""
+            <div style="font-family: sans-serif; text-align: center; padding: 50px;">
+                <h1 style="color: #dc2626;">Invalid Link</h1>
+                <p>This unsubscribe link is invalid or expired.</p>
+            </div>
+        """, status_code=404)
+
+    already_unsubscribed = lead.get('email_opt_in') is False or lead.get('is_unsubscribed') is True
+    if already_unsubscribed:
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content="""
+            <div style="font-family: sans-serif; text-align: center; padding: 50px;">
+                <h1 style="color: #6366f1;">Already Unsubscribed</h1>
+                <p>You have already been removed from our outreach list.</p>
+            </div>
+        """)
+
+    from fastapi.responses import HTMLResponse
+    base = str(request.base_url).rstrip("/")
+    return HTMLResponse(content=f"""
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 60px auto; padding: 32px; text-align: center; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <h1 style="color: #1e293b; font-size: 22px; margin-bottom: 8px;">LeadStream</h1>
+            <p style="color: #64748b; font-size: 15px; margin-bottom: 24px;">Do you want to stop receiving automated emails?</p>
+            <form action="{base}/unsubscribe/confirm" method="POST" style="display: inline-block; margin-right: 12px;">
+                <input type="hidden" name="token" value="{token}">
+                <button type="submit" style="background: #6366f1; color: white; border: none; padding: 10px 24px; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: 500;">Unsubscribe</button>
+            </form>
+            <form action="{base}/unsubscribe/keep" method="GET" style="display: inline-block;">
+                <input type="hidden" name="token" value="{token}">
+                <button type="submit" style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 10px 24px; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: 500;">Keep Me Subscribed</button>
+            </form>
+        </div>
+    """)
+
+@app.post("/unsubscribe/confirm")
+async def unsubscribe_confirm(token: str = Form(...)):
+    from app.api.leads import process_unsubscribe_by_token
+    process_unsubscribe_by_token(token)
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content="""
+        <div style="font-family: sans-serif; text-align: center; padding: 50px;">
+            <h1 style="color: #6366f1;">Unsubscribe Successful</h1>
+            <p>You have been successfully removed from our outreach list.</p>
+            <p style="color: #64748b; font-size: 14px;">You will no longer receive automated emails.</p>
+        </div>
+    """)
+
+@app.get("/unsubscribe/keep")
+async def unsubscribe_keep(token: str):
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content="""
+        <div style="font-family: sans-serif; text-align: center; padding: 50px;">
+            <h1 style="color: #16a34a;">You're Still Subscribed</h1>
+            <p>You have not been unsubscribed. You will continue to receive our emails.</p>
+        </div>
+    """)
+
+# RFC 8058 one-click unsubscribe — email clients POST directly (immediate, no confirmation)
+@app.post("/unsubscribe")
+async def unsubscribe_post(token: str):
+    from app.api.leads import process_unsubscribe_by_token
+    process_unsubscribe_by_token(token)
+    from fastapi.responses import Response
+    return Response(status_code=200, content="ok")
 
 # ---------------------------------------------------------------------------
 # CORS — robust multi-origin setup that works on Render with credentials

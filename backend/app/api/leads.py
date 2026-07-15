@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Any, Dict
 import json
+import secrets
 import psycopg2
 import psycopg2.extras
 from app.database import get_db_connection
@@ -210,6 +211,7 @@ def get_leads(
         """
         
     # Global Blacklist Exclusion
+    query += " AND (email_opt_in IS NULL OR email_opt_in = TRUE)"
     query += " AND (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)"
     query += " AND email NOT IN (SELECT email FROM unsubscribe_list)"
     
@@ -314,6 +316,7 @@ def get_leads(
             "email_status": r.get("email_status"),
             "status": r.get("email_status") or "PENDING_APPROVAL",
             "is_unsubscribed": r.get("is_unsubscribed", False),
+            "email_opt_in": True if r.get("email_opt_in") is not False else False,
             "remarks": r.get("remarks", ""),
             "created_at": r["created_at"].isoformat() + "Z" if r["created_at"] else None
         })
@@ -546,7 +549,7 @@ def export_all_leads(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     uid = normalize_user_id(user_id)
     is_admin = (str(user_id).lower() == 'admin')
     
-    query = "SELECT * FROM leads_raw lr WHERE (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)"
+    query = "SELECT * FROM leads_raw lr WHERE (email_opt_in IS NULL OR email_opt_in = TRUE) AND (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)"
     params = []
     
     if not is_admin:
@@ -1156,10 +1159,33 @@ def bulk_approve(req: List[int]):
         conn.close()
     return {"message": "Leads approved and moved to pipeline"}
 
+from app.models.lead import get_or_create_unsubscribe_token
+
+@router.get("/leads/unsubscribe")
+def unsubscribe_lead_get_token(token: str):
+    """Public GET endpoint for token-based email unsubscribe links — opened in browser."""
+    process_unsubscribe_by_token(token)
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content="""
+        <div style="font-family: sans-serif; text-align: center; padding: 50px;">
+            <h1 style="color: #6366f1;">Unsubscribe Successful</h1>
+            <p>You have been successfully removed from our outreach list.</p>
+            <p style="color: #64748b; font-size: 14px;">You can now close this window.</p>
+        </div>
+    """)
+
+@router.post("/leads/unsubscribe")
+async def unsubscribe_lead_post_token(token: str):
+    """API POST endpoint for one-click unsubscribe (RFC 8058) — email clients call this silently."""
+    process_unsubscribe_by_token(token)
+    from fastapi.responses import Response
+    return Response(status_code=200, content="ok")
+
+# Legacy lead_id-based endpoints kept for backward compatibility
 @router.get("/leads/unsubscribe/{lead_id}")
 @router.get("/leads/{lead_id}/unsubscribe")
-def unsubscribe_lead_get(lead_id: int):
-    """Public GET endpoint for email unsubscribe links — opened in browser."""
+def unsubscribe_lead_get_legacy(lead_id: int):
+    """Legacy GET endpoint — redirects to token-based flow."""
     process_unsubscribe(lead_id)
     from fastapi.responses import HTMLResponse
     return HTMLResponse(content="""
@@ -1172,16 +1198,57 @@ def unsubscribe_lead_get(lead_id: int):
 
 @router.post("/leads/unsubscribe/{lead_id}")
 @router.post("/leads/{lead_id}/unsubscribe")
-async def unsubscribe_lead_post(lead_id: int):
-    """API POST endpoint for one-click unsubscribe (RFC 8058) — email clients call this silently."""
+async def unsubscribe_lead_post_legacy(lead_id: int):
+    """Legacy POST endpoint for one-click unsubscribe (RFC 8058)."""
     process_unsubscribe(lead_id)
     from fastapi.responses import Response
     return Response(status_code=200, content="ok")
 
-def process_unsubscribe(lead_id: int):
-    """Core unsubscribe logic: marks lead + all instances of the same email, stops follow-ups, adds to global blacklist."""
+def validate_unsubscribe_token(token: str) -> dict:
+    """Validate a token exists and is not already unsubscribed. Returns lead info or raises 404."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        cur.execute("SELECT id, email, email_opt_in, is_unsubscribed FROM leads_raw WHERE unsubscribe_token = %s", (token,))
+        lead = cur.fetchone()
+        if not lead:
+            raise HTTPException(status_code=404, detail="Invalid unsubscribe link")
+        return dict(lead)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+def process_unsubscribe_by_token(token: str):
+    """Core unsubscribe logic using secure token: finds lead, marks opted out, stops follow-ups, adds to global blacklist."""
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        cur.execute("SELECT id, email, source FROM leads_raw WHERE unsubscribe_token = %s", (token,))
+        lead = cur.fetchone()
+        if not lead:
+            raise HTTPException(status_code=404, detail="Invalid unsubscribe link")
+        process_unsubscribe(lead['id'], conn=conn, cur=cur)
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+def process_unsubscribe(lead_id: int, conn=None, cur=None):
+    """Core unsubscribe logic: marks lead + all instances of the same email, stops follow-ups, adds to global blacklist.
+    Accepts optional conn/cur for callers that already have a database connection open."""
+    owned_conn = False
+    if conn is None or cur is None:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        owned_conn = True
     try:
         cur.execute("SELECT id, email, source FROM leads_raw WHERE id = %s", (lead_id,))
         lead = cur.fetchone()
@@ -1190,10 +1257,11 @@ def process_unsubscribe(lead_id: int):
 
         email = lead['email']
 
-        # Mark this lead as unsubscribed and stop follow-ups
+        # Mark this lead as opted out, stop follow-ups
         cur.execute("""
             UPDATE leads_raw
-            SET is_unsubscribed = TRUE,
+            SET email_opt_in = FALSE,
+                is_unsubscribed = TRUE,
                 followup_status = 'STOPPED',
                 followup_stage = 0,
                 email_status = 'STOPPED',
@@ -1205,12 +1273,13 @@ def process_unsubscribe(lead_id: int):
         if email:
             cur.execute("""
                 UPDATE leads_raw
-                SET is_unsubscribed = TRUE,
+                SET email_opt_in = FALSE,
+                    is_unsubscribed = TRUE,
                     followup_status = 'STOPPED',
                     followup_stage = 0,
                     email_status = 'STOPPED',
                     updated_at = NOW()
-                WHERE email = %s AND id != %s AND (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)
+                WHERE email = %s AND id != %s AND (email_opt_in IS NULL OR email_opt_in = TRUE)
             """, (email, lead_id))
 
             # Add to global unsubscribe blacklist (blocks re-import)
@@ -1220,14 +1289,18 @@ def process_unsubscribe(lead_id: int):
                 ON CONFLICT (email) DO NOTHING
             """, (email, lead['source']))
 
-        conn.commit()
+        if not owned_conn:
+            conn.commit()
+        else:
+            conn.commit()
         add_activity_log(lead_id, "UNSUBSCRIBED", "Lead opted out — unsubscribed, follow-ups stopped, email blacklisted globally", lead.get('source') or 'lead')
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail=str(e))
     finally:
-        cur.close()
-        conn.close()
+        if owned_conn:
+            cur.close()
+            conn.close()
 
 @router.post("/leads/bulk-delete")
 def bulk_delete(req: List[int]):
@@ -1397,13 +1470,15 @@ def bulk_import(
             cur.execute("SAVEPOINT lead_savepoint")
             try:
                 # Optimized query: only using columns we know exist for sure
+                _token = secrets.token_urlsafe(32)
                 cur.execute("""
                     INSERT INTO leads_raw (
                         first_name, last_name, email, company_name, linkedin_url, 
                         city, country, persona, phone, source, user_id, 
-                        raw_payload, remarks, designation, sector, lead_type, cc_email
+                        raw_payload, remarks, designation, sector, lead_type, cc_email,
+                        unsubscribe_token
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (email, COALESCE(user_id, -1)) DO UPDATE SET
                         first_name = EXCLUDED.first_name,
                         last_name = EXCLUDED.last_name,
@@ -1420,11 +1495,13 @@ def bulk_import(
                         designation = COALESCE(EXCLUDED.designation, leads_raw.designation),
                         sector = COALESCE(EXCLUDED.sector, leads_raw.sector),
                         lead_type = COALESCE(EXCLUDED.lead_type, leads_raw.lead_type),
-                        cc_email = COALESCE(EXCLUDED.cc_email, leads_raw.cc_email)
+                        cc_email = COALESCE(EXCLUDED.cc_email, leads_raw.cc_email),
+                        unsubscribe_token = COALESCE(leads_raw.unsubscribe_token, EXCLUDED.unsubscribe_token)
                 """, (
                     f_name, l_name, email, company, linkedin, 
                     city, country, persona, phone, "csv_import", db_user_id, 
-                    json.dumps(lead), lead.get("remarks", ""), designation, sector, lead_type, cc_email
+                    json.dumps(lead), lead.get("remarks", ""), designation, sector, lead_type, cc_email,
+                    _token
                 ))
                 if cur.rowcount > 0:
                     inserted += 1
