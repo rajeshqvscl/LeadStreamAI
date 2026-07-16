@@ -1489,11 +1489,35 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     if 'qvscl' in frontend_url.lower():
         logger.error(f"BLOCKED: FRONTEND_URL contains qvscl.com! Using fallback. Value was: {frontend_url}")
         frontend_url = "https://leadstreamai.onrender.com"
+
+    unsub_token = None
     try:
         unsub_token = get_or_create_unsubscribe_token(lead_id)
-    except Exception:
-        unsub_token = None
-    unsub_link = f"{frontend_url.rstrip('/')}/unsubscribe?token={unsub_token}" if unsub_token else f"{frontend_url.rstrip('/')}/unsubscribe"
+    except Exception as _tok_err:
+        logger.error(f"get_or_create_unsubscribe_token failed for lead {lead_id}: {_tok_err}. Attempting inline fallback.")
+        try:
+            from app.database import get_db_connection
+            _conn = get_db_connection()
+            _cur = _conn.cursor()
+            _cur.execute("SELECT unsubscribe_token FROM leads_raw WHERE id = %s", (lead_id,))
+            _row = _cur.fetchone()
+            if _row and _row[0]:
+                unsub_token = _row[0]
+            else:
+                import secrets
+                unsub_token = secrets.token_urlsafe(32)
+                _cur.execute("UPDATE leads_raw SET unsubscribe_token = %s, updated_at = NOW() WHERE id = %s", (unsub_token, lead_id))
+                _conn.commit()
+            _cur.close()
+            _conn.close()
+        except Exception as _fallback_err:
+            logger.critical(f"CRITICAL: Could not generate unsubscribe token for lead {lead_id}: {_fallback_err}")
+
+    if unsub_token:
+        unsub_link = f"{frontend_url.rstrip('/')}/unsubscribe?token={unsub_token}"
+    else:
+        logger.error(f"FALLBACK: Using /unsubscribe?lead_id={lead_id} — email will show 'Invalid link'")
+        unsub_link = f"{frontend_url.rstrip('/')}/unsubscribe"
     logger.info(f"UNSUBSCRIBE BODY LINK: {unsub_link} (FRONTEND_URL={os.getenv('FRONTEND_URL', 'NOT SET')})")
 
     is_palak = (profile.get('full_name') or '').strip().lower() == 'palak jain'
