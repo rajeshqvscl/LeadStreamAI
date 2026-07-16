@@ -1716,8 +1716,6 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
             from email.mime.text import MIMEText
             service = get_gmail_service(uid_int)
             if service and draft_to_email:
-                from app.services.email_service import build_unsubscribe_footer
-                html_body += build_unsubscribe_footer(req.lead_id)
                 message = MIMEText(html_body, 'html')
                 message['to'] = draft_to_email
                 message['subject'] = subject
@@ -2568,8 +2566,6 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
             from email.mime.text import MIMEText
             service = get_gmail_service(uid_t)
             if service and to_email:
-                from app.services.email_service import build_unsubscribe_footer
-                html_body += build_unsubscribe_footer(lead_id)
                 msg = MIMEMultipart('mixed')
                 msg_body = MIMEMultipart('alternative')
                 msg_body.attach(MIMEText(html_body, 'html'))
@@ -2998,8 +2994,6 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[s
             service = get_gmail_service(int(uid))
             if service:
                 html_body = markdown_to_html(full_body)
-                from app.services.email_service import build_unsubscribe_footer
-                html_body += build_unsubscribe_footer(draft_id)
                 message = MIMEText(html_body, 'html')
                 message['to'] = lead.get('email', '')
                 message['subject'] = refined_data['subject']
@@ -3763,8 +3757,6 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
 
                         # Use HTML for better consistency with individual drafts
                         html_body = markdown_to_html(body)
-                        from app.services.email_service import build_unsubscribe_footer
-                        html_body += build_unsubscribe_footer(lead_item['id'])
                         message = MIMEText(html_body, 'html')
                         message['to'] = lead_item.get('email', '')
                         message['subject'] = subject
