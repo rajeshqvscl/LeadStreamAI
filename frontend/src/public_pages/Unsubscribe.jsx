@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') || '';
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'https://lead-backend-g9de.onrender.com').replace(/\/$/, '');
 
 export default function Unsubscribe() {
   const [searchParams] = useSearchParams();

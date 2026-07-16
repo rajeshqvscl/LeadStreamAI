@@ -1712,14 +1712,25 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
             if is_kajal_user and "10kjiUJljms" not in body_with_sig:
                 drive_md = "\n\nYou can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)\n"
                 body_with_sig = body_with_sig.replace("SIG_START", drive_md + "SIG_START")
+            # Generate unsubscribe link for SIG_START/SIG_END templates (preserves custom sig)
+            try:
+                from app.models.lead import get_or_create_unsubscribe_token as _goc
+                _tok = _goc(req.lead_id)
+                _fu = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip('/')
+                if 'qvscl' in _fu.lower():
+                    _fu = "https://leadstreamai.onrender.com"
+                _unsub_link = f"{_fu}/unsubscribe?token={_tok}"
+                _unsub_html = f'\n\n<small><a href="{_unsub_link}" style="color:#666;font-size:11px;">Click here to unsubscribe</a></small>'
+                if "SIG_START" in body_with_sig:
+                    body_with_sig = body_with_sig.replace("SIG_START", _unsub_html + "\nSIG_START")
+                else:
+                    body_with_sig += _unsub_html
+            except Exception:
+                pass
         elif use_custom:
             body_with_sig = inject_signature(body, profile, req.lead_id)
         else:
-            body_lower = body.lower()
-            if "thanks & regards" in body_lower or "best regards" in body_lower:
-                body_with_sig = body
-            else:
-                body_with_sig = inject_signature(body, profile, req.lead_id)
+            body_with_sig = inject_signature(body, profile, req.lead_id)
 
         body_lines = body_with_sig.split("\n")
         subject_found = False
@@ -2578,13 +2589,23 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
             if 'kajal' in raw_n and "10kjiUJljms" not in body_with_sig:
                 drive_md = "\n\nYou can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)\n"
                 body_with_sig = body_with_sig.replace("SIG_START", drive_md + "SIG_START")
+            # Generate unsubscribe link for SIG_START/SIG_END templates
+            try:
+                from app.models.lead import get_or_create_unsubscribe_token as _goc2
+                _tok2 = _goc2(lead_id)
+                _fu2 = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip('/')
+                if 'qvscl' in _fu2.lower():
+                    _fu2 = "https://leadstreamai.onrender.com"
+                _ul2 = f"{_fu2}/unsubscribe?token={_tok2}"
+                _uh2 = f'\n\n<small><a href="{_ul2}" style="color:#666;font-size:11px;">Click here to unsubscribe</a></small>'
+                if "SIG_START" in body_with_sig:
+                    body_with_sig = body_with_sig.replace("SIG_START", _uh2 + "\nSIG_START")
+                else:
+                    body_with_sig += _uh2
+            except Exception:
+                pass
         else:
-            # Prevent double signature if the template body ended with a sign-off but no marker
-            body_lower = final_body.lower().strip()
-            if "thanks & regards" in body_lower or "best regards" in body_lower or body_lower.endswith("--"):
-                body_with_sig = final_body
-            else:
-                body_with_sig = inject_signature(final_body, profile, lead_id)
+            body_with_sig = inject_signature(final_body, profile, lead_id)
 
         # RE-GENERATE html_body AFTER deduplication
         html_body = markdown_to_html(body_with_sig)
@@ -3205,6 +3226,21 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             if 'kajal' in raw_n and "10kjiUJljms" not in body:
                 drive_md = "\n\nYou can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)\n"
                 body = body.replace("SIG_START", drive_md + "SIG_START")
+            # Add unsubscribe link for SIG_START/SIG_END templates
+            try:
+                from app.models.lead import get_or_create_unsubscribe_token as _goc3
+                _tok3 = _goc3(draft_id)
+                _fu3 = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip('/')
+                if 'qvscl' in _fu3.lower():
+                    _fu3 = "https://leadstreamai.onrender.com"
+                _ul3 = f"{_fu3}/unsubscribe?token={_tok3}"
+                _uh3 = f'\n\n<small><a href="{_ul3}" style="color:#666;font-size:11px;">Click here to unsubscribe</a></small>'
+                if "SIG_START" in body:
+                    body = body.replace("SIG_START", _uh3 + "\nSIG_START")
+                else:
+                    body += _uh3
+            except Exception:
+                pass
         else:
             body = inject_signature(body, profile, draft_id)
         
