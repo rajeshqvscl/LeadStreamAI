@@ -197,6 +197,35 @@ def _get_attachment_files_for_subject(subject: str, template_name: Optional[str]
         return ["QVSCL Company Profile.pdf", _HOSPITAL_TEASER_FILE]
     return ["QVSCL Company Profile.pdf", "Lalit_Huria_Profile.pdf"]
 
+def build_unsubscribe_footer(lead_id: int) -> str:
+    """Build the unsubscribe footer HTML appended to every email body.
+    Uses FRONTEND_URL so the link goes to the React unsubscribe page.
+    Falls back to a token-less link if token generation fails.
+    """
+    if not lead_id:
+        return ""
+    try:
+        from app.models.lead import get_or_create_unsubscribe_token
+        _ut = get_or_create_unsubscribe_token(lead_id)
+    except Exception as _ut_err:
+        logger.error(f"Failed to get unsubscribe token for lead {lead_id}: {_ut_err}")
+        _ut = None
+    _fu = os.getenv("FRONTEND_URL", "https://leadstreamai.onrender.com").rstrip('/')
+    if 'qvscl' in _fu.lower():
+        logger.error(f"BLOCKED: FRONTEND_URL contains qvscl.com! Using fallback. Value was: {_fu}")
+        _fu = "https://leadstreamai.onrender.com"
+    if _ut:
+        _uurl = f"{_fu}/unsubscribe?token={_ut}"
+    else:
+        _uurl = f"{_fu}/unsubscribe"
+    logger.info(f"UNSUBSCRIBE BODY FOOTER: {_uurl}")
+    return f"""
+<hr style="border:none;border-top:1px solid #e0e0e0;margin:20px 0 10px 0">
+<p style="font-size:12px;color:#888;margin:0;line-height:1.5">
+You're receiving this because you interacted with LeadStream.
+<a href="{_uurl}" style="color:#888;text-decoration:underline">Click here to unsubscribe</a>
+</p>"""
+
 def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None, lead_id: Optional[int] = None, is_system_email: bool = False, user_id: Optional[int] = None, cc: Optional[str] = None, thread_id: Optional[str] = None, in_reply_to: Optional[str] = None, template_name: Optional[str] = None) -> bool:
     """Sends an email using Gmail API (if token available) or falls back to Provider/SMTP."""
     load_dotenv(dotenv_path=env_path, override=True)
@@ -309,27 +338,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     attachments = merged_attachments
 
     # 3. Append unsubscribe footer (single source of truth for email body unsubscribe)
-    if lead_id:
-        try:
-            from app.models.lead import get_or_create_unsubscribe_token
-            _ut = get_or_create_unsubscribe_token(lead_id)
-        except Exception as _ut_err:
-            logger.error(f"Failed to get unsubscribe token for lead {lead_id}: {_ut_err}")
-            _ut = None
-        _fu = os.getenv("FRONTEND_URL", "https://leadstreamai.onrender.com").rstrip('/')
-        if 'qvscl' in _fu.lower():
-            _fu = "https://leadstreamai.onrender.com"
-        if _ut:
-            _uurl = f"{_fu}/unsubscribe?token={_ut}"
-        else:
-            _uurl = f"{_fu}/unsubscribe"
-        logger.info(f"UNSUBSCRIBE BODY FOOTER: {_uurl}")
-        html_content += f"""
-<hr style="border:none;border-top:1px solid #e0e0e0;margin:20px 0 10px 0">
-<p style="font-size:12px;color:#888;margin:0;line-height:1.5">
-You're receiving this because you interacted with LeadStream.
-<a href="{_uurl}" style="color:#888;text-decoration:underline">Click here to unsubscribe</a>
-</p>"""
+    html_content += build_unsubscribe_footer(lead_id)
 
     # 2. Attempt Gmail API Dispatch (Highly Preferred for Outreach)
     if user_id and not is_system_email:
