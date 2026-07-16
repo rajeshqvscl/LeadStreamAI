@@ -33,6 +33,11 @@ import GmailSent from './pages/GmailSent';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminAuditLogs from './pages/AdminAuditLogs';
 
+// Public Pages
+import Unsubscribe from './public_pages/Unsubscribe';
+import UnsubscribeSuccess from './public_pages/UnsubscribeSuccess';
+import Resubscribe from './public_pages/Resubscribe';
+
 const ProtectedRoute = ({ children }) => {
   const token = localStorage.getItem('token') || localStorage.getItem('token_admin');
   if (!token || token === 'undefined') {
@@ -121,6 +126,11 @@ function App() {
           <Route path="history" element={<AdminRoute><History /></AdminRoute>} />
         </Route>
         <Route path="/mis-report" element={<ProtectedRoute><MisReportPage /></ProtectedRoute>} />
+
+        {/* Public Unsubscribe Pages — no auth required */}
+        <Route path="/unsubscribe" element={<Unsubscribe />} />
+        <Route path="/unsubscribe/success" element={<UnsubscribeSuccess />} />
+        <Route path="/unsubscribe/resubscribe" element={<Resubscribe />} />
 
         {/* Root Redirect */}
         <Route path="/" element={<Navigate to={token ? "/dashboard" : "/login"} replace />} />

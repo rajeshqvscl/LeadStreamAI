@@ -69,6 +69,7 @@ def root():
 # Step 7: Confirmation page — prevents accidental unsubscribe from bot/scanner prefetch
 @app.get("/unsubscribe")
 async def unsubscribe_get(token: str, request: Request):
+    logger.info(f"Unsubscribe GET request: token={token}, url={request.url}, referer={request.headers.get('referer')}, ua={request.headers.get('user-agent')}, origin={request.headers.get('origin')}")
     from app.api.leads import validate_unsubscribe_token, process_unsubscribe_by_token
     try:
         lead = validate_unsubscribe_token(token)
@@ -79,7 +80,7 @@ async def unsubscribe_get(token: str, request: Request):
                 <h1 style="color: #dc2626;">Invalid Link</h1>
                 <p>This unsubscribe link is invalid or expired.</p>
             </div>
-        """, status_code=404)
+        """, status_code=404, headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
 
     already_unsubscribed = lead.get('email_opt_in') is False or lead.get('is_unsubscribed') is True
     if already_unsubscribed:
@@ -89,11 +90,12 @@ async def unsubscribe_get(token: str, request: Request):
                 <h1 style="color: #6366f1;">Already Unsubscribed</h1>
                 <p>You have already been removed from our outreach list.</p>
             </div>
-        """)
+        """, headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
 
     from fastapi.responses import HTMLResponse
     base = str(request.base_url).rstrip("/")
-    return HTMLResponse(content=f"""
+    return HTMLResponse(
+        content=f"""
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 60px auto; padding: 32px; text-align: center; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
             <h1 style="color: #1e293b; font-size: 22px; margin-bottom: 8px;">LeadStream</h1>
             <p style="color: #64748b; font-size: 15px; margin-bottom: 24px;">Do you want to stop receiving automated emails?</p>
@@ -106,10 +108,13 @@ async def unsubscribe_get(token: str, request: Request):
                 <button type="submit" style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 10px 24px; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: 500;">Keep Me Subscribed</button>
             </form>
         </div>
-    """)
+        """,
+        headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"}
+    )
 
 @app.post("/unsubscribe/confirm")
-async def unsubscribe_confirm(token: str = Form(...)):
+async def unsubscribe_confirm(token: str = Form(...), request: Request = None):
+    logger.info(f"Unsubscribe CONFIRM: token={token}, referer={request.headers.get('referer') if request else 'N/A'}, origin={request.headers.get('origin') if request else 'N/A'}")
     from app.api.leads import process_unsubscribe_by_token
     process_unsubscribe_by_token(token)
     from fastapi.responses import HTMLResponse
@@ -119,7 +124,7 @@ async def unsubscribe_confirm(token: str = Form(...)):
             <p>You have been successfully removed from our outreach list.</p>
             <p style="color: #64748b; font-size: 14px;">You will no longer receive automated emails.</p>
         </div>
-    """)
+    """, headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
 
 @app.get("/unsubscribe/keep")
 async def unsubscribe_keep(token: str):
@@ -129,15 +134,16 @@ async def unsubscribe_keep(token: str):
             <h1 style="color: #16a34a;">You're Still Subscribed</h1>
             <p>You have not been unsubscribed. You will continue to receive our emails.</p>
         </div>
-    """)
+    """, headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
 
 # RFC 8058 one-click unsubscribe — email clients POST directly (immediate, no confirmation)
 @app.post("/unsubscribe")
-async def unsubscribe_post(token: str):
+async def unsubscribe_post(token: str, request: Request = None):
+    logger.info(f"Unsubscribe POST (one-click): token={token}, referer={request.headers.get('referer') if request else 'N/A'}, origin={request.headers.get('origin') if request else 'N/A'}")
     from app.api.leads import process_unsubscribe_by_token
     process_unsubscribe_by_token(token)
     from fastapi.responses import Response
-    return Response(status_code=200, content="ok")
+    return Response(status_code=200, content="ok", headers={"Cache-Control": "no-store"})
 
 # ---------------------------------------------------------------------------
 # CORS — robust multi-origin setup that works on Render with credentials
@@ -258,7 +264,7 @@ from fastapi.staticfiles import StaticFiles
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/assets", StaticFiles(directory="assets"), name="assets")
 
-from app.api import ingest, drafts, dashboard, leads, auth, family_offices, campaigns, metrics, users, prompts, admin, companies, rocketreach, gmail, intelligence, admin_dashboard, tracking, reminders
+from app.api import ingest, drafts, dashboard, leads, auth, family_offices, campaigns, metrics, users, prompts, admin, companies, rocketreach, gmail, intelligence, admin_dashboard, tracking, reminders, public_email
 
 app.include_router(ingest.router, prefix="/api")
 app.include_router(drafts.router, prefix="/api")
@@ -278,3 +284,4 @@ app.include_router(intelligence.router, prefix="/api/intelligence", tags=["intel
 app.include_router(tracking.router, prefix="/api", tags=["tracking"])
 app.include_router(admin_dashboard.router, prefix="/api/admin", tags=["admin_dashboard"])
 app.include_router(reminders.router, prefix="/api", tags=["reminders"])
+app.include_router(public_email.router)

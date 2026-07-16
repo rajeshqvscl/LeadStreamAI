@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Header, Response
+from fastapi import APIRouter, HTTPException, Header, Response, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Any, Dict
@@ -1162,8 +1162,9 @@ def bulk_approve(req: List[int]):
 from app.models.lead import get_or_create_unsubscribe_token
 
 @router.get("/leads/unsubscribe")
-def unsubscribe_lead_get_token(token: str):
+def unsubscribe_lead_get_token(token: str, request: Request = None):
     """Public GET endpoint for token-based email unsubscribe links — opened in browser."""
+    logger.info(f"Legacy GET /leads/unsubscribe: token={token}, referer={request.headers.get('referer') if request else 'N/A'}, ua={request.headers.get('user-agent') if request else 'N/A'}")
     process_unsubscribe_by_token(token)
     from fastapi.responses import HTMLResponse
     return HTMLResponse(content="""
@@ -1172,20 +1173,22 @@ def unsubscribe_lead_get_token(token: str):
             <p>You have been successfully removed from our outreach list.</p>
             <p style="color: #64748b; font-size: 14px;">You can now close this window.</p>
         </div>
-    """)
+    """, headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
 
 @router.post("/leads/unsubscribe")
-async def unsubscribe_lead_post_token(token: str):
+async def unsubscribe_lead_post_token(token: str, request: Request = None):
     """API POST endpoint for one-click unsubscribe (RFC 8058) — email clients call this silently."""
+    logger.info(f"Legacy POST /leads/unsubscribe: token={token}, origin={request.headers.get('origin') if request else 'N/A'}, ua={request.headers.get('user-agent') if request else 'N/A'}")
     process_unsubscribe_by_token(token)
     from fastapi.responses import Response
-    return Response(status_code=200, content="ok")
+    return Response(status_code=200, content="ok", headers={"Cache-Control": "no-store"})
 
 # Legacy lead_id-based endpoints kept for backward compatibility
 @router.get("/leads/unsubscribe/{lead_id}")
 @router.get("/leads/{lead_id}/unsubscribe")
-def unsubscribe_lead_get_legacy(lead_id: int):
-    """Legacy GET endpoint — redirects to token-based flow."""
+def unsubscribe_lead_get_legacy(lead_id: int, request: Request = None):
+    """Legacy GET endpoint — processes unsubscribe immediately."""
+    logger.info(f"Legacy GET /leads/unsubscribe/{lead_id}: referer={request.headers.get('referer') if request else 'N/A'}")
     process_unsubscribe(lead_id)
     from fastapi.responses import HTMLResponse
     return HTMLResponse(content="""
@@ -1194,15 +1197,16 @@ def unsubscribe_lead_get_legacy(lead_id: int):
             <p>You have been successfully removed from our outreach list.</p>
             <p style="color: #64748b; font-size: 14px;">You can now close this window.</p>
         </div>
-    """)
+    """, headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
 
 @router.post("/leads/unsubscribe/{lead_id}")
 @router.post("/leads/{lead_id}/unsubscribe")
-async def unsubscribe_lead_post_legacy(lead_id: int):
+async def unsubscribe_lead_post_legacy(lead_id: int, request: Request = None):
     """Legacy POST endpoint for one-click unsubscribe (RFC 8058)."""
+    logger.info(f"Legacy POST /leads/unsubscribe/{lead_id}: origin={request.headers.get('origin') if request else 'N/A'}")
     process_unsubscribe(lead_id)
     from fastapi.responses import Response
-    return Response(status_code=200, content="ok")
+    return Response(status_code=200, content="ok", headers={"Cache-Control": "no-store"})
 
 def validate_unsubscribe_token(token: str) -> dict:
     """Validate a token exists and is not already unsubscribed. Returns lead info or raises 404."""

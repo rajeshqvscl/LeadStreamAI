@@ -1485,15 +1485,12 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 
     disclaimer = """Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."""
 
-    backend_url = os.getenv("BACKEND_URL", "https://lead-backend-g9de.onrender.com")
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
     try:
         unsub_token = get_or_create_unsubscribe_token(lead_id)
     except Exception:
         unsub_token = None
-    if unsub_token:
-        unsub_link = f"{backend_url.rstrip('/')}/unsubscribe?token={unsub_token}"
-    else:
-        unsub_link = f"{backend_url.rstrip('/')}/api/leads/unsubscribe/{lead_id}"
+    unsub_link = f"{frontend_url.rstrip('/')}/unsubscribe?token={unsub_token}" if unsub_token else f"{frontend_url.rstrip('/')}/unsubscribe"
 
     is_palak = (profile.get('full_name') or '').strip().lower() == 'palak jain'
     raw_name_lower = (profile.get('full_name') or profile.get('username') or '').strip().lower()

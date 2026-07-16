@@ -407,7 +407,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                         unsub_token = get_or_create_unsubscribe_token(lead_id)
                     except Exception:
                         unsub_token = None
-                    base_url = os.getenv("BACKEND_URL", "https://lead-backend-g9de.onrender.com")
+                    base_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
                     if unsub_token:
                         unsub_url = f"{base_url.rstrip('/')}/unsubscribe?token={unsub_token}"
                     else:
@@ -436,7 +436,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                     if tracking_token:
                         from urllib.parse import urljoin
                         from app.api.tracking import inject_click_tracking
-                        backend_url = os.getenv("BACKEND_URL", "https://lead-backend-g9de.onrender.com")
+                        backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
                         # Inject click tracking — replaces link hrefs with tracking redirect URLs
                         html_content = inject_click_tracking(html_content, tracking_token, backend_url.rstrip("/"))
                         # Inject open tracking pixel
@@ -621,7 +621,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                     unsub_token = get_or_create_unsubscribe_token(lead_id)
                 except Exception:
                     unsub_token = None
-                base_url = os.getenv("BACKEND_URL", "https://lead-backend-g9de.onrender.com")
+                base_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
                 if unsub_token:
                     unsub_url = f"{base_url.rstrip('/')}/unsubscribe?token={unsub_token}"
                 else:

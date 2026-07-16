@@ -7,7 +7,8 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': 'http://localhost:8000'
-    }
+    },
+    historyApiFallback: true,
   },
   optimizeDeps: {
     include: ['html2canvas', 'jspdf'],

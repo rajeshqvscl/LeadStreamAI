@@ -278,7 +278,7 @@ def request_access(req: AccessRequest):
     # 3. Final Fallback to a valid string, never Null
     if not base_url or base_url.lower() == "null" or base_url.strip() == "":
         # We also check the commented out production URL in case it's helpful
-        base_url = "https://lead-backend-g9de.onrender.com"
+        base_url = "http://127.0.0.1:8000"
     
     # Clean the URL
     base_url = base_url.rstrip("/")

@@ -275,7 +275,7 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
                 if not file_data:
                     actual_url = pitch_deck_url
                     if "127.0.0.1" in pitch_deck_url or "localhost" in pitch_deck_url:
-                        base = os.getenv("BACKEND_URL", "https://lead-backend-g9de.onrender.com")
+                        base = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
                         path_part = pitch_deck_url.split("/static", 1)[1] if "/static" in pitch_deck_url else pitch_deck_url
                         actual_url = f"{base}/static{path_part}" if "/static" in pitch_deck_url else pitch_deck_url
                     res = requests.get(actual_url, timeout=30)
