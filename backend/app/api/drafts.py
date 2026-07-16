@@ -1427,9 +1427,32 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     use_custom = False  # custom signatures disabled by user request
 
     # Strip any existing signature block to prevent duplication.
-    # Remove any "Click here to unsubscribe" link and everything after it.
-    body_text = re.sub(r'<a\s[^>]*>Click here to unsubscribe</a>.*$', '', body_text, flags=re.DOTALL | re.IGNORECASE)
-    body_text = re.sub(r'Click here to unsubscribe.*$', '', body_text, flags=re.DOTALL | re.IGNORECASE)
+    # Strip ANY link (regardless of href or text) that targets qvscl.com unsubscribe
+    body_text = re.sub(
+        r'<a\s[^>]*href="[^"]*qvscl\.com[^"]*unsubscribe[^"]*"[^>]*>.*?</a>\s*',
+        '',
+        body_text,
+        flags=re.DOTALL | re.IGNORECASE
+    )
+    body_text = re.sub(
+        r'<a\s[^>]*href=\'[^\']*qvscl\.com[^\']*unsubscribe[^\']*\'[^>]*>.*?</a>\s*',
+        '',
+        body_text,
+        flags=re.DOTALL | re.IGNORECASE
+    )
+    # Strip any link with "Click here to unsubscribe" or "Unsubscribe" text (any domain)
+    body_text = re.sub(
+        r'<a\s[^>]*>(?:Click here to unsubscribe|Unsubscribe)</a>\s*',
+        '',
+        body_text,
+        flags=re.IGNORECASE
+    )
+    body_text = re.sub(
+        r'(?:Click here to unsubscribe|To unsubscribe|Unsubscribe here)[^<]*',
+        '',
+        body_text,
+        flags=re.IGNORECASE
+    )
     # Remove trailing signature divs from previous inject calls
     body_text = re.sub(r'<div\s+style="color:\s*#666666;.*?</div>\s*$', '', body_text, flags=re.DOTALL | re.IGNORECASE)
     body_text = body_text.strip()

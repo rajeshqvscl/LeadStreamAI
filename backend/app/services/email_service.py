@@ -276,16 +276,29 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                         elif line:
                             html_paragraphs.append(f'<p style="margin: 0 0 14px 0; line-height: 1.7;">{line}</p>')
             html_content = '\n'.join(html_paragraphs)
-    # Safety filter: strip ONLY qvscl.com unsubscribe links — leaves Website/LinkedIn links intact
+    # Safety filter: strip ANY qvscl.com link that looks like unsubscribe (url or text)
     import re as _qvscl_re
     html_content = _qvscl_re.sub(
-        r'<a\s[^>]*href="[^"]*qvscl\.com[^"]*unsubscribe[^"]*"[^>]*>.*?</a>',
+        r'<a\s[^>]*href="[^"]*qvscl\.com[^"]*unsub[^"]*"[^>]*>.*?</a>',
         '',
         html_content,
         flags=_qvscl_re.IGNORECASE | _qvscl_re.DOTALL
     )
     html_content = _qvscl_re.sub(
-        r'<a\s[^>]*href=\'[^\']*qvscl\.com[^\']*unsubscribe[^\']*\'[^>]*>.*?</a>',
+        r'<a\s[^>]*href=\'[^\']*qvscl\.com[^\']*unsub[^\']*\'[^>]*>.*?</a>',
+        '',
+        html_content,
+        flags=_qvscl_re.IGNORECASE | _qvscl_re.DOTALL
+    )
+    # Also strip qvscl.com links where the link text itself says "unsubscribe" (url may vary)
+    html_content = _qvscl_re.sub(
+        r'<a\s[^>]*href="[^"]*qvscl\.com[^"]*"[^>]*>.*?unsubscribe.*?</a>',
+        '',
+        html_content,
+        flags=_qvscl_re.IGNORECASE | _qvscl_re.DOTALL
+    )
+    html_content = _qvscl_re.sub(
+        r'<a\s[^>]*href=\'[^\']*qvscl\.com[^\']*\'[^>]*>.*?unsubscribe.*?</a>',
         '',
         html_content,
         flags=_qvscl_re.IGNORECASE | _qvscl_re.DOTALL
