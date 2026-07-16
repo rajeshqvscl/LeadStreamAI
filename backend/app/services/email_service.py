@@ -408,10 +408,14 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                     except Exception:
                         unsub_token = None
                     base_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
+                    if 'qvscl' in base_url.lower():
+                        logger.error(f"BLOCKED: BACKEND_URL contains qvscl.com! Using fallback. Value was: {base_url}")
+                        base_url = os.getenv("RENDER_EXTERNAL_URL", "https://lead-backend-g9de.onrender.com")
                     if unsub_token:
                         unsub_url = f"{base_url.rstrip('/')}/unsubscribe?token={unsub_token}"
                     else:
                         unsub_url = f"{base_url.rstrip('/')}/api/leads/unsubscribe/{lead_id}"
+                    logger.info(f"UNSUBSCRIBE URL: List-Unsubscribe URL set to: {unsub_url} (BACKEND_URL={os.getenv('BACKEND_URL', 'NOT SET')})")
                     # Extract clean sender email for mailto unsubscribe
                     import re as _unsub_re
                     _sender_mail = _unsub_re.search(r'[\w.+-]+@[\w.-]+', clean_from)
@@ -622,10 +626,14 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 except Exception:
                     unsub_token = None
                 base_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
+                if 'qvscl' in base_url.lower():
+                    logger.error(f"BLOCKED: BACKEND_URL contains qvscl.com! Using fallback. Value was: {base_url}")
+                    base_url = os.getenv("RENDER_EXTERNAL_URL", "https://lead-backend-g9de.onrender.com")
                 if unsub_token:
                     unsub_url = f"{base_url.rstrip('/')}/unsubscribe?token={unsub_token}"
                 else:
                     unsub_url = f"{base_url.rstrip('/')}/api/leads/unsubscribe/{lead_id}"
+                logger.info(f"UNSUBSCRIBE URL: Resend List-Unsubscribe URL set to: {unsub_url} (BACKEND_URL={os.getenv('BACKEND_URL', 'NOT SET')})")
                 import re as _unsub_re
                 _sender_mail = _unsub_re.search(r'[\w.+-]+@[\w.-]+', from_email or '')
                 _mailto_addr = _sender_mail.group(0) if _sender_mail else (from_email or '')

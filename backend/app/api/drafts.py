@@ -1486,11 +1486,15 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     disclaimer = """Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."""
 
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    if 'qvscl' in frontend_url.lower():
+        logger.error(f"BLOCKED: FRONTEND_URL contains qvscl.com! Using fallback. Value was: {frontend_url}")
+        frontend_url = "https://leadstreamai.onrender.com"
     try:
         unsub_token = get_or_create_unsubscribe_token(lead_id)
     except Exception:
         unsub_token = None
     unsub_link = f"{frontend_url.rstrip('/')}/unsubscribe?token={unsub_token}" if unsub_token else f"{frontend_url.rstrip('/')}/unsubscribe"
+    logger.info(f"UNSUBSCRIBE BODY LINK: {unsub_link} (FRONTEND_URL={os.getenv('FRONTEND_URL', 'NOT SET')})")
 
     is_palak = (profile.get('full_name') or '').strip().lower() == 'palak jain'
     raw_name_lower = (profile.get('full_name') or profile.get('username') or '').strip().lower()
