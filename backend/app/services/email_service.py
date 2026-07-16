@@ -276,6 +276,20 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                         elif line:
                             html_paragraphs.append(f'<p style="margin: 0 0 14px 0; line-height: 1.7;">{line}</p>')
             html_content = '\n'.join(html_paragraphs)
+    # Safety filter: strip any hardcoded qvscl.com unsubscribe links from email body
+    import re as _qvscl_re
+    html_content = _qvscl_re.sub(
+        r'<a\s[^>]*href="[^"]*qvscl\.com[^"]*"[^>]*>.*?</a>',
+        '',
+        html_content,
+        flags=_qvscl_re.IGNORECASE | _qvscl_re.DOTALL
+    )
+    html_content = _qvscl_re.sub(
+        r'<a\s[^>]*href=\'[^\']*qvscl\.com[^\']*\'[^>]*>.*?</a>',
+        '',
+        html_content,
+        flags=_qvscl_re.IGNORECASE | _qvscl_re.DOTALL
+    )
     # 1. Prepare default attachments (used by both Gmail and Resend)
     # CRITICAL: Do NOT attach PDFs to follow-up emails! Only attach to the very first email in the sequence.
     # Detect follow-up by thread_id OR by Re: prefix in subject (handles case where thread_id is NULL in DB)

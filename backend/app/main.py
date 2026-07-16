@@ -65,6 +65,18 @@ app = FastAPI(lifespan=lifespan)
 def root():
     return {"status": "ok", "message": "LeadStreamAI Backend is running"}
 
+# Debug endpoint — check env vars used in unsubscribe URL construction
+@app.get("/debug/unsubscribe-env")
+def debug_unsubscribe_env():
+    return {
+        "BACKEND_URL": os.getenv("BACKEND_URL", "NOT SET"),
+        "FRONTEND_URL": os.getenv("FRONTEND_URL", "NOT SET"),
+        "VITE_API_BASE_URL": os.getenv("VITE_API_BASE_URL", "NOT SET"),
+        "RENDER_EXTERNAL_URL": os.getenv("RENDER_EXTERNAL_URL", "NOT SET"),
+        "has_qvscl_backend": "qvscl" in os.getenv("BACKEND_URL", "").lower(),
+        "has_qvscl_frontend": "qvscl" in os.getenv("FRONTEND_URL", "").lower(),
+    }
+
 # Public unsubscribe endpoint — token-based, no auth required
 # Step 7: Confirmation page — prevents accidental unsubscribe from bot/scanner prefetch
 @app.get("/unsubscribe")
