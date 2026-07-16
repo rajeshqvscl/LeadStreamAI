@@ -7,7 +7,7 @@ import os
 import re
 import base64
 
-from app.models.lead import get_lead_by_id, get_or_create_unsubscribe_token
+from app.models.lead import get_lead_by_id
 from app.models.draft import insert_draft
 from app.database import get_db_connection
 from app.services.llm_services import EmailGenerator
@@ -1064,9 +1064,7 @@ def markdown_to_html(text, gmail_style=False):
     if "Website" in text and "<a" not in text:
         text = text.replace("Website", '<a href="https://qvscl.com" style="color: #0066cc; text-decoration: underline;">Website</a>')
     
-    # Skip "Click here to unsubscribe" conversion — `inject_signature` already
-    # adds a proper unsubscribe link, and a plain-text replace would nest it inside
-    # the existing <a> tag, creating duplicate unsubscribe links.
+    # Skip "Click here to unsubscribe" conversion — `email_service.py` handles it.
 
     # 5. Standard Markdown
     text = re.sub(r'<b>(.*?)</b>', r'__BOLD__\1__BOLD__', text)
@@ -1418,7 +1416,7 @@ def _md_to_html(text: str) -> str:
     return text
 
 def inject_signature(body: str, profile: dict, lead_id: int) -> str:
-    """Appends a premium standardized signature and mandatory unsubscribe link."""
+    """Appends a premium standardized signature. Unsubscribe footer is added by email_service.py."""
     import re
     body_text = body.strip()
 
@@ -1426,33 +1424,6 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     sig_mode = profile.get('signature_mode') or 'custom'
     use_custom = False  # custom signatures disabled by user request
 
-    # Strip any existing signature block to prevent duplication.
-    # Strip ANY link (regardless of href or text) that targets qvscl.com unsubscribe
-    body_text = re.sub(
-        r'<a\s[^>]*href="[^"]*qvscl\.com[^"]*unsubscribe[^"]*"[^>]*>.*?</a>\s*',
-        '',
-        body_text,
-        flags=re.DOTALL | re.IGNORECASE
-    )
-    body_text = re.sub(
-        r'<a\s[^>]*href=\'[^\']*qvscl\.com[^\']*unsubscribe[^\']*\'[^>]*>.*?</a>\s*',
-        '',
-        body_text,
-        flags=re.DOTALL | re.IGNORECASE
-    )
-    # Strip any link with "Click here to unsubscribe" or "Unsubscribe" text (any domain)
-    body_text = re.sub(
-        r'<a\s[^>]*>(?:Click here to unsubscribe|Unsubscribe)</a>\s*',
-        '',
-        body_text,
-        flags=re.IGNORECASE
-    )
-    body_text = re.sub(
-        r'(?:Click here to unsubscribe|To unsubscribe|Unsubscribe here)[^<]*',
-        '',
-        body_text,
-        flags=re.IGNORECASE
-    )
     # Remove trailing signature divs from previous inject calls
     body_text = re.sub(r'<div\s+style="color:\s*#666666;.*?</div>\s*$', '', body_text, flags=re.DOTALL | re.IGNORECASE)
     body_text = body_text.strip()
@@ -1461,7 +1432,7 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     if "--" in body_text:
         parts = body_text.rsplit("--", 1)
         after_sep = parts[1].lower() if len(parts) > 1 else ""
-        sig_markers = ["regards", "sincerely", "thanks", "analyst", "unsubscribe", "disclaimer"]
+        sig_markers = ["regards", "sincerely", "thanks", "analyst", "disclaimer"]
         if any(x in after_sep for x in sig_markers):
             body_text = parts[0].strip()
             body_lower = body_text.lower()
@@ -1508,41 +1479,6 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 
     disclaimer = """Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."""
 
-    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    if 'qvscl' in frontend_url.lower():
-        logger.error(f"BLOCKED: FRONTEND_URL contains qvscl.com! Using fallback. Value was: {frontend_url}")
-        frontend_url = "https://leadstreamai.onrender.com"
-
-    unsub_token = None
-    try:
-        unsub_token = get_or_create_unsubscribe_token(lead_id)
-    except Exception as _tok_err:
-        logger.error(f"get_or_create_unsubscribe_token failed for lead {lead_id}: {_tok_err}. Attempting inline fallback.")
-        try:
-            from app.database import get_db_connection
-            _conn = get_db_connection()
-            _cur = _conn.cursor()
-            _cur.execute("SELECT unsubscribe_token FROM leads_raw WHERE id = %s", (lead_id,))
-            _row = _cur.fetchone()
-            if _row and _row[0]:
-                unsub_token = _row[0]
-            else:
-                import secrets
-                unsub_token = secrets.token_urlsafe(32)
-                _cur.execute("UPDATE leads_raw SET unsubscribe_token = %s, updated_at = NOW() WHERE id = %s", (unsub_token, lead_id))
-                _conn.commit()
-            _cur.close()
-            _conn.close()
-        except Exception as _fallback_err:
-            logger.critical(f"CRITICAL: Could not generate unsubscribe token for lead {lead_id}: {_fallback_err}")
-
-    if unsub_token:
-        unsub_link = f"{frontend_url.rstrip('/')}/unsubscribe?token={unsub_token}"
-    else:
-        logger.error(f"FALLBACK: Using /unsubscribe?lead_id={lead_id} — email will show 'Invalid link'")
-        unsub_link = f"{frontend_url.rstrip('/')}/unsubscribe"
-    logger.info(f"UNSUBSCRIBE BODY LINK: {unsub_link} (FRONTEND_URL={os.getenv('FRONTEND_URL', 'NOT SET')})")
-
     is_palak = (profile.get('full_name') or '').strip().lower() == 'palak jain'
     raw_name_lower = (profile.get('full_name') or profile.get('username') or '').strip().lower()
     is_kajal = 'kajal' in raw_name_lower
@@ -1560,7 +1496,6 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
         sig_html_content = _md_to_html(custom_sig.strip())
         sig_html = f"""
 <div style="color: #666666; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
-<a href="{unsub_link}" style="color: #666666; text-decoration: underline;">Click here to unsubscribe</a><br>
 --<br>
 {sig_html_content}
 <div style="font-size: 10px; color: #999999; line-height: 1.2; margin-top: 6px;">
@@ -1573,7 +1508,6 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     if is_palak:
         dis_text = "Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."
         sig_html = f"""<div style="font-family:Arial,Calibri,sans-serif;color:#0B2A6F;line-height:1.15;">
-<a href="{unsub_link}" style="color:#0B2A6F;font-size:10px;text-decoration:underline;">Click here to unsubscribe</a>
 <div style="color:#999;font-size:12px;">--</div>
 <div style="font-size:16px;font-weight:700;font-style:italic;margin:0;color:#0B2A6F;">Thanks &amp; Regards,</div>
 <div style="font-size:16px;font-weight:700;font-style:italic;margin:0;color:#0B2A6F;">{name}</div>
@@ -1587,7 +1521,6 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
         drive_link = '<i><a href="https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link" style="color: #0077b5; text-decoration: none;">Company Documents</a></i><br>' if is_kajal else ''
         sig_html = f"""
 <div style="color: #666666; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
-<a href="{unsub_link}" style="color: #666666; text-decoration: underline;">Click here to unsubscribe</a><br>
 --<br>
 <i>Thanks &amp; Regards,</i><br>
 <i><strong>{name}</strong></i><br>
@@ -1735,21 +1668,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
             if is_kajal_user and "10kjiUJljms" not in body_with_sig:
                 drive_md = "\n\nYou can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)\n"
                 body_with_sig = body_with_sig.replace("SIG_START", drive_md + "SIG_START")
-            # Generate unsubscribe link for SIG_START/SIG_END templates (preserves custom sig)
-            try:
-                from app.models.lead import get_or_create_unsubscribe_token as _goc
-                _tok = _goc(req.lead_id)
-                _fu = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip('/')
-                if 'qvscl' in _fu.lower():
-                    _fu = "https://leadstreamai.onrender.com"
-                _unsub_link = f"{_fu}/unsubscribe?token={_tok}"
-                _unsub_html = f'\n\n<small><a href="{_unsub_link}" style="color:#666;font-size:11px;">Click here to unsubscribe</a></small>'
-                if "SIG_START" in body_with_sig:
-                    body_with_sig = body_with_sig.replace("SIG_START", _unsub_html + "\nSIG_START")
-                else:
-                    body_with_sig += _unsub_html
-            except Exception:
-                pass
+            # Unsubscribe footer is added by email_service.py.send_email()
         elif use_custom:
             body_with_sig = inject_signature(body, profile, req.lead_id)
         else:
@@ -2612,21 +2531,7 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
             if 'kajal' in raw_n and "10kjiUJljms" not in body_with_sig:
                 drive_md = "\n\nYou can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)\n"
                 body_with_sig = body_with_sig.replace("SIG_START", drive_md + "SIG_START")
-            # Generate unsubscribe link for SIG_START/SIG_END templates
-            try:
-                from app.models.lead import get_or_create_unsubscribe_token as _goc2
-                _tok2 = _goc2(lead_id)
-                _fu2 = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip('/')
-                if 'qvscl' in _fu2.lower():
-                    _fu2 = "https://leadstreamai.onrender.com"
-                _ul2 = f"{_fu2}/unsubscribe?token={_tok2}"
-                _uh2 = f'\n\n<small><a href="{_ul2}" style="color:#666;font-size:11px;">Click here to unsubscribe</a></small>'
-                if "SIG_START" in body_with_sig:
-                    body_with_sig = body_with_sig.replace("SIG_START", _uh2 + "\nSIG_START")
-                else:
-                    body_with_sig += _uh2
-            except Exception:
-                pass
+            # Unsubscribe footer is added by email_service.py.send_email()
         else:
             body_with_sig = inject_signature(final_body, profile, lead_id)
 
@@ -3249,21 +3154,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             if 'kajal' in raw_n and "10kjiUJljms" not in body:
                 drive_md = "\n\nYou can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)\n"
                 body = body.replace("SIG_START", drive_md + "SIG_START")
-            # Add unsubscribe link for SIG_START/SIG_END templates
-            try:
-                from app.models.lead import get_or_create_unsubscribe_token as _goc3
-                _tok3 = _goc3(draft_id)
-                _fu3 = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip('/')
-                if 'qvscl' in _fu3.lower():
-                    _fu3 = "https://leadstreamai.onrender.com"
-                _ul3 = f"{_fu3}/unsubscribe?token={_tok3}"
-                _uh3 = f'\n\n<small><a href="{_ul3}" style="color:#666;font-size:11px;">Click here to unsubscribe</a></small>'
-                if "SIG_START" in body:
-                    body = body.replace("SIG_START", _uh3 + "\nSIG_START")
-                else:
-                    body += _uh3
-            except Exception:
-                pass
+            # Unsubscribe footer is added by email_service.py.send_email()
         else:
             body = inject_signature(body, profile, draft_id)
         

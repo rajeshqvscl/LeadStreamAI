@@ -276,33 +276,6 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                         elif line:
                             html_paragraphs.append(f'<p style="margin: 0 0 14px 0; line-height: 1.7;">{line}</p>')
             html_content = '\n'.join(html_paragraphs)
-    # Safety filter: strip ANY qvscl.com link that looks like unsubscribe (url or text)
-    import re as _qvscl_re
-    html_content = _qvscl_re.sub(
-        r'<a\s[^>]*href="[^"]*qvscl\.com[^"]*unsub[^"]*"[^>]*>.*?</a>',
-        '',
-        html_content,
-        flags=_qvscl_re.IGNORECASE | _qvscl_re.DOTALL
-    )
-    html_content = _qvscl_re.sub(
-        r'<a\s[^>]*href=\'[^\']*qvscl\.com[^\']*unsub[^\']*\'[^>]*>.*?</a>',
-        '',
-        html_content,
-        flags=_qvscl_re.IGNORECASE | _qvscl_re.DOTALL
-    )
-    # Also strip qvscl.com links where the link text itself says "unsubscribe" (url may vary)
-    html_content = _qvscl_re.sub(
-        r'<a\s[^>]*href="[^"]*qvscl\.com[^"]*"[^>]*>.*?unsubscribe.*?</a>',
-        '',
-        html_content,
-        flags=_qvscl_re.IGNORECASE | _qvscl_re.DOTALL
-    )
-    html_content = _qvscl_re.sub(
-        r'<a\s[^>]*href=\'[^\']*qvscl\.com[^\']*\'[^>]*>.*?unsubscribe.*?</a>',
-        '',
-        html_content,
-        flags=_qvscl_re.IGNORECASE | _qvscl_re.DOTALL
-    )
     # 1. Prepare default attachments (used by both Gmail and Resend)
     # CRITICAL: Do NOT attach PDFs to follow-up emails! Only attach to the very first email in the sequence.
     # Detect follow-up by thread_id OR by Re: prefix in subject (handles case where thread_id is NULL in DB)
@@ -334,6 +307,29 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     else:
         logger.info("Outreach is a follow-up email thread. Default PDF attachments skipped.")
     attachments = merged_attachments
+
+    # 3. Append unsubscribe footer (single source of truth for email body unsubscribe)
+    if lead_id:
+        try:
+            from app.models.lead import get_or_create_unsubscribe_token
+            _ut = get_or_create_unsubscribe_token(lead_id)
+        except Exception as _ut_err:
+            logger.error(f"Failed to get unsubscribe token for lead {lead_id}: {_ut_err}")
+            _ut = None
+        _fu = os.getenv("FRONTEND_URL", "https://leadstreamai.onrender.com").rstrip('/')
+        if 'qvscl' in _fu.lower():
+            _fu = "https://leadstreamai.onrender.com"
+        if _ut:
+            _uurl = f"{_fu}/unsubscribe?token={_ut}"
+        else:
+            _uurl = f"{_fu}/unsubscribe"
+        logger.info(f"UNSUBSCRIBE BODY FOOTER: {_uurl}")
+        html_content += f"""
+<hr style="border:none;border-top:1px solid #e0e0e0;margin:20px 0 10px 0">
+<p style="font-size:12px;color:#888;margin:0;line-height:1.5">
+You're receiving this because you interacted with LeadStream.
+<a href="{_uurl}" style="color:#888;text-decoration:underline">Click here to unsubscribe</a>
+</p>"""
 
     # 2. Attempt Gmail API Dispatch (Highly Preferred for Outreach)
     if user_id and not is_system_email:
