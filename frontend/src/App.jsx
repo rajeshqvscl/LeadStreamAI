@@ -63,6 +63,24 @@ const PublicRoute = ({ children }) => {
   return children;
 };
 
+function RootRedirect({ token }) {
+  const [searchParams] = useSearchParams();
+  const unsubToken = searchParams.get('token');
+  if (unsubToken) {
+    return <Unsubscribe />;
+  }
+  return <Navigate to={token ? "/dashboard" : "/login"} replace />;
+}
+
+function CatchAllRedirect({ token }) {
+  const [searchParams] = useSearchParams();
+  const unsubToken = searchParams.get('token');
+  if (unsubToken) {
+    return <Unsubscribe />;
+  }
+  return <Navigate to={token ? "/dashboard" : "/login"} replace />;
+}
+
 function App() {
   const [isInitializing, setIsInitializing] = React.useState(true);
   const [token, setToken] = React.useState(null);
@@ -132,11 +150,11 @@ function App() {
         <Route path="/unsubscribe/success" element={<UnsubscribeSuccess />} />
         <Route path="/unsubscribe/resubscribe" element={<Resubscribe />} />
 
-        {/* Root Redirect */}
-        <Route path="/" element={<Navigate to={token ? "/dashboard" : "/login"} replace />} />
+        {/* Root Redirect — also catch /index.html?token=... from Render 301 fallback */}
+        <Route path="/" element={<RootRedirect token={token} />} />
 
-        {/* Redirect unknown routes */}
-        <Route path="*" element={<Navigate to={token ? "/dashboard" : "/login"} replace />} />
+        {/* Redirect unknown routes — but check for Render 301 fallback token */}
+        <Route path="*" element={<CatchAllRedirect token={token} />} />
       </Routes>
     </Router>
   );
