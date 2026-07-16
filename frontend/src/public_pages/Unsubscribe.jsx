@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') || '';
+
 export default function Unsubscribe() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -17,7 +19,7 @@ export default function Unsubscribe() {
       setLoading(false);
       return;
     }
-    fetch(`/api/public/unsubscribe/validate?token=${encodeURIComponent(token)}`)
+    fetch(`${API_BASE}/api/public/unsubscribe/validate?token=${encodeURIComponent(token)}`)
       .then((r) => {
         if (!r.ok) return r.json().then((e) => { throw new Error(e.detail || 'Invalid link'); });
         return r.json();
@@ -35,7 +37,7 @@ export default function Unsubscribe() {
   const handleUnsubscribe = async () => {
     setSubmitting(true);
     try {
-      const res = await fetch('/api/public/unsubscribe', {
+      const res = await fetch(`${API_BASE}/api/public/unsubscribe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token }),

@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') || '';
+
 export default function Resubscribe() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -17,7 +19,7 @@ export default function Resubscribe() {
     }
     setSubmitting(true);
     try {
-      const res = await fetch('/api/public/resubscribe', {
+      const res = await fetch(`${API_BASE}/api/public/resubscribe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token }),
