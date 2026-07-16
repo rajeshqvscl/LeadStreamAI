@@ -337,8 +337,9 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
         logger.info("Outreach is a follow-up email thread. Default PDF attachments skipped.")
     attachments = merged_attachments
 
-    # 3. Append unsubscribe footer
-    html_content += build_unsubscribe_footer(lead_id)
+    # 3. Append unsubscribe footer (dedup: skip if already present from draft)
+    if "Click here to unsubscribe" not in html_content:
+        html_content += build_unsubscribe_footer(lead_id)
 
     # 2. Attempt Gmail API Dispatch (Highly Preferred for Outreach)
     if user_id and not is_system_email:
