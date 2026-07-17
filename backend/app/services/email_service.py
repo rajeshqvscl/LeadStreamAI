@@ -197,6 +197,18 @@ def _get_attachment_files_for_subject(subject: str, template_name: Optional[str]
         return ["QVSCL Company Profile.pdf", _HOSPITAL_TEASER_FILE]
     return ["QVSCL Company Profile.pdf", "Lalit_Huria_Profile.pdf"]
 
+def strip_old_unsubscribe_links(html_content: str) -> str:
+    """Remove legacy inject_signature unsubscribe links from content before the footer.
+    Never touches the footer's own link (which is after 'You're receiving this because')."""
+    import re as _us
+    _footer_text = "You're receiving this because you interacted with LeadStream"
+    if _footer_text in html_content:
+        _before, _after = html_content.split(_footer_text, 1)
+        _before = _us.sub(r'<a\s[^>]*>Click here to unsubscribe</a>', '', _before)
+        return _before + _footer_text + _after
+    return _us.sub(r'<a\s[^>]*>Click here to unsubscribe</a>', '', html_content)
+
+
 def build_unsubscribe_footer(lead_id: int) -> str:
     """Build the unsubscribe footer HTML appended to every email body.
     Uses FRONTEND_URL so the link goes to the frontend unsubscribe page.
@@ -339,22 +351,10 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     attachments = merged_attachments
 
     # 3. Strip any old unsubscribe links from legacy signature area (before the footer)
-    #    but NEVER touch the footer's own link (which is after "You're receiving this because")
-    import re as _unsub_strip
-    _footer_text = "You're receiving this because you interacted with LeadStream"
-    if _footer_text in html_content:
-        _before, _after = html_content.split(_footer_text, 1)
-        _before = _unsub_strip.sub(
-            r'<a\s[^>]*>Click here to unsubscribe</a>', '', _before
-        )
-        html_content = _before + _footer_text + _after
-    else:
-        html_content = _unsub_strip.sub(
-            r'<a\s[^>]*>Click here to unsubscribe</a>', '', html_content
-        )
+    html_content = strip_old_unsubscribe_links(html_content)
 
     # 4. Append unsubscribe footer (dedup: skip if already present from draft)
-    if _footer_text not in html_content:
+    if "You're receiving this because you interacted with LeadStream" not in html_content:
         html_content += build_unsubscribe_footer(lead_id)
 
     # 2. Attempt Gmail API Dispatch (Highly Preferred for Outreach)
