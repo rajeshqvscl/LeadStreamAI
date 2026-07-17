@@ -9,12 +9,16 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
     cur = conn.cursor()
 
     # Global Blacklist Check: Prevent ingestion of opted-out leads
+    # unless this is a manual re-creation — user explicitly wants to re-engage
     if email:
         cur.execute("SELECT 1 FROM unsubscribe_list WHERE email = %s", (email,))
         if cur.fetchone():
-            cur.close()
-            conn.close()
-            return  # Silently skip insertion for blacklisted emails
+            if source == 'manual':
+                cur.execute("DELETE FROM unsubscribe_list WHERE email = %s", (email,))
+            else:
+                cur.close()
+                conn.close()
+                return  # Silently skip insertion for blacklisted emails
 
     # Extract designation from payload if not explicitly provided
     designation = payload.get("current_title", payload.get("designation", payload.get("Designation", ""))) if payload else ""
@@ -60,6 +64,11 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
             intent_level = COALESCE(leads_raw.intent_level, EXCLUDED.intent_level),
             ai_score = COALESCE(leads_raw.ai_score, EXCLUDED.ai_score),
             system_confidence = COALESCE(leads_raw.system_confidence, EXCLUDED.system_confidence),
+            email_opt_in = TRUE,
+            is_unsubscribed = FALSE,
+            followup_status = NULL,
+            followup_stage = 0,
+            email_status = NULL,
             created_at = CURRENT_TIMESTAMP,
             unsubscribe_token = COALESCE(leads_raw.unsubscribe_token, EXCLUDED.unsubscribe_token)
     """
