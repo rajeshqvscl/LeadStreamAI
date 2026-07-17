@@ -217,7 +217,7 @@ def build_unsubscribe_footer(lead_id: int) -> str:
     if _ut:
         _uurl = f"{_bu}/unsubscribe?token={_ut}"
     else:
-        _uurl = f"{_bu}/unsubscribe"
+        _uurl = f"{_bu}/api/leads/unsubscribe/{lead_id}"
     logger.info(f"UNSUBSCRIBE BODY FOOTER: {_uurl}")
     return f"""
 <hr style="border:none;border-top:1px solid #e0e0e0;margin:20px 0 10px 0">
@@ -337,7 +337,15 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
         logger.info("Outreach is a follow-up email thread. Default PDF attachments skipped.")
     attachments = merged_attachments
 
-    # 3. Append unsubscribe footer (dedup: skip if already present from draft)
+    # 3. Strip any old unsubscribe links from legacy inject_signature to avoid duplicates
+    import re as _unsub_strip
+    html_content = _unsub_strip.sub(
+        r'<a\s[^>]*>Click here to unsubscribe</a>\s*<br\s*/?>',
+        '', html_content,
+        flags=_unsub_strip.IGNORECASE
+    )
+
+    # 4. Append unsubscribe footer (dedup: skip if already present from draft)
     if "You're receiving this because you interacted with LeadStream" not in html_content:
         html_content += build_unsubscribe_footer(lead_id)
 
