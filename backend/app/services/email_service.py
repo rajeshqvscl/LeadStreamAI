@@ -338,16 +338,23 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
         logger.info("Outreach is a follow-up email thread. Default PDF attachments skipped.")
     attachments = merged_attachments
 
-    # 3. Strip any old unsubscribe links from legacy inject_signature to avoid duplicates
+    # 3. Strip any old unsubscribe links from legacy signature area (before the footer)
+    #    but NEVER touch the footer's own link (which is after "You're receiving this because")
     import re as _unsub_strip
-    html_content = _unsub_strip.sub(
-        r'<a\s[^>]*>Click here to unsubscribe</a>\s*<br\s*/?>',
-        '', html_content,
-        flags=_unsub_strip.IGNORECASE
-    )
+    _footer_text = "You're receiving this because you interacted with LeadStream"
+    if _footer_text in html_content:
+        _before, _after = html_content.split(_footer_text, 1)
+        _before = _unsub_strip.sub(
+            r'<a\s[^>]*>Click here to unsubscribe</a>', '', _before
+        )
+        html_content = _before + _footer_text + _after
+    else:
+        html_content = _unsub_strip.sub(
+            r'<a\s[^>]*>Click here to unsubscribe</a>', '', html_content
+        )
 
     # 4. Append unsubscribe footer (dedup: skip if already present from draft)
-    if "You're receiving this because you interacted with LeadStream" not in html_content:
+    if _footer_text not in html_content:
         html_content += build_unsubscribe_footer(lead_id)
 
     # 2. Attempt Gmail API Dispatch (Highly Preferred for Outreach)
