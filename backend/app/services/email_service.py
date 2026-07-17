@@ -199,8 +199,8 @@ def _get_attachment_files_for_subject(subject: str, template_name: Optional[str]
 
 def build_unsubscribe_footer(lead_id: int) -> str:
     """Build the unsubscribe footer HTML appended to every email body.
-    Uses BACKEND_URL so the link goes directly to the unsubscribe endpoint.
-    Falls back to a token-less link if token generation fails.
+    Uses FRONTEND_URL so the link goes to the frontend unsubscribe page.
+    Falls back to the backend API if token generation fails.
     """
     if not lead_id:
         return ""
@@ -210,13 +210,14 @@ def build_unsubscribe_footer(lead_id: int) -> str:
     except Exception as _ut_err:
         logger.error(f"Failed to get unsubscribe token for lead {lead_id}: {_ut_err}")
         _ut = None
-    _bu = os.getenv("BACKEND_URL", "https://lead-backend-g9de.onrender.com").rstrip('/')
-    if 'qvscl' in _bu.lower():
-        logger.error(f"BLOCKED: BACKEND_URL contains qvscl.com! Using fallback. Value was: {_bu}")
-        _bu = "https://lead-backend-g9de.onrender.com"
+    _fu = os.getenv("FRONTEND_URL", "https://leadstreamai.onrender.com").rstrip('/')
+    if 'qvscl' in _fu.lower():
+        logger.error(f"BLOCKED: FRONTEND_URL contains qvscl.com! Using fallback. Value was: {_fu}")
+        _fu = "https://leadstreamai.onrender.com"
     if _ut:
-        _uurl = f"{_bu}/unsubscribe?token={_ut}"
+        _uurl = f"{_fu}/unsubscribe?token={_ut}"
     else:
+        _bu = os.getenv("BACKEND_URL", "https://lead-backend-g9de.onrender.com").rstrip('/')
         _uurl = f"{_bu}/api/leads/unsubscribe/{lead_id}"
     logger.info(f"UNSUBSCRIBE BODY FOOTER: {_uurl}")
     return f"""
@@ -448,10 +449,10 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                         unsub_token = get_or_create_unsubscribe_token(lead_id)
                     except Exception:
                         unsub_token = None
-                    base_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
+                    base_url = os.getenv("FRONTEND_URL", "https://leadstreamai.onrender.com").rstrip('/')
                     if 'qvscl' in base_url.lower():
-                        logger.error(f"BLOCKED: BACKEND_URL contains qvscl.com! Using fallback. Value was: {base_url}")
-                        base_url = os.getenv("RENDER_EXTERNAL_URL", "https://lead-backend-g9de.onrender.com")
+                        logger.error(f"BLOCKED: FRONTEND_URL contains qvscl.com! Using fallback. Value was: {base_url}")
+                        base_url = "https://leadstreamai.onrender.com"
                     if unsub_token:
                         unsub_url = f"{base_url.rstrip('/')}/unsubscribe?token={unsub_token}"
                     else:
@@ -666,15 +667,15 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                     unsub_token = get_or_create_unsubscribe_token(lead_id)
                 except Exception:
                     unsub_token = None
-                base_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
+                base_url = os.getenv("FRONTEND_URL", "https://leadstreamai.onrender.com").rstrip('/')
                 if 'qvscl' in base_url.lower():
-                    logger.error(f"BLOCKED: BACKEND_URL contains qvscl.com! Using fallback. Value was: {base_url}")
-                    base_url = os.getenv("RENDER_EXTERNAL_URL", "https://lead-backend-g9de.onrender.com")
+                    logger.error(f"BLOCKED: FRONTEND_URL contains qvscl.com! Using fallback. Value was: {base_url}")
+                    base_url = os.getenv("RENDER_EXTERNAL_URL", "https://leadstreamai.onrender.com")
                 if unsub_token:
                     unsub_url = f"{base_url.rstrip('/')}/unsubscribe?token={unsub_token}"
                 else:
                     unsub_url = f"{base_url.rstrip('/')}/api/leads/unsubscribe/{lead_id}"
-                logger.info(f"UNSUBSCRIBE URL: Resend List-Unsubscribe URL set to: {unsub_url} (BACKEND_URL={os.getenv('BACKEND_URL', 'NOT SET')})")
+                logger.info(f"UNSUBSCRIBE URL: Resend List-Unsubscribe URL set to: {unsub_url} (FRONTEND_URL={os.getenv('FRONTEND_URL', 'NOT SET')})")
                 import re as _unsub_re
                 _sender_mail = _unsub_re.search(r'[\w.+-]+@[\w.-]+', from_email or '')
                 _mailto_addr = _sender_mail.group(0) if _sender_mail else (from_email or '')
