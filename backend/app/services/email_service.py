@@ -199,7 +199,7 @@ def _get_attachment_files_for_subject(subject: str, template_name: Optional[str]
 
 def build_unsubscribe_footer(lead_id: int) -> str:
     """Build the unsubscribe footer HTML appended to every email body.
-    Uses FRONTEND_URL so the link goes to the React unsubscribe page.
+    Uses BACKEND_URL so the link goes directly to the unsubscribe endpoint.
     Falls back to a token-less link if token generation fails.
     """
     if not lead_id:
@@ -210,14 +210,14 @@ def build_unsubscribe_footer(lead_id: int) -> str:
     except Exception as _ut_err:
         logger.error(f"Failed to get unsubscribe token for lead {lead_id}: {_ut_err}")
         _ut = None
-    _fu = os.getenv("FRONTEND_URL", "https://leadstreamai.onrender.com").rstrip('/')
-    if 'qvscl' in _fu.lower():
-        logger.error(f"BLOCKED: FRONTEND_URL contains qvscl.com! Using fallback. Value was: {_fu}")
-        _fu = "https://leadstreamai.onrender.com"
+    _bu = os.getenv("BACKEND_URL", "https://lead-backend-g9de.onrender.com").rstrip('/')
+    if 'qvscl' in _bu.lower():
+        logger.error(f"BLOCKED: BACKEND_URL contains qvscl.com! Using fallback. Value was: {_bu}")
+        _bu = "https://lead-backend-g9de.onrender.com"
     if _ut:
-        _uurl = f"{_fu}/unsubscribe?token={_ut}"
+        _uurl = f"{_bu}/unsubscribe?token={_ut}"
     else:
-        _uurl = f"{_fu}/unsubscribe"
+        _uurl = f"{_bu}/unsubscribe"
     logger.info(f"UNSUBSCRIBE BODY FOOTER: {_uurl}")
     return f"""
 <hr style="border:none;border-top:1px solid #e0e0e0;margin:20px 0 10px 0">
