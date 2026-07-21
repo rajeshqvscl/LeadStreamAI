@@ -578,7 +578,8 @@ SIG_START
 Thanks & Regards,<br>
 <strong>{{Sender Name}}</strong><br>
 {{Sender Title}}<br>
-<a href="https://qvscl.com" style="color: #000000; text-decoration: none;">Website</a> | <a href="https://www.linkedin.com/company/qvscl/" style="color: #000000; text-decoration: none;">Company LinkedIn</a><br>
+<a href="https://www.linkedin.com/company/qvscl/" style="color:#1d5fd0;text-decoration:underline;">Company LinkedIn</a><br>
+<a href="https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link" style="color:#1d5fd0;text-decoration:underline;">Company Documents</a><br>
 {{Sender Phone}}
 </div>
 <img src="[[BACKEND_URL]]/assets/kajal.png" style="width: 150px; height: auto; display: block; margin-top: 10px;" />
@@ -1525,14 +1526,14 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 <div style="margin-top:10px;font-size:10px;line-height:1.4;color:#555555;max-width:600px;">{dis_text}</div>
 </div>"""
     else:
-        drive_link = '<a href="https://qvscl.com" style="color: #000000; text-decoration: none;">Website</a> | <a href="https://www.linkedin.com/company/qvscl/" style="color: #000000; text-decoration: none;">Company LinkedIn</a><br>' if is_kajal else ''
+        drive_link = '<a href="https://www.linkedin.com/company/qvscl/" style="color:#1d5fd0;text-decoration:underline;">Company LinkedIn</a><br><a href="https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link" style="color:#1d5fd0;text-decoration:underline;">Company Documents</a><br>' if is_kajal else ''
         sig_html = f"""
 <div style="color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
 --<br>
 <i>Thanks &amp; Regards,</i><br>
 <i><strong>{name}</strong></i><br>
 <i>{title}</i><br>
-<i><a href="https://qvscl.com" style="color: #000000; text-decoration: none;">Website</a> | <a href="{linkedin}" style="color: #000000; text-decoration: none;">LinkedIn</a></i><br>
+<i><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> | <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></i><br>
 <i>{phone}</i><br>
 {drive_link}<div style="font-size: 10px; color: #000000; line-height: 1.2; margin-top: 6px;">
 {disclaimer}
@@ -1674,7 +1675,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         if "SIG_START" in body or "SIG_END" in body:
             body_with_sig = body
             if is_kajal_user and "qvscl.com" not in body_with_sig:
-                drive_md = "\n\n<a href=\"https://qvscl.com\" style=\"color: #000000; text-decoration: none;\">Website</a> | <a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color: #000000; text-decoration: none;\">Company LinkedIn</a>\n"
+                drive_md = "\n\n<a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color:#1d5fd0;text-decoration:underline;\">Company LinkedIn</a><br>\n<a href=\"https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link\" style=\"color:#1d5fd0;text-decoration:underline;\">Company Documents</a>\n"
                 body_with_sig = body_with_sig.replace("SIG_START", drive_md + "SIG_START")
             # Unsubscribe footer is added by email_service.py.send_email()
         elif use_custom:
@@ -2375,7 +2376,7 @@ Thank you again for your consideration."""
             "You can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)"
         ).replace(
             "SIG_START\n--\nThanks & Regards,\n\n***{{Sender Name}}***\n{{Sender Title}}\n[LinkedIn]({{Sender LinkedIn}})\n{{Sender Phone}}\n\nImportant:",
-            "SIG_START\n--\n<div style=\"color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4;\">\nThanks & Regards,<br>\n<strong>{{Sender Name}}</strong><br>\n{{Sender Title}}<br>\n{{Sender Phone}}<br>\n<a href=\"https://qvscl.com\" style=\"color: #000000; text-decoration: none;\">Website</a> | <a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color: #000000; text-decoration: none;\">Company LinkedIn</a>\n</div>\n\nImportant:"
+            "SIG_START\n--\n<div style=\"color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4;\">\nThanks & Regards,<br>\n<strong>{{Sender Name}}</strong><br>\n{{Sender Title}}<br>\n{{Sender Phone}}<br>\n<a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color:#1d5fd0;text-decoration:underline;\">Company LinkedIn</a><br>\n<a href=\"https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link\" style=\"color:#1d5fd0;text-decoration:underline;\">Company Documents</a>\n</div>\n\nImportant:"
         )
         cur.execute(
             "UPDATE prompts SET content = %s, description = %s, owner_username = 'kajal' WHERE name = 'kajal_mam_agritech'",
@@ -2539,7 +2540,7 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
             body_with_sig = final_body
             raw_n = (profile.get('full_name') or profile.get('username') or '').strip().lower()
             if 'kajal' in raw_n and "qvscl.com" not in body_with_sig:
-                drive_md = "\n\n<a href=\"https://qvscl.com\" style=\"color: #000000; text-decoration: none;\">Website</a> | <a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color: #000000; text-decoration: none;\">Company LinkedIn</a>\n"
+                drive_md = "\n\n<a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color:#1d5fd0;text-decoration:underline;\">Company LinkedIn</a><br>\n<a href=\"https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link\" style=\"color:#1d5fd0;text-decoration:underline;\">Company Documents</a>\n"
                 body_with_sig = body_with_sig.replace("SIG_START", drive_md + "SIG_START")
             # Unsubscribe footer is added by email_service.py.send_email()
         else:
@@ -3169,7 +3170,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             # Add Drive link for Kajal if not already present
             raw_n = (profile.get('full_name') or profile.get('username') or '').strip().lower()
             if 'kajal' in raw_n and "qvscl.com" not in body:
-                drive_md = "\n\n<a href=\"https://qvscl.com\" style=\"color: #000000; text-decoration: none;\">Website</a> | <a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color: #000000; text-decoration: none;\">Company LinkedIn</a>\n"
+                drive_md = "\n\n<a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color:#1d5fd0;text-decoration:underline;\">Company LinkedIn</a><br>\n<a href=\"https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link\" style=\"color:#1d5fd0;text-decoration:underline;\">Company Documents</a>\n"
                 body = body.replace("SIG_START", drive_md + "SIG_START")
             # Unsubscribe footer is added by email_service.py.send_email()
         else:
