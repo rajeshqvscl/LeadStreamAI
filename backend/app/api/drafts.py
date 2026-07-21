@@ -1579,7 +1579,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 body = template_body.replace("{{First Name}}", f_name).replace("{{first name}}", f_name).replace("{{first_name}}", f_name)
                 body = body.replace("{{Full Name}}", full_name).replace("{{full_name}}", full_name)
                 body = body.replace("{{Company Name}}", company).replace("{{Company}}", company).replace("{{company_name}}", company)
-                body = body.replace("***{{Sender Name}}***", sender_full_name).replace("{{Sender Title}}", sender_title).replace("{{Sender Phone}}", sender_phone).replace("{{Sender LinkedIn}}", sender_linkedin).replace("{{Sender Linkedin}}", sender_linkedin)
+                body = body.replace("***{{Sender Name}}***", sender_full_name).replace("{{Sender Name}}", sender_full_name).replace("{{Sender Title}}", sender_title).replace("{{Sender Phone}}", sender_phone).replace("{{Sender LinkedIn}}", sender_linkedin).replace("{{Sender Linkedin}}", sender_linkedin)
                 subject = f"Strategic Investment/Partnership Opportunity | QVSCL × {company}"
             else:
                 email_data = generator.generate_palak_email(
@@ -1621,6 +1621,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                     ("{{Company}}", company),
                     ("{{Designation}}", designation),
                     ("***{{Sender Name}}***", sender_full_name),
+                    ("{{Sender Name}}", sender_full_name),
                     ("{{Sender Full Name}}", sender_full_name),
                     ("{{Sender First Name}}", sender_first_name),
                     ("{{Sender Title}}", sender_title),
@@ -3147,6 +3148,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         if "SIG_START" in body or "SIG_END" in body:
             # Just replace sender placeholders with current user's info
             body = body.replace("***{{Sender Name}}***", profile["full_name"])
+            body = body.replace("{{Sender Name}}", profile["full_name"])
             body = body.replace("{{Sender Title}}", profile["job_title"])
             body = body.replace("{{Sender Phone}}", profile["phone"])
             body = body.replace("{{Sender LinkedIn}}", profile["linkedin_url"])
