@@ -141,61 +141,10 @@ def format_outreach_html(text: str) -> str:
 
 # ---------------------------------------------------------------------------
 # Template-aware attachment selection
-# Maps email subject keywords → list of PDF filenames to attach from assets/.
-# The hospital teaser replaces Lalit_Huria_Profile.pdf for hospital outreach.
 # ---------------------------------------------------------------------------
-_HOSPITAL_SUBJECT_MARKER = "Integrated Multi-Site Hospital Platform"
-_HOSPITAL_TEASER_FILE    = "eastern_up_hospital_investor_teaser_v5b_investorfriendly (2).pdf"
-
-_TEMPLATE_ATTACHMENT_MAP = {
-    "ayush_sir_hospital_draft": [
-        "QVSCL Company Profile.pdf",
-        _HOSPITAL_TEASER_FILE,
-    ],
-    "yashika_draft_ai_tech": [],
-    "palak_mam_corporate_advisory": [
-        "QVSCL Company Profile.pdf",
-    ],
-    "palak_mam_mna_fundraising": [
-        "QVSCL Company Profile.pdf",
-        "Lalit_Huria_Profile.pdf",
-    ],
-    "kajal_mam_qvscl_intro": [],
-    "kajal_mam_health_ecosystem": [],
-    "kajal_mam_jv": [],
-    "kajal_mam_hyphen": [],
-    "kajal_mam_agritech": [],
-    "vismaya_leadstream": [],
-    "yashika_draft_agritech": [],
-}
 
 def _get_attachment_files_for_subject(subject: str, template_name: Optional[str] = None) -> list:
-    """Return the list of PDF filenames to attach, chosen based on the email subject or template name.
-    Checks hardcoded _TEMPLATE_ATTACHMENT_MAP first, then falls back to
-    prompts.attachment_file for custom user-uploaded PDFs.
-    """
-    if template_name and template_name in _TEMPLATE_ATTACHMENT_MAP:
-        return _TEMPLATE_ATTACHMENT_MAP[template_name]
-    if template_name:
-        try:
-            from app.database import get_db_connection
-            import psycopg2.extras
-            conn = get_db_connection()
-            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-            cur.execute(
-                "SELECT attachment_file FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE",
-                (template_name,)
-            )
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
-            if row and row['attachment_file']:
-                return [row['attachment_file']]
-        except Exception:
-            pass
-    if subject and _HOSPITAL_SUBJECT_MARKER in subject:
-        return ["QVSCL Company Profile.pdf", _HOSPITAL_TEASER_FILE]
-    return ["QVSCL Company Profile.pdf", "Lalit_Huria_Profile.pdf"]
+    return []
 
 def strip_old_unsubscribe_links(html_content: str) -> str:
     """Remove legacy inject_signature unsubscribe links from content before the footer.

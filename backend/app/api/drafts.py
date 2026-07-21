@@ -2715,10 +2715,7 @@ def get_bulk_progress(batch_id: str):
 # and physically attached when the email is sent from email_service.py).
 # ---------------------------------------------------------------------------
 TEMPLATE_ATTACHMENT_MAP = {
-    "ayush_sir_hospital_draft": [
-        {"name": "QVSCL Company Profile.pdf",                                        "size": "1.7 MB",  "type": "application/pdf"},
-        {"name": "eastern_up_hospital_investor_teaser_v5b_investorfriendly (2).pdf", "size": "202 KB", "type": "application/pdf"},
-    ],
+    "ayush_sir_hospital_draft": [],
     "yashika_draft_ai_tech": [],
     "yashika_draft_agritech": [],
     "kajal_mam_agritech": [],
@@ -2726,13 +2723,8 @@ TEMPLATE_ATTACHMENT_MAP = {
     "kajal_mam_jv": [],
     "kajal_mam_hyphen": [],
     "kajal_mam_qvscl_intro": [],
-    "palak_mam_corporate_advisory": [
-        {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
-    ],
-    "palak_mam_mna_fundraising": [
-        {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
-        {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
-    ],
+    "palak_mam_corporate_advisory": [],
+    "palak_mam_mna_fundraising": [],
     "vismaya_leadstream": [],
 }
 
@@ -2740,29 +2732,7 @@ TEMPLATE_ATTACHMENT_MAP = {
 _DEFAULT_ATTACHMENTS = []
 
 def _get_template_attachments(template_name: Optional[str]) -> list:
-    """Return the correct attachment metadata list for the given template name.
-    Checks hardcoded TEMPLATE_ATTACHMENT_MAP first, then falls back to
-    prompts.attachment_file for custom user-uploaded PDFs.
-    """
-    if not template_name:
-        return _DEFAULT_ATTACHMENTS
-    if template_name in TEMPLATE_ATTACHMENT_MAP:
-        return TEMPLATE_ATTACHMENT_MAP[template_name]
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cur.execute(
-            "SELECT attachment_file FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE",
-            (template_name,)
-        )
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        if row and row['attachment_file']:
-            return [{"name": row['attachment_file'], "size": "", "type": "application/pdf"}]
-    except Exception:
-        pass
-    return _DEFAULT_ATTACHMENTS
+    return []
 
 @router.get("/pending-drafts")
 @router.get("/emails")
