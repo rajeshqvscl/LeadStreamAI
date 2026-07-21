@@ -583,11 +583,8 @@ Thanks & Regards,<br>
 {{Sender Phone}}
 </div>
 <img src="[[BACKEND_URL]]/assets/kajal.png" style="width: 150px; height: auto; display: block; margin-top: 10px;" />
-
 Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at Quantum Value Strategic Consulting LLP by electronic mail message reply. Thank you.
-SIG_END
-
-<div style="text-align: center; margin-top: 25px; font-weight: bold; color: #444; font-size: 12px; letter-spacing: 1.5px;">CONFIDENTIAL | FOR PRIVATE CIRCULATION ONLY</div>"""
+SIG_END"""
 
     cur.execute(
         "UPDATE prompts SET content = %s, description = %s WHERE name = 'kajal_mam_health_ecosystem'",
@@ -1535,7 +1532,8 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 <i>{title}</i><br>
 <i><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> | <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></i><br>
 <i>{phone}</i><br>
-{drive_link}<div style="font-size: 10px; color: #000000; line-height: 1.2; margin-top: 6px;">
+{drive_link}
+<div style="font-size: 10px; color: #000000; line-height: 1.2; margin-top: 6px;">
 {disclaimer}
 </div>
 </div>
@@ -2376,7 +2374,7 @@ Thank you again for your consideration."""
             "You can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)"
         ).replace(
             "SIG_START\n--\nThanks & Regards,\n\n***{{Sender Name}}***\n{{Sender Title}}\n[LinkedIn]({{Sender LinkedIn}})\n{{Sender Phone}}\n\nImportant:",
-            "SIG_START\n--\n<div style=\"color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4;\">\nThanks & Regards,<br>\n<strong>{{Sender Name}}</strong><br>\n{{Sender Title}}<br>\n{{Sender Phone}}<br>\n<a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color:#1d5fd0;text-decoration:underline;\">Company LinkedIn</a><br>\n<a href=\"https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link\" style=\"color:#1d5fd0;text-decoration:underline;\">Company Documents</a>\n</div>\n\nImportant:"
+            "SIG_START\n--\n<div style=\"color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4;\">\nThanks & Regards,<br>\n<strong>{{Sender Name}}</strong><br>\n{{Sender Title}}<br>\n{{Sender Phone}}<br>\n<a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color:#1d5fd0;text-decoration:underline;\">Company LinkedIn</a><br>\n<a href=\"https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link\" style=\"color:#1d5fd0;text-decoration:underline;\">Company Documents</a>\n</div>\nImportant:"
         )
         cur.execute(
             "UPDATE prompts SET content = %s, description = %s, owner_username = 'kajal' WHERE name = 'kajal_mam_agritech'",
@@ -2739,10 +2737,7 @@ TEMPLATE_ATTACHMENT_MAP = {
 }
 
 # Default attachments for AI-generated or unknown templates
-_DEFAULT_ATTACHMENTS = [
-    {"name": "QVSCL Company Profile.pdf", "size": "1.7 MB",  "type": "application/pdf"},
-    {"name": "Lalit_Huria_Profile.pdf",   "size": "250 KB",  "type": "application/pdf"},
-]
+_DEFAULT_ATTACHMENTS = []
 
 def _get_template_attachments(template_name: Optional[str]) -> list:
     """Return the correct attachment metadata list for the given template name.
