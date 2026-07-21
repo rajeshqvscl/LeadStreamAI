@@ -1352,7 +1352,20 @@ def heal_draft_content(email_draft: str, user_id: Optional[str], profile: Option
     
     # 0b. Restore protected image filenames
     healed = healed.replace("[[KAJAL_IMG_PNG]]", "kajal.png")
-        
+    
+    # 1b. Replace sender placeholders with logged-in user's info
+    sender_title = profile.get('job_title') or profile.get('title') or ""
+    sender_phone = profile.get('phone') or ""
+    sender_linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
+    healed = healed.replace("***{{Sender Name}}***", sender_full_name)
+    healed = healed.replace("{{Sender Name}}", sender_full_name)
+    healed = healed.replace("{{Sender Full Name}}", sender_full_name)
+    healed = healed.replace("{{Sender First Name}}", sender_first_name)
+    healed = healed.replace("{{Sender Title}}", sender_title)
+    healed = healed.replace("{{Sender Phone}}", sender_phone)
+    healed = healed.replace("{{Sender LinkedIn}}", sender_linkedin)
+    healed = healed.replace("{{Sender Linkedin}}", sender_linkedin)
+    
     # 2. (Subject healing removed — all templates now have their own Subject: line in the content,
     #     extracted correctly by generate_email_internal() at lines 1430-1438.)
     
@@ -3868,6 +3881,8 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                     subject = email_data.get("subject", "Following up")
                     body = email_data.get("body", "Hello, we would love to connect.")
                     email_content = f"Subject: {subject}\n\n{body}"
+                else:
+                    email_content = heal_draft_content(email_content, user_id, profile)
                 
                 # Parse Subject and Body
                 subject = "Following up"
