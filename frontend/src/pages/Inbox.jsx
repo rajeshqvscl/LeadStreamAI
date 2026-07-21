@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../services/api';
 import { 
   Mail, MessageSquare, User, Clock, ArrowRight, 
@@ -242,12 +243,12 @@ const Inbox = () => {
                         </div>
                         <h4 className="text-white text-2xl font-black mb-3 tracking-tight">Intelligence Layer <span className="text-indigo-500 italic">Offline</span></h4>
                         <p className="text-slate-500 text-[14px] font-bold max-w-sm mx-auto uppercase tracking-tighter leading-relaxed mb-10 opacity-80">Your Gmail account is not synchronized. Activate the intelligence layer to enable real-time sentiment analysis and automated lead responses.</p>
-                        <a 
-                            href="/dashboard"
+                        <Link 
+                            to="/dashboard"
                             className="inline-block px-12 py-5 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black uppercase tracking-[4px] rounded-[20px] transition-all shadow-2xl shadow-indigo-600/30 active:scale-95"
                         >
                             🚀 Activate Gmail Sync
-                        </a>
+                        </Link>
                     </div>
                 ) : filteredMessages.length === 0 ? (
                     <div className="p-32 text-center">

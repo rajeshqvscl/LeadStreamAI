@@ -630,7 +630,7 @@ const Dashboard = () => {
           <h3 className="text-sm font-black text-white uppercase tracking-[4px]">Reports</h3>
         </div>
         <div className="p-10 grid grid-cols-1 md:grid-cols-2 gap-8">
-          <Link to="/dashboard/mis-report" className="group p-8 bg-white/2 hover:bg-amber-600/10 border border-white/5 rounded-[24px] transition-all">
+           <Link to="/mis-report" className="group p-8 bg-white/2 hover:bg-amber-600/10 border border-white/5 rounded-[24px] transition-all">
             <div className="w-14 h-14 bg-amber-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><FileText className="w-7 h-7 text-amber-500" /></div>
             <h4 className="text-white font-black text-lg mb-2">MIS Report</h4>
             <p className="text-slate-500 text-xs font-bold leading-relaxed uppercase tracking-tighter">Generate 5–8 page PDF report for management presentation.</p>
