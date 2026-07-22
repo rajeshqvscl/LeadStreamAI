@@ -1686,7 +1686,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         new_body_lines = []
         
         for line in body_lines:
-            if not subject_found and "subject:" in line.lower():
+            if not subject_found and line.lstrip().lower().startswith("subject:"):
                 if ":" in line:
                     subject = line.split(":", 1)[1].strip()
                 else:
@@ -2520,8 +2520,7 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
 
         body_lines = body.split("\n")
         for line in body_lines:
-            if not subject_found and "subject:" in line.lower():
-                # Extract the subject (skip "Subject: " part)
+            if not subject_found and line.lstrip().lower().startswith("subject:"):
                 if ":" in line:
                     final_subject = line.split(":", 1)[1].strip()
                 else:
