@@ -1637,11 +1637,15 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 body = email_data.get("body", "")
         elif req.template_type != 'standard':
             is_yashika = req.template_type.startswith('yashika_')
-            cur.execute("SELECT content FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE", (req.template_type,))
+            cur.execute("SELECT content, subject, cc, description FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE", (req.template_type,))
             row_t = cur.fetchone()
             
             if row_t:
                 template_body = row_t["content"]
+                template_subject = (row_t.get("subject") or "").strip()
+                template_cc = (row_t.get("cc") or "").strip()
+                template_desc = (row_t.get("description") or "").strip()
+
                 f_name = clean_first_name(lead)
 
                 l_name = (lead.get("last_name") or "").strip()
@@ -1657,6 +1661,16 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 sender_phone = (profile.get('phone') or "").strip() or "8527083798"
                 sender_linkedin = (profile.get('linkedin_url') or "").strip() or "https://www.linkedin.com/company/qvscl/"
 
+                # Subject — use template's subject if set, else fallback
+                if template_subject:
+                    subject = template_subject
+                    subject = subject.replace("{{First Name}}", f_name).replace("{{Company Name}}", company).replace("{{Company}}", company)
+                elif template_desc:
+                    subject = template_desc
+                else:
+                    subject = req.template_type.replace("_", " ").title()
+
+                # Replace all placeholders case-insensitively
                 body = template_body
                 replacements = [
                     ("{{First Name}}", f_name),
@@ -1683,7 +1697,6 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                     reg = re.compile(re.escape(placeholder), re.IGNORECASE)
                     body = reg.sub(str(value or ""), body)
 
-                subject = req.template_type.replace("_", " ").title()
             else:
                 email_data = generator.generate_email(
                     lead, 
