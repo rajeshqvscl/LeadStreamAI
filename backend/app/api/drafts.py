@@ -1683,7 +1683,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                     reg = re.compile(re.escape(placeholder), re.IGNORECASE)
                     body = reg.sub(str(value or ""), body)
 
-                subject = f"Strategic Partnership Opportunity | QVSCL × {company}"
+                subject = req.template_type.replace("_", " ").title()
             else:
                 email_data = generator.generate_email(
                     lead, 
@@ -2515,7 +2515,7 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
         elif template_desc:
             subject = template_desc
         else:
-            subject = f"Strategic Partnership Opportunity | QVSCL × {company}"
+            subject = template_name.replace("_", " ").title()
 
         # Resolve sender fields for dynamic templates
         profile = get_sender_profile(user_id)
