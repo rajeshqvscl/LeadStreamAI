@@ -1263,6 +1263,31 @@ def normalize_lead(lead):
 # Honorific/title prefixes that should never be used alone as a greeting name
 _HONORIFICS = {"dr", "mr", "mrs", "ms", "miss", "prof", "sir", "madam", "rev", "capt", "col", "gen", "lt", "maj", "cmdr", "adm", "sgt", "cpl", "pvt", "hm", "er", "ca", "cs", "adv", "md", "phd"}
 
+def _extract_lead_name_from_payload(lead: dict) -> tuple:
+    """Re-extract lead name from raw_payload (original Excel data) to fix corrupted names."""
+    raw_payload = lead.get("raw_payload")
+    if not raw_payload:
+        return ("", "")
+    if isinstance(raw_payload, str):
+        try:
+            raw_payload = json.loads(raw_payload)
+        except:
+            return ("", "")
+    if not isinstance(raw_payload, dict):
+        return ("", "")
+    norm = {str(k).lower().replace(" ", "").replace("-", "").replace("_", ""): v for k, v in raw_payload.items() if v}
+    payload_name = (
+        norm.get("name") or norm.get("fullname") or
+        norm.get("leadname") or norm.get("contactname") or norm.get("contact") or
+        norm.get("person") or norm.get("personname") or
+        f"{norm.get('firstname', '')} {norm.get('lastname', '')}".strip()
+    )
+    if not payload_name:
+        return ("", "")
+    parts = str(payload_name).split(" ", 1)
+    return (parts[0].strip(), parts[1].strip() if len(parts) > 1 else "")
+
+
 def clean_first_name(lead: dict) -> str:
     """
     Returns a greeting-safe FIRST name only for the lead.
@@ -1272,8 +1297,17 @@ def clean_first_name(lead: dict) -> str:
       become just 'Raajiv'.
     - Falls back to 'there' if no usable name is found.
     """
-    raw_first = (lead.get("first_name") or lead.get("name") or "").strip()
-    raw_last  = (lead.get("last_name") or "").strip()
+    # For intelligence-sourced leads, prefer name from raw_payload (fixes corrupted imports)
+    payload_first, payload_last = _extract_lead_name_from_payload(lead)
+    if payload_first:
+        raw_first = payload_first
+        raw_last = payload_last
+        # Still also check stored last_name if payload didn't have it
+        if not raw_last:
+            raw_last = (lead.get("last_name") or "").strip()
+    else:
+        raw_first = (lead.get("first_name") or lead.get("name") or "").strip()
+        raw_last  = (lead.get("last_name") or "").strip()
 
     # Strip trailing dot from honorific prefix check
     normalized = raw_first.rstrip(".").lower()
@@ -2452,7 +2486,7 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
         lead = normalize_lead(lead)
 
         # Fetch template
-        cur.execute("SELECT content, subject, cc FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE", (template_name,))
+        cur.execute("SELECT content, subject, cc, description FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE", (template_name,))
         tpl_row = cur.fetchone()
         cur.close()
         conn.close()
@@ -2463,6 +2497,7 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
         template_body = tpl_row["content"]
         template_subject = (tpl_row.get("subject") or "").strip()
         template_cc = (tpl_row.get("cc") or "").strip()
+        template_desc = (tpl_row.get("description") or "").strip()
 
         # Resolve lead fields
         first_name = clean_first_name(lead)  # strips Dr./Mr./Mrs. etc.
@@ -2477,6 +2512,8 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
         if template_subject:
             subject = template_subject
             subject = subject.replace("{{First Name}}", first_name).replace("{{Company Name}}", company).replace("{{Company}}", company)
+        elif template_desc:
+            subject = template_desc
         else:
             subject = f"Strategic Partnership Opportunity | QVSCL × {company}"
 
@@ -2534,6 +2571,18 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
                 final_body_lines.append(line)
 
         final_body = "\n".join(final_body_lines).strip()
+
+        # Self-healing: if subject was extracted from body but DB column was empty, save it
+        if subject_found and not template_subject and final_subject != subject:
+            try:
+                heal_conn = get_db_connection()
+                heal_cur = heal_conn.cursor()
+                heal_cur.execute("UPDATE prompts SET subject = %s WHERE name = %s AND (subject IS NULL OR subject = '')", (final_subject, template_name))
+                heal_conn.commit()
+                heal_cur.close()
+                heal_conn.close()
+            except Exception:
+                pass
 
         # Inject logged-in user's signature ONLY if the template doesn't already embed one
         profile = get_sender_profile(user_id)
