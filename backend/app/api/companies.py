@@ -929,7 +929,7 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
             
         # 2. Smart Name Detection
         name = (
-            norm.get("teammember") or norm.get("name") or norm.get("fullname") or 
+            norm.get("name") or norm.get("fullname") or 
             norm.get("leadname") or norm.get("contactname") or norm.get("contact") or
             norm.get("investor") or norm.get("person") or norm.get("personname") or
             f"{norm.get('firstname', '')} {norm.get('lastname', '')}".strip()
@@ -951,7 +951,7 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
             norm.get("firm") or norm.get("account") or norm.get("organization")
         )
         if not company:
-            company = "—"
+            company = None
         
         parts = name.split(" ", 1)
         f_name = parts[0]
@@ -1135,7 +1135,7 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: Optional
                     continue
 
                 name = (
-                    norm.get("teammember") or norm.get("name") or norm.get("fullname") or
+                    norm.get("name") or norm.get("fullname") or
                     norm.get("leadname") or norm.get("contactname") or norm.get("contact") or
                     norm.get("investor") or norm.get("person") or norm.get("personname") or
                     f"{norm.get('firstname', '')} {norm.get('lastname', '')}".strip()
@@ -1150,7 +1150,7 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: Optional
                     norm.get("companyname") or norm.get("company") or
                     norm.get("investorname") or norm.get("org") or
                     norm.get("firm") or norm.get("account") or norm.get("organization")
-                ) or "—"
+                )
                 parts = name.split(" ", 1)
                 f_name, l_name = parts[0], (parts[1] if len(parts) > 1 else "")
                 sender_name = "the team"

@@ -1612,7 +1612,9 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
 
                 l_name = (lead.get("last_name") or "").strip()
                 full_name = f"{f_name} {l_name}".strip()
-                company = (lead.get("company_name") or lead.get("family_office_name") or "your organization").strip()
+                company = (lead.get("company_name") or lead.get("family_office_name") or "").strip()
+                if not company or company in ("—", "-", "N/A", "n/a"):
+                    company = "your organization"
                 designation = (lead.get("designation") or "").strip()
 
                 sender_full_name = profile.get('full_name') or profile.get('username') or "the team"
@@ -2466,7 +2468,9 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
         first_name = clean_first_name(lead)  # strips Dr./Mr./Mrs. etc.
         last_name  = (lead.get("last_name") or "").strip()
         full_name  = f"{first_name} {last_name}".strip()
-        company    = (lead.get("company_name") or lead.get("family_office_name") or "your organization").strip()
+        company    = (lead.get("company_name") or lead.get("family_office_name") or "").strip()
+        if not company or company in ("—", "-", "N/A", "n/a"):
+            company = "your organization"
         designation= (lead.get("designation") or "").strip()
 
         # Subject — use template's subject if set, else fallback
