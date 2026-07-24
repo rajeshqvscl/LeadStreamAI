@@ -1351,7 +1351,7 @@ def get_sender_profile(user_id: Optional[str]) -> dict:
         "linkedin_url": "https://linkedin.com"
     }
 
-def heal_draft_content(email_draft: str, user_id: Optional[str], profile: Optional[dict] = None) -> str:
+def heal_draft_content(email_draft: str, user_id: Optional[str], profile: Optional[dict] = None, template_name: Optional[str] = None) -> str:
     if not email_draft:
         return email_draft
     
@@ -1401,16 +1401,11 @@ def heal_draft_content(email_draft: str, user_id: Optional[str], profile: Option
     # 2. (Subject healing removed — all templates now have their own Subject: line in the content,
     #     extracted correctly by generate_email_internal() at lines 1430-1438.)
     
-    healed_lower = healed.lower()
-    
-    # 3. Hospital-specific healing: detect by unique content fingerprints and upgrade signature
-    hospital_fingerprints = [
-        "uttar pradesh",
-        "arpob",
-        "ayush"
-    ]
-    # Check if this is likely the hospital draft (Ayush Sir's)
-    is_hospital = any(fp in healed_lower for fp in hospital_fingerprints)
+    # 3. Hospital-specific healing: only for the actual Ayush hospital template
+    #    Previously this used content fingerprinting which caused Yashika's emails
+    #    (and others) to get the Ayush hospital banner + disclaimer injected when
+    #    a lead's name or company happened to contain "ayush", "uttar pradesh", etc.
+    is_hospital = (template_name or '').strip().lower() == 'ayush_sir_hospital_draft'
     
     if is_hospital:
         backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
@@ -1455,13 +1450,12 @@ def _md_to_html(text: str) -> str:
     return text
 
 def inject_signature(body: str, profile: dict, lead_id: int) -> str:
-    """Appends a premium standardized signature. Unsubscribe footer is added by email_service.py."""
+    """Appends the correct signature for the person sending the email.
+    Each person gets their own consistent hardcoded signature regardless of which template they use.
+    Signature designs are preserved exactly as they were before.
+    Unsubscribe footer is added by email_service.py."""
     import re
     body_text = body.strip()
-
-    custom_sig = profile.get('signature')
-    sig_mode = profile.get('signature_mode') or 'custom'
-    use_custom = False  # custom signatures disabled by user request
 
     # Remove trailing signature divs from previous inject calls
     body_text = re.sub(r'<div\s+style="color:\s*#666666;.*?</div>\s*$', '', body_text, flags=re.DOTALL | re.IGNORECASE)
@@ -1484,12 +1478,7 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     sign_offs = ["thanks & regards", "sincerely", "best regards", "thanks,", "regards,", "thanks and regards"]
     for s in sign_offs:
         if body_lower.endswith(s):
-            # Strip the sign-off line AND everything after it (name, title, logo, links)
-            cutoff = body_text[:-(len(s))].rstrip()
-            remaining = body_text[-(len(s)):].strip()
-            # If sign-off was the last meaningful text, cut before it
             body_lines = body_text.rstrip().split('\n')
-            # Find the sign-off line and drop it and all lines after
             sig_line_idx = None
             for i, ln in enumerate(body_lines):
                 if s in ln.strip().lower():
@@ -1502,7 +1491,6 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
             break
 
     # Strip any remaining markdown images of known logos from the body
-    # (prevents duplicates when the template has embedded logo but -- separator was missing)
     body_text = re.sub(
         r'!\[.*?\]\(.*?qvscllogo.*?\)\s*\n*',
         '',
@@ -1516,13 +1504,18 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
     phone = profile.get('phone') or "8527083798"
 
-    disclaimer = """Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."""
-
-    is_palak = (profile.get('full_name') or '').strip().lower() == 'palak jain'
     raw_name_lower = (profile.get('full_name') or profile.get('username') or '').strip().lower()
+    is_palak = raw_name_lower == 'palak jain'
     is_kajal = 'kajal' in raw_name_lower
+    is_yashika = 'yashika' in raw_name_lower or 'gupta' in raw_name_lower
+    is_ayush = 'ayush' in raw_name_lower
+    is_vismaya = 'vismaya' in raw_name_lower
 
-    # Load qvscllogo.png as base64 once
+    standard_disclaimer = """Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."""
+
+    strict_disclaimer = """<strong>Strictly Private and Confidential.</strong><br><br>The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments."""
+
+    # Load qvscllogo.png as base64 once (only used by Palak)
     try:
         with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", "qvscllogo.png"), "rb") as _f:
             _b64_logo = base64.b64encode(_f.read()).decode()
@@ -1530,22 +1523,11 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     except Exception:
         _logo_data_uri = ""
 
-    # Use custom signature if mode is 'custom' — convert markdown to HTML
-    if use_custom:
-        sig_html_content = _md_to_html(custom_sig.strip())
-        sig_html = f"""
-<div style="color: #666666; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
---<br>
-{sig_html_content}
-<div style="font-size: 10px; color: #999999; line-height: 1.2; margin-top: 6px;">
-{disclaimer}
-</div>
-</div>
-"""
-        return body_text + "\n\n" + sig_html
+    # ---- Per-person hardcoded signatures ----
+    # Each person gets ONE consistent signature matching their original design.
 
     if is_palak:
-        dis_text = "Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."
+        # Blue-themed, italic bold, with QVSCL logo (same as before)
         sig_html = f"""<div style="font-family:Arial,Calibri,sans-serif;color:#0B2A6F;line-height:1.15;">
 <div style="color:#999;font-size:12px;">--</div>
 <div style="font-size:16px;font-weight:700;font-style:italic;margin:0;color:#0B2A6F;">Thanks &amp; Regards,</div>
@@ -1554,10 +1536,12 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 <div style="font-size:15px;font-style:italic;margin:0;color:#0B2A6F;"><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> <span style="color:#1d5fd0;">/</span> <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></div>
 <div style="font-size:15px;font-style:italic;margin-top:2px;color:#0B2A6F;">{phone}</div>
 {f'<img src="{_logo_data_uri}" alt="QVSCL" width="110" style="margin-top:10px;width:110px;height:auto;display:block;">' if _logo_data_uri else ''}
-<div style="margin-top:10px;font-size:10px;line-height:1.4;color:#555555;max-width:600px;">{dis_text}</div>
+<div style="margin-top:10px;font-size:10px;line-height:1.4;color:#555555;max-width:600px;">{standard_disclaimer}</div>
 </div>"""
-    else:
-        drive_link = '<a href="https://www.linkedin.com/company/qvscl/" style="color:#1d5fd0;text-decoration:underline;">Company LinkedIn</a><br><a href="https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link" style="color:#1d5fd0;text-decoration:underline;">Company Documents</a><br>' if is_kajal else ''
+
+    elif is_kajal:
+        # Standard grey italic + Company LinkedIn + Company Documents (same as before)
+        drive_link = '<a href="https://www.linkedin.com/company/qvscl/" style="color:#1d5fd0;text-decoration:underline;">Company LinkedIn</a><br><a href="https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link" style="color:#1d5fd0;text-decoration:underline;">Company Documents</a><br>'
         sig_html = f"""
 <div style="color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
 --<br>
@@ -1568,10 +1552,70 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 <i>{phone}</i><br>
 {drive_link}
 <div style="font-size: 10px; color: #000000; line-height: 1.2; margin-top: 6px;">
-{disclaimer}
+{standard_disclaimer}
 </div>
+</div>"""
+
+    elif is_ayush:
+        # Standard grey italic + hospital banner + Strictly Private disclaimer (same as his template before)
+        backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+        banner_img = f'<img src="{backend_url}/assets/PHOTO-2026-05-25-10-33-35.jpg" alt="Investment Opportunity Banner" width="420" height="126" style="margin-top: 10px; display: block;" />'
+        sig_html = f"""
+<div style="color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
+--<br>
+<i>Thanks &amp; Regards,</i><br>
+<i><strong>{name}</strong></i><br>
+<i>{title}</i><br>
+<i><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> | <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></i><br>
+<i>{phone}</i><br>
+{banner_img}
+<div style="font-size: 10px; color: #000000; line-height: 1.2; margin-top: 6px;">
+{strict_disclaimer}
 </div>
-"""
+</div>"""
+
+    elif is_yashika:
+        # Standard grey italic + Strictly Private disclaimer (matching her AI Tech template)
+        sig_html = f"""
+<div style="color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
+--<br>
+<i>Thanks &amp; Regards,</i><br>
+<i><strong>{name}</strong></i><br>
+<i>{title}</i><br>
+<i><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> | <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></i><br>
+<i>{phone}</i><br>
+<div style="font-size: 10px; color: #000000; line-height: 1.2; margin-top: 6px;">
+{strict_disclaimer}
+</div>
+</div>"""
+
+    elif is_vismaya:
+        # Standard grey italic with NO disclaimer (same as her template before)
+        sig_html = f"""
+<div style="color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
+--<br>
+<i>Thanks &amp; Regards,</i><br>
+<i><strong>{name}</strong></i><br>
+<i>{title}</i><br>
+<i><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> | <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></i><br>
+<i>{phone}</i><br>
+</div>"""
+
+    else:
+        # Standard grey italic + standard disclaimer (same as before for all other users)
+        sig_html = f"""
+<div style="color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
+--<br>
+<i>Thanks &amp; Regards,</i><br>
+<i><strong>{name}</strong></i><br>
+<i>{title}</i><br>
+<i><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> | <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></i><br>
+<i>{phone}</i><br>
+<div style="font-size: 10px; color: #000000; line-height: 1.2; margin-top: 6px;">
+{standard_disclaimer}
+</div>
+</div>"""
+
     # MUST separate signature from body with a blank line so markdown_to_html()
     # can split it into its own <div> block instead of embedding inside a <p> tag
     return body_text + "\n\n" + sig_html
@@ -1714,21 +1758,8 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
             subject = email_data.get("subject")
             body = email_data.get("body")
         
-        custom_sig = profile.get('signature')
-        sig_mode = profile.get('signature_mode') or 'custom'
-        use_custom = sig_mode == 'custom' and custom_sig and custom_sig.strip()
-        raw_name_lower = (profile.get('full_name') or profile.get('username') or '').strip().lower()
-        is_kajal_user = 'kajal' in raw_name_lower
-        if "SIG_START" in body or "SIG_END" in body:
-            body_with_sig = body
-            if is_kajal_user and "qvscl.com" not in body_with_sig:
-                drive_md = "\n\n<a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color:#1d5fd0;text-decoration:underline;\">Company LinkedIn</a><br>\n<a href=\"https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link\" style=\"color:#1d5fd0;text-decoration:underline;\">Company Documents</a>\n"
-                body_with_sig = body_with_sig.replace("SIG_START", drive_md + "SIG_START")
-            # Unsubscribe footer is added by email_service.py.send_email()
-        elif use_custom:
-            body_with_sig = inject_signature(body, profile, req.lead_id)
-        else:
-            body_with_sig = inject_signature(body, profile, req.lead_id)
+        # Always inject the sender's own hardcoded signature
+        body_with_sig = inject_signature(body, profile, req.lead_id)
 
         body_lines = body_with_sig.split("\n")
         subject_found = False
@@ -2597,17 +2628,9 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
             except Exception:
                 pass
 
-        # Inject logged-in user's signature ONLY if the template doesn't already embed one
+        # Always inject the sender's own hardcoded signature
         profile = get_sender_profile(user_id)
-        if "SIG_START" in final_body or "SIG_END" in final_body:
-            body_with_sig = final_body
-            raw_n = (profile.get('full_name') or profile.get('username') or '').strip().lower()
-            if 'kajal' in raw_n and "qvscl.com" not in body_with_sig:
-                drive_md = "\n\n<a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color:#1d5fd0;text-decoration:underline;\">Company LinkedIn</a><br>\n<a href=\"https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link\" style=\"color:#1d5fd0;text-decoration:underline;\">Company Documents</a>\n"
-                body_with_sig = body_with_sig.replace("SIG_START", drive_md + "SIG_START")
-            # Unsubscribe footer is added by email_service.py.send_email()
-        else:
-            body_with_sig = inject_signature(final_body, profile, lead_id)
+        body_with_sig = inject_signature(final_body, profile, lead_id)
 
         # RE-GENERATE html_body AFTER deduplication
         html_body = markdown_to_html(body_with_sig)
@@ -2921,8 +2944,9 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         profile = get_sender_profile(user_id)
         for r in rows:
             draft_content = r["email_draft"] or ""
+            template_name = r.get('draft_template_used')
             # Apply healing with pre-fetched profile
-            draft_content = heal_draft_content(draft_content, user_id, profile)
+            draft_content = heal_draft_content(draft_content, user_id, profile, template_name=template_name)
             # Normalize literal \\n to real newlines for consistent parsing
             draft_content = draft_content.replace("\\n", "\n").replace("\\r\\n", "\n")
                 
@@ -3112,7 +3136,8 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             raise HTTPException(status_code=404, detail="Lead not found")
 
         draft_content = lead.get('email_draft')
-        draft_content = heal_draft_content(draft_content, user_id)
+        template_name = lead.get('draft_template_used') if lead else None
+        draft_content = heal_draft_content(draft_content, user_id, template_name=template_name)
         email = lead.get('email')
         stored_cc = lead.get('cc_email')
         
@@ -3141,7 +3166,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             body = rest[1].lstrip("\n").strip() if len(rest) > 1 else ""
         else:
             body = draft_content.strip()
-
+        
         # Real Dispatch — Gmail API if connected, else Resend/SMTP
         uid = normalize_user_id(user_id)
         logging.info(f"Triggering real email dispatch for lead {draft_id} from {sender_email} (User: {uid})")
@@ -3156,7 +3181,6 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             pass
         
         cc_email = req.cc if (req and req.cc) else stored_cc
-        template_name = lead.get('draft_template_used') if lead else None
         
         # Vismaya ke emails mein sirf rajesh.s@qvscl.com CC karo
         is_vismaya = (
@@ -3168,43 +3192,8 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             cc_email = "rajesh.s@qvscl.com"
         
         # --- Re-inject Signature of the CURRENT logged-in user ---
-        # Only for templates without embedded SIG_START/SIG_END markers.
-        # Templates like ayush_sir_hospital_draft have their own complete
-        # signature block with banner image and custom disclaimer.
-        profile = {
-            "full_name": sender_name,
-            "job_title": "Analyst",
-            "phone": "8527083798",
-            "linkedin_url": "https://www.linkedin.com/company/qvscl/",
-            "signature": None,
-            "signature_mode": 'auto'
-        }
-        
-        if u:
-            profile["job_title"] = u.get('job_title') or profile["job_title"]
-            profile["phone"] = u.get('phone') or profile["phone"]
-            profile["linkedin_url"] = u.get('linkedin_url') or profile["linkedin_url"]
-            profile["signature"] = u.get('signature')
-            profile["signature_mode"] = u.get('signature_mode') or 'custom'
-        
-        # Skip signature re-injection for templates with embedded SIG_START/SIG_END markers
-        # to preserve their custom banner image, disclaimer, and formatting
-        if "SIG_START" in body or "SIG_END" in body:
-            # Just replace sender placeholders with current user's info
-            body = body.replace("***{{Sender Name}}***", profile["full_name"])
-            body = body.replace("{{Sender Name}}", profile["full_name"])
-            body = body.replace("{{Sender Title}}", profile["job_title"])
-            body = body.replace("{{Sender Phone}}", profile["phone"])
-            body = body.replace("{{Sender LinkedIn}}", profile["linkedin_url"])
-            body = body.replace("{{Sender Linkedin}}", profile["linkedin_url"])
-            # Add Drive link for Kajal if not already present
-            raw_n = (profile.get('full_name') or profile.get('username') or '').strip().lower()
-            if 'kajal' in raw_n and "qvscl.com" not in body:
-                drive_md = "\n\n<a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color:#1d5fd0;text-decoration:underline;\">Company LinkedIn</a><br>\n<a href=\"https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link\" style=\"color:#1d5fd0;text-decoration:underline;\">Company Documents</a>\n"
-                body = body.replace("SIG_START", drive_md + "SIG_START")
-            # Unsubscribe footer is added by email_service.py.send_email()
-        else:
-            body = inject_signature(body, profile, draft_id)
+        # Always uses the person's own hardcoded signature from inject_signature()
+        body = inject_signature(body, profile, draft_id)
         
         user_id_int = int(uid) if uid else None
         body_attachments, url_replacements = _extract_body_attachments(body, user_id=user_id_int)
@@ -3486,7 +3475,7 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
         from app.api.drafts import normalize_user_id
         uid_val = normalize_user_id(user_id)
         if uid_val and str(uid_val).isdigit():
-            cur.execute("SELECT email, full_name, username FROM users WHERE id = %s", (int(uid_val),))
+            cur.execute("SELECT email, full_name, username, job_title, phone, linkedin_url, signature, signature_mode FROM users WHERE id = %s", (int(uid_val),))
             u = cur.fetchone()
             if u:
                 sender_email = u['email']
@@ -3520,7 +3509,8 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     for lead in leads_to_send:
         try:
             draft_content = lead['email_draft'] or ""
-            draft_content = heal_draft_content(draft_content, user_id, profile)
+            template_name = lead.get('draft_template_used')
+            draft_content = heal_draft_content(draft_content, user_id, profile, template_name=template_name)
             
             subject = "Following up"
             body = draft_content
@@ -3528,6 +3518,26 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
                 parts = draft_content.split("\n\n", 1)
                 subject = parts[0].replace("Subject: ", "").strip()
                 body = parts[1].strip() if len(parts) > 1 else ""
+
+            # Handle SIG_START/SIG_END markers like the individual send path does
+            # Build profile for sender info replacement
+            batch_profile = {
+                "full_name": sender_name,
+                "job_title": "Analyst",
+                "phone": "8527083798",
+                "linkedin_url": "https://www.linkedin.com/company/qvscl/",
+                "signature": None,
+                "signature_mode": 'auto'
+            }
+            if u:
+                batch_profile["job_title"] = u.get('job_title') or batch_profile["job_title"]
+                batch_profile["phone"] = u.get('phone') or batch_profile["phone"]
+                batch_profile["linkedin_url"] = u.get('linkedin_url') or batch_profile["linkedin_url"]
+                batch_profile["signature"] = u.get('signature')
+                batch_profile["signature_mode"] = u.get('signature_mode') or 'custom'
+
+            # Always uses the person's own hardcoded signature from inject_signature()
+            body = inject_signature(body, batch_profile, lead['id'])
 
             uid_val = normalize_user_id(user_id)
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
@@ -3539,7 +3549,7 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
                 lead_id=lead['id'],
                 user_id=int(uid_val),
                 cc=lead['cc_email'],
-                template_name=lead.get('draft_template_used')
+                template_name=template_name
             )
 
             if success:
@@ -3623,7 +3633,8 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
     for lead in leads_to_send:
         try:
             draft_content = lead['email_draft'] or ""
-            draft_content = heal_draft_content(draft_content, user_id, profile)
+            template_name = lead.get('draft_template_used')
+            draft_content = heal_draft_content(draft_content, user_id, profile, template_name=template_name)
             
             subject = "Following up"
             body = draft_content
@@ -3913,7 +3924,8 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                     body = email_data.get("body", "Hello, we would love to connect.")
                     email_content = f"Subject: {subject}\n\n{body}"
                 else:
-                    email_content = heal_draft_content(email_content, user_id, profile)
+                    template_name = lead.get('draft_template_used')
+                    email_content = heal_draft_content(email_content, user_id, profile, template_name=template_name)
                 
                 # Parse Subject and Body
                 subject = "Following up"
