@@ -17,3 +17,4 @@ markdown
 groq
 redis
 python-multipart
+bcrypt

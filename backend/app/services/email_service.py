@@ -537,6 +537,25 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                     sent_rfc_message_id = f"<{sent.get('id')}@mail.gmail.com>"
                     logger.warning(f"Could not fetch RFC Message-ID from Gmail API. Using fallback: {sent_rfc_message_id}")
 
+                # ── LEAD OWNERSHIP UPDATE ──
+                # After successful send, assign the lead to whoever sent the email.
+                # This ensures replies are attributed to the correct user's inbound deals.
+                if lead_id and user_id:
+                    try:
+                        own_conn = get_db_connection()
+                        own_cur = own_conn.cursor()
+                        own_cur.execute(
+                            "UPDATE leads_raw SET user_id = %s, updated_at = NOW() WHERE id = %s AND COALESCE(user_id, 0) != %s",
+                            (int(user_id), lead_id, int(user_id))
+                        )
+                        if own_cur.rowcount > 0:
+                            logger.info(f"Lead {lead_id} ownership transferred to user {user_id}")
+                        own_conn.commit()
+                        own_cur.close()
+                        own_conn.close()
+                    except Exception as own_err:
+                        logger.warning(f"Failed to update lead ownership for {lead_id}: {own_err}")
+
                 logger.info(f"✅ Gmail API dispatch successful to {to_email} (CC: {cc}) — Message ID: {sent.get('id')}")
                 return True, "Success", sent_thread_id, sent_rfc_message_id
             else:

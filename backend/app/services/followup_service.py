@@ -453,6 +453,9 @@ def process_outreach_sequences():
                     break
 
                 try:
+                    # Single connection for all DB operations on this lead
+                    # (replaces 8+ separate connections, avoids TCP handshake overhead)
+                    lead_conn = get_db_connection()
                     lead = dict(lead)
                     lead_id = lead['id']
                     stage = lead['followup_stage'] or 0
@@ -477,12 +480,10 @@ def process_outreach_sequences():
                     if stage >= max_stage:
                         logger.info(f"Lead {lead_id} at stage {stage} >= max {max_stage} ({lead.get('lead_type') or 'INVESTOR'}) — completing")
                         try:
-                            comp_conn = get_db_connection()
-                            comp_cur = comp_conn.cursor()
+                            comp_cur = lead_conn.cursor()
                             comp_cur.execute("UPDATE leads_raw SET followup_status = 'COMPLETED', updated_at = NOW() WHERE id = %s AND followup_status = 'ACTIVE'", (lead_id,))
-                            comp_conn.commit()
+                            lead_conn.commit()
                             comp_cur.close()
-                            comp_conn.close()
                         except:
                             pass
                         continue
@@ -515,8 +516,7 @@ def process_outreach_sequences():
 
                     # Re-verify stage, status, and auto-pilot (prevents sends after user stops follow-up)
                     try:
-                        verify_conn = get_db_connection()
-                        verify_cur = verify_conn.cursor()
+                        verify_cur = lead_conn.cursor()
                         verify_cur.execute("""
                             SELECT l.followup_stage, l.followup_status, l.reply_intent, l.email_status, l.is_unsubscribed, l.email_opt_in, u.auto_followup
                             FROM leads_raw l
@@ -525,7 +525,6 @@ def process_outreach_sequences():
                         """, (lead_id,))
                         verify_row = verify_cur.fetchone()
                         verify_cur.close()
-                        verify_conn.close()
                         
                         if verify_row:
                             current_stage = verify_row['followup_stage'] if isinstance(verify_row, dict) else verify_row[0]
@@ -594,8 +593,7 @@ def process_outreach_sequences():
                                         if heal_subject:
                                             lead['first_outreach_subject'] = heal_subject
 
-                                        heal_conn = get_db_connection()
-                                        heal_cur = heal_conn.cursor()
+                                        heal_cur = lead_conn.cursor()
                                         heal_cur.execute("""
                                             UPDATE leads_raw
                                             SET gmail_thread_id = %s,
@@ -604,9 +602,8 @@ def process_outreach_sequences():
                                                 updated_at = NOW()
                                             WHERE id = %s
                                         """, (heal_thread_id, heal_msg_id, heal_subject, lead_id))
-                                        heal_conn.commit()
+                                        lead_conn.commit()
                                         heal_cur.close()
-                                        heal_conn.close()
                         except Exception as heal_err:
                             logger.warning(f"On-the-fly thread heal failed for lead {lead_id}: {heal_err}")
 
@@ -618,15 +615,13 @@ def process_outreach_sequences():
                     # Final duplicate guard: check activity_log for existing follow-up at this stage
                     # Skip only if stage was NOT reset (i.e. followup_stage matches expected stage)
                     try:
-                        dup_conn = get_db_connection()
-                        dup_cur = dup_conn.cursor()
+                        dup_cur = lead_conn.cursor()
                         dup_cur.execute(
                             "SELECT COUNT(*) FROM activity_log WHERE lead_id = %s AND action = 'AUTO_FOLLOWUP_SENT' AND details LIKE %s",
                             (lead_id, f"Stage {next_stage}%")
                         )
                         dup_count = list(dup_cur.fetchone().values())[0]
                         dup_cur.close()
-                        dup_conn.close()
                         if dup_count > 0:
                             logger.info(f"Lead {lead_id}: Stage {next_stage} already sent ({dup_count}x in log) — skipping duplicate")
                             continue
@@ -664,17 +659,15 @@ def process_outreach_sequences():
 
                     # Stop any old pending drafts for this lead before sending new one
                     try:
-                        stop_conn = get_db_connection()
-                        stop_cur = stop_conn.cursor()
+                        stop_cur = lead_conn.cursor()
                         stop_cur.execute("""
                             UPDATE leads_raw
                             SET email_status = 'STOPPED',
                                 updated_at = NOW()
                             WHERE id = %s AND email_status IN ('PENDING_APPROVAL', 'APPROVED', 'SCHEDULED')
                         """, (lead_id,))
-                        stop_conn.commit()
+                        lead_conn.commit()
                         stop_cur.close()
-                        stop_conn.close()
                     except Exception as stop_err:
                         logger.warning(f"Failed to stop old drafts for lead {lead_id}: {stop_err}")
 
@@ -682,8 +675,7 @@ def process_outreach_sequences():
                     # Claiming first prevents the race condition where two workers
                     # both send the email but only one's claim succeeds (duplicate send).
                     new_status = 'COMPLETED' if next_stage >= max_stage else 'ACTIVE'
-                    claim_conn = get_db_connection()
-                    claim_cur = claim_conn.cursor()
+                    claim_cur = lead_conn.cursor()
                     claim_cur.execute("""
                         UPDATE leads_raw
                         SET followup_stage = %s,
@@ -694,10 +686,9 @@ def process_outreach_sequences():
                             updated_at = NOW()
                         WHERE id = %s AND followup_stage = %s AND followup_status = 'ACTIVE'
                     """, (next_stage, new_status, subject, lead_id, stage))
-                    claim_conn.commit()
+                    lead_conn.commit()
                     claimed = claim_cur.rowcount > 0
                     claim_cur.close()
-                    claim_conn.close()
 
                     if not claimed:
                         logger.info(f"Lead {lead_id}: stage {stage} already claimed by another worker — skipping")
@@ -720,8 +711,7 @@ def process_outreach_sequences():
                         logger.error(f"Auto-Pilot failed for {lead['email']}: {msg}")
                         # Rollback: restore previous stage so it can be retried
                         try:
-                            rb_conn = get_db_connection()
-                            rb_cur = rb_conn.cursor()
+                            rb_cur = lead_conn.cursor()
                             rb_cur.execute("""
                                 UPDATE leads_raw
                                 SET followup_stage = %s,
@@ -729,9 +719,8 @@ def process_outreach_sequences():
                                     updated_at = NOW()
                                 WHERE id = %s AND followup_stage = %s
                             """, (stage, lead_id, next_stage))
-                            rb_conn.commit()
+                            lead_conn.commit()
                             rb_cur.close()
-                            rb_conn.close()
                         except Exception as rb_err:
                             logger.warning(f"Rollback failed for lead {lead_id}: {rb_err}")
                         continue
@@ -739,8 +728,7 @@ def process_outreach_sequences():
                     # Save the thread/message IDs after successful send
                     if new_thread_id or new_rfc_msg_id:
                         try:
-                            save_conn = get_db_connection()
-                            save_cur = save_conn.cursor()
+                            save_cur = lead_conn.cursor()
                             save_cur.execute("""
                                 UPDATE leads_raw
                                 SET gmail_thread_id = COALESCE(%s, gmail_thread_id),
@@ -748,9 +736,8 @@ def process_outreach_sequences():
                                     updated_at = NOW()
                                 WHERE id = %s
                             """, (new_thread_id, new_rfc_msg_id, lead_id))
-                            save_conn.commit()
+                            lead_conn.commit()
                             save_cur.close()
-                            save_conn.close()
                         except Exception as save_err:
                             logger.warning(f"Failed to save thread IDs for lead {lead_id}: {save_err}")
 
@@ -761,6 +748,13 @@ def process_outreach_sequences():
                     time.sleep(5)
                 except Exception as ex:
                     logger.error(f"Error dispatching auto-followup for lead {lead.get('id')}: {ex}")
+                finally:
+                    # Return the lead connection to pool for reuse
+                    if 'lead_conn' in locals():
+                        try:
+                            lead_conn.close()
+                        except Exception:
+                            pass
     except Exception as e:
         logger.error(f"Error in process_outreach_sequences: {e}")
     finally:

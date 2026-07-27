@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Header, UploadFile, File, HTTPException
+import shutil
 from pydantic import BaseModel
 import traceback
 from typing import Optional, List
@@ -1336,10 +1337,24 @@ def get_sender_profile(user_id: Optional[str]) -> dict:
         # Select all relevant signature fields
         cur.execute("SELECT full_name, username, job_title, phone, linkedin_url, signature, signature_mode FROM users WHERE id = %s", (uid,))
         user = cur.fetchone()
+        if user:
+            profile = dict(user)
+            # Also fetch all saved signatures for this user (multiple signatures support)
+            try:
+                cur.execute(
+                    "SELECT id, name, content, is_default FROM user_signatures WHERE user_id = %s ORDER BY is_default DESC, created_at ASC",
+                    (uid,)
+                )
+                sig_rows = cur.fetchall()
+                profile["signatures"] = [dict(r) for r in sig_rows] if sig_rows else []
+            except Exception:
+                # Table might not exist yet
+                profile["signatures"] = []
+            cur.close()
+            conn.close()
+            return profile
         cur.close()
         conn.close()
-        if user:
-            return dict(user)
     except Exception as e:
         logger.error(f"Error fetching sender profile: {e}")
     
@@ -1348,8 +1363,282 @@ def get_sender_profile(user_id: Optional[str]) -> dict:
         "username": "admin",
         "job_title": "ITTEAM", 
         "phone": "8527083798", 
-        "linkedin_url": "https://linkedin.com"
+        "linkedin_url": "https://linkedin.com",
+        "signatures": []
     }
+
+def get_hardcoded_signature_markdown(profile: dict) -> str:
+    """Returns the same signature that inject_signature() would use for this user,
+    but in markdown format. Mirrors the per-person detection logic to provide
+    the correct default signature in the frontend Signatures page."""
+    raw_name = profile.get('full_name') or profile.get('username') or 'The Team'
+    name = " ".join([p.capitalize() for p in raw_name.split()])
+    title = profile.get('job_title') or 'Analyst'
+    linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
+    phone = profile.get('phone') or "8527083798"
+
+    raw_name_lower = (profile.get('full_name') or profile.get('username') or '').strip().lower()
+    is_palak = raw_name_lower == 'palak jain'
+    is_kajal = 'kajal' in raw_name_lower
+    is_yashika = 'yashika' in raw_name_lower or 'gupta' in raw_name_lower
+    is_ayush = 'ayush' in raw_name_lower
+    is_vismaya = 'vismaya' in raw_name_lower
+
+    disclaimer_standard = "Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."
+    disclaimer_strict = "**Strictly Private and Confidential.**\n\nThe information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it."
+
+    if is_palak:
+        sig = f"""--
+*Thanks & Regards,*
+***{name}***
+*{title}*
+[Website](https://qvscl.com) | [LinkedIn]({linkedin})
+*{phone}*
+
+{disclaimer_standard}"""
+    elif is_kajal:
+        sig = f"""--
+*Thanks & Regards,*
+***{name}***
+*{title}*
+[Website](https://qvscl.com) | [LinkedIn]({linkedin})
+*{phone}*
+
+{disclaimer_standard}"""
+    elif is_ayush:
+        sig = f"""--
+*Thanks & Regards,*
+***{name}***
+*{title}*
+[Website](https://qvscl.com) | [LinkedIn]({linkedin})
+*{phone}*
+
+{disclaimer_strict}"""
+    elif is_yashika:
+        sig = f"""--
+*Thanks & Regards,*
+***{name}***
+*{title}*
+[Website](https://qvscl.com) | [LinkedIn]({linkedin})
+*{phone}*
+
+{disclaimer_strict}"""
+    elif is_vismaya:
+        sig = f"""--
+*Thanks & Regards,*
+***{name}***
+*{title}*
+[Website](https://qvscl.com) | [LinkedIn]({linkedin})
+*{phone}*"""
+    else:
+        sig = f"""--
+*Thanks & Regards,*
+***{name}***
+*{title}*
+[Website](https://qvscl.com) | [LinkedIn]({linkedin})
+*{phone}*
+
+{disclaimer_standard}"""
+
+    return sig
+
+@router.get("/signatures/default-hardcoded")
+def get_default_hardcoded_signature(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Returns the hardcoded signature (from inject_signature() logic) as markdown
+    for the current user. Used by the Signatures page as the default fallback."""
+    profile = get_sender_profile(user_id)
+    sig = get_hardcoded_signature_markdown(profile)
+    return {
+        "signature": sig,
+        "name": profile.get('full_name') or profile.get('username') or 'My Default Signature',
+    }
+
+@router.get("/assets/pdfs")
+def list_available_pdfs():
+    """List all files available in the assets directory for attachment selection."""
+    asset_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets")
+    files = []
+    try:
+        for f in sorted(os.listdir(asset_dir)):
+            if f.lower().endswith('.pdf') or f.lower().endswith('.docx') or f.lower().endswith('.doc') or f.lower().endswith('.xlsx') or f.lower().endswith('.jpg') or f.lower().endswith('.png') or f.lower().endswith('.pptx'):
+                files.append({
+                    "filename": f,
+                    "path": f"/assets/{f}",
+                })
+        return files
+    except Exception as e:
+        logger.error(f"Error listing assets: {e}")
+        return []
+
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets")
+
+@router.post("/signatures/upload-attachment")
+def upload_signature_attachment(file: UploadFile = File(...)):
+    """Upload any file type as an attachment for signatures."""
+    import uuid
+    safe_name = file.filename.replace(" ", "_").replace("(", "").replace(")", "")
+    unique_name = f"sig_att_{uuid.uuid4().hex[:8]}_{safe_name}"
+    dest_path = os.path.join(ASSETS_DIR, unique_name)
+    try:
+        with open(dest_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        return {"filename": unique_name, "message": "Attachment uploaded successfully"}
+    except Exception as e:
+        logger.error(f"Error uploading attachment: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ────────────────────────────────────────────────────────
+# MULTIPLE SIGNATURES CRUD API
+# ────────────────────────────────────────────────────────
+
+class SignatureCreateRequest(BaseModel):
+    name: str = "My Signature"
+    content: str
+    attachment_file: Optional[str] = None
+
+class SignatureUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    content: Optional[str] = None
+    is_default: Optional[bool] = None
+    attachment_file: Optional[str] = None
+
+@router.get("/signatures")
+def list_signatures(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """List all saved signatures for the current user."""
+    uid = normalize_user_id(user_id)
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        cur.execute(
+            "SELECT id, name, content, is_default, created_at, updated_at, attachment_file FROM user_signatures WHERE user_id = %s ORDER BY is_default DESC, created_at ASC",
+            (uid,)
+        )
+        rows = cur.fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Error listing signatures: {e}")
+        return []
+    finally:
+        cur.close()
+        conn.close()
+
+@router.post("/signatures")
+def create_signature(req: SignatureCreateRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Create a new signature for the current user."""
+    if not req.content or not req.content.strip():
+        raise HTTPException(status_code=400, detail="Signature content cannot be empty")
+    uid = normalize_user_id(user_id)
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        # If this is the first signature, make it default
+        cur.execute("SELECT COUNT(*) FROM user_signatures WHERE user_id = %s", (uid,))
+        count = cur.fetchone()[0]
+        is_default = (count == 0)
+        
+        cur.execute(
+            "INSERT INTO user_signatures (user_id, name, content, is_default, attachment_file) VALUES (%s, %s, %s, %s, %s) RETURNING id, name, content, is_default, created_at, updated_at, attachment_file",
+            (uid, req.name, req.content, is_default, req.attachment_file)
+        )
+        new_sig = dict(cur.fetchone())
+        conn.commit()
+        return new_sig
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error creating signature: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+@router.put("/signatures/{sig_id}")
+def update_signature(sig_id: int, req: SignatureUpdateRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Update a signature's name, content, or default status."""
+    uid = normalize_user_id(user_id)
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        # Verify ownership
+        cur.execute("SELECT id FROM user_signatures WHERE id = %s AND user_id = %s", (sig_id, uid))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Signature not found")
+        
+        updates = []
+        params = []
+        if req.name is not None:
+            updates.append("name = %s")
+            params.append(req.name)
+        if req.content is not None:
+            updates.append("content = %s")
+            params.append(req.content)
+        if req.is_default is not None:
+            # If setting this as default, unset all others first
+            if req.is_default:
+                cur.execute("UPDATE user_signatures SET is_default = FALSE WHERE user_id = %s", (uid,))
+            updates.append("is_default = %s")
+            params.append(req.is_default)
+        
+        if not updates:
+            return {"message": "No fields to update"}
+        
+        updates.append("updated_at = NOW()")
+        params.append(sig_id)
+        
+        if req.attachment_file is not None:
+            updates.append("attachment_file = %s")
+            params.append(req.attachment_file)
+        
+        cur.execute(
+            f"UPDATE user_signatures SET {', '.join(updates)} WHERE id = %s RETURNING id, name, content, is_default, created_at, updated_at, attachment_file",
+            params
+        )
+        updated = dict(cur.fetchone())
+        conn.commit()
+        return updated
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error updating signature: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+@router.delete("/signatures/{sig_id}")
+def delete_signature(sig_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Delete a signature."""
+    uid = normalize_user_id(user_id)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM user_signatures WHERE id = %s AND user_id = %s RETURNING id", (sig_id, uid))
+        deleted = cur.fetchone()
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Signature not found")
+        # If we deleted the default, promote the next oldest signature to default
+        cur.execute("""
+            UPDATE user_signatures SET is_default = TRUE
+            WHERE id = (
+                SELECT id FROM user_signatures
+                WHERE user_id = %s AND is_default = FALSE
+                ORDER BY created_at ASC LIMIT 1
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM user_signatures WHERE user_id = %s AND is_default = TRUE
+            )
+        """, (uid, uid))
+        conn.commit()
+        return {"message": "Signature deleted", "id": sig_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error deleting signature: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
 
 def heal_draft_content(email_draft: str, user_id: Optional[str], profile: Optional[dict] = None, template_name: Optional[str] = None) -> str:
     if not email_draft:
@@ -1503,6 +1792,24 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     title = profile.get('job_title') or 'Analyst'
     linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
     phone = profile.get('phone') or "8527083798"
+
+    # ── Check for custom/user-edited signature first ──
+    # Hardcoded per-person signature is the DEFAULT.
+    # Custom signature is only used when signature_mode == 'custom'
+    # AND a custom signature has been explicitly saved.
+    # signature_mode defaults to 'custom' in DB, but we only treat
+    # it as active if a non-empty custom signature also exists.
+    signature_mode = profile.get('signature_mode') or 'custom'
+    custom_signature = profile.get('signature')
+    if signature_mode == 'custom' and custom_signature and custom_signature.strip():
+        cs = custom_signature
+        first_name = name.split(' ')[0] if ' ' in name else name
+        cs = cs.replace('{{Sender Name}}', name)
+        cs = cs.replace('{{Sender First Name}}', first_name)
+        cs = cs.replace('{{Sender Title}}', title)
+        cs = cs.replace('{{Sender LinkedIn}}', linkedin)
+        cs = cs.replace('{{Sender Phone}}', phone)
+        return body_text + "\n\n" + cs
 
     raw_name_lower = (profile.get('full_name') or profile.get('username') or '').strip().lower()
     is_palak = raw_name_lower == 'palak jain'

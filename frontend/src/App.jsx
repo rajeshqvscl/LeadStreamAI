@@ -13,12 +13,12 @@ import LeadDetail from './pages/LeadDetail';
 import Emails from './pages/Emails';
 import EditEmail from './pages/EditEmail';
 import Prompts from './pages/Prompts';
+import Signatures from './pages/Signatures';
 import Metrics from './pages/Metrics';
 import MisReportPage from './pages/MisReportPage';
 import Users from './pages/Users';
 import FamilyOffices from './pages/FamilyOffices';
 import FamilyOfficeDetail from './pages/FamilyOfficeDetail';
-import GenerateSector from './pages/GenerateSector';
 import BulkSearch from './pages/BulkSearch';
 import CompanyDatabase from './pages/CompanyDatabase';
 import History from './pages/History';
@@ -124,11 +124,11 @@ function App() {
           <Route path="emails" element={<Emails />} />
           <Route path="emails/:draftId/edit" element={<EditEmail />} />
           <Route path="prompts" element={<Prompts />} />
+          <Route path="signatures" element={<Signatures />} />
           <Route path="metrics" element={<Metrics />} />
           <Route path="users" element={<Users />} />
           <Route path="family-offices" element={<FamilyOffices />} />
           <Route path="family-offices/:officeId" element={<ErrorBoundary><FamilyOfficeDetail /></ErrorBoundary>} />
-          {/* <Route path="generate" element={<GenerateSector />} /> */}
           <Route path="bulk-search" element={<BulkSearch />} />
           <Route path="companies" element={<CompanyDatabase />} />
           <Route path="followups" element={<Followups />} />

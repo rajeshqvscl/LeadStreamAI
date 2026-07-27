@@ -5,20 +5,24 @@ from pydantic import BaseModel
 from typing import Optional
 import os
 import requests
-import hashlib
+import bcrypt
 import psycopg2
 import psycopg2.extras
+import logging
 from dotenv import load_dotenv
 import datetime
 from app.database import get_db_connection
 from app.services.google_service import get_google_flow, register_gmail_watch
 
+logger = logging.getLogger(__name__)
+
 # Fix: Ensure .env is loaded in the API layer too
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path, override=True)
 
-# --- OAuth Environment Fixes (Local Testing) ---
-os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+# --- OAuth Insecure Transport (Local Dev Only) ---
+if os.getenv("DEBUG", "").lower() in ("true", "1", "yes"):
+    os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 router = APIRouter()
 
@@ -28,7 +32,7 @@ class LoginRequest(BaseModel):
 
 @router.post("/auth/login")
 def login(req: LoginRequest):
-    import hashlib
+    import uuid
     from app.database import get_db_connection
     from fastapi import HTTPException
     
@@ -52,15 +56,32 @@ def login(req: LoginRequest):
     if not user['is_active']:
         raise HTTPException(status_code=403, detail="Account is deactivated")
         
-    # Verify password hash
-    password_hash = hashlib.sha256(req.password.encode()).hexdigest()
-    if password_hash != user['password_hash']:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-        
-    # Verification removed: Users stay approved once an admin activates them.
+    # Verify password hash (support both bcrypt and legacy SHA256)
+    stored_hash = user['password_hash']
+    # Detect if it's a bcrypt hash (starts with $2b$ or $2a$)
+    if stored_hash.startswith('$2'):
+        if not bcrypt.checkpw(password.encode(), stored_hash.encode()):
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+    else:
+        # Legacy SHA256 fallback
+        import hashlib
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        if password_hash != stored_hash:
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+        # Upgrade to bcrypt on successful login
+        new_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+        try:
+            up_conn = get_db_connection()
+            up_cur = up_conn.cursor()
+            up_cur.execute("UPDATE users SET password_hash = %s WHERE id = %s", (new_hash, user['id']))
+            up_conn.commit()
+            up_cur.close()
+            up_conn.close()
+        except Exception:
+            pass  # Non-blocking upgrade
 
     return {
-        "access_token": "dummy_token",
+        "access_token": str(uuid.uuid4()),
         "token_type": "bearer",
         "user": {
             "id": user['id'],
@@ -286,7 +307,7 @@ def request_access(req: AccessRequest):
         base_url = f"https://{base_url}"
         
     approve_url = f"{base_url}/api/admin/approve-user/{user['id']}"
-    print(f"DEBUG: Generated Approval URL: {approve_url}")
+    logger.info(f"Generated Approval URL: {approve_url}")
     
     subject = f"🚨 Discovery Access Request: {user['full_name'] or user['username']}"
     html_content = f"""
@@ -413,7 +434,7 @@ def google_callback(request: Request, code: str, state: str):
         user_id = state_data.get('u')
         code_verifier = state_data.get('v')
     except Exception as e:
-        print(f"Error decoding OAuth state: {e}")
+        logger.error(f"Error decoding OAuth state: {e}")
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
 
     # Use configured redirect URI or fallback to current request host
@@ -476,11 +497,11 @@ def google_callback(request: Request, code: str, state: str):
         
         # Scope Validation: Check if we actually got the required permission
         received_scopes = creds.scopes or []
-        print(f"DEBUG: Scopes received from Google for user {user_id}: {received_scopes}")
+        logger.info(f"Scopes received from Google for user {user_id}: {received_scopes}")
         
         has_full_scope = any('gmail.readonly' in s or 'mail.google.com' in s for s in received_scopes)
         if not has_full_scope:
-            print(f"WARNING: User {user_id} linked account without read scope. Scopes received: {received_scopes}")
+            logger.warning(f"User {user_id} linked account without read scope. Scopes received: {received_scopes}")
             # Redirect to a specialized error page
             frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
             return RedirectResponse(url=f"{frontend_url}/dashboard?error=permissions_denied")

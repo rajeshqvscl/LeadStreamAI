@@ -308,7 +308,7 @@ def list_gmail_drafts(user_id: int):
         for d in drafts_list:
             try:
                 # Use metadata format to avoid scope restrictions for the list view
-                draft_obj = service.users().drafts().get(userId='me', id=d['id'], format='metadata').execute()
+                draft_obj = service.users().drafts().get(userId='me', id=d['id'], format='metadata', metadataHeaders=['To', 'Subject', 'Date']).execute()
                 msg = draft_obj.get('message', {})
                 headers = msg.get('payload', {}).get('headers', [])
                 
@@ -358,7 +358,7 @@ def list_gmail_sent(user_id: int):
         full_messages = []
         for m in messages_list[:30]:
             try:
-                msg = service.users().messages().get(userId='me', id=m['id'], format='metadata').execute()
+                msg = service.users().messages().get(userId='me', id=m['id'], format='metadata', metadataHeaders=['To', 'Subject', 'Date']).execute()
                 payload = msg.get('payload', {})
                 headers = payload.get('headers', [])
                 
@@ -447,7 +447,7 @@ def get_gmail_message(user_id: int, message_id: str):
             except Exception as raw_e:
                 # Fallback to metadata
                 try:
-                    meta = service.users().messages().get(userId='me', id=message_id, format='metadata').execute()
+                    meta = service.users().messages().get(userId='me', id=message_id, format='metadata', metadataHeaders=['To', 'Subject', 'Date', 'From']).execute()
                     headers = meta.get('payload', {}).get('headers', [])
                     return {
                         'id': message_id,

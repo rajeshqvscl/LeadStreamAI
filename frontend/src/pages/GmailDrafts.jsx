@@ -325,7 +325,7 @@ const GmailDrafts = () => {
                     <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center text-red-400 font-black text-[10px]">G</div>
                         <div>
-                            <div className="text-[12px] font-bold text-white truncate max-w-[200px]">{draft.to || 'No Recipient'}</div>
+                            <div className="text-[12px] font-bold text-white truncate max-w-[200px]">{draft.to || '—'}</div>
                             <div className="text-[9px] text-slate-500 font-medium tracking-tight mt-0.5">Draft ID: {draft.id.substring(0,8)}...</div>
                         </div>
                     </div>

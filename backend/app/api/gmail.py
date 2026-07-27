@@ -1352,14 +1352,29 @@ def poll_all_users_for_replies():
                                 conn.commit()
                                 continue
 
-                            # Check if this email exists as a lead (regardless of owner) and hasn't responded yet
+                            # ── SCOPE BY USER ID FIRST ──
+                            # Check if this email exists as a lead under the CURRENT user being scanned.
+                            # This prevents cross-account contamination where replies intended for
+                            # one user show up in another user's inbound deals.
                             cur.execute("""
                                 SELECT id, user_id FROM leads_raw 
-                                WHERE LOWER(email) = LOWER(%s) AND is_responded = FALSE
+                                WHERE LOWER(email) = LOWER(%s) AND user_id = %s AND is_responded = FALSE
                                 LIMIT 1
-                            """, (sender_email,))
+                            """, (sender_email, uid))
                             
                             found_lead = cur.fetchone()
+                            
+                            # Cross-account fallback: if not found under this user, search across all users
+                            if not found_lead:
+                                cur.execute("""
+                                    SELECT id, user_id FROM leads_raw 
+                                    WHERE LOWER(email) = LOWER(%s) AND is_responded = FALSE
+                                    LIMIT 1
+                                """, (sender_email,))
+                                found_lead = cur.fetchone()
+                                if found_lead:
+                                    logger.info(f"Cross-account reply: {sender_email} found under user {found_lead['user_id']}, not current user {uid}")
+                            
                             if found_lead:
                                 target_uid = found_lead['user_id'] or uid
                                 

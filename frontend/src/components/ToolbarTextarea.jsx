@@ -113,9 +113,14 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/png,image/jpeg,image/jpg,image/gif,image/webp,image/svg+xml';
+    const MAX_SIZE = 10 * 1024 * 1024; // 10MB
     input.onchange = async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
+      if (file.size > MAX_SIZE) {
+        alert(`File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed is 10MB.`);
+        return;
+      }
       const formData = new FormData();
       formData.append('file', file);
       try {
@@ -133,9 +138,14 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.pdf,.doc,.docx,.xls,.xlsx';
+    const MAX_SIZE = 15 * 1024 * 1024; // 15MB for documents
     input.onchange = async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
+      if (file.size > MAX_SIZE) {
+        alert(`File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed is 15MB.`);
+        return;
+      }
       setUploading(true);
       const formData = new FormData();
       formData.append('file', file);

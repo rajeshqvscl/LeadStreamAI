@@ -306,6 +306,11 @@ const EditEmail = () => {
     input.onchange = async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
+      const MAX_SIZE_IMG = 10 * 1024 * 1024; // 10MB
+      if (file.size > MAX_SIZE_IMG) {
+        alert(`Image too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed is 10MB.`);
+        return;
+      }
       const formData = new FormData();
       formData.append('file', file);
       try {
@@ -332,6 +337,11 @@ const EditEmail = () => {
     input.onchange = async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
+      const MAX_SIZE_DOC = 15 * 1024 * 1024; // 15MB
+      if (file.size > MAX_SIZE_DOC) {
+        alert(`File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed is 15MB.`);
+        return;
+      }
       setUploading(true);
       const formData = new FormData();
       formData.append('file', file);

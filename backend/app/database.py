@@ -1,11 +1,13 @@
 import os
+import logging
+import threading
 import psycopg2
+import psycopg2.pool
 from psycopg2.extras import RealDictCursor
-from dotenv import load_dotenv
-from pathlib import Path
 
-env_path = Path(__file__).resolve().parent / ".env"
-load_dotenv(dotenv_path=env_path, override=True)
+logger = logging.getLogger(__name__)
+
+# .env is loaded in main.py — don't reload here to avoid override confusion
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 if DATABASE_URL:
@@ -14,18 +16,84 @@ if DATABASE_URL:
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
+# ── Connection Pool (Thread-safe, used across scheduler workers & API routes) ──
+_db_pool = None
+_db_pool_lock = threading.Lock()
+
+
+class _PooledConnection:
+    """Wraps a psycopg2 connection so that .close() returns it to the pool
+    instead of actually closing the socket. All other attributes delegate
+    transparently to the underlying connection."""
+
+    __slots__ = ('_conn', '_pool')
+
+    def __init__(self, conn, pool):
+        object.__setattr__(self, '_conn', conn)
+        object.__setattr__(self, '_pool', pool)
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, '_conn'), name)
+
+    def close(self):
+        conn = object.__getattribute__(self, '_conn')
+        pool = object.__getattribute__(self, '_pool')
+        try:
+            pool.putconn(conn)
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def cursor(self, *args, **kwargs):
+        return object.__getattribute__(self, '_conn').cursor(*args, **kwargs)
+
+    def commit(self):
+        return object.__getattribute__(self, '_conn').commit()
+
+    def rollback(self):
+        return object.__getattribute__(self, '_conn').rollback()
+
+
+def _get_pool():
+    global _db_pool
+    if _db_pool is None:
+        with _db_pool_lock:
+            if _db_pool is None:  # Double-check after acquiring lock
+                minconn = int(os.getenv("DB_POOL_MIN", "2"))
+                maxconn = int(os.getenv("DB_POOL_MAX", "10"))
+                logger.info(
+                    "Creating DB connection pool: min=%d max=%d", minconn, maxconn
+                )
+                _db_pool = psycopg2.pool.ThreadedConnectionPool(
+                    minconn, maxconn, DATABASE_URL,
+                    cursor_factory=RealDictCursor,
+                    connect_timeout=10
+                )
+    return _db_pool
+
+
 def get_db_connection():
     if not DATABASE_URL:
         url = os.getenv("DATABASE_URL")
         if not url:
-             raise Exception("CRITICAL: DATABASE_URL is missing from environment.")
+            raise Exception("CRITICAL: DATABASE_URL is missing from environment.")
 
     try:
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor, connect_timeout=10)
-        return conn
-    except psycopg2.OperationalError as e:
-        print(f"DATABASE CONNECTION ERROR: {e}")
-        raise Exception(f"Failed to connect to database: {str(e)}")
+        pool = _get_pool()
+        raw = pool.getconn()
+        return _PooledConnection(raw, pool)
+    except Exception as pool_err:
+        logger.error("DB pool get failed: %s — falling back to direct connect", pool_err)
+        try:
+            return psycopg2.connect(
+                DATABASE_URL,
+                cursor_factory=RealDictCursor,
+                connect_timeout=10
+            )
+        except psycopg2.OperationalError as e:
+            raise Exception(f"Failed to connect to database: {str(e)}")
 
 # Create Database Tables
 def create_tables():
@@ -537,11 +605,11 @@ def create_tables():
     # Seed default admin if missing
     cur.execute("SELECT COUNT(*) FROM users WHERE username = %s", (os.getenv("ADMIN_USERNAME", "admin"),))
     if cur.fetchone()['count'] == 0:
-        import hashlib
+        import bcrypt
         # Default credentials for first setup
         default_username = os.getenv("ADMIN_USERNAME", "admin")
         default_password = os.getenv("ADMIN_PASSWORD", "admin123")
-        password_hash = hashlib.sha256(default_password.encode()).hexdigest()
+        password_hash = bcrypt.hashpw(default_password.encode(), bcrypt.gensalt()).decode()
         
         cur.execute("""
             INSERT INTO users (username, email, full_name, password_hash, role)
@@ -589,6 +657,6 @@ def create_tables():
                 if response.ok:
                     from app.models.family_office import sync_from_csv
                     sync_from_csv(response.text)
-                    print(f"[startup] Auto-synced family offices from Google Sheets.")
+                    logger.info(f"Auto-synced family offices from Google Sheets.")
     except Exception as e:
-        print(f"[startup] Could not auto-sync family offices: {e}")
+        logger.warning(f"Could not auto-sync family offices: {e}")

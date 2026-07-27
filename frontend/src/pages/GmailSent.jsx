@@ -223,7 +223,7 @@ const GmailSent = () => {
                               <User className="w-5 h-5" />
                           </div>
                           <div>
-                              <div className="text-[13px] font-bold text-white group-hover:text-emerald-400 transition-colors truncate max-w-[180px]">{msg.to || 'No Recipient'}</div>
+                              <div className="text-[13px] font-bold text-white group-hover:text-emerald-400 transition-colors truncate max-w-[180px]">{msg.to || '—'}</div>
                               <div className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter mt-0.5">Dispatched</div>
                           </div>
                       </div>

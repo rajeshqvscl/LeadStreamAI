@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Loader2, CheckCircle2, AlertCircle, Trash2, ChevronDown, ChevronUp, Save, Upload, Paperclip, AtSign, FileText } from 'lucide-react';
 import api from '../services/api';
 import ToolbarTextarea from '../components/ToolbarTextarea';
-import SignatureEditor from '../components/SignatureEditor';
+
 import mammoth from 'mammoth';
 import * as pdfjsLib from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -78,7 +78,7 @@ const Prompts = () => {
     }
   };
 
-  const fetchPrompts = async () => {
+  const fetchPrompts = useCallback(async () => {
     setIsLoading(true);
     try {
       const res = await api.get('/api/custom-draft-templates', { headers: { 'X-User-Id': userId } });
@@ -88,9 +88,9 @@ const Prompts = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [userId]);
 
-  useEffect(() => { fetchPrompts(); }, []);
+  useEffect(() => { fetchPrompts(); }, [fetchPrompts]);
 
   useEffect(() => {
     const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
@@ -407,7 +407,7 @@ const Prompts = () => {
               </button>
             </div>
           )}
-          <SignatureEditor userId={userId} />
+
           <button onClick={() => setShowForm(!showForm)} className="btn bg-blue-600 hover:bg-blue-500 text-white border-none py-2.5 px-6 rounded-xl flex items-center gap-2 shadow-[0_0_20px_rgba(37,99,235,0.3)] transition-all hover:scale-105 active:scale-95">
             <Plus className="w-4 h-4" />
             <span className="text-[13px] font-bold">{showForm ? 'Cancel' : 'New Template'}</span>
