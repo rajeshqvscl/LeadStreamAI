@@ -634,6 +634,40 @@ def create_tables():
     """)
     conn.commit()
 
+    # ── user_signatures Table (Multiple Signatures Support) ──
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS user_signatures (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name VARCHAR(255) NOT NULL DEFAULT 'My Signature',
+        content TEXT NOT NULL,
+        is_default BOOLEAN NOT NULL DEFAULT FALSE,
+        attachment_file TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+    );
+    """)
+    conn.commit()
+
+    # Add attachment_file column if the table already existed without it
+    try:
+        cur.execute("""
+            ALTER TABLE user_signatures ADD COLUMN IF NOT EXISTS attachment_file TEXT;
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
+    # Add index for fast lookup by user
+    try:
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_user_signatures_user_id
+            ON user_signatures (user_id);
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
     conn.commit()
     cur.close()
     conn.close()

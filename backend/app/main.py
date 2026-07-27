@@ -258,15 +258,14 @@ async def global_exception_handler(request: Request, exc: Exception):
     error_details = traceback.format_exc()
     logger.error(f"GLOBAL ERROR: {str(exc)}\n{error_details}")
     
-    # Get current origins to match CORS
-    raw_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
-    allowed_origins = [origin.strip().rstrip("/") for origin in raw_origins.split(",") if origin.strip()]
-    reported_origin = "https://leadstreamai.onrender.com"
-    if reported_origin not in allowed_origins:
-        allowed_origins.append(reported_origin)
-    
-    origin = request.headers.get("origin")
-    response_origin = origin if origin in allowed_origins else "*"
+    # Use same CORS logic as DynamicCORSMiddleware
+    origin = request.headers.get("origin", "")
+    if _origin_allowed(origin):
+        response_origin = origin
+        credential_header = "true"
+    else:
+        response_origin = "*"
+        credential_header = "false"
 
     return JSONResponse(
         status_code=500,
@@ -277,7 +276,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         },
         headers={
             "Access-Control-Allow-Origin": response_origin,
-            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Credentials": credential_header,
             "Access-Control-Allow-Methods": "*",
             "Access-Control-Allow-Headers": "*",
         }
