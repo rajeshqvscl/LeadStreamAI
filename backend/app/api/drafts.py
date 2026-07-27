@@ -1582,11 +1582,12 @@ def update_signature(sig_id: int, req: SignatureUpdateRequest, user_id: Optional
             return {"message": "No fields to update"}
         
         updates.append("updated_at = NOW()")
-        params.append(sig_id)
         
         if req.attachment_file is not None:
             updates.append("attachment_file = %s")
             params.append(req.attachment_file)
+        
+        params.append(sig_id)  # Must be LAST — used by WHERE id = %s
         
         cur.execute(
             f"UPDATE user_signatures SET {', '.join(updates)} WHERE id = %s RETURNING id, name, content, is_default, created_at, updated_at, attachment_file",
