@@ -146,6 +146,50 @@ def format_outreach_html(text: str) -> str:
 def _get_attachment_files_for_subject(subject: str, template_name: Optional[str] = None) -> list:
     return []
 
+
+def _get_signature_attachments(user_id: Optional[int]) -> list:
+    """Fetch the current user's default signature attachment_file list and
+    return file dicts ready for MIME inclusion."""
+    if not user_id:
+        return []
+    try:
+        from app.database import get_db_connection
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Get the default signature's attachment_file
+        cur.execute(
+            "SELECT attachment_file FROM user_signatures WHERE user_id = %s ORDER BY is_default DESC, created_at ASC LIMIT 1",
+            (user_id,)
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if not row or not row.get('attachment_file'):
+            return []
+        raw = row['attachment_file']
+        filenames = [f.strip() for f in raw.split(',') if f.strip()]
+        if not filenames:
+            return []
+        asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
+        result = []
+        for fn in filenames:
+            path = asset_dir / fn
+            if path.exists():
+                import base64
+                with open(path, "rb") as f:
+                    content_bytes = f.read()
+                result.append({
+                    "content": base64.b64encode(content_bytes).decode('utf-8'),
+                    "filename": fn
+                })
+                logger.info(f"Loaded signature attachment: {fn}")
+            else:
+                logger.warning(f"Signature attachment NOT FOUND: {fn} at {path}")
+        return result
+    except Exception as e:
+        logger.error(f"Error fetching signature attachments for user {user_id}: {e}")
+        return []
+
 def strip_old_unsubscribe_links(html_content: str) -> str:
     """Remove legacy inject_signature unsubscribe links from content before the footer.
     Never touches the footer's own link (which is after 'You're receiving this because')."""
@@ -272,7 +316,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     # Detect follow-up by thread_id OR by Re: prefix in subject (handles case where thread_id is NULL in DB)
     is_followup = bool(thread_id or in_reply_to or (subject and subject.strip().lower().startswith('re:')))
     
-    # Merge any provided attachments with default profile attachments
+    # Merge any provided attachments with default profile attachments & signature attachments
     merged_attachments = list(attachments) if attachments else []
     if not is_followup:
         asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
@@ -295,6 +339,14 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 logger.info(f"Loaded attachment successfully: {filename}")
             else:
                 logger.error(f"Attachment NOT FOUND directly at: {path}")
+        
+        # Also include signature attachments from the user's saved signature
+        if user_id and not is_system_email:
+            sig_attachments = _get_signature_attachments(int(user_id))
+            for sig_att in sig_attachments:
+                if not any(a.get('filename') == sig_att['filename'] for a in merged_attachments):
+                    merged_attachments.append(sig_att)
+                    logger.info(f"Loaded signature attachment: {sig_att['filename']}")
     else:
         logger.info("Outreach is a follow-up email thread. Default PDF attachments skipped.")
     attachments = merged_attachments
