@@ -1027,6 +1027,17 @@ const Emails = () => {
                 </div>
               )}
 
+              {!signaturesLoading && signatures.length === 0 && (
+                <div className="pt-4 border-t border-white/5">
+                  <div className="flex items-center gap-2 py-2 px-3 rounded-xl bg-slate-500/5 border border-slate-500/10">
+                    <Star className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    <span className="text-slate-500 text-[10px] font-medium">
+                      No saved signatures. Go to <a href="/dashboard/signatures" className="text-amber-400 hover:text-amber-300 underline">Signatures</a> to create one.
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {signaturesLoading && (
                 <div className="flex items-center gap-2 text-slate-500 text-[10px] font-medium pt-4">
                   <Loader2 className="w-3 h-3 animate-spin" />
