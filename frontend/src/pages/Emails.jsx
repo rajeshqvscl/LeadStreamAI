@@ -360,22 +360,6 @@ const Emails = () => {
     }
   };
 
-  const handleOptOut = (leadId) => {
-    setPendingOptOut(leadId);
-  };
-
-  const confirmOptOut = async () => {
-    const leadId = pendingOptOut;
-    setPendingOptOut(null);
-    try {
-      await api.post(`/api/leads/${leadId}/unsubscribe`);
-      showNotification('success', 'Lead opted out and blacklisted');
-      fetchEmails();
-    } catch {
-      showNotification('error', 'Opt-out failed');
-    }
-  };
-
   const sendApprovedBatch = async () => {
     if (!window.confirm('Send all approved emails now?')) return;
     const taskId = `batch-approved-${Date.now()}`;
