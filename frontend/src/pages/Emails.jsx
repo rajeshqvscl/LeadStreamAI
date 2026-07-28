@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Eye, Edit3, Loader2, Send, ChevronLeft, ChevronRight, X, Archive, CheckCircle2, Sparkles, History, User, Globe, Calendar, Trash2, AlertCircle, Square } from 'lucide-react';
+import { Eye, Edit3, Loader2, Send, ChevronLeft, ChevronRight, X, Archive, CheckCircle2, Sparkles, History, User, Globe, Calendar, Trash2, AlertCircle, Square, Star, Check } from 'lucide-react';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import api from '../services/api';
@@ -39,6 +39,27 @@ const Emails = () => {
   const [selectedTemplate, setSelectedTemplate] = useState('ai');
   const [isTemplateGenerating, setIsTemplateGenerating] = useState(false);
   const [customTemplates, setCustomTemplates] = useState([]);
+  
+  // ── Signature Selection State ──
+  const [signatures, setSignatures] = useState([]);
+  const [selectedSignatureId, setSelectedSignatureId] = useState(null);
+  const [signaturesLoading, setSignaturesLoading] = useState(false);
+  const userId = JSON.parse(localStorage.getItem('user') || '{}').id || 'admin';
+  
+  const fetchSignatures = useCallback(async () => {
+    setSignaturesLoading(true);
+    try {
+      const res = await api.get('/api/signatures', { headers: { 'X-User-Id': userId } });
+      const sigs = res.data || [];
+      setSignatures(sigs);
+      const defaultSig = sigs.find(s => s.is_default) || sigs[0];
+      if (defaultSig) setSelectedSignatureId(defaultSig.id);
+    } catch (err) {
+      console.error('Failed to fetch signatures', err);
+    } finally {
+      setSignaturesLoading(false);
+    }
+  }, [userId]);
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
@@ -67,6 +88,14 @@ const Emails = () => {
   useEffect(() => {
     api.get('/api/custom-draft-templates').then(r => setCustomTemplates(r.data || [])).catch(() => {});
   }, []);
+
+  // Fetch signatures when the template picker opens
+  useEffect(() => {
+    if (showTemplatePicker) {
+      setSelectedTemplate('ai');
+      fetchSignatures();
+    }
+  }, [showTemplatePicker, fetchSignatures]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -237,6 +266,14 @@ const Emails = () => {
 
   const handleGenerateWithTemplate = async () => {
     if (selectedIds.length === 0) return;
+    
+    // Store selected signature preference
+    if (selectedSignatureId) {
+      const sig = signatures.find(s => s.id === selectedSignatureId);
+      localStorage.setItem('preferred_signature_id', String(selectedSignatureId));
+      localStorage.setItem('preferred_signature_name', sig?.name || '');
+    }
+    
     const taskId = `gen-${Date.now()}`;
     setShowTemplatePicker(false);
     
@@ -935,6 +972,67 @@ const Emails = () => {
                   </div>
                 </div>
               ))}
+
+              {/* ── Signature Selection (Card Style like Templates) ── */}
+              {signatures.length > 0 && (
+                <div className="pt-6 border-t border-white/5">
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-4">
+                    <Star className="w-4 h-4 text-amber-400" />
+                    Choose Signature
+                  </h3>
+                  <div className="space-y-2">
+                    {signatures.map(sig => {
+                      const previewText = sig.content
+                        ? sig.content.replace(/[#*\[\]`>_]/g, '').replace(/\n/g, ' ').substring(0, 60)
+                        : '';
+                      return (
+                        <label
+                          key={sig.id}
+                          className={`flex items-start gap-4 p-3.5 rounded-2xl border cursor-pointer transition-all ${
+                            selectedSignatureId === sig.id
+                              ? 'border-amber-500/60 bg-amber-500/10'
+                              : 'border-white/8 bg-white/[0.02] hover:border-white/15'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="emailsig"
+                            value={sig.id}
+                            className="sr-only"
+                            checked={selectedSignatureId === sig.id}
+                            onChange={() => setSelectedSignatureId(sig.id)}
+                          />
+                          <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${selectedSignatureId === sig.id ? 'border-amber-500' : 'border-slate-600'}`}>
+                            {selectedSignatureId === sig.id && <div className="w-2 h-2 rounded-full bg-amber-500" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-white font-bold text-sm">
+                                ✍️ {sig.name}
+                              </p>
+                              {sig.is_default && (
+                                <span className="text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Default</span>
+                              )}
+                            </div>
+                            {previewText && (
+                              <div className="text-slate-500 text-[10px] mt-1.5 font-mono overflow-hidden">
+                                {previewText}
+                              </div>
+                            )}
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {signaturesLoading && (
+                <div className="flex items-center gap-2 text-slate-500 text-[10px] font-medium pt-4">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Loading signatures...
+                </div>
+              )}
             </div>
 
             <div className="p-8 bg-black/20 border-t border-white/5 flex gap-4">

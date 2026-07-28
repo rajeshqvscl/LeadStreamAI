@@ -189,7 +189,13 @@ const BulkSearch = () => {
 
   const [bulkProgress, setBulkProgress] = useState(null);
 
-  const handleTemplateGenerate = async (templateName) => {
+  const handleTemplateGenerate = async (templateName, signatureId, signatureName) => {
+    // Store selected signature preference in localStorage for later use
+    if (signatureId) {
+      localStorage.setItem('preferred_signature_id', String(signatureId));
+      localStorage.setItem('preferred_signature_name', signatureName || '');
+    }
+    
     const leadIds = singleLeadId !== null ? [singleLeadId] : Array.from(selectedLeads);
     if (leadIds.length === 0) return;
     singleLeadId !== null ? setProcessingId(singleLeadId) : setIsBulkActionLoading(true);

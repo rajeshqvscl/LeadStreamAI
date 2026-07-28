@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Sparkles, Loader2, X, Upload } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Sparkles, Loader2, X, Upload, Star, Check } from 'lucide-react';
 import api from '../services/api';
 import UploadScreenshotModal from './UploadScreenshotModal';
 
@@ -9,7 +9,7 @@ import UploadScreenshotModal from './UploadScreenshotModal';
  *   isOpen          — boolean
  *   onClose         — () => void
  *   selectedCount   — number of selected leads/companies
- *   onGenerate      — async (templateName: string) => void
+ *   onGenerate      — async (templateName: string, signatureId?: number, signatureName?: string) => void
  *                     called with 'ai' or a custom template name
  */
 const DraftTemplatePicker = ({ isOpen, onClose, selectedCount, onGenerate }) => {
@@ -17,21 +17,50 @@ const DraftTemplatePicker = ({ isOpen, onClose, selectedCount, onGenerate }) => 
   const [selectedTemplate, setSelectedTemplate] = useState('ai');
   const [showScreenshotModal, setShowScreenshotModal] = useState(false);
 
+  // ── Signature Selection State ──
+  const [signatures, setSignatures] = useState([]);
+  const [selectedSignatureId, setSelectedSignatureId] = useState(null);
+  const [signaturesLoading, setSignaturesLoading] = useState(false);
+
+  const userId = JSON.parse(localStorage.getItem('user') || '{}').id || 'admin';
+
+  const fetchSignatures = useCallback(async () => {
+    setSignaturesLoading(true);
+    try {
+      const res = await api.get('/api/signatures', { headers: { 'X-User-Id': userId } });
+      const sigs = res.data || [];
+      setSignatures(sigs);
+      // Auto-select default signature or first one
+      const defaultSig = sigs.find(s => s.is_default) || sigs[0];
+      if (defaultSig) {
+        setSelectedSignatureId(defaultSig.id);
+      }
+    } catch (err) {
+      console.error('Failed to fetch signatures', err);
+    } finally {
+      setSignaturesLoading(false);
+    }
+  }, [userId]);
+
   useEffect(() => {
     api.get('/api/custom-draft-templates')
       .then(r => setCustomTemplates(r.data || []))
       .catch(() => {});
   }, []);
 
-  // Reset selection whenever modal opens
+  // Fetch signatures and reset selections whenever modal opens
   useEffect(() => {
-    if (isOpen) setSelectedTemplate('ai');
-  }, [isOpen]);
+    if (isOpen) {
+      setSelectedTemplate('ai');
+      fetchSignatures();
+    }
+  }, [isOpen, fetchSignatures]);
 
   if (!isOpen) return null;
 
   const handleGenerate = () => {
-    onGenerate(selectedTemplate);
+    const selectedSig = signatures.find(s => s.id === selectedSignatureId);
+    onGenerate(selectedTemplate, selectedSignatureId, selectedSig?.name || '');
   };
 
   return (
@@ -121,6 +150,74 @@ const DraftTemplatePicker = ({ isOpen, onClose, selectedCount, onGenerate }) => 
               </label>
             ))}
           </div>
+
+          {/* ── Signature Selection (Card Style like Templates) ── */}
+          {signatures.length > 0 && (
+            <>
+              <div className="mt-6 pt-6 border-t border-white/5 shrink-0">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-4">
+                  <Star className="w-4 h-4 text-amber-400" />
+                  Choose Signature
+                </h3>
+              </div>
+              <div className="space-y-2 shrink-0 max-h-[220px] overflow-y-auto custom-scrollbar pr-2">
+                {signatures.map(sig => {
+                  // Get a short preview of the signature content
+                  const previewText = sig.content
+                    ? sig.content.replace(/[#*\[\]`>_]/g, '').replace(/\n/g, ' ').substring(0, 60)
+                    : '';
+                  
+                  return (
+                    <label
+                      key={sig.id}
+                      className={`flex items-start gap-4 p-3.5 rounded-2xl border cursor-pointer transition-all ${
+                        selectedSignatureId === sig.id
+                          ? 'border-amber-500/60 bg-amber-500/10'
+                          : 'border-white/8 bg-white/[0.02] hover:border-white/15'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="signature"
+                        value={sig.id}
+                        className="sr-only"
+                        checked={selectedSignatureId === sig.id}
+                        onChange={() => setSelectedSignatureId(sig.id)}
+                      />
+                      <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${selectedSignatureId === sig.id ? 'border-amber-500' : 'border-slate-600'}`}>
+                        {selectedSignatureId === sig.id && <div className="w-2 h-2 rounded-full bg-amber-500" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-white font-bold text-sm">
+                            ✍️ {sig.name}
+                          </p>
+                          {sig.is_default && (
+                            <span className="text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Default</span>
+                          )}
+                        </div>
+                        {previewText && (
+                          <div className="text-slate-500 text-[10px] mt-1.5 font-mono overflow-hidden">
+                            {previewText}
+                          </div>
+                        )}
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {/* ── Loading Signatures ── */}
+          {signaturesLoading && (
+            <div className="mt-4 pt-4 border-t border-white/5 shrink-0">
+              <div className="flex items-center gap-2 text-slate-500 text-[10px] font-medium">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Loading signatures...
+              </div>
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex gap-3 pt-6 shrink-0">
