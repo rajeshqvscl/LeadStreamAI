@@ -42,6 +42,17 @@ const Emails = () => {
   const [isTemplateGenerating, setIsTemplateGenerating] = useState(false);
   const [customTemplates, setCustomTemplates] = useState([]);
   
+  // ── Email-to-Lead mapping ref (survives page changes) ──
+  const emailToLeadRef = useRef({});
+  
+  // Update ref whenever emails change
+  // Accumulate email-to-lead mappings so they survive page changes
+  useEffect(() => {
+    emails.forEach(e => {
+      emailToLeadRef.current[e.id] = e.lead_id;
+    });
+  }, [emails]);
+  
   // ── Signature Selection State ──
   const [signatures, setSignatures] = useState([]);
   const [selectedSignatureId, setSelectedSignatureId] = useState(null);
@@ -285,18 +296,29 @@ const Emails = () => {
       detail: { id: taskId, title: 'AI Generation', subtitle: `Processing ${selectedIds.length} drafts...`, progress: 10, status: 'RUNNING' } 
     }));
 
-    const leadIds = [...selectedIds];
+    // Get actual lead IDs from the email-to-lead ref (survives page changes)
+    const leadIds = selectedIds
+      .map(id => emailToLeadRef.current[id])
+      .filter(Boolean);
+    if (leadIds.length === 0) {
+      showNotification('error', 'No valid leads selected for generation');
+      setShowTemplatePicker(false);
+      return;
+    }
     setSelectedIds([]);
     try {
       if (selectedTemplate === 'ai') {
-        await api.post('/api/generate-bulk-domain-drafts', { lead_ids: leadIds });
+        await api.post('/api/generate-bulk-domain-drafts', { lead_ids: leadIds, signature_id: selectedSignatureId || undefined });
         window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
           detail: { id: taskId, title: 'Generation Complete', subtitle: `Generated ${leadIds.length} drafts`, progress: 100, status: 'COMPLETED' } 
         }));
+        fetchEmails();
+        showNotification('success', `Generated ${leadIds.length} draft${leadIds.length > 1 ? 's' : ''} successfully`);
       } else {
         const res = await api.post('/api/bulk-generate-draft-from-template', {
           lead_ids: leadIds,
           template_name: selectedTemplate,
+          signature_id: selectedSignatureId || undefined,
         });
         const batchId = res.data.batch_id;
         if (!batchId) {
@@ -311,15 +333,19 @@ const Emails = () => {
               window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
                 detail: { id: taskId, title: `Applying ${selectedTemplate}`, subtitle: `${p.processed}/${p.total} leads...`, progress: Math.round((p.processed / p.total) * 100), status: p.status === 'running' ? 'RUNNING' : 'COMPLETED' } 
               }));
-              if (p.status === 'done' || p.status === 'error') {
+              if (p.status === 'done') {
                 clearInterval(pollInterval);
                 fetchEmails();
+                showNotification('success', `Template "${selectedTemplate}" applied successfully`);
+              } else if (p.status === 'error') {
+                clearInterval(pollInterval);
+                fetchEmails();
+                showNotification('error', 'Template generation failed for some leads');
               }
             } catch { clearInterval(pollInterval); }
           }, 1500);
         }
       }
-      fetchEmails();
     } catch (err) {
       window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
         detail: { id: taskId, title: 'Generation Failed', subtitle: 'Error in AI matrix', progress: 0, status: 'FAILED' } 

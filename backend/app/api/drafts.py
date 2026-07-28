@@ -916,8 +916,11 @@ def markdown_to_html(text, gmail_style=False):
     import re
     # Normalize newlines
     text = text.replace("\r\n", "\n")
-    # 1. Strip technical markers
-    text = text.replace("SIG_START", "").replace("SIG_END", "").replace("[[SIG_PLACEHOLDER]]", "")
+    # 1. Strip technical markers and entire signature blocks between them
+    # SIG_START...SIG_END blocks contain template-embedded signatures that should be
+    # completely removed — inject_signature() adds the sender's own signature later
+    text = re.sub(r'SIG_START.*?SIG_END', '', text, flags=re.DOTALL)
+    text = text.replace("[[SIG_PLACEHOLDER]]", "")
     # 1a. Resolve [[BACKEND_URL]] placeholder so images work in send flow
     backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
     text = text.replace("[[BACKEND_URL]]", backend_url)
@@ -1186,6 +1189,7 @@ class RejectRequest(BaseModel):
 class BulkDraftRequest(BaseModel):
     lead_ids: List[int]
     cc: Optional[str] = None
+    signature_id: Optional[int] = None
 
 class BulkSendRequest(BaseModel):
     lead_ids: List[int]
@@ -1368,79 +1372,42 @@ def get_sender_profile(user_id: Optional[str]) -> dict:
     }
 
 def get_hardcoded_signature_markdown(profile: dict) -> str:
-    """Returns the same signature that inject_signature() would use for this user,
-    but in markdown format. Mirrors the per-person detection logic to provide
-    the correct default signature in the frontend Signatures page."""
+    """Returns the user's saved signature (from user_signatures table) in markdown format,
+    with fallback to a simple text signature if no saved signatures exist."""
     raw_name = profile.get('full_name') or profile.get('username') or 'The Team'
     name = " ".join([p.capitalize() for p in raw_name.split()])
     title = profile.get('job_title') or 'Analyst'
     linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
     phone = profile.get('phone') or "8527083798"
 
-    raw_name_lower = (profile.get('full_name') or profile.get('username') or '').strip().lower()
-    is_palak = raw_name_lower == 'palak jain'
-    is_kajal = 'kajal' in raw_name_lower
-    is_yashika = 'yashika' in raw_name_lower or 'gupta' in raw_name_lower
-    is_ayush = 'ayush' in raw_name_lower
-    is_vismaya = 'vismaya' in raw_name_lower
+    # Use saved signature from user_signatures table if available
+    saved_sigs = profile.get('signatures', [])
+    if saved_sigs:
+        # Prefer default signature, else first one
+        default_sig = None
+        for s in saved_sigs:
+            if s.get('is_default'):
+                default_sig = s
+                break
+        if not default_sig:
+            default_sig = saved_sigs[0]
+        content = default_sig.get('content', '')
+        if content and content.strip():
+            first_name = name.split(' ')[0] if ' ' in name else name
+            content = content.replace('{{Sender Name}}', name)
+            content = content.replace('{{Sender First Name}}', first_name)
+            content = content.replace('{{Sender Title}}', title)
+            content = content.replace('{{Sender LinkedIn}}', linkedin)
+            content = content.replace('{{Sender Phone}}', phone)
+            return content
 
-    disclaimer_standard = "Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."
-    disclaimer_strict = "**Strictly Private and Confidential.**\n\nThe information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it."
-
-    if is_palak:
-        sig = f"""--
-*Thanks & Regards,*
-***{name}***
-*{title}*
-[Website](https://qvscl.com) | [LinkedIn]({linkedin})
-*{phone}*
-
-{disclaimer_standard}"""
-    elif is_kajal:
-        sig = f"""--
-*Thanks & Regards,*
-***{name}***
-*{title}*
-[Website](https://qvscl.com) | [LinkedIn]({linkedin})
-*{phone}*
-
-{disclaimer_standard}"""
-    elif is_ayush:
-        sig = f"""--
-*Thanks & Regards,*
-***{name}***
-*{title}*
-[Website](https://qvscl.com) | [LinkedIn]({linkedin})
-*{phone}*
-
-{disclaimer_strict}"""
-    elif is_yashika:
-        sig = f"""--
-*Thanks & Regards,*
-***{name}***
-*{title}*
-[Website](https://qvscl.com) | [LinkedIn]({linkedin})
-*{phone}*
-
-{disclaimer_strict}"""
-    elif is_vismaya:
-        sig = f"""--
+    # Minimal fallback — no disclaimer, no images, just contact info
+    return f"""--
 *Thanks & Regards,*
 ***{name}***
 *{title}*
 [Website](https://qvscl.com) | [LinkedIn]({linkedin})
 *{phone}*"""
-    else:
-        sig = f"""--
-*Thanks & Regards,*
-***{name}***
-*{title}*
-[Website](https://qvscl.com) | [LinkedIn]({linkedin})
-*{phone}*
-
-{disclaimer_standard}"""
-
-    return sig
 
 @router.get("/signatures/default-hardcoded")
 def get_default_hardcoded_signature(user_id: Optional[str] = Header(None, alias="X-User-Id")):
@@ -1750,9 +1717,8 @@ def _md_to_html(text: str) -> str:
     return text
 
 def inject_signature(body: str, profile: dict, lead_id: int) -> str:
-    """Appends the correct signature for the person sending the email.
-    Each person gets their own consistent hardcoded signature regardless of which template they use.
-    Signature designs are preserved exactly as they were before.
+    """Appends the user's saved signature (from user_signatures table) to the email body.
+    Falls back to a simple text signature if no saved signatures exist.
     Unsubscribe footer is added by email_service.py."""
     import re
     body_text = body.strip()
@@ -1804,63 +1770,29 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
     phone = profile.get('phone') or "8527083798"
 
-    # ── Check for custom/user-edited signature first ──
-    # Hardcoded per-person signature is the DEFAULT.
-    # Custom signature is only used when signature_mode == 'custom'
-    # AND a custom signature has been explicitly saved.
-    # signature_mode defaults to 'custom' in DB, but we only treat
-    # it as active if a non-empty custom signature also exists.
-    signature_mode = profile.get('signature_mode') or 'custom'
-    custom_signature = profile.get('signature')
-    if signature_mode == 'custom' and custom_signature and custom_signature.strip():
-        cs = custom_signature
-        first_name = name.split(' ')[0] if ' ' in name else name
-        cs = cs.replace('{{Sender Name}}', name)
-        cs = cs.replace('{{Sender First Name}}', first_name)
-        cs = cs.replace('{{Sender Title}}', title)
-        cs = cs.replace('{{Sender LinkedIn}}', linkedin)
-        cs = cs.replace('{{Sender Phone}}', phone)
-        return body_text + "\n\n" + cs
+    # ── Use saved signature from user_signatures table if available ──
+    saved_sigs = profile.get('signatures', [])
+    if saved_sigs:
+        # Prefer default signature, else first one
+        default_sig = None
+        for s in saved_sigs:
+            if s.get('is_default'):
+                default_sig = s
+                break
+        if not default_sig:
+            default_sig = saved_sigs[0]
+        sig_content = default_sig.get('content', '')
+        if sig_content and sig_content.strip():
+            first_name = name.split(' ')[0] if ' ' in name else name
+            sig_content = sig_content.replace('{{Sender Name}}', name)
+            sig_content = sig_content.replace('{{Sender First Name}}', first_name)
+            sig_content = sig_content.replace('{{Sender Title}}', title)
+            sig_content = sig_content.replace('{{Sender LinkedIn}}', linkedin)
+            sig_content = sig_content.replace('{{Sender Phone}}', phone)
+            return body_text + "\n\n" + sig_content
 
-    raw_name_lower = (profile.get('full_name') or profile.get('username') or '').strip().lower()
-    is_palak = raw_name_lower == 'palak jain'
-    is_kajal = 'kajal' in raw_name_lower
-    is_yashika = 'yashika' in raw_name_lower or 'gupta' in raw_name_lower
-    is_ayush = 'ayush' in raw_name_lower
-    is_vismaya = 'vismaya' in raw_name_lower
-
-    standard_disclaimer = """Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you."""
-
-    strict_disclaimer = """<strong>Strictly Private and Confidential.</strong><br><br>The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments."""
-
-    # Load qvscllogo.png as base64 once (only used by Palak)
-    try:
-        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", "qvscllogo.png"), "rb") as _f:
-            _b64_logo = base64.b64encode(_f.read()).decode()
-        _logo_data_uri = f"data:image/png;base64,{_b64_logo}"
-    except Exception:
-        _logo_data_uri = ""
-
-    # ---- Per-person hardcoded signatures ----
-    # Each person gets ONE consistent signature matching their original design.
-
-    if is_palak:
-        # Blue-themed, italic bold, with QVSCL logo (same as before)
-        sig_html = f"""<div style="font-family:Arial,Calibri,sans-serif;color:#0B2A6F;line-height:1.15;">
-<div style="color:#999;font-size:12px;">--</div>
-<div style="font-size:16px;font-weight:700;font-style:italic;margin:0;color:#0B2A6F;">Thanks &amp; Regards,</div>
-<div style="font-size:16px;font-weight:700;font-style:italic;margin:0;color:#0B2A6F;">{name}</div>
-<div style="font-size:15px;font-style:italic;margin:0;color:#0B2A6F;">{title}</div>
-<div style="font-size:15px;font-style:italic;margin:0;color:#0B2A6F;"><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> <span style="color:#1d5fd0;">/</span> <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></div>
-<div style="font-size:15px;font-style:italic;margin-top:2px;color:#0B2A6F;">{phone}</div>
-{f'<img src="{_logo_data_uri}" alt="QVSCL" width="110" style="margin-top:10px;width:110px;height:auto;display:block;">' if _logo_data_uri else ''}
-<div style="margin-top:10px;font-size:10px;line-height:1.4;color:#555555;max-width:600px;">{standard_disclaimer}</div>
-</div>"""
-
-    elif is_kajal:
-        # Standard grey italic + Company LinkedIn + Company Documents (same as before)
-        drive_link = '<a href="https://www.linkedin.com/company/qvscl/" style="color:#1d5fd0;text-decoration:underline;">Company LinkedIn</a><br><a href="https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link" style="color:#1d5fd0;text-decoration:underline;">Company Documents</a><br>'
-        sig_html = f"""
+    # ── Minimal fallback — no disclaimer, no images, just contact info ──
+    sig_html = f"""
 <div style="color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
 --<br>
 <i>Thanks &amp; Regards,</i><br>
@@ -1868,70 +1800,6 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 <i>{title}</i><br>
 <i><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> | <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></i><br>
 <i>{phone}</i><br>
-{drive_link}
-<div style="font-size: 10px; color: #000000; line-height: 1.2; margin-top: 6px;">
-{standard_disclaimer}
-</div>
-</div>"""
-
-    elif is_ayush:
-        # Standard grey italic + hospital banner + Strictly Private disclaimer (same as his template before)
-        backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
-        banner_img = f'<img src="{backend_url}/assets/PHOTO-2026-05-25-10-33-35.jpg" alt="Investment Opportunity Banner" width="420" height="126" style="margin-top: 10px; display: block;" />'
-        sig_html = f"""
-<div style="color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
---<br>
-<i>Thanks &amp; Regards,</i><br>
-<i><strong>{name}</strong></i><br>
-<i>{title}</i><br>
-<i><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> | <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></i><br>
-<i>{phone}</i><br>
-{banner_img}
-<div style="font-size: 10px; color: #000000; line-height: 1.2; margin-top: 6px;">
-{strict_disclaimer}
-</div>
-</div>"""
-
-    elif is_yashika:
-        # Standard grey italic + Strictly Private disclaimer (matching her AI Tech template)
-        sig_html = f"""
-<div style="color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
---<br>
-<i>Thanks &amp; Regards,</i><br>
-<i><strong>{name}</strong></i><br>
-<i>{title}</i><br>
-<i><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> | <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></i><br>
-<i>{phone}</i><br>
-<div style="font-size: 10px; color: #000000; line-height: 1.2; margin-top: 6px;">
-{strict_disclaimer}
-</div>
-</div>"""
-
-    elif is_vismaya:
-        # Standard grey italic with NO disclaimer (same as her template before)
-        sig_html = f"""
-<div style="color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
---<br>
-<i>Thanks &amp; Regards,</i><br>
-<i><strong>{name}</strong></i><br>
-<i>{title}</i><br>
-<i><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> | <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></i><br>
-<i>{phone}</i><br>
-</div>"""
-
-    else:
-        # Standard grey italic + standard disclaimer (same as before for all other users)
-        sig_html = f"""
-<div style="color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
---<br>
-<i>Thanks &amp; Regards,</i><br>
-<i><strong>{name}</strong></i><br>
-<i>{title}</i><br>
-<i><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> | <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></i><br>
-<i>{phone}</i><br>
-<div style="font-size: 10px; color: #000000; line-height: 1.2; margin-top: 6px;">
-{standard_disclaimer}
-</div>
 </div>"""
 
     # MUST separate signature from body with a blank line so markdown_to_html()
@@ -2818,14 +2686,15 @@ Thank you again for your consideration."""
 class TemplateDraftRequest(BaseModel):
     lead_id: int
     template_name: str  # e.g. "palak_mam_Draft_1"
+    signature_id: Optional[int] = None
 
 @router.post("/generate-draft-from-template")
 def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Generate a draft using a fixed custom template, replacing {{First Name}}, {{Company Name}} etc."""
-    return _generate_template_draft_inner(req.lead_id, req.template_name, user_id)
+    return _generate_template_draft_inner(req.lead_id, req.template_name, user_id, req.signature_id)
 
 
-def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Optional[str]) -> dict:
+def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Optional[str], signature_id: Optional[int] = None) -> dict:
     """Core logic for generating a template draft. Used by single and bulk endpoints."""
     try:
         conn = get_db_connection()
@@ -2881,6 +2750,24 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
 
         # Resolve sender fields for dynamic templates
         profile = get_sender_profile(user_id)
+
+        # If a specific signature_id is provided, override the profile's signature
+        # (cur/conn are already closed at this point, so open a fresh connection)
+        if signature_id:
+            try:
+                sig_conn = get_db_connection()
+                sig_cur = sig_conn.cursor()
+                sig_cur.execute("SELECT content FROM user_signatures WHERE id = %s AND user_id = %s", (signature_id, uid))
+                sig_row = sig_cur.fetchone()
+                sig_cur.close()
+                sig_conn.close()
+                if sig_row:
+                    sig_content = sig_row[0] if not isinstance(sig_row, dict) else sig_row['content']
+                    # Set signatures list to just this selected signature so inject_signature uses it
+                    profile['signatures'] = [{'content': sig_content, 'is_default': True}]
+                    logger.info(f"✅ Overrode profile signature with user_signatures id={signature_id}")
+            except Exception as sig_err:
+                logger.warning(f"Failed to fetch signature_id={signature_id}: {sig_err}")
         sender_full_name = profile.get('full_name') or profile.get('username') or "the team"
         sender_first_name = sender_full_name.split()[0] if sender_full_name else "Team"
         sender_title = (profile.get('job_title') or "").strip() or "Analyst"
@@ -3056,6 +2943,7 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
 class BulkTemplateDraftRequest(BaseModel):
     lead_ids: list[int]
     template_name: str
+    signature_id: Optional[int] = None
 
 import uuid as _uuid
 import threading as _threading
@@ -3080,7 +2968,7 @@ def bulk_generate_draft_from_template(req: BulkTemplateDraftRequest, user_id: Op
     def _run():
         try:
             with ThreadPoolExecutor(max_workers=3) as executor:
-                futures = {executor.submit(_generate_template_draft_inner, lid, req.template_name, user_id): lid for lid in req.lead_ids}
+                futures = {executor.submit(_generate_template_draft_inner, lid, req.template_name, user_id, req.signature_id): lid for lid in req.lead_ids}
                 for future in as_completed(futures):
                     lid = futures[future]
                     try:

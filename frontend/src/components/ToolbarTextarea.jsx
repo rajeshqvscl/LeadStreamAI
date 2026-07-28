@@ -112,7 +112,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
   const handleImageUpload = async () => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/png,image/jpeg,image/jpg,image/gif,image/webp,image/svg+xml';
+    // Allow all file types — backend will detect extension
     const MAX_SIZE = 10 * 1024 * 1024; // 10MB
     input.onchange = async (e) => {
       const file = e.target.files?.[0];
@@ -137,7 +137,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
   const handleFileUpload = async () => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.pdf,.doc,.docx,.xls,.xlsx';
+    // Allow all file types — backend will detect extension
     const MAX_SIZE = 15 * 1024 * 1024; // 15MB for documents
     input.onchange = async (e) => {
       const file = e.target.files?.[0];
@@ -150,9 +150,17 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
       const formData = new FormData();
       formData.append('file', file);
       try {
-        const res = await api.post('/api/upload-file', formData);
+        const isImage = file.type.startsWith('image/');
+        const endpoint = isImage ? '/api/upload-image' : '/api/upload-file';
+        const res = await api.post(endpoint, formData);
         const fileUrl = res.data.url;
-        insert(`[${file.name}](${fileUrl})`);
+        const ext = file.name.split('.').pop()?.toLowerCase() || '';
+        const imageExts = ['png','jpg','jpeg','gif','webp','svg','bmp','ico'];
+        if (isImage || imageExts.includes(ext)) {
+          insert(`![](${fileUrl})\n`);
+        } else {
+          insert(`[\u{1F4CE} ${file.name}](${fileUrl})`);
+        }
       } catch (err) {
         alert('Failed to upload file');
       } finally {

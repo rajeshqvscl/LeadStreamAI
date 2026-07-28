@@ -118,12 +118,27 @@ ALLOWED_DOCUMENT_TYPES = {
 
 @router.post("/upload-image")
 def upload_image(file: UploadFile = File(...)):
-    """Upload an image to the assets folder and return its URL path."""
-    if file.content_type not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(status_code=400, detail=f"Invalid image type: {file.content_type}. Allowed: PNG, JPG, GIF, WebP, SVG")
-    ext = ALLOWED_IMAGE_TYPES[file.content_type]
-    # Generate unique filename
+    """Upload an image to the assets folder and return its URL path.
+    Falls back to file extension detection if content-type is not recognized."""
     import time, random
+    
+    # Try content-type first, then fall back to extension
+    ext = ALLOWED_IMAGE_TYPES.get(file.content_type)
+    if not ext:
+        # Fall back to filename extension
+        name_lower = (file.filename or '').lower()
+        ext_map = {'.png': '.png', '.jpg': '.jpg', '.jpeg': '.jpg', '.gif': '.gif', '.webp': '.webp', '.svg': '.svg', '.bmp': '.bmp', '.ico': '.ico', '.tiff': '.tiff', '.tif': '.tiff'}
+        for fe, mapped_ext in ext_map.items():
+            if name_lower.endswith(fe):
+                ext = mapped_ext
+                break
+    if not ext:
+        # Last resort: use original file extension or fallback to generic
+        if '.' in (file.filename or ''):
+            ext = '.' + file.filename.rsplit('.', 1)[-1].lower()
+        else:
+            ext = '.bin'  # Generic fallback for extensionless files
+    
     ts = int(time.time() * 1000)
     rn = random.randint(1000, 9999)
     dest_name = f"upload_{ts}_{rn}{ext}"
@@ -135,14 +150,31 @@ def upload_image(file: UploadFile = File(...)):
 
 @router.post("/upload-file")
 def upload_file(file: UploadFile = File(...)):
-    """Upload a document file (PDF, DOCX, XLSX) to the assets folder and return its URL."""
-    if file.content_type not in ALLOWED_DOCUMENT_TYPES:
-        raise HTTPException(status_code=400, detail=f"Invalid document type: {file.content_type}. Allowed: PDF, DOC, DOCX, XLS, XLSX")
-    ext = ALLOWED_DOCUMENT_TYPES[file.content_type]
+    """Upload a document file (PDF, DOCX, XLSX) to the assets folder and return its URL.
+    Falls back to file extension detection if content-type is not recognized."""
     import time, random
+    
+    # Try content-type first, then fall back to extension
+    ext = ALLOWED_DOCUMENT_TYPES.get(file.content_type)
+    if not ext:
+        name_lower = (file.filename or '').lower()
+        doc_ext_map = {'.pdf': '.pdf', '.docx': '.docx', '.doc': '.doc', '.xls': '.xls', '.xlsx': '.xlsx', '.csv': '.csv', '.txt': '.txt', '.ppt': '.ppt', '.pptx': '.pptx'}
+        for fe, mapped_ext in doc_ext_map.items():
+            if name_lower.endswith(fe):
+                ext = mapped_ext
+                break
+    if not ext:
+        # Last resort: use original file extension or fallback to generic
+        if '.' in (file.filename or ''):
+            ext = '.' + file.filename.rsplit('.', 1)[-1].lower()
+        else:
+            ext = '.bin'  # Generic fallback for extensionless files
+    
     ts = int(time.time() * 1000)
     rn = random.randint(1000, 9999)
     safe_name = "".join(c for c in file.filename.rsplit('.', 1)[0] if c.isalnum() or c in ' _-')[:60]
+    if not safe_name:
+        safe_name = f"file_{ts}"  # For extensionless files with no safe name
     dest_name = f"{safe_name}_{ts}_{rn}{ext}"
     dest_path = os.path.join(ASSETS_DIR, dest_name)
     with open(dest_path, "wb") as f:

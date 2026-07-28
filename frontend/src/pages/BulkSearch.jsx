@@ -202,7 +202,7 @@ const BulkSearch = () => {
     setBulkProgress({ processed: 0, total: leadIds.length, status: 'running' });
     try {
       if (templateName === 'ai') {
-        await api.post('/api/generate-bulk-domain-drafts', { lead_ids: leadIds });
+        await api.post('/api/generate-bulk-domain-drafts', { lead_ids: leadIds, signature_id: signatureId || undefined });
         setBulkProgress({ processed: leadIds.length, total: leadIds.length, status: 'done', success: leadIds.length });
         showNotification('success', `AI draft${leadIds.length > 1 ? 's' : ''} generated for ${leadIds.length} lead${leadIds.length > 1 ? 's' : ''}.`);
         setShowTemplatePicker(false);
@@ -214,6 +214,7 @@ const BulkSearch = () => {
         const res = await api.post('/api/bulk-generate-draft-from-template', {
           lead_ids: leadIds,
           template_name: templateName,
+          signature_id: signatureId || undefined,
         });
         const batchId = res.data.batch_id;
         if (!batchId) {

@@ -385,6 +385,7 @@ const CompanyDatabase = () => {
       const res = await api.post('/api/companies/bulk-generate-drafts', {
         row_ids: ids,
         template_name: templateName === 'ai' ? null : templateName,
+        signature_id: signatureId || undefined,
       });
       const batchId = res.data.batch_id;
       if (!batchId) {

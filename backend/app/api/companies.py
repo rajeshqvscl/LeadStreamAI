@@ -1045,6 +1045,7 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
 class BulkCompanyDraftRequest(BaseModel):
     row_ids: list[int]
     template_name: Optional[str] = None
+    signature_id: Optional[int] = None
 
 import uuid as _uuid
 import threading as _threading
