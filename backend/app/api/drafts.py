@@ -1506,9 +1506,11 @@ class SignatureUpdateRequest(BaseModel):
 def list_signatures(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """List all saved signatures for the current user."""
     uid = normalize_user_id(user_id)
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    conn = None
+    cur = None
     try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         cur.execute(
             "SELECT id, name, content, is_default, created_at, updated_at, attachment_file FROM user_signatures WHERE user_id = %s ORDER BY is_default DESC, created_at ASC",
             (uid,)
@@ -1519,8 +1521,16 @@ def list_signatures(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         logger.error(f"Error listing signatures: {e}")
         return []
     finally:
-        cur.close()
-        conn.close()
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 @router.post("/signatures")
 def create_signature(req: SignatureCreateRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):

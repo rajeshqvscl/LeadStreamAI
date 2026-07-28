@@ -16,15 +16,18 @@ if DATABASE_URL:
     DATABASE_URL = DATABASE_URL.strip().strip("'").strip('"')
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-    # Ensure sslmode=require is present for Render PostgreSQL
-    # Use regex to precisely detect/replace any sslmode= parameter in the query string
-    if re.search(r'sslmode=', DATABASE_URL):
-        # Replace whatever sslmode value is there with 'require'
-        DATABASE_URL = re.sub(r'sslmode=\w+', 'sslmode=require', DATABASE_URL)
-    else:
-        # No sslmode param at all — append it
-        separator = "&" if "?" in DATABASE_URL else "?"
-        DATABASE_URL = f"{DATABASE_URL}{separator}sslmode=require"
+    # Ensure sslmode=require is present for Render/external PostgreSQL.
+    # Skip for localhost connections (local dev) where SSL is typically not available.
+    _is_local = bool(re.search(r'(localhost|127\.0\.0\.1|::1)', DATABASE_URL))
+    if not _is_local:
+        # Use regex to precisely detect/replace any sslmode= parameter in the query string
+        if re.search(r'sslmode=', DATABASE_URL):
+            # Replace whatever sslmode value is there with 'require'
+            DATABASE_URL = re.sub(r'sslmode=[\w-]+', 'sslmode=require', DATABASE_URL)
+        else:
+            # No sslmode param at all — append it
+            separator = "&" if "?" in DATABASE_URL else "?"
+            DATABASE_URL = f"{DATABASE_URL}{separator}sslmode=require"
 
 # ── Connection Pool (Thread-safe, used across scheduler workers & API routes) ──
 _db_pool = None
@@ -79,8 +82,7 @@ def _get_pool():
                 _db_pool = psycopg2.pool.ThreadedConnectionPool(
                     minconn, maxconn, DATABASE_URL,
                     cursor_factory=RealDictCursor,
-                    connect_timeout=10,
-                    sslmode='require'
+                    connect_timeout=10
                 )
     return _db_pool
 
@@ -101,8 +103,7 @@ def get_db_connection():
             return psycopg2.connect(
                 DATABASE_URL,
                 cursor_factory=RealDictCursor,
-                connect_timeout=10,
-                sslmode='require'
+                connect_timeout=10
             )
         except psycopg2.OperationalError as e:
             raise Exception(f"Failed to connect to database: {str(e)}")
@@ -679,6 +680,28 @@ def create_tables():
         conn.commit()
     except psycopg2.Error:
         conn.rollback()
+
+    # ── Migrate legacy users.signature → user_signatures ──
+    # If the user_signatures table was just created (or was empty), copy any
+    # existing data from the legacy users.signature column so every user gets
+    # their old signature as a named entry in the new table automatically.
+    try:
+        cur.execute("""
+            INSERT INTO user_signatures (user_id, name, content, is_default)
+            SELECT id, 'My Signature', signature, TRUE
+            FROM users
+            WHERE signature IS NOT NULL AND signature != ''
+            AND NOT EXISTS (
+                SELECT 1 FROM user_signatures WHERE user_signatures.user_id = users.id
+            );
+        """)
+        migrated = cur.rowcount
+        if migrated > 0:
+            logger.info(f"Migrated {migrated} legacy signature(s) to user_signatures table")
+        conn.commit()
+    except psycopg2.Error as e:
+        conn.rollback()
+        logger.warning(f"Could not migrate legacy signatures: {e}")
 
     conn.commit()
     cur.close()
