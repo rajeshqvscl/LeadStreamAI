@@ -295,26 +295,13 @@ def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header
             print(f"DEBUG: First processed row sample: {processed_rows[0]}")
             print(f"DEBUG: Source tab for first row: {processed_rows[0].get('_source_tab')}")
         
-        # Smart Sync vs Full Purge
+        # Full Purge: delete ALL existing data for this user before inserting new data
+        # This ensures the company database always reflects exactly what was imported,
+        # preventing accumulation of old data from previous imports
         if processed_rows:
-            # Extract unique source tabs from incoming data
-            tabs_to_clear = {r["_source_tab"] for r in processed_rows if "_source_tab" in r}
+            print(f"DEBUG: Performing FULL Registry Purge for user {uid} before inserting {len(processed_rows)} new rows")
+            cur.execute("DELETE FROM company_registry WHERE user_id = %s", (uid,))
             
-            # If the user is importing ALL tabs (or we have no tab info), we do a full wipe
-            # as requested ("purge old one and new should appear")
-            # We detect this if there are multiple tabs or if it's the "ALL_TABS" case
-            if len(tabs_to_clear) > 1 or not tabs_to_clear:
-                print(f"DEBUG: Performing FULL Registry Purge for user {uid}")
-                cur.execute("DELETE FROM company_registry WHERE user_id = %s", (uid,))
-            else:
-                # Specific Tab Sync: Only delete rows from that specific tab
-                tab_name = list(tabs_to_clear)[0]
-                print(f"DEBUG: Performing SMART Purge for tab '{tab_name}'")
-                cur.execute("""
-                    DELETE FROM company_registry 
-                    WHERE user_id = %s AND row_data->>'_source_tab' = %s
-                """, (uid, tab_name))
-                
             data_to_insert = []
             match_count = 0
             for row in processed_rows:

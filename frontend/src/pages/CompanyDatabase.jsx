@@ -37,6 +37,7 @@ const CompanyDatabase = () => {
   const [activeBrowsingTab, setActiveBrowsingTab] = useState(localStorage.getItem('active_browsing_tab') || 'ALL DATA');
 
   // Pagination State
+  const [pageSize, setPageSize] = useState(parseInt(localStorage.getItem('company_page_size')) || 100);
   const [currentPage, setCurrentPage] = useState(parseInt(localStorage.getItem('current_company_page')) || 1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
@@ -60,7 +61,7 @@ const CompanyDatabase = () => {
       const filtersJson = JSON.stringify(filtersCopy);
       const queryParams = new URLSearchParams({
         page: String(page),
-        limit: '100'
+        limit: String(pageSize)
       });
       queryParams.append('_t', String(Date.now()));
       if (search) queryParams.append('search', search);
@@ -69,8 +70,8 @@ const CompanyDatabase = () => {
       const response = await api.get(`/api/companies?${queryParams.toString()}`);
       setCompanies(response.data.companies || []);
       setTotalCount(response.data.total || 0);
-      const limit = response.data.limit || 500;
-      const pages = response.data.pages || Math.ceil((response.data.total || 0) / limit);
+      const returnedLimit = response.data.limit || pageSize;
+      const pages = response.data.pages || Math.ceil((response.data.total || 0) / returnedLimit);
       setTotalPages(pages);
       setCurrentPage(response.data.page || page);
       
@@ -93,7 +94,7 @@ const CompanyDatabase = () => {
     }, 400); // 400ms debounce
 
     return () => clearTimeout(handler);
-  }, [search, columnFilters, activeBrowsingTab, currentPage]);
+  }, [search, columnFilters, activeBrowsingTab, currentPage, pageSize]);
 
   const fetchTabs = async () => {
     try {
@@ -969,7 +970,7 @@ const CompanyDatabase = () => {
             <tbody className="divide-y divide-white/[0.03]">
               {sortedCompanies.map((company, i) => (
                 <tr key={company.id} className={`hover:bg-blue-500/[0.04] transition-all group ${selectedIds.includes(company.id) ? 'bg-blue-500/[0.06]' : ''}`}>
-                  <td className="px-3 py-3 text-center text-[11px] font-mono text-slate-600">{(currentPage - 1) * 100 + i + 1}</td>
+                  <td className="px-3 py-3 text-center text-[11px] font-mono text-slate-600">{(currentPage - 1) * pageSize + i + 1}</td>
                   <td className="px-3 py-3 text-center">
                     <input
                       type="checkbox"
@@ -1071,14 +1072,36 @@ const CompanyDatabase = () => {
           <div className="bg-[#0d1117]/80 border-t border-white/5 flex items-center justify-between px-6 py-2.5 text-[10px] font-mono text-slate-500">
             <span>
               {totalCount > 0
-                ? `Showing ${(currentPage - 1) * 100 + 1}–${Math.min(currentPage * 100, totalCount)} of ${totalCount} entries`
+                ? `Showing ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, totalCount)} of ${totalCount} entries`
                 : `${sortedCompanies.length} entries`}
             </span>
             <span className="flex items-center gap-4">
               {sortConfig.key && (
                 <span>Sorted by <span className="text-blue-400 font-semibold">{sortConfig.key.replace(/_/g, ' ')}</span> ({sortConfig.direction === 'asc' ? 'A→Z' : 'Z→A'})</span>
               )}
-              <span>{selectedIds.length > 0 ? `${selectedIds.length} selected` : ''}</span>
+              <span className="flex items-center gap-3">
+                <span>{selectedIds.length > 0 ? `${selectedIds.length} selected` : ''}</span>
+                <span className="w-px h-3 bg-white/10" />
+                <span className="flex items-center gap-1.5">
+                  <span className="text-[8px] text-slate-600 uppercase tracking-wider">Rows:</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => {
+                      const newSize = parseInt(e.target.value);
+                      setPageSize(newSize);
+                      localStorage.setItem('company_page_size', String(newSize));
+                      setCurrentPage(1);
+                    }}
+                    className="appearance-none bg-transparent border border-white/10 rounded-md px-2 py-0.5 text-[10px] font-bold text-slate-400 focus:outline-none focus:border-blue-500/30 cursor-pointer hover:border-white/20 transition-colors"
+                  >
+                    <option value={25} className="bg-[#0d1117]">25</option>
+                    <option value={50} className="bg-[#0d1117]">50</option>
+                    <option value={100} className="bg-[#0d1117]">100</option>
+                    <option value={200} className="bg-[#0d1117]">200</option>
+                    <option value={500} className="bg-[#0d1117]">500</option>
+                  </select>
+                </span>
+              </span>
             </span>
           </div>
         )}
