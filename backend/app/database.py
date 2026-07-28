@@ -1,4 +1,5 @@
 import os
+import re
 import logging
 import threading
 import psycopg2
@@ -16,7 +17,12 @@ if DATABASE_URL:
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
     # Ensure sslmode=require is present for Render PostgreSQL
-    if "sslmode=require" not in DATABASE_URL and "sslmode" not in DATABASE_URL:
+    # Use regex to precisely detect/replace any sslmode= parameter in the query string
+    if re.search(r'sslmode=', DATABASE_URL):
+        # Replace whatever sslmode value is there with 'require'
+        DATABASE_URL = re.sub(r'sslmode=\w+', 'sslmode=require', DATABASE_URL)
+    else:
+        # No sslmode param at all — append it
         separator = "&" if "?" in DATABASE_URL else "?"
         DATABASE_URL = f"{DATABASE_URL}{separator}sslmode=require"
 
@@ -73,7 +79,8 @@ def _get_pool():
                 _db_pool = psycopg2.pool.ThreadedConnectionPool(
                     minconn, maxconn, DATABASE_URL,
                     cursor_factory=RealDictCursor,
-                    connect_timeout=10
+                    connect_timeout=10,
+                    sslmode='require'
                 )
     return _db_pool
 
@@ -94,7 +101,8 @@ def get_db_connection():
             return psycopg2.connect(
                 DATABASE_URL,
                 cursor_factory=RealDictCursor,
-                connect_timeout=10
+                connect_timeout=10,
+                sslmode='require'
             )
         except psycopg2.OperationalError as e:
             raise Exception(f"Failed to connect to database: {str(e)}")
