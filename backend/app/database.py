@@ -15,6 +15,10 @@ if DATABASE_URL:
     DATABASE_URL = DATABASE_URL.strip().strip("'").strip('"')
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    # Ensure sslmode=require is present for Render PostgreSQL
+    if "sslmode" not in DATABASE_URL:
+        separator = "&" if "?" in DATABASE_URL else "?"
+        DATABASE_URL = f"{DATABASE_URL}{separator}sslmode=require"
 
 # ── Connection Pool (Thread-safe, used across scheduler workers & API routes) ──
 _db_pool = None

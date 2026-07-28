@@ -64,7 +64,11 @@ async def scheduler_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    create_tables()
+    try:
+        create_tables()
+    except Exception as e:
+        logger.error(f"Failed to create/verify tables on startup: {e}")
+        logger.warning("App will still start — DB may be temporarily unavailable")
     t1 = asyncio.create_task(scheduler_loop())
     t2 = asyncio.create_task(maintenance_loop())
     yield
