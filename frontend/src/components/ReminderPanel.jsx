@@ -112,9 +112,9 @@ const ReminderPanel = () => {
     <>
       {/* Floating Bell */}
       <button onClick={() => setShowAlerts(true)}
-        className="fixed bottom-6 right-6 z-[300] w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 border border-white/10 shadow-2xl flex items-center justify-center hover:scale-105 transition-all cursor-pointer group"
+        className="fixed bottom-20 right-6 z-[300] w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 border border-white/10 shadow-2xl flex items-center justify-center hover:scale-105 transition-all cursor-pointer group"
         title="Reminders">
-        <Bell className="w-6 h-6 text-white" />
+        <Bell className="w-5 h-5 text-white" />
         {(reminders.length > 0 || urgent.pending_followups_count > 0 || urgent.pending_drafts_count > 0) && (
           <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-rose-500 text-[9px] font-black text-white flex items-center justify-center shadow-lg">
             {reminders.length + (urgent.pending_followups_count > 0 ? urgent.pending_followups_count : 0) + (urgent.pending_drafts_count > 0 ? urgent.pending_drafts_count : 0)}

@@ -82,6 +82,7 @@ const Layout = () => {
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const [tasks, setTasks] = useState([]);
   const [isMinimized, setIsMinimized] = useState(false);
+  const [showSystemMatrix, setShowSystemMatrix] = useState(true);
 
   useEffect(() => {
     const handleTask = (e) => {
@@ -296,10 +297,22 @@ const Layout = () => {
               <span className="text-[9px] font-semibold text-slate-500">today</span>
             </div>
           </div>
-          <div className="bg-black/20 border border-white/5 px-4 py-2 rounded-[10px] flex items-center gap-3">
-            <div className="text-[10px] font-extrabold text-[#475569] uppercase tracking-[1px]">System Matrix</div>
-            <div className="text-[14px] font-black text-white font-mono min-w-[80px]">{time}</div>
-            <div className="inline-flex items-center px-1.5 py-0.5 border border-green-500/20 rounded-[4px] text-[8px] font-bold text-green-500 bg-green-500/10 tracking-[0.5px]">SYNCED</div>
+          <div className="bg-black/20 border border-white/5 px-3 py-2 rounded-[10px] flex items-center gap-2.5 transition-all">
+            <button
+              onClick={() => setShowSystemMatrix(!showSystemMatrix)}
+              className="flex items-center gap-1.5 text-[10px] font-extrabold text-[#475569] uppercase tracking-[1px] hover:text-slate-300 transition-all cursor-pointer shrink-0"
+              title={showSystemMatrix ? 'Collapse System Matrix' : 'Expand System Matrix'}
+            >
+              <span className={`transition-transform duration-300 ${showSystemMatrix ? 'rotate-0' : '-rotate-90'}`}>▼</span>
+              System Matrix
+            </button>
+            {showSystemMatrix && (
+              <div className="flex items-center gap-2.5 animate-in fade-in slide-in-from-left duration-300">
+                <div className="w-px h-4 bg-white/10" />
+                <div className="text-[14px] font-black text-white font-mono min-w-[80px]">{time}</div>
+                <div className="inline-flex items-center px-1.5 py-0.5 border border-green-500/20 rounded-[4px] text-[8px] font-bold text-green-500 bg-green-500/10 tracking-[0.5px]">SYNCED</div>
+              </div>
+            )}
           </div>
         </div>
 
