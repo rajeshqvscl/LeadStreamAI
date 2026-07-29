@@ -144,6 +144,16 @@ def format_outreach_html(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _get_attachment_files_for_subject(subject: str, template_name: Optional[str] = None) -> list:
+    """Returns the list of filenames (as plain strings) to attach for a given template.
+    Delegates to drafts.py's TEMPLATE_ATTACHMENT_MAP via _get_template_attachments."""
+    if template_name:
+        try:
+            from app.api.drafts import _get_template_attachments
+            atts = _get_template_attachments(template_name)
+            # atts is a list of dicts like [{"name": "file.pdf"}, ...]
+            return [a["name"] for a in atts if isinstance(a, dict) and a.get("name")]
+        except Exception as e:
+            logger.error(f"Error getting template attachments for {template_name}: {e}")
     return []
 
 
@@ -164,9 +174,12 @@ def _get_signature_attachments(user_id: Optional[int]) -> list:
         row = cur.fetchone()
         cur.close()
         conn.close()
-        if not row or not row.get('attachment_file'):
+        if not row:
             return []
-        raw = row['attachment_file']
+        # row is a tuple because of regular cursor
+        raw = row[0] if isinstance(row, (tuple, list)) else (row.get('attachment_file') if hasattr(row, 'get') else None)
+        if not raw:
+            return []
         filenames = [f.strip() for f in raw.split(',') if f.strip()]
         if not filenames:
             return []

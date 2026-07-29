@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Rocket, Search, ChevronDown, CheckCircle, Mail, User, Linkedin,
@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import axios from 'axios';
 import api from '../services/api';
+import SignaturePicker from '../components/SignaturePicker';
 
 const Leads = () => {
   const navigate = useNavigate();
@@ -38,12 +39,44 @@ const Leads = () => {
 
   // Template picker
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [templatePickerStep, setTemplatePickerStep] = useState(0); // 0 = templates, 1 = signatures
   const [customTemplates, setCustomTemplates] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState('ai'); // 'ai' or template name
   const [isTemplateGenerating, setIsTemplateGenerating] = useState(false);
   const abortControllerRef = useRef(null);
   const pollIntervalRef = useRef(null);
   const currentTaskIdRef = useRef(null);
+
+  // ── Signature Selection State ──
+  const userId = JSON.parse(localStorage.getItem('user') || '{}').id || 'admin';
+  const [signatures, setSignatures] = useState([]);
+  const [selectedSignatureId, setSelectedSignatureId] = useState(null);
+  const [signaturesLoading, setSignaturesLoading] = useState(false);
+
+  const fetchSignatures = useCallback(async () => {
+    setSignaturesLoading(true);
+    try {
+      const res = await api.get('/api/signatures', { headers: { 'X-User-Id': userId } });
+      const sigs = res.data || [];
+      setSignatures(sigs);
+      const defaultSig = sigs.find(s => s.is_default) || sigs[0];
+      if (defaultSig) setSelectedSignatureId(defaultSig.id);
+    } catch (err) {
+      console.error('Failed to fetch signatures', err);
+    } finally {
+      setSignaturesLoading(false);
+    }
+  }, [userId]);
+
+  // Fetch signatures when the template picker opens
+  useEffect(() => {
+    if (showTemplatePicker) {
+      setTemplatePickerStep(0);
+      setSelectedTemplate('ai');
+      setSelectedSignatureId(null);
+      fetchSignatures();
+    }
+  }, [showTemplatePicker, fetchSignatures]);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [isCreatingLead, setIsCreatingLead] = useState(false);
@@ -430,7 +463,7 @@ const Leads = () => {
       if (selectedTemplate === 'ai') {
         const controller = new AbortController();
         abortControllerRef.current = controller;
-        await api.post('/api/generate-bulk-domain-drafts', { lead_ids: leadIds }, { signal: controller.signal });
+        await api.post('/api/generate-bulk-domain-drafts', { lead_ids: leadIds, signature_id: selectedSignatureId || undefined }, { signal: controller.signal });
         abortControllerRef.current = null;
         if (currentTaskIdRef.current !== taskId) return; // was cancelled
         window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
@@ -441,6 +474,7 @@ const Leads = () => {
         const res = await api.post('/api/bulk-generate-draft-from-template', {
           lead_ids: leadIds,
           template_name: selectedTemplate,
+          signature_id: selectedSignatureId || undefined,
         });
         const batchId = res.data.batch_id;
         if (!batchId) {
@@ -1451,83 +1485,133 @@ const Leads = () => {
         </>
       )}
 
-      {/* Template Picker Modal */}
+      {/* Template Picker Modal (2-Step Wizard) */}
       {showTemplatePicker && (
         <>
           <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[5000] animate-in fade-in duration-300" onClick={() => setShowTemplatePicker(false)} />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-[#0d1117] border border-white/10 rounded-3xl shadow-[0_0_60px_rgba(0,0,0,0.6)] z-[5001] animate-in zoom-in-95 duration-300 overflow-hidden">
-            <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 via-purple-500 to-rose-500" />
-            <div className="p-8">
-              <div className="flex items-center justify-between mb-6">
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-[#0d1117] border border-white/10 rounded-3xl shadow-[0_0_60px_rgba(0,0,0,0.6)] z-[5001] animate-in zoom-in-95 duration-300 flex flex-col max-h-[85vh]">
+            <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 via-purple-500 to-rose-500 shrink-0" />
+            <div className="p-8 flex flex-col min-h-0">
+              <div className="flex items-center justify-between mb-2 shrink-0">
                 <div>
                   <h2 className="text-lg font-black text-white tracking-tight flex items-center gap-2">
-                    <Sparkles className="w-5 h-5 text-blue-400" /> Choose Draft Template
+                    <Sparkles className="w-5 h-5 text-blue-400" />
+                    {templatePickerStep === 0 ? 'Choose Draft Template' : 'Choose Signature'}
                   </h2>
                   <p className="text-slate-500 text-[11px] mt-0.5 font-medium">
                     Generating for <span className="text-white font-bold">{selectedLeads.size}</span> selected lead{selectedLeads.size > 1 ? 's' : ''}
                   </p>
                 </div>
-                <button onClick={() => setShowTemplatePicker(false)} className="text-slate-500 hover:text-white transition-colors cursor-pointer">
+                <button onClick={() => setShowTemplatePicker(false)} className="text-slate-500 hover:text-white transition-colors cursor-pointer shrink-0">
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <div className="space-y-3 mb-8">
-                {/* Regular AI option */}
-                <label className={`flex items-start gap-4 p-4 rounded-2xl border cursor-pointer transition-all ${selectedTemplate === 'ai' ? 'border-blue-500/60 bg-blue-500/10' : 'border-white/8 bg-white/[0.02] hover:border-white/15'}`}>
-                  <input type="radio" name="template" value="ai" className="sr-only" checked={selectedTemplate === 'ai'} onChange={() => setSelectedTemplate('ai')} />
-                  <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${selectedTemplate === 'ai' ? 'border-blue-500' : 'border-slate-600'}`}>
-                    {selectedTemplate === 'ai' && <div className="w-2 h-2 rounded-full bg-blue-500" />}
-                  </div>
-                  <div>
-                    <p className="text-white font-bold text-sm flex items-center gap-2">
-                      🤖 Regular AI Draft
-                      <span className="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Default</span>
-                    </p>
-                    <p className="text-slate-500 text-[11px] mt-0.5">AI generates a personalized email based on the lead's profile, industry, and persona.</p>
-                  </div>
-                </label>
-
-                {/* Custom templates */}
-                {customTemplates.map(tpl => (
-                  <label key={tpl.name} className={`flex items-start gap-4 p-4 rounded-2xl border cursor-pointer transition-all ${selectedTemplate === tpl.name ? 'border-purple-500/60 bg-purple-500/10' : 'border-white/8 bg-white/[0.02] hover:border-white/15'}`}>
-                    <input type="radio" name="template" value={tpl.name} className="sr-only" checked={selectedTemplate === tpl.name} onChange={() => setSelectedTemplate(tpl.name)} />
-                    <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${selectedTemplate === tpl.name ? 'border-purple-500' : 'border-slate-600'}`}>
-                      {selectedTemplate === tpl.name && <div className="w-2 h-2 rounded-full bg-purple-500" />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white font-bold text-sm flex items-center gap-2">
-                        📝 {tpl.name}
-                        <span className="text-[9px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Custom</span>
-                      </p>
-                      <p className="text-slate-500 text-[11px] mt-0.5">{tpl.description || 'Custom template with lead name & company auto-filled.'}</p>
-                      <p className="text-slate-600 text-[10px] mt-1.5 font-mono truncate">
-                        SUBJECT: {(() => {
-                          if (tpl.subject) return tpl.subject;
-                          if (!tpl.content) return "—";
-                          const lines = tpl.content.split('\n');
-                          const subLine = lines.find(l => l.trim().toLowerCase().startsWith('subject:'));
-                          if (subLine) return subLine.replace(/^subject:/i, '').trim();
-                          return "—";
-                        })()}
-                      </p>
-                    </div>
-                  </label>
-                ))}
+              {/* Step Indicator */}
+              <div className="flex items-center gap-2 mb-5 shrink-0">
+                <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${templatePickerStep === 0 ? 'bg-blue-500/15 text-blue-400 border border-blue-500/20' : 'bg-white/5 text-slate-500 border border-white/5'}`}>
+                  {templatePickerStep === 0 ? <div className="w-1.5 h-1.5 rounded-full bg-blue-500" /> : <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+                  1/2 · Draft Template
+                </div>
+                <div className="w-5 h-px bg-white/10" />
+                <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${templatePickerStep === 1 ? 'bg-amber-500/15 text-amber-400 border border-amber-500/20' : 'bg-white/5 text-slate-500 border border-white/5'}`}>
+                  {templatePickerStep === 1 && <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
+                  2/2 · Signature
+                </div>
               </div>
 
-              <div className="flex gap-3">
-                <button onClick={() => setShowTemplatePicker(false)} className="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 font-bold text-xs uppercase tracking-widest border border-white/5 cursor-pointer transition-colors">
-                  Cancel
-                </button>
-                <button
-                  onClick={handleGenerateWithTemplate}
-                  disabled={isTemplateGenerating}
-                  className="flex-[2] py-3 px-6 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer transition-all"
-                >
-                  {isTemplateGenerating ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</> : <><Sparkles className="w-4 h-4" /> Generate {selectedLeads.size} Draft{selectedLeads.size > 1 ? 's' : ''}</>}
-                </button>
-              </div>
+              {/* ── STEP 1/2: Templates ── */}
+              {templatePickerStep === 0 && (
+                <>
+                  <div className="space-y-3 flex-1 overflow-y-auto custom-scrollbar pr-3 min-h-0">
+                    {/* Regular AI option */}
+                    <label className={`flex items-start gap-4 p-4 rounded-2xl border cursor-pointer transition-all ${selectedTemplate === 'ai' ? 'border-blue-500/60 bg-blue-500/10' : 'border-white/8 bg-white/[0.02] hover:border-white/15'}`}>
+                      <input type="radio" name="template" value="ai" className="sr-only" checked={selectedTemplate === 'ai'} onChange={() => setSelectedTemplate('ai')} />
+                      <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${selectedTemplate === 'ai' ? 'border-blue-500' : 'border-slate-600'}`}>
+                        {selectedTemplate === 'ai' && <div className="w-2 h-2 rounded-full bg-blue-500" />}
+                      </div>
+                      <div>
+                        <p className="text-white font-bold text-sm flex items-center gap-2">
+                          🤖 Regular AI Draft
+                          <span className="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Default</span>
+                        </p>
+                        <p className="text-slate-500 text-[11px] mt-0.5">AI generates a personalized email based on the lead's profile, industry, and persona.</p>
+                      </div>
+                    </label>
+
+                    {/* Custom templates */}
+                    {customTemplates.map(tpl => (
+                      <label key={tpl.name} className={`flex items-start gap-4 p-4 rounded-2xl border cursor-pointer transition-all ${selectedTemplate === tpl.name ? 'border-purple-500/60 bg-purple-500/10' : 'border-white/8 bg-white/[0.02] hover:border-white/15'}`}>
+                        <input type="radio" name="template" value={tpl.name} className="sr-only" checked={selectedTemplate === tpl.name} onChange={() => setSelectedTemplate(tpl.name)} />
+                        <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${selectedTemplate === tpl.name ? 'border-purple-500' : 'border-slate-600'}`}>
+                          {selectedTemplate === tpl.name && <div className="w-2 h-2 rounded-full bg-purple-500" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white font-bold text-sm flex items-center gap-2">
+                            📝 {tpl.name}
+                            <span className="text-[9px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Custom</span>
+                          </p>
+                          <p className="text-slate-500 text-[11px] mt-0.5">{tpl.description || 'Custom template with lead name & company auto-filled.'}</p>
+                          <p className="text-slate-600 text-[10px] mt-1.5 font-mono truncate">
+                            SUBJECT: {(() => {
+                              if (tpl.subject) return tpl.subject;
+                              if (!tpl.content) return "—";
+                              const lines = tpl.content.split('\n');
+                              const subLine = lines.find(l => l.trim().toLowerCase().startsWith('subject:'));
+                              if (subLine) return subLine.replace(/^subject:/i, '').trim();
+                              return "—";
+                            })()}
+                          </p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+
+                  {/* Actions - Step 1 */}
+                  <div className="flex gap-3 pt-6 shrink-0">
+                    <button onClick={() => setShowTemplatePicker(false)} className="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 font-bold text-xs uppercase tracking-widest border border-white/5 cursor-pointer transition-colors">
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => setTemplatePickerStep(1)}
+                      className="flex-[2] py-3 px-6 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 cursor-pointer transition-all"
+                    >
+                      Next <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* ── STEP 2/2: Signature ── */}
+              {templatePickerStep === 1 && (
+                <>
+                  <div className="flex-1 overflow-y-auto custom-scrollbar pr-3 min-h-0">
+                    <SignaturePicker
+                      signatures={signatures}
+                      loading={signaturesLoading}
+                      selectedId={selectedSignatureId}
+                      onSelect={(id, name) => setSelectedSignatureId(id)}
+                    />
+                  </div>
+
+                  {/* Actions - Step 2 */}
+                  <div className="flex gap-3 pt-6 shrink-0 border-t border-white/5 mt-6">
+                    <button
+                      onClick={() => setTemplatePickerStep(0)}
+                      className="flex items-center justify-center gap-2 py-3 px-5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 font-bold text-xs uppercase tracking-widest border border-white/5 cursor-pointer transition-colors"
+                    >
+                      <ChevronLeft className="w-4 h-4" /> Back
+                    </button>
+                    <button
+                      onClick={handleGenerateWithTemplate}
+                      disabled={isTemplateGenerating}
+                      className="flex-[2] py-3 px-6 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer transition-all"
+                    >
+                      {isTemplateGenerating ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</> : <><Sparkles className="w-4 h-4" /> Generate {selectedLeads.size} Draft{selectedLeads.size > 1 ? 's' : ''}</>}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </>

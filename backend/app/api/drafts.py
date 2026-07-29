@@ -1421,17 +1421,26 @@ def get_default_hardcoded_signature(user_id: Optional[str] = Header(None, alias=
     }
 
 @router.get("/assets/pdfs")
-def list_available_pdfs():
-    """List all files available in the assets directory for attachment selection."""
+def list_available_pdfs(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """List all files available for attachment selection.
+    Shows shared system files + only this user's uploaded files (sig_{uid}_* prefix)."""
     asset_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets")
+    uid = normalize_user_id(user_id) if user_id else None
     files = []
     try:
         for f in sorted(os.listdir(asset_dir)):
-            if f.lower().endswith('.pdf') or f.lower().endswith('.docx') or f.lower().endswith('.doc') or f.lower().endswith('.xlsx') or f.lower().endswith('.jpg') or f.lower().endswith('.png') or f.lower().endswith('.pptx'):
-                files.append({
-                    "filename": f,
-                    "path": f"/assets/{f}",
-                })
+            # Skip legacy sig_att_* files (old upload format)
+            if f.startswith("sig_att_"):
+                continue
+            # Skip other users' sig_{uid}_ prefixed files
+            if uid and f.startswith("sig_") and not f.startswith(f"sig_{uid}_"):
+                continue
+            # Skip user files when no user context
+            if not uid and f.startswith("sig_"):
+                continue
+            ext_ok = any(f.lower().endswith(ext) for ext in ['.pdf', '.docx', '.doc', '.xlsx', '.jpg', '.png', '.pptx'])
+            if ext_ok:
+                files.append({"filename": f, "path": f"/assets/{f}"})
         return files
     except Exception as e:
         logger.error(f"Error listing assets: {e}")
@@ -1440,18 +1449,43 @@ def list_available_pdfs():
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets")
 
 @router.post("/signatures/upload-attachment")
-def upload_signature_attachment(file: UploadFile = File(...)):
-    """Upload any file type as an attachment for signatures."""
+def upload_signature_attachment(file: UploadFile = File(...), user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Upload any file type — saved with sig_{uid}_ prefix for per-user isolation."""
     import uuid
+    uid = normalize_user_id(user_id) if user_id else "shared"
     safe_name = file.filename.replace(" ", "_").replace("(", "").replace(")", "")
-    unique_name = f"sig_att_{uuid.uuid4().hex[:8]}_{safe_name}"
+    unique_name = f"sig_{uid}_{safe_name}"
     dest_path = os.path.join(ASSETS_DIR, unique_name)
+    # Avoid overwrites
+    if os.path.exists(dest_path):
+        base, ext = os.path.splitext(unique_name)
+        unique_name = f"{base}_{uuid.uuid4().hex[:4]}{ext}"
+        dest_path = os.path.join(ASSETS_DIR, unique_name)
     try:
         with open(dest_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
         return {"filename": unique_name, "message": "Attachment uploaded successfully"}
     except Exception as e:
         logger.error(f"Error uploading attachment: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/signatures/attachment/{filename}")
+def delete_signature_attachment(filename: str, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Delete a signature attachment file — only if owned by the current user."""
+    safe_name = os.path.basename(filename)
+    uid = normalize_user_id(user_id) if user_id else None
+    # Only allow deleting files owned by this user (prefixed with sig_{uid}_)
+    if uid and not safe_name.startswith(f"sig_{uid}_"):
+        raise HTTPException(status_code=403, detail="You can only delete your own uploaded files")
+    file_path = os.path.join(ASSETS_DIR, safe_name)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"File not found: {safe_name}")
+    try:
+        os.remove(file_path)
+        logger.info(f"🗑️ Deleted attachment: {safe_name}")
+        return {"filename": safe_name, "message": "File deleted successfully"}
+    except Exception as e:
+        logger.error(f"Error deleting attachment {safe_name}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ────────────────────────────────────────────────────────
@@ -1555,14 +1589,18 @@ def update_signature(sig_id: int, req: SignatureUpdateRequest, user_id: Optional
             updates.append("is_default = %s")
             params.append(req.is_default)
         
-        if not updates:
+        if not updates and req.attachment_file is None:
             return {"message": "No fields to update"}
         
         updates.append("updated_at = NOW()")
         
         if req.attachment_file is not None:
-            updates.append("attachment_file = %s")
-            params.append(req.attachment_file)
+            # Empty string means "clear the attachment_file"
+            if req.attachment_file == '':
+                updates.append("attachment_file = NULL")
+            else:
+                updates.append("attachment_file = %s")
+                params.append(req.attachment_file)
         
         params.append(sig_id)  # Must be LAST — used by WHERE id = %s
         
@@ -3009,7 +3047,24 @@ def get_bulk_progress(batch_id: str):
 # and physically attached when the email is sent from email_service.py).
 # ---------------------------------------------------------------------------
 TEMPLATE_ATTACHMENT_MAP = {
-    "ayush_sir_hospital_draft": [],
+    # Palak templates — Company Profile + Lalit Huria Profile
+    "palak_mam_corporate_advisory": [
+        {"name": "QVSCL Company Profile.pdf"},
+        {"name": "Lalit_Huria_Profile.pdf"},
+    ],
+    "palak_mam_mna_fundraising": [
+        {"name": "QVSCL Company Profile.pdf"},
+        {"name": "Lalit_Huria_Profile.pdf"},
+    ],
+
+    # Ayush template — Company Profile + Lalit Huria Profile + Eastern UP Teaser
+    "ayush_sir_hospital_draft": [
+        {"name": "QVSCL Company Profile.pdf"},
+        {"name": "Lalit_Huria_Profile.pdf"},
+        {"name": "eastern_up_hospital_investor_teaser_v5b_investorfriendly (2).pdf"},
+    ],
+
+    # All other templates — no attachments
     "yashika_draft_ai_tech": [],
     "yashika_draft_agritech": [],
     "kajal_mam_agritech": [],
@@ -3017,8 +3072,6 @@ TEMPLATE_ATTACHMENT_MAP = {
     "kajal_mam_jv": [],
     "kajal_mam_hyphen": [],
     "kajal_mam_qvscl_intro": [],
-    "palak_mam_corporate_advisory": [],
-    "palak_mam_mna_fundraising": [],
     "vismaya_leadstream": [],
 }
 
@@ -3026,7 +3079,11 @@ TEMPLATE_ATTACHMENT_MAP = {
 _DEFAULT_ATTACHMENTS = []
 
 def _get_template_attachments(template_name: Optional[str]) -> list:
-    return []
+    """Returns the list of attachment dicts for a given template name.
+    Falls back to _DEFAULT_ATTACHMENTS if the template is not in the map."""
+    if template_name and template_name in TEMPLATE_ATTACHMENT_MAP:
+        return TEMPLATE_ATTACHMENT_MAP[template_name]
+    return _DEFAULT_ATTACHMENTS
 
 @router.get("/pending-drafts")
 @router.get("/emails")
@@ -3951,6 +4008,23 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
                 groups[group_key] = []
             groups[group_key].append(lead_dict)
             
+        # ── Load sender profile and resolve signature ──
+        profile = get_sender_profile(user_id)
+        if req.signature_id:
+            try:
+                sig_conn = get_db_connection()
+                sig_cur = sig_conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+                sig_cur.execute("SELECT content FROM user_signatures WHERE id = %s AND user_id = %s", (req.signature_id, uid))
+                sig_row = sig_cur.fetchone()
+                sig_cur.close()
+                sig_conn.close()
+                if sig_row:
+                    sig_content = sig_row['content'] if isinstance(sig_row, dict) else sig_row[0]
+                    profile['signatures'] = [{'content': sig_content, 'is_default': True}]
+                    logger.info(f"✅ Overrode profile signature with user_signatures id={req.signature_id}")
+            except Exception as sig_err:
+                logger.warning(f"Failed to fetch signature_id={req.signature_id}: {sig_err}")
+        
         generator = EmailGenerator()
         total_leads_updated = 0
         total_groups = len(groups)
@@ -4007,6 +4081,12 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
                     parts = resolved_content.split("\n\n", 1)
                     subject = parts[0].replace("Subject: ", "").strip()
                     body = parts[1].strip() if len(parts) > 1 else ""
+
+                # ── Inject user signature into the body ──
+                try:
+                    body = inject_signature(body, profile, lead_item['id'])
+                except Exception as inj_err:
+                    logger.warning(f"Signature injection failed for lead {lead_item['id']}: {inj_err}")
 
                 # Sync to Gmail if service is available
                 gmail_draft_id = None

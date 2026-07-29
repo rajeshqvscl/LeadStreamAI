@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Pen, Save, Loader2, CheckCircle2, FileUp, Upload, Sparkles, Plus, Trash2, Star, Pencil, ArrowLeft, Eye, Paperclip } from 'lucide-react';
+import { Pen, Save, Loader2, CheckCircle2, FileUp, Upload, Sparkles, Plus, Trash2, Star, Pencil, ArrowLeft, Eye, Paperclip, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
 import ToolbarTextarea from '../components/ToolbarTextarea';
@@ -41,6 +41,7 @@ const Signatures = () => {
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const [uploadingAttach, setUploadingAttach] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [deletingFile, setDeletingFile] = useState(null);
   const [editingName, setEditingName] = useState(null);
   const [editNameValue, setEditNameValue] = useState('');
   const [availablePdfs, setAvailablePdfs] = useState([]);
@@ -61,13 +62,13 @@ const Signatures = () => {
 
   const fetchPdfs = useCallback(async () => {
     try {
-      const res = await api.get('/api/assets/pdfs');
+      const res = await api.get('/api/assets/pdfs', { headers: { 'X-User-Id': userId } });
       setAvailablePdfs(res.data || []);
     } catch (err) {
       console.error('Failed to fetch PDFs', err);
       setAvailablePdfs([]);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -170,7 +171,7 @@ const Signatures = () => {
     setSaving(true);
     setSaved(false);
     try {
-      const attachmentVal = currentAttachments.length > 0 ? currentAttachments.join(', ') : null;
+      const attachmentVal = currentAttachments.length > 0 ? currentAttachments.join(', ') : '';
       if (currentSigId) {
         await api.put(`/api/signatures/${currentSigId}`,
           { name: currentName, content: currentContent, attachment_file: attachmentVal },
@@ -193,6 +194,11 @@ const Signatures = () => {
       localStorage.setItem('user', JSON.stringify(u));
 
       await fetchSignatures();
+      // If attachments were cleared, update UI to reflect that
+      if (!attachmentVal) {
+        setCurrentAttachments([]);
+        setShowAttachments(false);
+      }
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
@@ -226,6 +232,23 @@ const Signatures = () => {
       alert('Failed to delete signature');
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleDeleteFile = async (filename) => {
+    if (!window.confirm(`Delete "${filename}" permanently? This cannot be undone.`)) return;
+    setDeletingFile(filename);
+    try {
+      await api.delete(`/api/signatures/attachment/${encodeURIComponent(filename)}`, { headers: { 'X-User-Id': userId } });
+      // Remove from selected attachments if it was checked
+      setCurrentAttachments(prev => prev.filter(f => f !== filename));
+      // Refresh the available files list
+      await fetchPdfs();
+    } catch (err) {
+      const detail = err.response?.data?.detail || err.message;
+      alert(`Failed to delete file: ${detail}`);
+    } finally {
+      setDeletingFile(null);
     }
   };
 
@@ -497,33 +520,61 @@ const Signatures = () => {
 
                 {/* Optional Attachments */}
                 <div className="border border-white/5 rounded-xl p-4 bg-white/[0.01]">
-                  <label className="flex items-center gap-3 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={showAttachments}
-                      onChange={e => {
-                        setShowAttachments(e.target.checked);
-                        if (!e.target.checked) setCurrentAttachments([]);
-                      }}
-                      className="w-4 h-4 rounded border-white/20 bg-black/40 text-purple-600 focus:ring-purple-500/50 cursor-pointer shrink-0"
-                    />
-                    <div className="flex items-center gap-1.5">
-                      <Paperclip className={`w-3.5 h-3.5 ${showAttachments ? 'text-purple-400' : 'text-slate-500'}`} />
-                      <span className={`text-[11px] font-bold uppercase tracking-widest ${showAttachments ? 'text-purple-300' : 'text-slate-500'}`}>
-                        Optional Attachments
-                      </span>
-                      {currentAttachments.length > 0 && showAttachments && (
-                        <span className="text-[9px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-bold">
-                          {currentAttachments.length}
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-3 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={showAttachments}
+                        onChange={e => {
+                          setShowAttachments(e.target.checked);
+                          if (!e.target.checked) setCurrentAttachments([]);
+                        }}
+                        className="w-4 h-4 rounded border-white/20 bg-black/40 text-purple-600 focus:ring-purple-500/50 cursor-pointer shrink-0"
+                      />
+                      <div className="flex items-center gap-1.5">
+                        <Paperclip className={`w-3.5 h-3.5 ${showAttachments ? 'text-purple-400' : 'text-slate-500'}`} />
+                        <span className={`text-[11px] font-bold uppercase tracking-widest ${showAttachments ? 'text-purple-300' : 'text-slate-500'}`}>
+                          Optional Attachments
                         </span>
-                      )}
-                    </div>
-                  </label>
+                        {currentAttachments.length > 0 && showAttachments && (
+                          <span className="text-[9px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-bold">
+                            {currentAttachments.length}
+                          </span>
+                        )}
+                        {currentAttachments.length === 0 && showAttachments && (
+                          <span className="text-[9px] bg-slate-500/10 text-slate-500 border border-slate-500/20 px-1.5 py-0.5 rounded font-bold">
+                            None
+                          </span>
+                        )}
+                      </div>
+                    </label>
+                    {currentAttachments.length > 0 && showAttachments && (
+                      <button
+                        onClick={() => {
+                          setCurrentAttachments([]);
+                          setShowAttachments(false);
+                        }}
+                        title="Clear all selected attachments"
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 hover:border-red-500/40 transition-all"
+                      >
+                        <X className="w-3 h-3" />
+                        Clear All
+                      </button>
+                    )}
+                  </div>
 
                   {showAttachments && (
                     <div className="mt-3 space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
                       <p className="text-[10px] text-slate-600">Check files to attach when sending emails with this signature, or upload new ones.</p>
                       
+                      {/* No files selected banner */}
+                      {currentAttachments.length === 0 && availablePdfs.length > 0 && (
+                        <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-500/5 border border-amber-500/15 rounded-xl">
+                          <Paperclip className="w-3.5 h-3.5 shrink-0 text-amber-400/60" />
+                          <span className="text-[11px] text-amber-400/70 font-medium">No files selected for this signature — check files below to attach them.</span>
+                        </div>
+                      )}
+
                       <div className="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar bg-black/20 border border-white/5 rounded-xl p-2">
                         {availablePdfs.length === 0 ? (
                           <p className="text-[11px] text-slate-600 italic text-center py-3">No files available. Upload one below.</p>
@@ -533,7 +584,7 @@ const Signatures = () => {
                             return (
                               <label
                                 key={pdf.filename}
-                                className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all ${
+                                className={`group flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all ${
                                   isChecked
                                     ? 'bg-purple-600/15 border border-purple-500/30'
                                     : 'hover:bg-white/5 border border-transparent'
@@ -552,9 +603,26 @@ const Signatures = () => {
                                   className="w-4 h-4 rounded border-white/20 bg-black/40 text-purple-600 focus:ring-purple-500/50 cursor-pointer"
                                 />
                                 <Paperclip className={`w-3.5 h-3.5 shrink-0 ${isChecked ? 'text-purple-400' : 'text-slate-500'}`} />
-                                <span className={`text-[12px] truncate ${isChecked ? 'text-purple-200 font-medium' : 'text-slate-400'}`}>
+                                <span className={`flex-1 text-[12px] truncate ${isChecked ? 'text-purple-200 font-medium' : 'text-slate-400'}`}>
                                   {pdf.filename}
                                 </span>
+                                {/* Delete button (hidden by default, shows on row hover) */}
+                                <button
+                                  onClick={e => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleDeleteFile(pdf.filename);
+                                  }}
+                                  disabled={deletingFile === pdf.filename}
+                                  className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-slate-500 hover:text-red-400 hover:bg-red-500/15 transition-all"
+                                  title={`Delete ${pdf.filename}`}
+                                >
+                                  {deletingFile === pdf.filename ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
                               </label>
                             );
                           })
@@ -576,7 +644,7 @@ const Signatures = () => {
                               try {
                                 const formData = new FormData();
                                 formData.append('file', file);
-                                const res = await api.post('/api/signatures/upload-attachment', formData);
+                                const res = await api.post('/api/signatures/upload-attachment', formData, { headers: { 'X-User-Id': userId } });
                                 const filename = res.data?.filename;
                                 if (filename) {
                                   await fetchPdfs();
