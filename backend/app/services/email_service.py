@@ -86,12 +86,12 @@ def format_outreach_html(text: str) -> str:
     """
     import re
     
-    # Normalize bullet characters
-    text = text.replace('•', '*')
-    
     # If content already has HTML structure, pass through (markdown already handled it)
     if re.search(r'<(ul|ol|li|p|table)[>\s]', text, re.IGNORECASE):
         return text
+    
+    # Normalize bullet characters for markdown processing
+    text = text.replace('•', '*')
     
     # 1. Convert markdown links [text](url) to <a href="url">text</a>
     text = re.sub(
@@ -102,7 +102,7 @@ def format_outreach_html(text: str) -> str:
 
     # 2. Convert bold/italic markdown into clean <strong> tags
     text = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong style="color: #ffffff; font-size: 15px;">\1</strong>', text)
-    text = re.sub(r'\*\*(.*?)\*\*', r'<strong style="color: #ffffff; font-size: 14px;">\1</strong>', text)
+    text = re.sub(r'\*\*(.*?)\*\*', r'<strong style="color: #ffffff; font-size: 18px;">\1</strong>', text)
     text = re.sub(r'\*(.*?)\*', r'<em style="color: #cbd5e1;">\1</em>', text)
     
     # 3. Convert bullet points to proper list items
@@ -139,23 +139,6 @@ def format_outreach_html(text: str) -> str:
             parts[i] = p.replace('[', '').replace(']', '')
     return ''.join(parts)
 
-# ---------------------------------------------------------------------------
-# Template-aware attachment selection
-# ---------------------------------------------------------------------------
-
-def _get_attachment_files_for_subject(subject: str, template_name: Optional[str] = None) -> list:
-    """Returns the list of filenames (as plain strings) to attach for a given template.
-    Delegates to drafts.py's TEMPLATE_ATTACHMENT_MAP via _get_template_attachments."""
-    if template_name:
-        try:
-            from app.api.drafts import _get_template_attachments
-            atts = _get_template_attachments(template_name)
-            # atts is a list of dicts like [{"name": "file.pdf"}, ...]
-            return [a["name"] for a in atts if isinstance(a, dict) and a.get("name")]
-        except Exception as e:
-            logger.error(f"Error getting template attachments for {template_name}: {e}")
-    return []
-
 
 def _get_signature_attachments(user_id: Optional[int]) -> list:
     """Fetch the current user's default signature attachment_file list and
@@ -183,9 +166,14 @@ def _get_signature_attachments(user_id: Optional[int]) -> list:
         filenames = [f.strip() for f in raw.split(',') if f.strip()]
         if not filenames:
             return []
+        IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico'}
         asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
         result = []
         for fn in filenames:
+            ext = os.path.splitext(fn)[1].lower()
+            if ext in IMAGE_EXTS:
+                logger.info(f"Skipping image from signature attachments (inline in body): {fn}")
+                continue
             path = asset_dir / fn
             if path.exists():
                 import base64
@@ -300,10 +288,10 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
             pass
     
     import markdown
-    # Normalize bullet characters for markdown compatibility
-    html_content = html_content.replace('•', '*')
     # Convert markdown to HTML for a premium look
     if not html_content.strip().startswith('<'):
+        # Normalize bullet characters for markdown compatibility
+        html_content = html_content.replace('•', '*')
         has_bullet_lines = any(line.strip().startswith('* ') for line in html_content.split('\n'))
         if any(marker in html_content for marker in ['**', '###', '[', '|']) or has_bullet_lines:
             html_content = markdown.markdown(html_content, extensions=['extra', 'nl2br'])
@@ -329,31 +317,10 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     # Detect follow-up by thread_id OR by Re: prefix in subject (handles case where thread_id is NULL in DB)
     is_followup = bool(thread_id or in_reply_to or (subject and subject.strip().lower().startswith('re:')))
     
-    # Merge any provided attachments with default profile attachments & signature attachments
+    # Merge any provided attachments with signature attachments
     merged_attachments = list(attachments) if attachments else []
     if not is_followup:
-        asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
-        profile_files = [] if is_vismaya else _get_attachment_files_for_subject(subject, template_name)
-        
-        logger.info(f"Looking for attachments in: {asset_dir}")
-        for filename in profile_files:
-            if any(a.get('filename') == filename for a in merged_attachments):
-                continue
-            path = asset_dir / filename
-            if path.exists():
-                import base64
-                with open(path, "rb") as f:
-                    content_bytes = f.read()
-                    content_b64 = base64.b64encode(content_bytes).decode('utf-8')
-                merged_attachments.append({
-                    "content": content_b64,
-                    "filename": filename
-                })
-                logger.info(f"Loaded attachment successfully: {filename}")
-            else:
-                logger.error(f"Attachment NOT FOUND directly at: {path}")
-        
-        # Also include signature attachments from the user's saved signature
+        # Include signature attachments from the user's saved signature
         if user_id and not is_system_email:
             sig_attachments = _get_signature_attachments(int(user_id))
             for sig_att in sig_attachments:
@@ -361,7 +328,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                     merged_attachments.append(sig_att)
                     logger.info(f"Loaded signature attachment: {sig_att['filename']}")
     else:
-        logger.info("Outreach is a follow-up email thread. Default PDF attachments skipped.")
+        logger.info("Outreach is a follow-up email thread. Default attachments skipped.")
     attachments = merged_attachments
 
     # 3. Strip any old unsubscribe links from legacy signature area (before the footer)
@@ -511,9 +478,14 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                         pixel_html = f'<img src="{pixel_url}" width="1" height="1" style="display:none" />'
                         html_content = html_content + pixel_html
 
-                # Wrap in professional email template for consistent branding
+                # Strip ALL inline font-size from html_content so wrapper 18px cascades uniformly
+                # This prevents any <span style="font-size:12px"> in the saved draft from overriding the wrapper
+                import re as _fs_re
+                html_content = _fs_re.sub(r'font-size\s*:\s*[^;]+;?\s*', '', html_content)
+
+                # Wrap in clean email template for professional appearance in Gmail
                 html_content = f"""
-                <div style="font-family: sans-serif; line-height: 1.6; color: #1a202c; font-size: 14px;">
+                <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.6; color: #333333; font-size: 18px;">
                     {html_content}
                 </div>
                 """
@@ -664,10 +636,13 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     else:
         # Process HTML Formatting (Markdown-to-HTML)
         formatted_html = format_outreach_html(html_content)
+        # Strip ALL inline font-size so wrapper 18px cascades uniformly
+        import re as _fs_resend
+        formatted_html = _fs_resend.sub(r'font-size\s*:\s*[^;]+;?\s*', '', formatted_html)
         
-        # Wrap in a clean container
+        # Wrap in a clean container for professional appearance
         final_html = f"""
-        <div style="font-family: sans-serif; background-color: #0f172a; color: #cbd5e1; padding: 40px; border-radius: 12px; max-width: 600px; margin: auto;">
+        <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.6; color: #333333; font-size: 18px; max-width: 600px; margin: auto;">
             {formatted_html}
         </div>
         """

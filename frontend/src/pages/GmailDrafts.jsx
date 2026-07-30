@@ -194,14 +194,14 @@ const GmailDrafts = () => {
         listHtml += '</ul>';
         htmlParts.push(listHtml);
       } else if (lines.length >= 2 && lines.every(l => !l.trim() || (l.trim().startsWith('|') && l.trim().endsWith('|')))) {
-        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:13px;">';
+        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-family:Arial,sans-serif;font-size:18px;">';
         const dataLines = lines.filter(l => l.trim() && !l.trim().match(/^\|[-:\s]+\|$/));
         dataLines.forEach((line, i) => {
           const cells = line.trim().split('|').slice(1, -1).map(c => c.trim());
           const tag = i === 0 ? 'th' : 'td';
           const cellStyle = tag === 'th'
-            ? 'border:1px solid #475569;padding:8px 10px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:12px;text-transform:uppercase;'
-            : 'border:1px solid #475569;padding:8px 10px;text-align:left;color:#cbd5e1;font-size:13px;';
+            ? 'border:1px solid #475569;padding:2px 4px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:18px;'
+            : 'border:1px solid #475569;padding:1px 4px;text-align:left;color:#cbd5e1;font-size:18px;';
           const cellHtml = cells.map(c => `<${tag} style="${cellStyle}">${c}</${tag}>`).join('');
           tableHtml += `<tr>${cellHtml}</tr>`;
         });
@@ -210,7 +210,7 @@ const GmailDrafts = () => {
       } else {
         // Paragraph: preserve single newlines as line breaks
         const content = trimmed.replace(/\n/g, '<br />');
-        htmlParts.push(`<p style="margin-bottom: 1.2em; color: #cbd5e1; line-height: 1.6;">${content}</p>`);
+        htmlParts.push(`<p style="margin-bottom: 1.2em; color: #cbd5e1; line-height: 1.6; font-size: 18px;">${content}</p>`);
       }
     });
 
@@ -223,24 +223,32 @@ const GmailDrafts = () => {
       .replace(/_(.*?)_/g, '<em style="font-style:italic">$1</em>')
       .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color: #60a5fa; text-decoration: underline; font-weight: 700;">$1</a>');
     // Ensure all HTML tables have visible borders
+    // Strip ALL existing font-size so wrapper cascades uniformly
     finalHtml = finalHtml
+      .replace(/font-size\s*:\s*[^;]+;?\s*/gi, '')
       .replace(/<table(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
-          return m.replace(/style="([^"]*)"/, 'style="$1;border-collapse:collapse;width:100%;margin-bottom:18px;font-family:Arial,sans-serif;font-size:13px;"');
+          return m.replace(/style="([^"]*)"/, 'style="$1;border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:18px;"');
         }
-        return m.replace('<table', '<table style="border-collapse:collapse;width:100%;margin-bottom:18px;font-family:Arial,sans-serif;font-size:13px;"');
+        return m.replace('<table', '<table style="border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:18px;"');
       })
       .replace(/<th(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
-          return m.replace(/style="([^"]*)"/, 'style="$1;border:1px solid #475569;padding:8px 10px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:12px;text-transform:uppercase;"');
+          return m.replace(/style="([^"]*)"/, (_, existing) => {
+            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\btext-transform[^;]*;?/gi, '');
+            return `style="${clean};padding:2px 4px;font-size:18px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;"`;
+          });
         }
-        return m.replace('<th', '<th style="border:1px solid #475569;padding:8px 10px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:12px;text-transform:uppercase;"');
+        return m.replace('<th', '<th style="padding:2px 4px;font-size:18px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;"');
       })
       .replace(/<td(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
-          return m.replace(/style="([^"]*)"/, 'style="$1;border:1px solid #475569;padding:8px 10px;text-align:left;color:#cbd5e1;font-size:13px;"');
+          return m.replace(/style="([^"]*)"/, (_, existing) => {
+            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '');
+            return `style="${clean};padding:1px 4px;font-size:18px;border:1px solid #475569;text-align:left;color:#cbd5e1;"`;
+          });
         }
-        return m.replace('<td', '<td style="border:1px solid #475569;padding:8px 10px;text-align:left;color:#cbd5e1;font-size:13px;"');
+        return m.replace('<td', '<td style="padding:1px 4px;font-size:18px;border:1px solid #475569;text-align:left;color:#cbd5e1;"');
       });
     return finalHtml;
   };

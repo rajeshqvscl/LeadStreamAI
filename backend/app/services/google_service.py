@@ -504,8 +504,8 @@ def update_gmail_draft(user_id: int, draft_id: str, subject: str, body: str):
                     if all(re.match(r'^[-:\s]+$', c) for c in cells):
                         continue
                     tag = 'th' if i == 0 else 'td'
-                    th_style = 'padding:10px 14px;border:1px solid #e2e8f0;text-align:left;font-weight:700;color:#1e293b;background:#f1f5f9;font-size:12px;text-transform:uppercase;'
-                    td_style = 'padding:8px 14px;border:1px solid #e2e8f0;text-align:left;font-weight:400;color:#334155;'
+                    th_style = 'padding:2px 6px;border:1px solid #e2e8f0;text-align:left;font-weight:700;color:#1e293b;background:#f1f5f9;font-size:10px;'
+                    td_style = 'padding:1px 6px;border:1px solid #e2e8f0;text-align:left;font-weight:400;color:#334155;font-size:10px;'
                     style = th_style if tag == 'th' else td_style
                     row_html = f"<{tag} style='{style}'>" + f"</{tag}><{tag} style='{style}'>".join(cells) + f"</{tag}>"
                     table_html += f"<tr>{row_html}</tr>"

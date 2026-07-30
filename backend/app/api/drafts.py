@@ -211,19 +211,19 @@ At a time when institutional investors and strategic healthcare operators are ac
 <table style="border-collapse: collapse; border: 1px solid #999; font-family: Arial, sans-serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
 <thead>
 <tr style="background-color: #ffffff;">
-<th style="padding: 2px 8px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 9pt;">Particulars</th>
-<th style="padding: 2px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">Current Metrics</th>
+<th style="padding: 2px 4px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 18px;">Particulars</th>
+<th style="padding: 2px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">Current Metrics</th>
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">Net Revenue</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~₹49.2 Cr</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">EBITDA</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~₹16.8 Cr</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">EBITDA Margin</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~34.2%</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">PAT</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~₹8.4 Cr</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">Installed Capacity</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">225 Beds</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">ARPOB / RPOB</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~₹26,000</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">Average Length of Stay</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">3.8 Days</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">Blended Occupancy</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~28.3%</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Net Revenue</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~₹49.2 Cr</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">EBITDA</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~₹16.8 Cr</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">EBITDA Margin</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~34.2%</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">PAT</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~₹8.4 Cr</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Installed Capacity</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">225 Beds</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">ARPOB / RPOB</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~₹26,000</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Average Length of Stay</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">3.8 Days</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Blended Occupancy</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~28.3%</td></tr>
 </tbody>
 </table>
 
@@ -261,14 +261,14 @@ The business benefits from a highly favorable payer mix:
 <table style="border-collapse: collapse; border: 1px solid #d0d0d0; font-family: Arial, sans-serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
 <thead>
 <tr style="background-color: #ffffff;">
-<th style="padding: 2px 8px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000;">REVENUE MIX</th>
-<th style="padding: 2px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000;">CONTRIBUTION</th>
+<th style="padding: 2px 4px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 18px;">REVENUE MIX</th>
+<th style="padding: 2px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">CONTRIBUTION</th>
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">Cash</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~58.3%</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">Corporate</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~39.0%</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">TPA</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">Only ~2.7%</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Cash</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~58.3%</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Corporate</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~39.0%</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">TPA</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">Only ~2.7%</td></tr>
 </tbody>
 </table>
 
@@ -325,14 +325,14 @@ On a normalized basis, the platform has already demonstrated healthy operational
 <table style="border-collapse: collapse; border: 1px solid #d0d0d0; font-family: Arial, sans-serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
 <thead>
 <tr style="background-color: #ffffff;">
-<th style="padding: 2px 8px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000;">Metric</th>
-<th style="padding: 2px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000;">Growth</th>
+<th style="padding: 2px 4px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 18px;">Metric</th>
+<th style="padding: 2px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">Growth</th>
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">Core Hospital EBITDA Growth</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~9.9%</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">Occupancy Growth</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~14.3%</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">ARPOB Growth</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~4.0%</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Core Hospital EBITDA Growth</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~9.9%</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Occupancy Growth</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~14.3%</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">ARPOB Growth</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~4.0%</td></tr>
 </tbody>
 </table>
 
@@ -388,23 +388,21 @@ SIG_START
 <span style="color: #008000; font-weight: bold; font-family: Arial, sans-serif; font-size: 14px;">Thanks & Best Regards,</span>
 <strong style="color: #000000; font-family: Arial, sans-serif; font-size: 14px; display: block; margin-top: 2px; margin-bottom: 2px;">***{{Sender Name}}***</strong>
 <span style="color: #000000; font-family: Arial, sans-serif; font-size: 14px; display: block; margin-bottom: 2px;">{{Sender Title}}</span>
-<a href="{{Sender LinkedIn}}" style="color: #0000ee; text-decoration: underline; font-family: Arial, sans-serif; font-size: 14px; display: block; margin-bottom: 2px;">Add Me On Linkedin</a>
-<a href="https://www.qvscl.com" style="color: #0000ee; text-decoration: underline; font-family: Arial, sans-serif; font-size: 14px; display: block; margin-bottom: 4px;">Quantum Value Strategic Consulting</a>
-<img src="[[BACKEND_URL]]/assets/PHOTO-2026-05-25-10-33-35.jpg" alt="Investment Opportunity Banner" width="420" height="126" style="display: block; margin-top: 10px;" />
+<a href="{{Sender LinkedIn}}" style="color: #0000ee; text-decoration: underline; font-family: Arial, sans-serif; font-size: 14px; display: block; margin-bottom: 2px;">Add Me On Linkedin</a>            <a href="https://www.qvscl.com" style="color: #0000ee; text-decoration: underline; font-family: Arial, sans-serif; font-size: 14px; display: block; margin-bottom: 4px;">Quantum Value Strategic Consulting</a>
 
-<strong>Strictly Private and Confidential.</strong>
+            <strong>Strictly Private and Confidential.</strong>
 
 The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
 SIG_END"""
 
-    # FORCE UPDATE
+    # 2. Force-update ayush_hospital_draft with the same 18px content
     cur.execute(
-        "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_sir_hospital_draft'",
+        "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_hospital_draft'",
         (hospital_content, hospital_description)
     )
     if cur.rowcount == 0:
         cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type) VALUES ('ayush_sir_hospital_draft', %s, %s, 'CUSTOM_DRAFT')",
+            "INSERT INTO prompts (name, description, content, prompt_type) VALUES ('ayush_hospital_draft', %s, %s, 'CUSTOM_DRAFT')",
             (hospital_description, hospital_content)
         )
     conn.commit()
@@ -888,10 +886,26 @@ def _extract_body_attachments(body: str, user_id: Optional[int] = None) -> tuple
         if f"{backend_url}/assets/" in url or "/assets/" in url:
             found_urls.add(url)
 
+    IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico'}
     for url in found_urls:
         filename = url.rsplit("/", 1)[-1] if "/" in url else url
         filepath = os.path.join(asset_dir, filename)
         if os.path.exists(filepath):
+            ext = os.path.splitext(filename)[1].lower()
+            if ext in IMAGE_EXTS:
+                logger.info(f"Skipping image attachment (inline in body): {filename}")
+                if user_id is not None:
+                    try:
+                        from app.services.google_service import upload_to_drive
+                        with open(filepath, "rb") as f:
+                            content_bytes = f.read()
+                        drive_link = upload_to_drive(user_id, filename, content_bytes)
+                        if drive_link:
+                            url_replacements[url] = drive_link
+                            logger.info(f"Uploaded image to Drive: {filename} -> {drive_link}")
+                    except Exception as e:
+                        logger.warning(f"Drive upload failed for image {filename}: {e}")
+                continue
             import base64
             with open(filepath, "rb") as f:
                 content_bytes = f.read()
@@ -916,24 +930,8 @@ def markdown_to_html(text, gmail_style=False):
     import re
     # Normalize newlines
     text = text.replace("\r\n", "\n")
-    # 1. Strip technical markers and entire signature blocks between them
-    # SIG_START...SIG_END blocks contain template-embedded signatures that should be
-    # completely removed — inject_signature() adds the sender's own signature later
-    text = re.sub(r'SIG_START.*?SIG_END', '', text, flags=re.DOTALL)
-    text = text.replace("[[SIG_PLACEHOLDER]]", "")
-    # 1a. Resolve [[BACKEND_URL]] placeholder so images work in send flow
-    backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
-    text = text.replace("[[BACKEND_URL]]", backend_url)
-    
-    # Rewrite any localhost/127.0.0.1 asset URLs to the actual BACKEND_URL so links work
-    # in sent emails regardless of where the file was uploaded from
-    text = re.sub(
-        r'https?://(?:localhost|127\.0\.0\.1)(?::\d+)?/assets/',
-        f"{backend_url}/assets/",
-        text
-    )
-    
-    # Convert known asset images to inline base64 data URIs for reliable rendering in email clients
+
+    # ── Inner helper: inline known asset images to base64 data URIs ──
     def _inline_img(m):
         tag = m.group(0)
         src_m = re.search(r'src="([^"]+)"', tag)
@@ -953,6 +951,13 @@ def markdown_to_html(text, gmail_style=False):
                     new_src = f"data:{mime_type};base64,{b64_data}"
                     _INLINED_IMAGE_CACHE[img_name] = new_src
                     return tag.replace(f'src="{src}"', f'src="{new_src}"')
+        # Fallback: for base64 images not in known list, force full width
+        if src.startswith("data:image/"):
+            if re.search(r'style\s*=', tag, re.IGNORECASE):
+                tag = re.sub(r'style\s*=\s*"[^"]*"', 'style="width:400px;height:auto;display:block;"', tag, flags=re.IGNORECASE)
+            else:
+                tag = tag.replace(' src="', ' style="width:400px;height:auto;display:block;" src="')
+            return tag
         return tag
 
     def _inline_md_img(m):
@@ -964,8 +969,8 @@ def markdown_to_html(text, gmail_style=False):
                 if img_name in _INLINED_IMAGE_CACHE:
                     new_src = _INLINED_IMAGE_CACHE[img_name]
                     if img_name == "qvscllogo.png":
-                        return f'<img src="{new_src}" alt="{alt_text}" style="width:110px;height:auto;display:block;margin-top:10px;" />'
-                    return f'<div style="width: 100%; margin-top: 25px; margin-bottom: 25px;"><img src="{new_src}" alt="{alt_text}" width="420" height="126" style="display: block;" /></div>'
+                        return f'<img src="{new_src}" alt="{alt_text}" style="width:200px;height:auto;display:block;margin-top:10px;" />'
+                    return f'<img src="{new_src}" alt="{alt_text}" style="width:100%;height:auto;display:block;margin-top:25px;margin-bottom:25px;" />'
                 img_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", img_name)
                 if os.path.exists(img_path):
                     with open(img_path, "rb") as f:
@@ -973,17 +978,32 @@ def markdown_to_html(text, gmail_style=False):
                     new_src = f"data:{mime_type};base64,{b64_data}"
                     _INLINED_IMAGE_CACHE[img_name] = new_src
                     if img_name == "qvscllogo.png":
-                        return f'<img src="{new_src}" alt="{alt_text}" style="width:110px;height:auto;display:block;margin-top:10px;" />'
-                    return f'<div style="width: 100%; margin-top: 25px; margin-bottom: 25px;"><img src="{new_src}" alt="{alt_text}" width="420" height="126" style="display: block;" /></div>'
+                        return f'<img src="{new_src}" alt="{alt_text}" style="width:200px;height:auto;display:block;margin-top:10px;" />'
+                    return f'<img src="{new_src}" alt="{alt_text}" style="width:100%;height:auto;display:block;margin-top:25px;margin-bottom:25px;" />'
         # Fallback: convert any unknown image markdown to an <img> tag
-        return f'<img src="{src}" alt="{alt_text}" style="max-width:100%;height:auto;display:block;" />'
+        return f'<img src="{src}" alt="{alt_text}" style="width:100%;height:auto;display:block;" />'
     
+    # ── If text is already rich HTML, skip markdown processing ──
+    if re.search(r'<(div|table|span|p|h[1-6]|ul|ol|li|br|img|a|strong|em|b|i|u|font)[\s>]', text, re.IGNORECASE) or '</' in text:
+        text = re.sub(r'SIG_START.*?SIG_END', '', text, flags=re.DOTALL)
+        text = text.replace("[[SIG_PLACEHOLDER]]", "")
+        backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+        text = text.replace("[[BACKEND_URL]]", backend_url)
+        text = re.sub(r'https?://(?:localhost|127\.0\.0\.1)(?::\d+)?/assets/', f"{backend_url}/assets/", text)
+        # Convert markdown links [text](url) to HTML — but skip already-converted HTML tags
+        text = re.sub(r'(?<!href=")(?<!src=")\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', text)
+        text = re.sub(r'<img[^>]+>', _inline_img, text, flags=re.DOTALL | re.IGNORECASE)
+        return text
+
     text = re.sub(r'!\[(.*?)\]\((.*?)\)', _inline_md_img, text)
     text = re.sub(r'<img[^>]+>', _inline_img, text, flags=re.DOTALL | re.IGNORECASE)
     # 1.5 Handle Global Bolding (catch any remaining **stars**)
     text = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong><em>\1</em></strong>', text)
     text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
     
+    # 1.6 Horizontal rule (--- on its own line)
+    text = re.sub(r'^[-*_]{3,}\s*$', '<hr style="border: none; border-top: 2px solid #475569; margin: 16px 0;">', text, flags=re.MULTILINE)
+
     # 2. Handle Links (Markdown style [Text](URL))
     # Using a more specific regex to avoid catching already-converted HTML tags
     text = re.sub(r'(?<!href=")(?<!src=")\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', text)
@@ -1031,14 +1051,14 @@ def markdown_to_html(text, gmail_style=False):
             if is_legal and not is_strictly_private:
                 # Standard legal disclaimer: tiny and grey
                 line = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', line)
-                line = f'<span style="font-size: 10px; color: #999; font-style: normal; line-height: 1.2; display: block; margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px;">{line}</span>'
+                line = f'<span style="font-size: 18px; color: #999; font-style: normal; line-height: 1.2; display: block; margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px;">{line}</span>'
             elif is_strictly_private:
                 # Premium Hospital Disclaimer: Bold, prominent, and full-size
                 line = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', line)
                 # Ensure "Strictly Private" itself is bolded if not already
                 if "<strong>" not in line and "strictly private" in line.lower():
                      line = re.sub(r"(?i)(strictly private and confidential)", r"<strong>\1</strong>", line)
-                line = f'<div style="font-size: 13px; color: #444; font-weight: normal; line-height: 1.4; display: block; margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">{line}</div>'
+                line = f'<div style="font-size: 18px; color: #444; font-weight: normal; line-height: 1.4; display: block; margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">{line}</div>'
             elif "<div" in line or "<img" in line or (not gmail_style and ("<span" in line or "<a" in line or "<strong" in line)):
                 pass
             else:
@@ -1048,7 +1068,7 @@ def markdown_to_html(text, gmail_style=False):
                     line = line.replace("Website", '<a href="https://qvscl.com" style="color: #0066cc; text-decoration: underline;">Website</a>')
                 # Handle names/titles in signature (bold them if they are in ***)
                 line = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong>\1</strong>', line)
-                line = f'<span style="color: #666; font-style: italic; display: block; margin-bottom: 0px; font-size: 13px;">{line}</span>'
+                line = f'<span style="color: #666; font-style: italic; display: block; margin-bottom: 0px; font-size: 18px;">{line}</span>'
             
             formatted_sig_lines.append(line)
         
@@ -1105,7 +1125,7 @@ def markdown_to_html(text, gmail_style=False):
             # Check if this is a markdown table
             lines = p.split("\n")
             if len(lines) >= 2 and all(l.strip().startswith("|") and l.strip().endswith("|") for l in lines):
-                table_html = "<table style='width:100%;border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:13px;'>"
+                table_html = "<table style='width:100%;border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:18px;'>"
                 for i, line in enumerate(lines):
                     line = line.strip()
                     if not line: continue
@@ -1113,7 +1133,7 @@ def markdown_to_html(text, gmail_style=False):
                     if all(re.match(r'^[-:\s]+$', c) for c in cells):
                         continue
                     tag = "th" if i == 0 else "td"
-                    style = "border:1px solid #000;padding:8px 10px;text-align:left;font-weight:bold;font-size:13px;" if tag == "th" else "border:1px solid #000;padding:8px 10px;text-align:left;font-size:13px;font-weight:bold;"
+                    style = "border:1px solid #000;padding:2px 6px;text-align:left;font-weight:bold;font-size:10px;" if tag == "th" else "border:1px solid #000;padding:1px 6px;text-align:left;font-size:10px;font-weight:bold;"
                     row_html = f"<{tag} style='{style}'>" + f"</{tag}><{tag} style='{style}'>".join(cells) + f"</{tag}>"
                     table_html += f"<tr>{row_html}</tr>"
                 table_html += "</table>"
@@ -1438,7 +1458,7 @@ def list_available_pdfs(user_id: Optional[str] = Header(None, alias="X-User-Id")
             # Skip user files when no user context
             if not uid and f.startswith("sig_"):
                 continue
-            ext_ok = any(f.lower().endswith(ext) for ext in ['.pdf', '.docx', '.doc', '.xlsx', '.jpg', '.png', '.pptx'])
+            ext_ok = any(f.lower().endswith(ext) for ext in ['.pdf', '.docx', '.doc', '.xlsx', '.pptx'])
             if ext_ok:
                 files.append({"filename": f, "path": f"/assets/{f}"})
         return files
@@ -1710,7 +1730,7 @@ def heal_draft_content(email_draft: str, user_id: Optional[str], profile: Option
     #    Previously this used content fingerprinting which caused Yashika's emails
     #    (and others) to get the Ayush hospital banner + disclaimer injected when
     #    a lead's name or company happened to contain "ayush", "uttar pradesh", etc.
-    is_hospital = (template_name or '').strip().lower() == 'ayush_sir_hospital_draft'
+    is_hospital = (template_name or '').strip().lower() == 'ayush_hospital_draft'
     
     if is_hospital:
         backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
@@ -1726,16 +1746,20 @@ def heal_draft_content(email_draft: str, user_id: Optional[str], profile: Option
         if re.search(r"Important:", healed, flags=re.IGNORECASE):
             healed = re.sub(r"Important:.*$", hospital_disclaimer, healed, flags=re.DOTALL | re.IGNORECASE)
         
-        # Second, ensure the banner is present
-        if "PHOTO-2026-05-25-10-33-35" not in healed:
-            if "<strong>Strictly Private" in healed:
-                 healed = healed.replace(
-                    "<strong>Strictly Private",
-                    f"{banner_md}\n\n<strong>Strictly Private"
-                )
-            else:
-                # Appending banner and then disclaimer if somehow standard detection failed
-                healed = healed.rstrip() + f"\n\n{banner_md}\n\n{hospital_disclaimer}"
+        # Strip any existing banner image markdown — don't re-inject it
+        healed = re.sub(
+            r'!\[.*?\]\(.*?PHOTO-2026-05-25-10-33-35.*?\)\s*',
+            '',
+            healed,
+            flags=re.IGNORECASE
+        )
+        # Also strip any HTML img tag for this banner image, if the markdown was already converted
+        healed = re.sub(
+            r'<img[^>]*src="[^"]*PHOTO-2026-05-25-10-33-35[^"]*"[^>]*>\s*',
+            '',
+            healed,
+            flags=re.IGNORECASE
+        )
                 
     return healed
 
@@ -1831,7 +1855,7 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 
     # ── Minimal fallback — no disclaimer, no images, just contact info ──
     sig_html = f"""
-<div style="color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; text-align: left; margin-top: 4px;">
+<div style="color: #000000; font-family: Arial, sans-serif; font-size: 18px; line-height: 1.4; text-align: left; margin-top: 4px;">
 --<br>
 <i>Thanks &amp; Regards,</i><br>
 <i><strong>{name}</strong></i><br>
@@ -2089,7 +2113,7 @@ def _detect_campaign_key(template_name: str, content: str, description: str) -> 
         return "INVESTOR_KAJAL_JV"
     if name in ("kajal_mam_hyphen", "kajal_mam_agritech"):
         return "INVESTOR_KAJAL_GENERIC"
-    if name == "ayush_sir_hospital_draft" or "hospital" in text:
+    if name == "ayush_hospital_draft" or "hospital" in text:
         return "INVESTOR_HEALTHTECH"
     if name == "vismaya_leadstream" or "leadstream" in text:
         return "INVESTOR_GENERIC"
@@ -2113,7 +2137,9 @@ def _fill_hardcoded_followups(template: dict) -> dict:
             # Strip Subject line from body content so it shows clean in UI
             rest = content.split("\n", 1)
             template["content"] = rest[1].lstrip("\n").strip() if len(rest) > 1 else ""
-    if template.get("followup_1"):
+    # If followup_1 has ANY value in DB (including empty string ''), respect it — don't overwrite.
+    # Only populate hardcoded follow-ups when followup_1 is None (column was never set).
+    if template.get("followup_1") is not None:
         return template
     from app.services.followup_service import FOLLOWUP_TEMPLATES
     owner = template.get("owner_username") or ""
@@ -2142,7 +2168,7 @@ def list_custom_draft_templates(user_id: Optional[str] = Header(None, alias="X-U
             "palak_mam_mna_fundraising": "palak",
             "yashika_draft_agritech": "yashika",
             "yashika_draft_ai_tech": "yashika",
-            "ayush_sir_hospital_draft": "ayush",
+            "ayush_hospital_draft": "ayush",
             "kajal_mam_hyphen": "kajal",
             "kajal_mam_jv": "kajal",
             "kajal_mam_health_ecosystem": "kajal",
@@ -2322,14 +2348,14 @@ At a time when institutional investors and strategic healthcare operators are ac
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">Net Revenue</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~₹49.2 Cr</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">EBITDA</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~₹16.8 Cr</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">EBITDA Margin</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~34.2%</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">PAT</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~₹8.4 Cr</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">Installed Capacity</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">225 Beds</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">ARPOB / RPOB</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~₹26,000</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">Average Length of Stay</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">3.8 Days</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">Blended Occupancy</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~28.3%</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Net Revenue</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~₹49.2 Cr</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">EBITDA</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~₹16.8 Cr</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">EBITDA Margin</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~34.2%</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">PAT</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~₹8.4 Cr</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Installed Capacity</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">225 Beds</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">ARPOB / RPOB</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~₹26,000</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Average Length of Stay</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">3.8 Days</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Blended Occupancy</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~28.3%</td></tr>
 </tbody>
 </table>
 
@@ -2372,9 +2398,9 @@ The business benefits from a highly favorable payer mix:
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">Cash</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~58.3%</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">Corporate</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~39.0%</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">TPA</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">Only ~2.7%</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Cash</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~58.3%</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Corporate</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~39.0%</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">TPA</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">Only ~2.7%</td></tr>
 </tbody>
 </table>
 
@@ -2434,9 +2460,9 @@ This materially lowers execution and capital deployment risk relative to greenfi
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">Core Hospital EBITDA Growth</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~9.9%</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">Occupancy Growth</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~14.3%</td></tr>
-<tr><td style="padding: 1px 8px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 9pt;">ARPOB Growth</td><td style="padding: 1px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">~4.0%</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Core Hospital EBITDA Growth</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~9.9%</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Occupancy Growth</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~14.3%</td></tr>
+<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">ARPOB Growth</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~4.0%</td></tr>
 </tbody>
 </table>
 
@@ -2491,19 +2517,16 @@ Thanks & Regards,
 
 <strong>***{{Sender Name}}***</strong>
 {{Sender Title}}
-[Website](https://www.qvscl.com) | [LinkedIn]({{Sender LinkedIn}})
-{{Sender Phone}}
+[Website](https://www.qvscl.com) | [LinkedIn]({{Sender LinkedIn}})            {{Sender Phone}}
 
-<img src="[[BACKEND_URL]]/assets/PHOTO-2026-05-25-10-33-35.jpg" alt="Investment Opportunity Banner" width="420" height="126" style="margin-top: 10px; display: block;" />
-
-<strong>Strictly Private and Confidential.</strong>
+            <strong>Strictly Private and Confidential.</strong>
 
 The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
 SIG_END"""
 
         # FORCE UPDATE EVERY TIME the templates are listed
         cur.execute(
-            "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_sir_hospital_draft'",
+            "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_hospital_draft'",
             (hospital_content, hospital_description)
         )
 
@@ -2916,23 +2939,6 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
                 msg.attach(msg_body)
                 msg['to'] = to_email
                 msg['subject'] = final_subject
-                # Attach PDFs based on template name
-                try:
-                    tpl_attachments = _get_template_attachments(template_name)
-                    if tpl_attachments:
-                        assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets")
-                        for att in tpl_attachments:
-                            fpath = os.path.join(assets_dir, att["name"])
-                            if os.path.exists(fpath):
-                                with open(fpath, "rb") as f:
-                                    part = MIMEApplication(f.read(), Name=att["name"])
-                                    part['Content-Disposition'] = f'attachment; filename="{att["name"]}"'
-                                    msg.attach(part)
-                                logger.info(f"📎 Attached {att['name']} to Gmail draft")
-                            else:
-                                logger.warning(f"⚠️  Attachment not found: {fpath}")
-                except Exception as ae:
-                    logger.warning(f"⚠️  Attachment sync failed for draft: {ae}")
                 raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode('utf-8')
                 draft_body = {'message': {'raw': raw_message}}
                 created_draft = service.users().drafts().create(userId='me', body=draft_body).execute()
@@ -3040,50 +3046,6 @@ def get_bulk_progress(batch_id: str):
     return prog
 
 
-
-# ---------------------------------------------------------------------------
-# Template → PDF Attachment Mapping
-# Each template specifies which PDFs get attached (shown in the draft preview
-# and physically attached when the email is sent from email_service.py).
-# ---------------------------------------------------------------------------
-TEMPLATE_ATTACHMENT_MAP = {
-    # Palak templates — Company Profile + Lalit Huria Profile
-    "palak_mam_corporate_advisory": [
-        {"name": "QVSCL Company Profile.pdf"},
-        {"name": "Lalit_Huria_Profile.pdf"},
-    ],
-    "palak_mam_mna_fundraising": [
-        {"name": "QVSCL Company Profile.pdf"},
-        {"name": "Lalit_Huria_Profile.pdf"},
-    ],
-
-    # Ayush template — Company Profile + Lalit Huria Profile + Eastern UP Teaser
-    "ayush_sir_hospital_draft": [
-        {"name": "QVSCL Company Profile.pdf"},
-        {"name": "Lalit_Huria_Profile.pdf"},
-        {"name": "eastern_up_hospital_investor_teaser_v5b_investorfriendly (2).pdf"},
-    ],
-
-    # All other templates — no attachments
-    "yashika_draft_ai_tech": [],
-    "yashika_draft_agritech": [],
-    "kajal_mam_agritech": [],
-    "kajal_mam_health_ecosystem": [],
-    "kajal_mam_jv": [],
-    "kajal_mam_hyphen": [],
-    "kajal_mam_qvscl_intro": [],
-    "vismaya_leadstream": [],
-}
-
-# Default attachments for AI-generated or unknown templates
-_DEFAULT_ATTACHMENTS = []
-
-def _get_template_attachments(template_name: Optional[str]) -> list:
-    """Returns the list of attachment dicts for a given template name.
-    Falls back to _DEFAULT_ATTACHMENTS if the template is not in the map."""
-    if template_name and template_name in TEMPLATE_ATTACHMENT_MAP:
-        return TEMPLATE_ATTACHMENT_MAP[template_name]
-    return _DEFAULT_ATTACHMENTS
 
 @router.get("/pending-drafts")
 @router.get("/emails")
@@ -3249,7 +3211,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
                 "subject": subject,
                 "body": body.replace("[[BACKEND_URL]]", backend_url),
                 "html_body": markdown_to_html(body.replace("[[BACKEND_URL]]", backend_url)),
-                "attachments": _get_template_attachments(r.get("draft_template_used")),
+                "attachments": [],
                 "draft_template_used": r.get("draft_template_used") or "",
                 "status": r["email_status"] or "PENDING_APPROVAL",
                 "performance": {"opens": 0, "clicks": 0},

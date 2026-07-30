@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Plus, Loader2, CheckCircle2, AlertCircle, Trash2, ChevronDown, ChevronUp, Save, Upload, Paperclip, AtSign, FileText } from 'lucide-react';
+import { Plus, Loader2, CheckCircle2, AlertCircle, Trash2, ChevronDown, ChevronUp, Save, Upload, Paperclip, AtSign, FileText, Eye } from 'lucide-react';
 import api from '../services/api';
 import ToolbarTextarea from '../components/ToolbarTextarea';
 
@@ -21,6 +21,8 @@ const Prompts = () => {
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({ name: '', content: '', description: '', followup_1: '', followup_2: '', followup_3: '', subject: '', cc: '', followup_count: 3 });
+  const [showBodyPreview, setShowBodyPreview] = useState(false);
+  const [expandedBodyPreview, setExpandedBodyPreview] = useState({});
   const [creating, setCreating] = useState(false);
   const [saveField, setSaveField] = useState({ id: null, field: null });
   const [saveFieldSuccess, setSaveFieldSuccess] = useState({ id: null, field: null });
@@ -254,21 +256,56 @@ const Prompts = () => {
   const renderEmailPreview = (text, showSigDisc = true, isFollowup = false) => {
     if (!text) return '<p class="text-slate-500 italic">(empty)</p>';
     const backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
-    text = text.replace(/\[\[BACKEND_URL\]\]/g, backendUrl);
+    // Resolve sender placeholders (needed regardless of HTML/markdown)
+    const firstName = userSenderName.split(' ')[0] || userSenderName;
+    text = text.replace(/\{\{Sender Name\}\}/g, userSenderName);
+    text = text.replace(/\{\{Sender First Name\}\}/g, firstName);
+    text = text.replace(/\{\{Sender Title\}\}/g, userTitle);
+    text = text.replace(/\{\{Sender LinkedIn\}\}/g, userLinkedin);
+    text = text.replace(/\{\{Sender Phone\}\}/g, userPhone);
+
+    // If content already has HTML tags, render directly — no markdown processing!
+    // This ensures tables, fonts, colors, etc look EXACTLY like in the editor.
+    if (/<[a-z][\s\S]*>/i.test(text)) {
+      let html = text
+        .replace(/^SIG_START\n?/gm, '')
+        .replace(/\n?SIG_END\n?/gm, '')
+        .replace(/<img\s+[^>]*src="data:image\/[^"]*"[^>]*>/gi, (m) => {
+          if (/style\s*=\s*"/i.test(m)) return m.replace(/style\s*=\s*"([^"]*)"/i, 'style="width:400px;height:auto;display:block;"');
+          return m.replace('<img', '<img style="width:400px;height:auto;display:block;"');
+        })
+        .replace(/font-size\s*:\s*[^;]+;?\s*/gi, '')
+        .replace(/<table(\s[^>]*)?>/gi, (m) => {
+          if (m.includes('style="')) return m.replace(/style="([^"]*)"/, 'style="border-collapse:collapse;$1"');
+          return '<table style="border-collapse:collapse;">';
+        })
+        .replace(/<th(\s[^>]*)?>/gi, (m) => {
+          if (m.includes('style="')) {
+            let s = m.replace(/style="([^"]*)"/, (_, existing) => {
+              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '');
+              return `style="${clean};padding:2px 4px;font-size:18px;"`;
+            });
+            return s;
+          }
+          return '<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;font-size:18px;">';
+        })
+        .replace(/<td(\s[^>]*)?>/gi, (m) => {
+          if (m.includes('style="')) {
+            let s = m.replace(/style="([^"]*)"/, (_, existing) => {
+              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '');
+              return `style="${clean};padding:1px 4px;font-size:18px;"`;
+            });
+            return s;
+          }
+          return '<td style="padding:1px 4px;border:1px solid #475569;text-align:left;font-size:18px;">';
+        });
+      return `<div style="color:#cbd5e1;font-size:18px;line-height:1.5;">${html}</div>`;
+    }
 
     if (!isFollowup) {
       // Main body: keep all content, just remove SIG_START/SIG_END markers
-      // and resolve common placeholders with actual user data
       text = text.replace(/^SIG_START\n?/gm, '');
       text = text.replace(/\n?SIG_END\n?/gm, '');
-      // Resolve sender placeholders
-      const firstName = userSenderName.split(' ')[0] || userSenderName;
-      text = text.replace(/\{\{Sender Name\}\}/g, userSenderName);
-      text = text.replace(/\{\{Sender First Name\}\}/g, firstName);
-      text = text.replace(/\{\{Sender Title\}\}/g, userTitle);
-      text = text.replace(/\{\{Sender LinkedIn\}\}/g, userLinkedin);
-      text = text.replace(/\{\{Sender Phone\}\}/g, userPhone);
-      // Also resolve {{First Name}} (generic lead placeholder stays as-is for preview)
     } else {
       // Follow-up: strip SIG_START...SIG_END entirely
       const sigStartIdx = text.indexOf('SIG_START');
@@ -288,6 +325,11 @@ const Prompts = () => {
     paragraphs.forEach(p => {
       const trimmed = p.trim();
       if (!trimmed) return;
+      // Horizontal rule: ---, ***, ___
+      if (/^[-*_]{3,}\s*$/.test(trimmed)) {
+        htmlParts.push('<hr style="border: none; border-top: 2px solid #475569; margin: 16px 0;">');
+        return;
+      }
       const lines = trimmed.split('\n');
       const isUnordered = lines.some(l => /^\s*[\*\-•]\s+/.test(l));
       const isOrdered = lines.some(l => /^\s*\d+\.\s+/.test(l));
@@ -310,14 +352,14 @@ const Prompts = () => {
         listHtml += '</ol>';
         htmlParts.push(listHtml);
       } else if (lines.length >= 2 && lines.every(l => !l.trim() || (l.trim().startsWith('|') && l.trim().endsWith('|')))) {
-        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:13px;">';
+        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-family:Arial,sans-serif;font-size:18px;">';
         const dataLines = lines.filter(l => l.trim() && !l.trim().match(/^\|[-:\s]+\|$/));
         dataLines.forEach((line, i) => {
           const cells = line.trim().split('|').slice(1, -1).map(c => c.trim());
           const tag = i === 0 ? 'th' : 'td';
           const cellStyle = tag === 'th'
-            ? 'border:1px solid #475569;padding:8px 10px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:12px;text-transform:uppercase;'
-            : 'border:1px solid #475569;padding:8px 10px;text-align:left;color:#cbd5e1;font-size:13px;';
+            ? 'border:1px solid #475569;padding:2px 4px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:18px;'
+            : 'border:1px solid #475569;padding:1px 4px;text-align:left;color:#cbd5e1;font-size:18px;';
           const cellHtml = cells.map(c => `<${tag} style="${cellStyle}">${c}</${tag}>`).join('');
           tableHtml += `<tr>${cellHtml}</tr>`;
         });
@@ -325,11 +367,15 @@ const Prompts = () => {
         htmlParts.push(tableHtml);
       } else {
         let content = trimmed.replace(/\n/g, '<br />');
-        content = content.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/_(.*?)_/g, '<em>$1</em>').replace(/\*(.*?)\*/g, '<em>$1</em>');
+        content = content.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        content = content.replace(/\*([^*]+)\*/g, (m, inner) => {
+          if (inner.startsWith(' ') || inner.endsWith(' ')) return m;
+          return `<em>${inner}</em>`;
+        });
         // Handle markdown images ![alt](url) and links [text](url)
         content = content.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0;" />');
         content = content.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>');
-        htmlParts.push(`<p style="margin-bottom: 1em; color: #cbd5e1;">${content}</p>`);
+        htmlParts.push(`<p style="margin-bottom: 1em; color: #cbd5e1; font-size: 18px;">${content}</p>`);
       }
     });
 
@@ -345,26 +391,34 @@ const Prompts = () => {
     }
 
     let finalHtml = htmlParts.join('') + autoSigHtml;
-    finalHtml = finalHtml.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>').replace(/\*\*(.*?)\*\*/g, '<strong style="color: white; font-weight: 800;">$1</strong>').replace(/_(.*?)_/g, '<em style="font-style:italic">$1</em>').replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color: #60a5fa; text-decoration: underline; font-weight: 700;">$1</a>');
-    // Ensure all HTML tables have visible borders (handles mammoth DOCX conversion output)
+    finalHtml = finalHtml.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>').replace(/\*\*(.*?)\*\*/g, '<strong style="color: white; font-weight: 800;">$1</strong>').replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color: #60a5fa; text-decoration: underline; font-weight: 700;">$1</a>');
+    finalHtml = finalHtml.replace(/\*([^*]+)\*/g, (m, inner) => {
+      if (inner.startsWith(' ') || inner.endsWith(' ')) return m;
+      return `<em>${inner}</em>`;
+    });
+    // Ensure all HTML tables have visible borders — force concise padding/font-size!
     finalHtml = finalHtml
       .replace(/<table(\s[^>]*)?>/gi, (m) => {
-        if (m.includes('style="')) {
-          return m.replace(/style="([^"]*)"/, 'style="$1;border-collapse:collapse;width:100%;margin-bottom:18px;font-family:Arial,sans-serif;font-size:13px;"');
-        }
-        return m.replace('<table', '<table style="border-collapse:collapse;width:100%;margin-bottom:18px;font-family:Arial,sans-serif;font-size:13px;"');
+        if (m.includes('style="')) return m.replace(/style="([^"]*)"/, 'style="border-collapse:collapse;$1"');
+        return '<table style="border-collapse:collapse;">';
       })
       .replace(/<th(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
-          return m.replace(/style="([^"]*)"/, 'style="$1;border:1px solid #475569;padding:8px 10px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:12px;text-transform:uppercase;"');
-        }
-        return m.replace('<th', '<th style="border:1px solid #475569;padding:8px 10px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:12px;text-transform:uppercase;"');
+          // Force concise padding/font-size — strip existing values & replace
+          return m.replace(/style="([^"]*)"/, (_, existing) => {
+            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '').replace(/\btext-transform[^;]*;?/gi, '');return `style="${clean};padding:2px 4px;font-size:18px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;"`;
+            });
+          }
+          return '<th style="padding:2px 4px;font-size:18px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;">';
       })
       .replace(/<td(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
-          return m.replace(/style="([^"]*)"/, 'style="$1;border:1px solid #475569;padding:8px 10px;text-align:left;color:#cbd5e1;font-size:13px;"');
-        }
-        return m.replace('<td', '<td style="border:1px solid #475569;padding:8px 10px;text-align:left;color:#cbd5e1;font-size:13px;"');
+          // Force concise padding/font-size — strip existing values & replace
+          return m.replace(/style="([^"]*)"/, (_, existing) => {
+            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '');return `style="${clean};padding:1px 4px;font-size:18px;border:1px solid #475569;text-align:left;color:#cbd5e1;"`;
+            });
+          }
+          return '<td style="padding:1px 4px;font-size:18px;border:1px solid #475569;text-align:left;color:#cbd5e1;">';
       });
     return finalHtml;
   };
@@ -441,6 +495,19 @@ const Prompts = () => {
               </div>
               <p className="text-[10px] text-slate-600 mb-2">Use placeholders: {'{{First Name}}'}, {'{{Company Name}}'}, {'{{Sender Name}}'}</p>
               <ToolbarTextarea value={form.content} onChange={e => setForm({...form, content: e.target.value})} rows={8} placeholder="Write your email body here..." />
+              <button
+                type="button"
+                onClick={() => setShowBodyPreview(!showBodyPreview)}
+                className={`mt-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${showBodyPreview ? 'bg-blue-600/20 text-blue-400 border-blue-500/30' : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 border-white/10'}`}
+              >
+                <Eye className="w-3 h-3" />
+                {showBodyPreview ? 'Hide Live Preview' : 'Show Live Preview'}
+              </button>
+              {showBodyPreview && (
+                <div className="mt-3 bg-[#0a0d14] border border-white/5 rounded-xl p-5 max-h-[500px] overflow-y-auto">
+                  <div className="email-preview text-[14px] leading-relaxed" dangerouslySetInnerHTML={{ __html: form.content ? renderEmailPreview(form.content, true, false) : '<p class="text-slate-500 italic text-[12px]">Type something to see preview...</p>' }} />
+                </div>
+              )}
             </div>
             <div>
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Subject (optional)</label>
@@ -593,11 +660,19 @@ const Prompts = () => {
                       <div className="flex gap-2">
                         <ToolbarTextarea value={tpl.content} onChange={e => { const updated = [...prompts]; const idx = updated.findIndex(p => p.id === tpl.id); updated[idx] = {...updated[idx], content: e.target.value}; setPrompts(updated); }} rows={6} placeholder="Email body..." />
                         <div className="flex flex-col gap-2">
+                          <button onClick={() => setExpandedBodyPreview(prev => ({...prev, [tpl.id]: !prev[tpl.id]}))} className={`px-3 py-2 rounded-lg text-[10px] font-bold border whitespace-nowrap transition-all ${expandedBodyPreview[tpl.id] ? 'bg-blue-600/20 text-blue-400 border-blue-500/30' : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 border-white/10'}`}>
+                            <Eye className="w-3 h-3" />
+                          </button>
                           <button onClick={() => setPreview({ show: true, content: tpl.content, label: 'Body', subject: tpl.subject, attachment: tpl.attachment_file })} className="px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-[10px] font-bold border border-blue-500/20 whitespace-nowrap transition-all">Preview</button>
                           <button onClick={() => handleFieldSave(tpl.id, 'content', tpl.content)} disabled={saveField.id === tpl.id && saveField.field === 'content'} className={`px-3 py-2 rounded-lg text-[10px] font-bold border whitespace-nowrap transition-all ${saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === 'content' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/30' : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 border-white/10'}`}>
                             {saveField.id === tpl.id && saveField.field === 'content' ? <Loader2 className="w-3 h-3 animate-spin" /> : saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === 'content' ? <CheckCircle2 className="w-3 h-3" /> : 'Save'}
                           </button>
                         </div>
+                        {expandedBodyPreview[tpl.id] && (
+                          <div className="mt-2 bg-[#0a0d14] border border-white/5 rounded-xl p-4 max-h-[400px] overflow-y-auto">
+                            <div className="email-preview text-[14px] leading-relaxed" dangerouslySetInnerHTML={{ __html: tpl.content ? renderEmailPreview(tpl.content, true, false) : '<p class="text-slate-500 italic text-[12px]">(empty)</p>' }} />
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center justify-between">
@@ -633,7 +708,14 @@ const Prompts = () => {
                               <input type="file" accept=".docx,.pdf" className="hidden" disabled={uploading} onChange={e => handleFollowupFileUploadExisting(e, tpl.id, fkey)} />
                             </label>
                             {tpl[fkey] && (
-                              <button onClick={() => { const updated = [...prompts]; const idx = updated.findIndex(p => p.id === tpl.id); updated[idx] = {...updated[idx], [fkey]: ''}; setPrompts(updated); }} className="px-3 py-2 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 text-[10px] font-bold whitespace-nowrap transition-all">
+                              <button onClick={() => { 
+                                const updated = [...prompts]; 
+                                const idx = updated.findIndex(p => p.id === tpl.id); 
+                                updated[idx] = {...updated[idx], [fkey]: ''}; 
+                                setPrompts(updated); 
+                                // Auto-save empty value to backend so deletion persists on reload
+                                handleFieldSave(tpl.id, fkey, ''); 
+                              }} className="px-3 py-2 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 text-[10px] font-bold whitespace-nowrap transition-all">
                                 <Trash2 className="w-3 h-3" />
                               </button>
                             )}

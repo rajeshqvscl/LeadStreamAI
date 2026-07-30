@@ -33,13 +33,19 @@ const mdToHtml = (md) => {
   html = html.replace(/<li>\n/g, '<li>').replace(/\n<\/li>/g, '</li>');
   html = html.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>');
   html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/_(.*?)_/g, '<em>$1</em>');
-  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
-  html = html.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width:200px;height:auto;">');
+  html = html.replace(/\*([^*]+)\*/g, (m, inner) => {
+    if (inner.startsWith(' ') || inner.endsWith(' ')) return m;
+    return `<em>${inner}</em>`;
+  });
+  html = html.replace(/!\[(.*?)\]\((.*?)\)/g, (m, alt, src) => {
+    const isBase64 = src.startsWith('data:image/');
+    return `<img src="${src}" alt="${alt}" style="${isBase64 ? 'width:400px' : 'max-width:200px'};height:auto;">`;
+  });
   html = html.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>');
   html = html.replace(/^###\s+(.*?)$/gm, '<h3>$1</h3>');
   html = html.replace(/^##\s+(.*?)$/gm, '<h2>$1</h2>');
   html = html.replace(/^#\s+(.*?)$/gm, '<h1>$1</h1>');
+  html = html.replace(/^[-*_]{3,}\s*$/gm, '<hr style="border: none; border-top: 2px solid #475569; margin: 16px 0;">');
   html = html.replace(/\n/g, '<br>');
   return html;
 };
@@ -101,6 +107,7 @@ const EditEmail = () => {
   const editorRef = React.useRef(null);
   const textColorBtnRef = React.useRef(null);
   const bgColorBtnRef = React.useRef(null);
+  const editorSyncedRef = React.useRef(''); // Tracks what HTML is currently in the editor DOM
   const [userSignature, setUserSignature] = useState('');
   const [showSigEditor, setShowSigEditor] = useState(false);
   const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -241,9 +248,12 @@ const EditEmail = () => {
   const handleFontChange = (e) => {
     const font = e.target.value;
     if (!font) return;
+    e.target.value = '';
     if (editorRef.current && !showSource) {
       editorRef.current.focus();
+      document.execCommand('styleWithCSS', false, true);
       document.execCommand('fontName', false, font);
+      editorSyncedRef.current = editorRef.current.innerHTML;
       setBody(editorRef.current.innerHTML);
       return;
     }
@@ -253,17 +263,27 @@ const EditEmail = () => {
   const handleSizeChange = (e) => {
     const size = e.target.value;
     if (!size) return;
+    e.target.value = '';
     if (editorRef.current && !showSource) {
       editorRef.current.focus();
-      document.execCommand('fontSize', false, '7');
-      // execCommand fontSize uses 1-7, so use span for precise size
-      const selection = window.getSelection();
-      if (selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0);
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
         const span = document.createElement('span');
         span.style.fontSize = `${size}px`;
-        range.surroundContents(span);
+        try {
+          range.surroundContents(span);
+        } catch(_e) {
+          const fragment = range.extractContents();
+          span.appendChild(fragment);
+          range.insertNode(span);
+          range.setStartAfter(span);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
       }
+      editorSyncedRef.current = editorRef.current.innerHTML;
       setBody(editorRef.current.innerHTML);
       return;
     }
@@ -460,34 +480,39 @@ const EditEmail = () => {
     const backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
     text = text.replace(/\[\[BACKEND_URL\]\]/g, backendUrl);
 
-    // Normalize bullet characters & convert HTML-wrapped bullets to proper lists
-    text = text.replace(/•/g, '*');
-    let htmlLines = text.split('\n');
-    let convertedLines = [];
-    let inBulletGroup = false;
-    for (let i = 0; i < htmlLines.length; i++) {
-      const line = htmlLines[i];
-      const bulletMatch = line.match(/^\s*<(div|p)[^>]*>\s*\*\s+(.*?)<\/(div|p)>\s*$/i);
-      if (bulletMatch) {
-        if (!inBulletGroup) {
-          convertedLines.push('<ul style="margin: 0.8em 0; padding-left: 0; list-style: none;">');
-          inBulletGroup = true;
-        }
-        convertedLines.push(`<li style="margin-bottom: 0.4em; position: relative; padding-left: 14px; line-height: 1.6; color: #cbd5e1;"><span style="position: absolute; left: 0; color: #94a3b8; font-size: 9px; top: 0px; display: inline-block; vertical-align: middle;">•</span>${bulletMatch[2].trim()}</li>`);
-      } else {
-        if (inBulletGroup) {
-          convertedLines.push('</ul>');
-          inBulletGroup = false;
-        }
-        convertedLines.push(line);
-      }
-    }
-    if (inBulletGroup) convertedLines.push('</ul>');
-    text = convertedLines.join('\n');
-
-    // If text is already complex HTML, wrap it in styled container and return
-    if (/<[a-z][\s\S]*>/i.test(text) && !text.includes('**') && !text.includes('\n--')) {
-      return `<div style="color: #cbd5e1; font-size: 13px; line-height: 1.6;">${text}</div>`;
+    // If body already has HTML tags (WYSIWYG mode), render directly — no markdown processing!
+    // This ensures fonts, sizes, colors, tables, etc look EXACTLY like in the editor.
+    // Strip ALL font-size from inline styles so wrapper 18px cascades to everything
+    if (/<[a-z][\s\S]*>/i.test(text)) {
+      let html = text
+        .replace(/<img\s+[^>]*src="data:image\/[^"]*"[^>]*>/gi, (m) => {
+          if (/style\s*=\s*"/i.test(m)) return m.replace(/style\s*=\s*"([^"]*)"/i, 'style="width:400px;height:auto;display:block;"');
+          return m.replace('<img', '<img style="width:400px;height:auto;display:block;"');
+        })
+        .replace(/font-size\s*:\s*[^;]+;?\s*/gi, '')
+        .replace(/<table(\s[^>]*)?>/gi, (m) => {
+          if (m.includes('style="')) return m.replace(/style="([^"]*)"/, 'style="border-collapse:collapse;$1"');
+          return '<table style="border-collapse:collapse;">';
+        })
+        .replace(/<th(\s[^>]*)?>/gi, (m) => {
+          if (m.includes('style="')) {
+            return m.replace(/style="([^"]*)"/, (_, existing) => {
+              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '');
+              return `style="${clean};padding:2px 4px;font-size:18px;"`;
+            });
+          }
+          return '<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;font-size:18px;">';
+        })
+        .replace(/<td(\s[^>]*)?>/gi, (m) => {
+          if (m.includes('style="')) {
+            return m.replace(/style="([^"]*)"/, (_, existing) => {
+              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '');
+              return `style="${clean};padding:1px 4px;font-size:18px;"`;
+            });
+          }
+          return '<td style="padding:1px 4px;border:1px solid #475569;text-align:left;font-size:18px;">';
+        });
+      return `<div style="color: #cbd5e1; font-size: 18px; line-height: 1.6;">${html}</div>`;
     }
 
     // Handle markdown images before other markdown processing
@@ -522,7 +547,10 @@ const EditEmail = () => {
             const url = trimmed.replace('SIG_LINK:', '').trim();
             sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:2px;">LinkedIn</a>`;
           } else if (trimmed.startsWith('<img') || trimmed.startsWith('<div')) {
-            sigHtml += trimmed;
+            sigHtml += trimmed.replace(/<img\s+[^>]*src="data:image\/[^"]*"[^>]*>/gi, (m) => {
+              if (/style\s*=\s*"/i.test(m)) return m.replace(/style\s*=\s*"([^"]*)"/i, 'style="width:400px;height:auto;display:block;"');
+              return m.replace('<img', '<img style="width:400px;height:auto;display:block;"');
+            });
           } else if (trimmed) {
             // Apply inline markdown to signature lines too
             let lineHtml = trimmed
@@ -530,10 +558,13 @@ const EditEmail = () => {
               .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
               .replace(/_(.*?)_/g, '<em>$1</em>')
               .replace(/\*(.*?)\*/g, '<em>$1</em>')
-              .replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width:120px;height:auto;display:block;margin-top:8px;" />')
+              .replace(/!\[(.*?)\]\((.*?)\)/g, (m, alt, src) => {
+                const w = src.startsWith('data:image/') ? '800px' : '120px';
+                return `<img src="${src}" alt="${alt}" style="width:${w};height:auto;display:block;margin-top:8px;" />`;
+              })
               .replace(/\[(.*?)\]\((.*?)\)/g, `<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>`);
 
-            sigHtml += `<div style="color:#94a3b8; font-size:12px; line-height:1.4; margin-bottom:0px;">${lineHtml}</div>`;
+            sigHtml += `<div style="color:#94a3b8; font-size:18px; line-height:1.4; margin-bottom:0px;">${lineHtml}</div>`;
           }
         });
         sigHtml += '</div>';
@@ -556,17 +587,23 @@ const EditEmail = () => {
             const url = trimmed.replace('SIG_LINK:', '').trim();
             sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:2px;">LinkedIn</a>`;
           } else if (trimmed.startsWith('<img') || trimmed.startsWith('<div')) {
-            sigHtml += trimmed;
+            sigHtml += trimmed.replace(/<img\s+[^>]*src="data:image\/[^"]*"[^>]*>/gi, (m) => {
+              if (/style\s*=\s*"/i.test(m)) return m.replace(/style\s*=\s*"([^"]*)"/i, 'style="width:400px;height:auto;display:block;"');
+              return m.replace('<img', '<img style="width:400px;height:auto;display:block;"');
+            });
           } else if (trimmed) {
             let lineHtml = trimmed
               .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
               .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
               .replace(/_(.*?)_/g, '<em>$1</em>')
               .replace(/\*(.*?)\*/g, '<em>$1</em>')
-              .replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width:120px;height:auto;display:block;margin-top:8px;" />')
+              .replace(/!\[(.*?)\]\((.*?)\)/g, (m, alt, src) => {
+                const w = src.startsWith('data:image/') ? '800px' : '120px';
+                return `<img src="${src}" alt="${alt}" style="width:${w};height:auto;display:block;margin-top:8px;" />`;
+              })
               .replace(/\[(.*?)\]\((.*?)\)/g, `<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>`);
 
-            sigHtml += `<div style="color:#94a3b8; font-size:12px; line-height:1.4; margin-bottom:0px;">${lineHtml}</div>`;
+            sigHtml += `<div style="color:#94a3b8; font-size:18px; line-height:1.4; margin-bottom:0px;">${lineHtml}</div>`;
           }
         });
         sigHtml += '</div>';
@@ -612,14 +649,14 @@ const EditEmail = () => {
         listHtml += '</ol>';
         htmlParts.push(listHtml);
       } else if (lines.length >= 2 && lines.every(l => !l.trim() || (l.trim().startsWith('|') && l.trim().endsWith('|')))) {
-        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:13px;">';
+        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-family:Arial,sans-serif;font-size:18px;">';
         const dataLines = lines.filter(l => l.trim() && !l.trim().match(/^\|[-:\s]+\|$/));
         dataLines.forEach((line, i) => {
           const cells = line.trim().split('|').slice(1, -1).map(c => c.trim());
           const tag = i === 0 ? 'th' : 'td';
           const cellStyle = tag === 'th'
-            ? 'border:1px solid #475569;padding:8px 10px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:12px;text-transform:uppercase;'
-            : 'border:1px solid #475569;padding:8px 10px;text-align:left;color:#cbd5e1;font-size:13px;';
+            ? 'border:1px solid #475569;padding:2px 4px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:18px;'
+            : 'border:1px solid #475569;padding:1px 4px;text-align:left;color:#cbd5e1;font-size:18px;';
           const cellHtml = cells.map(c => `<${tag} style="${cellStyle}">${c}</${tag}>`).join('');
           tableHtml += `<tr>${cellHtml}</tr>`;
         });
@@ -650,7 +687,7 @@ const EditEmail = () => {
           .replace(/_(.*?)_/g, '<em>$1</em>')
           .replace(/\*(.*?)\*/g, '<em>$1</em>')
           .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>');
-        return `<p style="margin-top:1.2em; color:#94a3b8; font-size:12px;">${content}</p>`;
+        return `<p style="margin-top:1.2em; color:#94a3b8; font-size:18px;">${content}</p>`;
       }).join('');
     }
 
@@ -667,21 +704,27 @@ const EditEmail = () => {
     finalHtml = finalHtml
       .replace(/<table(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
-          return m.replace(/style="([^"]*)"/, 'style="$1;border-collapse:collapse;width:100%;margin-bottom:18px;font-family:Arial,sans-serif;font-size:13px;"');
+          return m.replace(/style="([^"]*)"/, 'style="$1;border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:18px;"');
         }
-        return m.replace('<table', '<table style="border-collapse:collapse;width:100%;margin-bottom:18px;font-family:Arial,sans-serif;font-size:13px;"');
+        return m.replace('<table', '<table style="border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:18px;"');
       })
       .replace(/<th(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
-          return m.replace(/style="([^"]*)"/, 'style="$1;border:1px solid #475569;padding:8px 10px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:12px;text-transform:uppercase;"');
-        }
-        return m.replace('<th', '<th style="border:1px solid #475569;padding:8px 10px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:12px;text-transform:uppercase;"');
+          // Force concise padding/font-size — strip existing values & replace
+          return m.replace(/style="([^"]*)"/, (_, existing) => {
+            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '').replace(/\btext-transform[^;]*;?/gi, '');return `style="${clean};padding:2px 4px;font-size:18px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;"`;
+            });
+          }
+          return m.replace('<th', '<th style="padding:2px 4px;font-size:18px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;"');
       })
       .replace(/<td(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
-          return m.replace(/style="([^"]*)"/, 'style="$1;border:1px solid #475569;padding:8px 10px;text-align:left;color:#cbd5e1;font-size:13px;"');
-        }
-        return m.replace('<td', '<td style="border:1px solid #475569;padding:8px 10px;text-align:left;color:#cbd5e1;font-size:13px;"');
+          // Force concise padding/font-size — strip existing values & replace
+          return m.replace(/style="([^"]*)"/, (_, existing) => {
+            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '');return `style="${clean};padding:1px 4px;font-size:18px;border:1px solid #475569;text-align:left;color:#cbd5e1;"`;
+            });
+          }
+          return m.replace('<td', '<td style="padding:1px 4px;font-size:18px;border:1px solid #475569;text-align:left;color:#cbd5e1;"');
       });
     return finalHtml;
   };
@@ -712,8 +755,54 @@ const EditEmail = () => {
       setSubject(sub);
       const sigUser = JSON.parse(localStorage.getItem('user') || '{}');
       setUserSignature(sigUser.signature || '');
+
       // Convert markdown body to HTML for WYSIWYG editor
-      setBody(isHtml(bd) ? bd : mdToHtml(bd));
+      let finalBody = isHtml(bd) ? bd : mdToHtml(bd);
+
+      // ── Auto-insert concise table from template if body doesn't already have one ──
+      const templateName = lead.draft_template_used;
+      if (templateName && !/<table[\s\S]*?<\/table>/i.test(bd) && !/^\s*\|.*\|\s*$/m.test(bd)) {
+        try {
+          const tplRes = await api.get(`/api/prompts/by-name/${encodeURIComponent(templateName)}`);
+          const tpl = tplRes.data;
+          // Try to extract HTML table
+          let tableHtml = null;
+          const htmlMatch = (tpl.content || '').match(/<table[\s\S]*?<\/table>/i);
+          if (htmlMatch) {
+            tableHtml = htmlMatch[0];
+          } else {
+            // Fallback: markdown pipe table (lines starting & ending with |)
+            const lines = (tpl.content || '').split('\n');
+            const pipeLines = [];
+            let inPipeTable = false;
+            for (const line of lines) {
+              const t = line.trim();
+              if (t.startsWith('|') && t.endsWith('|')) {
+                pipeLines.push(line);
+                inPipeTable = true;
+              } else if (inPipeTable) break;
+            }
+            if (pipeLines.length >= 2) {
+              tableHtml = pipeLines.join('\n');
+              tableHtml = isHtml(tableHtml) ? tableHtml : mdToHtml(tableHtml);
+            }
+          }
+
+          if (tableHtml) {
+            // Insert table before signature (SIG_START) or append at the end
+            const sigIdx = finalBody.indexOf('SIG_START');
+            if (sigIdx !== -1) {
+              finalBody = finalBody.substring(0, sigIdx) + '<br clear="both"><br>' + tableHtml + '<br><br>' + finalBody.substring(sigIdx);
+            } else {
+              finalBody = finalBody + '<br clear="both"><br>' + tableHtml;
+            }
+          }
+        } catch (err) {
+          console.warn('Could not auto-insert template table:', err.message || err);
+        }
+      }
+
+      setBody(finalBody);
       const userStr = localStorage.getItem('user') || localStorage.getItem('user_admin');
       let isVismaya = false;
       if (userStr) {
@@ -736,18 +825,44 @@ const EditEmail = () => {
     fetchDraft();
   }, [draftId]);
 
-  // Sync editor content when body changes from non-editor sources (AI refine, insert signature)
+  // Sync editor DOM only when body changes from EXTERNAL sources (AI refine, insert signature, undo, initial load)
+  // When user types in WYSIWYG mode, editorSyncedRef is updated so this effect skips, preserving cursor!
   useEffect(() => {
     if (editorRef.current && !showSource) {
-      const cursor = window.getSelection();
-      const wasFocused = editorRef.current.contains(cursor?.anchorNode);
+      // If DOM already matches body (user typed it), don't touch anything — preserves cursor!
+      if (editorSyncedRef.current === body) return;
+
+      // External update — save cursor position before replacing DOM
+      const sel = window.getSelection();
+      const wasFocused = editorRef.current.contains(sel?.anchorNode);
+      let savedOffset = null;
+      if (wasFocused && sel?.rangeCount > 0) {
+        try {
+          const range = sel.getRangeAt(0);
+          const preRange = range.cloneRange();
+          preRange.selectNodeContents(editorRef.current);
+          preRange.setEnd(range.endContainer, range.endOffset);
+          savedOffset = preRange.toString().length;
+        } catch(e) { /* ignore */ }
+      }
+
       editorRef.current.innerHTML = body;
-      if (wasFocused && cursor) {
-        const range = document.createRange();
-        range.selectNodeContents(editorRef.current);
-        range.collapse(false);
-        cursor.removeAllRanges();
-        cursor.addRange(range);
+      editorSyncedRef.current = body;
+
+      // Restore cursor to saved character offset
+      if (wasFocused && savedOffset !== null) {
+        try {
+          const newSel = window.getSelection();
+          if (newSel && editorRef.current.firstChild) {
+            const textLen = editorRef.current.textContent?.length || 0;
+            const offset = Math.min(savedOffset, textLen);
+            const range = document.createRange();
+            range.setStart(editorRef.current.firstChild, offset);
+            range.collapse(true);
+            newSel.removeAllRanges();
+            newSel.addRange(range);
+          }
+        } catch(e) { /* fallback — cursor stays where browser puts it */ }
       }
     }
   }, [body, showSource]);
@@ -764,7 +879,7 @@ const EditEmail = () => {
     }
     setIsSaving(true);
     try {
-      const rawBody = isHtml(body) ? htmlToMd(body) : body;
+      const rawBody = body;
       const email_draft = `Subject: ${subject}\n\n${rawBody}`;
       await api.patch(`/api/leads/${draftId}`, { email_draft, remarks, cc_email: cc });
       if (!silent) {
@@ -1109,7 +1224,13 @@ const EditEmail = () => {
               <div className="flex items-center gap-2 mb-2">
                 <button
                   type="button"
-                  onClick={() => setShowSource(!showSource)}
+                  onClick={() => {
+                    if (showSource) {
+                      // Switching to WYSIWYG — force DOM update by resetting sync ref
+                      editorSyncedRef.current = '';
+                    }
+                    setShowSource(!showSource);
+                  }}
                   className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded ${showSource ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'text-slate-500 hover:text-slate-300'}`}
                 >
                   {showSource ? 'Rich Text' : 'Source'}
@@ -1121,7 +1242,7 @@ const EditEmail = () => {
                   value={isHtml(body) ? htmlToMd(body) : body}
                   onChange={(e) => setBody(mdToHtml(e.target.value))}
                   placeholder="Generate AI draft to begin or write your own message..."
-                  className="w-full h-full min-h-[300px] flex-1 bg-[#0a0f1a] border border-[#ffffff10] rounded-md px-4 py-3 text-[13px] text-white font-medium outline-none focus:border-blue-500/50 resize-none leading-relaxed"
+                  className="w-full h-full min-h-[300px] flex-1 bg-[#0a0f1a] border border-[#ffffff10] rounded-md px-4 py-3 text-[18px] text-white font-medium outline-none focus:border-blue-500/50 resize-none leading-relaxed"
                 />
               ) : (
                 <div
@@ -1130,6 +1251,8 @@ const EditEmail = () => {
                   suppressContentEditableWarning
                   onInput={(e) => {
                     const html = e.currentTarget.innerHTML;
+                    // Mark as user-synced so the useEffect skips DOM update and cursor stays put
+                    editorSyncedRef.current = html;
                     if (html !== body) setBody(html);
                   }}
                   onKeyDown={(e) => {
@@ -1139,8 +1262,7 @@ const EditEmail = () => {
                       if (e.key === 'u') { document.execCommand('underline'); e.preventDefault(); }
                     }
                   }}
-                  dangerouslySetInnerHTML={{ __html: body }}
-                  className="w-full h-full min-h-[300px] flex-1 bg-[#0a0f1a] border border-[#ffffff10] rounded-md px-4 py-3 text-[13px] text-white outline-none focus:border-blue-500/50 resize-none leading-relaxed overflow-y-auto [&:empty:before]:content-[attr(data-placeholder)] [&:empty:before]:text-slate-600 [&:empty:before]:italic"
+                  className="w-full h-full min-h-[300px] flex-1 bg-[#0a0f1a] border border-[#ffffff10] rounded-md px-4 py-3 text-[18px] text-white outline-none focus:border-blue-500/50 resize-none leading-relaxed overflow-y-auto [&:empty:before]:content-[attr(data-placeholder)] [&:empty:before]:text-slate-600 [&:empty:before]:italic"
                   data-placeholder="Generate AI draft to begin or write your own message..."
                 />
               )}

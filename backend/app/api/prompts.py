@@ -47,6 +47,40 @@ class PromptUpdate(BaseModel):
 def list_prompts():
     return get_all_prompts()
 
+@router.get("/prompts/by-name/{name}")
+def get_prompt_by_name(name: str):
+    """Fetch a single CUSTOM_DRAFT prompt by its name."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute(
+            "SELECT id, name, content, description, subject, cc, followup_1, followup_2, followup_3, followup_count, attachment_file "
+            "FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE",
+            (name,)
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Template '{name}' not found")
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "content": row["content"] or "",
+            "description": row["description"] or "",
+            "subject": row["subject"] or "",
+            "cc": row["cc"] or "",
+            "followup_1": row["followup_1"] or "",
+            "followup_2": row["followup_2"] or "",
+            "followup_3": row["followup_3"] or "",
+            "followup_count": row["followup_count"] or 3,
+            "attachment_file": row["attachment_file"] or "",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch template: {str(e)}")
+
 @router.post("/prompts")
 def add_prompt(prompt: PromptBase):
     prompt_id = create_prompt(

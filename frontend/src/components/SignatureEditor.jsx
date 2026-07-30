@@ -225,6 +225,10 @@ const SignatureEditor = ({ userId, onSave, onClose, children }) => {
     html = html.replace(/(?<!href=")(?<!src=")\[([^\]]*)\]\(([^)]*)\)/g, '<a href="$2" target="_blank" style="color:#3b82f6;text-decoration:underline;">$1</a>');
     html = html.replace(/\n{2,}/g, '<br /><br />');
     html = html.replace(/\n/g, '<br />');
+    html = html.replace(/<img\s+[^>]*src="data:image\/[^"]*"[^>]*>/gi, (m) => {
+      if (/style\s*=\s*"/i.test(m)) return m.replace(/style\s*=\s*"([^"]*)"/i, 'style="width:400px;height:auto;display:block;"');
+      return m.replace('<img', '<img style="width:400px;height:auto;display:block;"');
+    });
     return html;
   };
 

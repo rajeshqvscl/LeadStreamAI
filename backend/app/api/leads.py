@@ -699,8 +699,7 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
                 
         lead["email_draft"] = draft_raw
     
-    from app.api.drafts import _get_template_attachments
-    lead["attachments"] = _get_template_attachments(lead.get("draft_template_used"))
+    lead["attachments"] = []
     
     return lead
 

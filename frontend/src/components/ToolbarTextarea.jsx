@@ -1,6 +1,81 @@
-import React, { useRef, useState } from 'react';
-import { Bold, Italic, Underline, List, ListOrdered, Link, Image, Paperclip, Palette } from 'lucide-react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { Bold, Italic, Underline, List, ListOrdered, Link, Image, Paperclip, Palette, Code, Table, Eye } from 'lucide-react';
 import api from '../services/api';
+
+// ─── Markdown ↔ HTML Conversion ────────────────────────────────────────
+const mdToHtml = (md) => {
+  if (!md) return '';
+  if (/^<[a-z][^>]*>/i.test(md.trim()) && /<\/[a-z]+>\s*$/i.test(md.trim())) return md;
+  let html = md.replace(/•/g, '*');
+  let lines = html.split('\n');
+  let result = [];
+  let inList = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (/^\*\s+/.test(line)) {
+      if (!inList) { result.push('<ul>'); inList = true; }
+      result.push('<li>' + line.replace(/^\*\s+/, '') + '</li>');
+    } else {
+      if (inList) { result.push('</ul>'); inList = false; }
+      result.push(line);
+    }
+  }
+  if (inList) result.push('</ul>');
+  html = result.join('\n');
+  html = html.replace(/<ul>\n/g, '<ul>').replace(/\n<\/ul>/g, '</ul>');
+  html = html.replace(/<li>\n/g, '<li>').replace(/\n<\/li>/g, '</li>');
+  html = html.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*([^*]+)\*/g, (m, inner) => {
+    if (inner.startsWith(' ') || inner.endsWith(' ')) return m;
+    return `<em>${inner}</em>`;
+  });
+  html = html.replace(/!\[(.*?)\]\((.*?)\)/g, (m, alt, src) => {
+    const w = src.startsWith('data:image/') ? '400px' : '200px';
+    return `<img src="${src}" alt="${alt}" style="width:${w};height:auto;">`;
+  });
+  html = html.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>');
+  html = html.replace(/^###\s+(.*?)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^##\s+(.*?)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^#\s+(.*?)$/gm, '<h1>$1</h1>');
+  html = html.replace(/^[-*_]{3,}\s*$/gm, '<hr style="border: none; border-top: 2px solid #475569; margin: 16px 0;">');
+  html = html.replace(/\n/g, '<br>');
+  return html;
+};
+
+const htmlToMd = (html) => {
+  if (!html) return '';
+  let md = html;
+  md = md.replace(/<strong><em>(.*?)<\/em><\/strong>/g, '***$1***');
+  md = md.replace(/<strong>(.*?)<\/strong>/g, '**$1**');
+  md = md.replace(/<em>(.*?)<\/em>/g, '*$1*');
+  md = md.replace(/<b>(.*?)<\/b>/g, '**$1**');
+  md = md.replace(/<i>(.*?)<\/i>/g, '*$1*');
+  md = md.replace(/<u>(.*?)<\/u>/gi, '<u>$1</u>');
+  md = md.replace(/<h1>(.*?)<\/h1>/gi, '# $1\n');
+  md = md.replace(/<h2>(.*?)<\/h2>/gi, '## $1\n');
+  md = md.replace(/<h3>(.*?)<\/h3>/gi, '### $1\n');
+  md = md.replace(/<a\s+[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi, '[$2]($1)');
+  md = md.replace(/<img[^>]*src="([^"]*)"[^>]*>/gi, '![]($1)');
+  md = md.replace(/<br\s*\/?>/gi, '\n');
+  md = md.replace(/<\/div>/gi, '\n').replace(/<div[^>]*>/gi, '');
+  md = md.replace(/<\/p>/gi, '\n\n').replace(/<p[^>]*>/gi, '');
+  md = md.replace(/<\/li>/gi, '\n').replace(/<li[^>]*>/gi, '');
+  md = md.replace(/<\/ul>/gi, '\n').replace(/<ul[^>]*>/gi, '');
+  md = md.replace(/<\/ol>/gi, '\n').replace(/<ol[^>]*>/gi, '');
+  md = md.replace(/<span\s+style="([^"]*)"[^>]*>/gi, (m, style) => {
+    if (style) return `<span style="${style}">`;
+    return '';
+  });
+  md = md.replace(/<\/span>/gi, '</span>');
+  md = md.replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&nbsp;/gi, ' ');
+  md = md.replace(/\n{3,}/g, '\n\n');
+  return md.trim();
+};
+
+const isHtml = (str) => /<[a-z][\s\S]*>/i.test(str);
+
+// ─── Constants ─────────────────────────────────────────────────────────
 
 const FONTS = [
   { label: 'Sans Serif', value: 'sans-serif' },
@@ -19,9 +94,9 @@ const FONTS = [
 const FONT_SIZES = Array.from({ length: 11 }, (_, i) => i + 6);
 
 const HEADINGS = [
-  { label: 'Small', prefix: '### ' },
-  { label: 'Medium', prefix: '## ' },
-  { label: 'Big', prefix: '# ' },
+  { label: 'H1', prefix: '# ', tag: 'h1' },
+  { label: 'H2', prefix: '## ', tag: 'h2' },
+  { label: 'H3', prefix: '### ', tag: 'h3' },
 ];
 
 const COLORS = [
@@ -37,24 +112,112 @@ const COLORS = [
   '#274e13', '#0c343d', '#1c4587', '#073763', '#20124d', '#4c1130',
 ];
 
-const ToolButton = ({ icon: Icon, title, onClick }) => (
+// ─── ToolButton ────────────────────────────────────────────────────────
+
+const ToolButton = ({ icon: Icon, title, onClick, active, className = '' }) => (
   <button
     type="button"
     title={title}
-    onMouseDown={e => { e.preventDefault(); onClick(); }}
-    className="p-1.5 rounded-md hover:bg-white/10 text-slate-400 hover:text-white transition-all"
+    onMouseDown={e => { e.preventDefault(); onClick?.(); }}
+    className={`p-1.5 rounded-md hover:bg-white/10 text-slate-400 hover:text-white transition-all ${active ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : ''} ${className}`}
   >
     <Icon className="w-3.5 h-3.5" />
   </button>
 );
 
+// ─── ToolbarTextarea ───────────────────────────────────────────────────
+
 const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOnly }) => {
   const textareaRef = useRef(null);
+  const editorRef = useRef(null);
+  const [showSource, setShowSource] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [showTextColors, setShowTextColors] = useState(false);
   const [showBgColors, setShowBgColors] = useState(false);
   const textColorBtnRef = useRef(null);
   const bgColorBtnRef = useRef(null);
+  const editorSyncedRef = useRef(''); // Tracks what's currently in the editor DOM
+
+  // ── Conversion helpers ──────────────────────────────────────────────
+
+  const toHtml = useCallback((raw) => {
+    if (!raw) return '';
+    return isHtml(raw) ? raw : mdToHtml(raw);
+  }, []);
+
+  const toRaw = useCallback((html) => {
+    if (!html) return '';
+    if (!isHtml(html)) return html;
+    return htmlToMd(html);
+  }, []);
+
+  // ── Sync editor DOM only when value changes from EXTERNAL sources ──
+  // When user types, syncFromEditor updates editorSyncedRef so this skips — cursor stays put!
+
+  useEffect(() => {
+    if (!showSource && editorRef.current) {
+      const expectedHtml = toHtml(value);
+      // Skip if DOM already matches — preserves cursor position during user typing
+      if (editorSyncedRef.current === expectedHtml) return;
+
+      // External update (toolbar button, parent value change, mode switch)
+      const sel = window.getSelection();
+      const wasFocused = editorRef.current.contains(sel?.anchorNode);
+
+      // Save cursor position as character offset
+      let savedOffset = null;
+      if (wasFocused && sel?.rangeCount > 0) {
+        try {
+          const range = sel.getRangeAt(0);
+          const preRange = range.cloneRange();
+          preRange.selectNodeContents(editorRef.current);
+          preRange.setEnd(range.endContainer, range.endOffset);
+          savedOffset = preRange.toString().length;
+        } catch(e) { /* ignore */ }
+      }
+
+      editorRef.current.innerHTML = expectedHtml;
+      editorSyncedRef.current = expectedHtml;
+
+      // Restore cursor to character offset
+      if (wasFocused && savedOffset !== null) {
+        try {
+          const newSel = window.getSelection();
+          if (newSel && editorRef.current.firstChild) {
+            const textLen = editorRef.current.textContent?.length || 0;
+            const offset = Math.min(savedOffset, textLen);
+            const range = document.createRange();
+            range.setStart(editorRef.current.firstChild, offset);
+            range.collapse(true);
+            newSel.removeAllRanges();
+            newSel.addRange(range);
+          }
+        } catch(e) { /* fallback */ }
+      }
+    }
+  }, [value, showSource, toHtml]);
+
+  // ── Update parent from WYSIWYG editor ──────────────────────────────
+
+  const syncFromEditor = useCallback(() => {
+    if (!editorRef.current) return;
+    const newHtml = editorRef.current.innerHTML;
+    // Mark as user-synced so the useEffect skips DOM update — cursor stays put!
+    editorSyncedRef.current = newHtml;
+    const raw = newHtml === '<br>' ? '' : newHtml;
+    if (onChange) onChange({ target: { value: raw } });
+  }, [onChange]);
+
+  // ── WYSIWYG execCommand ────────────────────────────────────────────
+
+  const execWysiwyg = useCallback((cmd, cmdValue = null) => {
+    if (!editorRef.current || showSource) return;
+    editorRef.current.focus();
+    document.execCommand(cmd, false, cmdValue);
+    syncFromEditor();
+  }, [showSource, syncFromEditor]);
+
+  // ── Source mode handlers ────────────────────────────────────────────
 
   const insert = (before, after = '') => {
     const ta = textareaRef.current;
@@ -87,38 +250,69 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
     }, 0);
   };
 
-  const handleFontChange = (e) => {
-    const font = e.target.value;
-    if (!font) return;
-    insert(`<span style="font-family:${font};">`, `</span>`);
+  // ── Unified handlers (WYSIWYG + Source) ─────────────────────────────
+
+  const handleBold = () => {
+    if (showSource) { insert('**', '**'); return; }
+    execWysiwyg('bold');
   };
 
-  const handleSizeChange = (e) => {
-    const size = e.target.value;
-    if (!size) return;
-    insert(`<span style="font-size:${size}px;">`, `</span>`);
+  const handleItalic = () => {
+    if (showSource) { insert('*', '*'); return; }
+    execWysiwyg('italic');
   };
 
-  const applyTextColor = (color) => {
-    setShowTextColors(false);
-    insert(`<span style="color:${color};">`, `</span>`);
+  const handleUnderline = () => {
+    if (showSource) { insert('<u>', '</u>'); return; }
+    execWysiwyg('underline');
   };
 
-  const applyBgColor = (color) => {
-    setShowBgColors(false);
-    insert(`<span style="background-color:${color};">`, `</span>`);
+  const handleBulletList = () => {
+    if (showSource) { insertLinePrefix('- '); return; }
+    execWysiwyg('insertUnorderedList');
+  };
+
+  const handleOrderedList = () => {
+    if (showSource) { insertLinePrefix('1. '); return; }
+    execWysiwyg('insertOrderedList');
+  };
+
+  const handleLink = () => {
+    if (showSource) {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      const selected = value.substring(ta.selectionStart, ta.selectionEnd);
+      const url = window.prompt('Enter URL:', 'https://');
+      if (!url) return;
+      const display = selected || window.prompt('Enter link text:', 'link');
+      if (!display) return;
+      insert(`[${display}](${url})`);
+      return;
+    }
+    const url = window.prompt('Enter URL:', 'https://');
+    if (!url) return;
+    editorRef.current?.focus();
+    const sel = window.getSelection()?.toString();
+    if (sel) {
+      execWysiwyg('createLink', url);
+    } else {
+      const display = window.prompt('Enter link text:', 'link');
+      if (!display) return;
+      document.execCommand('insertHTML', false, `<a href="${url}">${display}</a>`);
+      syncFromEditor();
+    }
   };
 
   const handleImageUpload = async () => {
     const input = document.createElement('input');
     input.type = 'file';
-    // Allow all file types — backend will detect extension
-    const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+    input.accept = 'image/png,image/jpeg,image/jpg,image/gif,image/webp,image/svg+xml';
+    const MAX_SIZE = 10 * 1024 * 1024;
     input.onchange = async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
       if (file.size > MAX_SIZE) {
-        alert(`File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed is 10MB.`);
+        alert(`Image too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed is 10MB.`);
         return;
       }
       const formData = new FormData();
@@ -126,7 +320,13 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
       try {
         const res = await api.post('/api/upload-image', formData);
         const imgUrl = res.data.url;
-        insert(`![](${imgUrl})\n`);
+        if (!showSource && editorRef.current) {
+          editorRef.current.focus();
+          document.execCommand('insertImage', false, imgUrl);
+          syncFromEditor();
+        } else {
+          insert(`![](${imgUrl})\n`);
+        }
       } catch (err) {
         alert('Failed to upload image');
       }
@@ -137,8 +337,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
   const handleFileUpload = async () => {
     const input = document.createElement('input');
     input.type = 'file';
-    // Allow all file types — backend will detect extension
-    const MAX_SIZE = 15 * 1024 * 1024; // 15MB for documents
+    const MAX_SIZE = 15 * 1024 * 1024;
     input.onchange = async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -157,9 +356,21 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
         const ext = file.name.split('.').pop()?.toLowerCase() || '';
         const imageExts = ['png','jpg','jpeg','gif','webp','svg','bmp','ico'];
         if (isImage || imageExts.includes(ext)) {
-          insert(`![](${fileUrl})\n`);
+          if (!showSource && editorRef.current) {
+            editorRef.current.focus();
+            document.execCommand('insertImage', false, fileUrl);
+            syncFromEditor();
+          } else {
+            insert(`![](${fileUrl})\n`);
+          }
         } else {
-          insert(`[\u{1F4CE} ${file.name}](${fileUrl})`);
+          if (!showSource && editorRef.current) {
+            editorRef.current.focus();
+            document.execCommand('insertHTML', false, `<a href="${fileUrl}" target="_blank">📎 ${file.name}</a>`);
+            syncFromEditor();
+          } else {
+            insert(`[📎 ${file.name}](${fileUrl})`);
+          }
         }
       } catch (err) {
         alert('Failed to upload file');
@@ -170,36 +381,180 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
     input.click();
   };
 
-  const handleLink = () => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    const selected = value.substring(ta.selectionStart, ta.selectionEnd);
-    const url = window.prompt('Enter URL:', 'https://');
-    if (!url) return;
-    const display = selected || window.prompt('Enter link text:', 'link');
-    if (!display) return;
-    insert(`[${display}](${url})`);
+  const handleHeading = (e) => {
+    const selected = e.target.value;
+    if (!selected) return;
+    e.target.value = '';
+    if (showSource) {
+      insertLinePrefix(selected);
+      return;
+    }
+    const tagMap = { '# ': 'h1', '## ': 'h2', '### ': 'h3' };
+    const tag = tagMap[selected] || 'h3';
+    execWysiwyg('formatBlock', tag);
   };
 
-  const handleHeading = (e) => {
-    const prefix = e.target.value;
-    if (!prefix) return;
+  const handleFontChange = (e) => {
+    const font = e.target.value;
+    if (!font) return;
     e.target.value = '';
-    insertLinePrefix(prefix);
+    if (showSource) {
+      insert(`<span style="font-family:${font};">`, `</span>`);
+      return;
+    }
+    if (editorRef.current) {
+      editorRef.current.focus();
+      // styleWithCSS ensures execCommand('fontName') produces <span style="font-family:...">
+      document.execCommand('styleWithCSS', false, true);
+      document.execCommand('fontName', false, font);
+      syncFromEditor();
+    }
   };
+
+  const handleSizeChange = (e) => {
+    const size = e.target.value;
+    if (!size) return;
+    e.target.value = '';
+    if (showSource) {
+      insert(`<span style="font-size:${size}px;">`, `</span>`);
+      return;
+    }
+    if (editorRef.current) {
+      editorRef.current.focus();
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        const span = document.createElement('span');
+        span.style.fontSize = `${size}px`;
+        try {
+          // Works for single-text-node selections
+          range.surroundContents(span);
+        } catch(_e) {
+          // Fallback for multi-element selections — extract, wrap, reinsert
+          const fragment = range.extractContents();
+          span.appendChild(fragment);
+          range.insertNode(span);
+          range.setStartAfter(span);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      }
+      syncFromEditor();
+    }
+  };
+
+  const applyTextColor = (color) => {
+    setShowTextColors(false);
+    if (showSource) {
+      insert(`<span style="color:${color};">`, `</span>`);
+      return;
+    }
+    execWysiwyg('foreColor', color);
+  };
+
+  const applyBgColor = (color) => {
+    setShowBgColors(false);
+    if (showSource) {
+      insert(`<span style="background-color:${color};">`, `</span>`);
+      return;
+    }
+    execWysiwyg('hiliteColor', color);
+  };
+
+  const handleInsertTable = () => {
+    const cols = parseInt(window.prompt('Columns:', '3'));
+    const rows = parseInt(window.prompt('Rows:', '3'));
+    if (!cols || !rows || cols < 1 || rows < 1) return;
+    if (isNaN(cols) || isNaN(rows)) return;
+    if (showSource) {
+      // Generate markdown table
+      let table = '';
+      for (let r = 0; r < rows; r++) {
+        table += '| ';
+        for (let c = 0; c < cols; c++) {
+          table += ` ${r === 0 ? `Header ${c + 1}` : r === 1 ? '---' : ''} |`;
+        }
+        table += '\n';
+        if (r === 0) {
+          table += '|';
+          for (let c = 0; c < cols; c++) table += ' --- |';
+          table += '\n';
+        }
+      }
+      insert(table);
+      return;
+    }
+    if (editorRef.current) {
+      editorRef.current.focus();
+      let tableHtml = `<table style="width:100%;border-collapse:collapse;margin-bottom:1em;font-family:Arial,sans-serif;font-size:13px;">`;
+      for (let r = 0; r < rows; r++) {
+        tableHtml += '<tr>';
+        for (let c = 0; c < cols; c++) {
+          const tag = r === 0 ? 'th' : 'td';
+          const style = r === 0
+            ? 'border:1px solid #475569;padding:2px 6px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:10px;'
+            : 'border:1px solid #475569;padding:1px 6px;text-align:left;color:#cbd5e1;font-size:10px;';
+          tableHtml += `<${tag} style="${style}">${r === 0 ? `Header ${c + 1}` : ''}</${tag}>`;
+        }
+        tableHtml += '</tr>';
+      }
+      tableHtml += '</table><br>';
+      document.execCommand('insertHTML', false, tableHtml);
+      syncFromEditor();
+    }
+  };
+
+  // ── Toggle source/WYSIWYG ──────────────────────────────────────────
+
+  const toggleSource = () => {
+    if (!showSource) {
+      // Switching to Source: convert HTML → raw
+      const currentHtml = editorRef.current?.innerHTML || '';
+      const raw = toRaw(currentHtml);
+      onChange({ target: { value: raw } });
+    } else {
+      // Switching to WYSIWYG: convert raw → HTML and force DOM update
+      const raw = textareaRef.current?.value || value;
+      const html = toHtml(raw);
+      editorSyncedRef.current = ''; // Force DOM update
+      if (editorRef.current) editorRef.current.innerHTML = html;
+      editorSyncedRef.current = html; // Mark as synced
+    }
+    setShowSource(!showSource);
+    setShowTextColors(false);
+    setShowBgColors(false);
+  };
+
+  // ── Keyboard shortcuts for WYSIWYG ─────────────────────────────────
+
+  const handleEditorKeyDown = (e) => {
+    if (e.ctrlKey || e.metaKey) {
+      if (e.key === 'b') { document.execCommand('bold'); e.preventDefault(); }
+      if (e.key === 'i') { document.execCommand('italic'); e.preventDefault(); }
+      if (e.key === 'u') { document.execCommand('underline'); e.preventDefault(); }
+    }
+    // Delayed sync after any keyboard action
+    setTimeout(syncFromEditor, 0);
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────
 
   return (
     <div className="flex flex-col flex-1 min-w-0">
+      {/* Toolbar */}
       <div className="flex items-center gap-0.5 px-2 py-1.5 bg-black/30 border border-b-0 border-white/5 rounded-t-xl flex-wrap relative">
-        <ToolButton icon={Bold} title="Bold (Ctrl+B)" onClick={() => insert('**', '**')} />
-        <ToolButton icon={Italic} title="Italic (Ctrl+I)" onClick={() => insert('*', '*')} />
-        <ToolButton icon={Underline} title="Underline (Ctrl+U)" onClick={() => insert('<u>', '</u>')} />
+        <ToolButton icon={Bold} title="Bold (Ctrl+B)" onClick={handleBold} />
+        <ToolButton icon={Italic} title="Italic (Ctrl+I)" onClick={handleItalic} />
+        <ToolButton icon={Underline} title="Underline (Ctrl+U)" onClick={handleUnderline} />
         <div className="w-px h-4 bg-white/10 mx-1" />
-        <ToolButton icon={List} title="Bullet List" onClick={() => insertLinePrefix('- ')} />
-        <ToolButton icon={ListOrdered} title="Numbered List" onClick={() => insertLinePrefix('1. ')} />
+        <ToolButton icon={List} title="Bullet List" onClick={handleBulletList} />
+        <ToolButton icon={ListOrdered} title="Numbered List" onClick={handleOrderedList} />
         <div className="w-px h-4 bg-white/10 mx-1" />
         <ToolButton icon={Link} title="Insert Link" onClick={handleLink} />
         <ToolButton icon={Image} title="Insert Image" onClick={handleImageUpload} />
+        <ToolButton icon={Table} title="Insert Table" onClick={handleInsertTable} />
+        <div className="w-px h-4 bg-white/10 mx-1" />
         <select
           onChange={handleHeading}
           defaultValue=""
@@ -207,66 +562,70 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
         >
           <option value="" disabled>Heading</option>
           {HEADINGS.map(h => (
-            <option key={h.label} value={h.prefix}>{h.label}</option>
+            <option key={h.prefix} value={h.prefix}>{h.label}</option>
           ))}
         </select>
         <div className="w-px h-4 bg-white/10 mx-1" />
-        <button
-          type="button"
-          title="Text Color"
-          ref={textColorBtnRef}
-          onMouseDown={e => { e.preventDefault(); setShowTextColors(!showTextColors); setShowBgColors(false); }}
-          className="p-1.5 rounded-md hover:bg-white/10 text-slate-400 hover:text-white transition-all relative"
-        >
-          <Palette className="w-3.5 h-3.5" />
-        </button>
-        {showTextColors && (
-          <div className="absolute top-full left-0 mt-1 z-50 bg-[#1a1d26] border border-white/10 rounded-xl p-2 shadow-2xl w-[248px]" onMouseDown={e => e.preventDefault()}>
-            <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1.5 px-0.5">Text Color</div>
-            <div className="grid grid-cols-8 gap-1">
-              {COLORS.map(c => (
-                <button
-                  key={c}
-                  type="button"
-                  title={c}
-                  onMouseDown={() => applyTextColor(c)}
-                  className="w-6 h-6 rounded-md border border-white/10 hover:scale-110 transition-transform cursor-pointer"
-                  style={{ backgroundColor: c }}
-                />
-              ))}
+        <div className="relative">
+          <button
+            type="button"
+            title="Text Color"
+            ref={textColorBtnRef}
+            onMouseDown={e => { e.preventDefault(); setShowTextColors(!showTextColors); setShowBgColors(false); }}
+            className={`p-1.5 rounded-md hover:bg-white/10 text-slate-400 hover:text-white transition-all relative ${showTextColors ? 'bg-blue-500/20 text-blue-400' : ''}`}
+          >
+            <Palette className="w-3.5 h-3.5" />
+          </button>
+          {showTextColors && (
+            <div className="absolute top-full left-0 mt-1 z-50 bg-[#1a1d26] border border-white/10 rounded-xl p-2 shadow-2xl w-[248px]" onMouseDown={e => e.preventDefault()}>
+              <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1.5 px-0.5">Text Color</div>
+              <div className="grid grid-cols-8 gap-1">
+                {COLORS.map(c => (
+                  <button
+                    key={c}
+                    type="button"
+                    title={c}
+                    onMouseDown={() => applyTextColor(c)}
+                    className="w-6 h-6 rounded-md border border-white/10 hover:scale-110 transition-transform cursor-pointer"
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-        <button
-          type="button"
-          title="Background / Highlight Color"
-          ref={bgColorBtnRef}
-          onMouseDown={e => { e.preventDefault(); setShowBgColors(!showBgColors); setShowTextColors(false); }}
-          className="p-1.5 rounded-md hover:bg-white/10 text-slate-400 hover:text-white transition-all relative"
-          style={{ background: 'linear-gradient(135deg, transparent 50%, #ffd70020 50%)' }}
-        >
-          <span className="text-[11px] font-bold leading-none" style={{ textShadow: '0 0 2px rgba(255,215,0,0.5)' }}>H</span>
-        </button>
-        {showBgColors && (
-          <div className="absolute top-full left-0 mt-1 z-50 bg-[#1a1d26] border border-white/10 rounded-xl p-2 shadow-2xl w-[248px]" onMouseDown={e => e.preventDefault()}>
-            <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1.5 px-0.5">Highlight Color</div>
-            <div className="grid grid-cols-8 gap-1">
-              {COLORS.map(c => (
-                <button
-                  key={c}
-                  type="button"
-                  title={c}
-                  onMouseDown={() => applyBgColor(c)}
-                  className="w-6 h-6 rounded-md border border-white/10 hover:scale-110 transition-transform cursor-pointer"
-                  style={{ backgroundColor: c }}
-                />
-              ))}
+          )}
+        </div>
+        <div className="relative">
+          <button
+            type="button"
+            title="Background / Highlight Color"
+            ref={bgColorBtnRef}
+            onMouseDown={e => { e.preventDefault(); setShowBgColors(!showBgColors); setShowTextColors(false); }}
+            className={`p-1.5 rounded-md hover:bg-white/10 text-slate-400 hover:text-white transition-all relative ${showBgColors ? 'bg-blue-500/20 text-blue-400' : ''}`}
+            style={{ background: 'linear-gradient(135deg, transparent 50%, #ffd70020 50%)' }}
+          >
+            <span className="text-[11px] font-bold leading-none" style={{ textShadow: '0 0 2px rgba(255,215,0,0.5)' }}>H</span>
+          </button>
+          {showBgColors && (
+            <div className="absolute top-full left-0 mt-1 z-50 bg-[#1a1d26] border border-white/10 rounded-xl p-2 shadow-2xl w-[248px]" onMouseDown={e => e.preventDefault()}>
+              <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1.5 px-0.5">Highlight Color</div>
+              <div className="grid grid-cols-8 gap-1">
+                {COLORS.map(c => (
+                  <button
+                    key={c}
+                    type="button"
+                    title={c}
+                    onMouseDown={() => applyBgColor(c)}
+                    className="w-6 h-6 rounded-md border border-white/10 hover:scale-110 transition-transform cursor-pointer"
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
         <button
           type="button"
-          title="Attach File (PDF, DOCX, XLSX)"
+          title="Attach File"
           onMouseDown={e => { e.preventDefault(); handleFileUpload(); }}
           className={`p-1.5 rounded-md transition-all ${uploading ? 'text-blue-400 animate-pulse' : 'text-slate-400 hover:text-white hover:bg-white/10'}`}
         >
@@ -294,17 +653,42 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
             <option key={s} value={s}>{s}px</option>
           ))}
         </select>
+        <div className="w-px h-4 bg-white/10 mx-1" />
+        <button
+          type="button"
+          title={showSource ? 'Rich Text View' : 'Source View'}
+          onMouseDown={e => { e.preventDefault(); toggleSource(); }}
+          className={`p-1.5 rounded-md transition-all ${showSource ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'text-slate-400 hover:text-white hover:bg-white/10'}`}
+        >
+          {showSource ? <Eye className="w-3.5 h-3.5" /> : <Code className="w-3.5 h-3.5" />}
+        </button>
       </div>
-      <textarea
-        ref={textareaRef}
-        value={value}
-        onChange={onChange}
-        rows={rows}
-        placeholder={placeholder}
-        readOnly={readOnly}
-        className={`w-full bg-black/40 border border-white/5 rounded-b-xl p-3 text-xs text-white focus:border-blue-500/50 outline-none resize-none ${className || ''}`}
-        style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}
-      />
+
+      {/* Editor Area */}
+      {showSource ? (
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={onChange}
+          rows={rows}
+          placeholder={placeholder}
+          readOnly={readOnly}
+          className={`w-full bg-black/40 border border-white/5 rounded-b-xl p-3 text-xs text-white focus:border-blue-500/50 outline-none resize-none font-mono ${className || ''}`}
+          style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}
+        />
+      ) : (
+        <div
+          ref={editorRef}
+          contentEditable={!readOnly}
+          suppressContentEditableWarning
+          onInput={syncFromEditor}
+          onKeyDown={handleEditorKeyDown}
+          onBlur={syncFromEditor}
+          className={`w-full bg-black/40 border border-white/5 rounded-b-xl p-3 text-[13px] text-white outline-none resize-none overflow-y-auto leading-relaxed min-h-[120px] focus:border-blue-500/50 [&:empty:before]:content-[attr(data-placeholder)] [&:empty:before]:text-slate-500 [&:empty:before]:italic ${className || ''}`}
+          style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0, ...(rows ? { minHeight: `${rows * 28}px` } : {}) }}
+          data-placeholder={placeholder || 'Start writing...'}
+        />
+      )}
     </div>
   );
 };

@@ -293,10 +293,14 @@ const Signatures = () => {
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     html = html.replace(/_(.*?)_/g, '<em>$1</em>');
     html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
-    html = html.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width:100%;height:auto;border-radius:8px;" />');
+    html = html.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="width:100%;height:auto;border-radius:8px;" />');
     html = html.replace(/(?<!href=")(?<!src=")\[([^\]]*)\]\(([^)]*)\)/g, '<a href="$2" target="_blank" style="color:#3b82f6;text-decoration:underline;">$1</a>');
     html = html.replace(/\n{2,}/g, '<br /><br />');
     html = html.replace(/\n/g, '<br />');
+    html = html.replace(/<img\s+[^>]*src="data:image\/[^"]*"[^>]*>/gi, (m) => {
+      if (/style\s*=\s*"/i.test(m)) return m.replace(/style\s*=\s*"([^"]*)"/i, 'style="width:400px;height:auto;display:block;"');
+      return m.replace('<img', '<img style="width:400px;height:auto;display:block;"');
+    });
     return html;
   };
 
