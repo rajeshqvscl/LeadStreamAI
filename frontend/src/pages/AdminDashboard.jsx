@@ -427,7 +427,10 @@ const AdminDashboard = () => {
     try {
       const rangeLabel = exportRange === 'ALL' ? 'full' : exportRange.toLowerCase();
       showNotification('success', `Preparing ${rangeLabel} master export...`);
-      const res = await api.get(`/api/admin/leads/export?period=${exportRange}`);
+      const exportParams = new URLSearchParams({ period: exportRange, _t: Date.now() });
+      Object.entries(filters).forEach(([k, v]) => { if (v !== 'ALL') exportParams.set(k, v); });
+      if (debouncedSearch) exportParams.set('search', debouncedSearch);
+      const res = await api.get(`/api/admin/leads/export?${exportParams.toString()}`);
       const allLeads = res.data.leads || [];
       const headers = ['Name','Email','Designation','Company','Type','Status','Intent','Score','Check Size','Rejection Reason','Sector/Industry','Owner','Last Interaction','AI Strategy','Analyst Report','Key Signals','Confidence %'].join(',');
       const rows = allLeads.map(l => {

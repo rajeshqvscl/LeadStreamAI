@@ -404,12 +404,19 @@ def get_all_leads_admin(
 
 @router.get("/leads/export")
 def export_all_leads_admin(
-    period: Optional[str] = "ALL", 
+    period: Optional[str] = "ALL",
+    type: Optional[str] = None,
+    status: Optional[str] = None,
+    intent: Optional[str] = None,
+    owner: Optional[str] = None,
+    sector: Optional[str] = None,
+    search: Optional[str] = None,
     user_id: Optional[str] = Header(None, alias="X-User-Id")
 ):
     """
     Returns filtered leads in the system without pagination for full master export.
     Supports period: DAILY, WEEKLY, MONTHLY, QUARTERLY, YEARLY, ALL
+    Also filters by type, status, intent, owner, sector, search when provided.
     """
     try:
         conn = get_db_connection()
@@ -422,33 +429,63 @@ def export_all_leads_admin(
              if user_id != 'admin':
                 raise HTTPException(status_code=403, detail="Admin access required")
 
-        # 2. Build Range Filter (IST timezone — filter by updated_at)
-        range_clause = ""
-        if period == 'DAILY':
-            range_clause = "AND l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date"
-        elif period == 'WEEKLY':
-            range_clause = "AND l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '6 days'"
-        elif period == 'MONTHLY':
-            range_clause = "AND l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '29 days'"
-        elif period == 'QUARTERLY':
-            range_clause = "AND l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '89 days'"
-        elif period == 'YEARLY':
-            range_clause = "AND l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '364 days'"
+        # 2. Build Dynamic WHERE Clause
+        where_clauses = ["1=1"]
+        params = []
+
+        if type and type != 'ALL':
+            where_clauses.append(f"({TYPE_CASE_SQL}) = %s")
+            params.append(type.upper())
+        if status and status != 'ALL':
+            if status.upper() == 'REPLIED':
+                where_clauses.append("(l.email_status ILIKE 'REPLIED' OR l.is_responded = TRUE)")
+            elif status == 'Interested':
+                where_clauses.append("l.reply_intent = 'INTERESTED'")
+            else:
+                where_clauses.append("l.email_status ILIKE %s")
+                params.append(status)
+        if intent and intent != 'ALL':
+            where_clauses.append("l.reply_intent ILIKE %s")
+            params.append(intent)
+        if owner and owner != 'ALL':
+            where_clauses.append("u.username ILIKE %s")
+            params.append(owner)
+        if sector and sector != 'ALL':
+            where_clauses.append(f"( ({SECTOR_CASE_SQL}) = %s OR COALESCE(l.sector, '') ILIKE '%%' || %s || '%%' )")
+            params.append(sector.upper())
+            params.append(sector)
+        if search:
+            where_clauses.append("(l.first_name ILIKE %s OR l.last_name ILIKE %s OR l.company_name ILIKE %s OR l.email ILIKE %s)")
+            s_param = f"%{search}%"
+            params.extend([s_param, s_param, s_param, s_param])
+        if period and period != 'ALL':
+            if period == 'DAILY':
+                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
+            elif period == 'WEEKLY':
+                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '6 days'")
+            elif period == 'MONTHLY':
+                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '29 days'")
+            elif period == 'QUARTERLY':
+                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '89 days'")
+            elif period == 'YEARLY':
+                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '364 days'")
+
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
         # 3. Fetch leads with derived + raw sector
         query = f"""
             SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.company_name, l.family_office_name, l.designation, 
-                   ({SECTOR_CASE_SQL}) as sector, l.sector as raw_sector, l.lead_type, l.reply_intent, l.sentiment_score, l.deal_size, l.check_size,
+                   ({SECTOR_CASE_SQL}) as sector, l.sector as raw_sector, ({TYPE_CASE_SQL}) as lead_type, l.reply_intent, l.sentiment_score, l.deal_size, l.check_size,
                    l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
                    l.email_status, l.followup_status,
                    l.persona, l.email_draft, l.first_outreach_subject, l.last_outreach_subject,
                    u.username as owner_name
             FROM leads_raw l
             LEFT JOIN users u ON l.user_id = u.id
-            WHERE 1=1 {range_clause}
+            {where_sql}
             ORDER BY l.created_at DESC
         """
-        cur.execute(query)
+        cur.execute(query, tuple(params))
         leads = cur.fetchall()
         
         return {"leads": [dict(l) for l in leads]}
