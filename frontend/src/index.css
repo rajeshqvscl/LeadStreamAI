@@ -383,6 +383,8 @@ body {
 /* Global Email Content Overrides for Dark Mode */
 .email-content-container * {
   color: inherit !important;
+  background: transparent !important;
+  background-color: transparent !important;
 }
 
 .email-content-container a {

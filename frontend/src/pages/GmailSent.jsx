@@ -94,7 +94,10 @@ const GmailSent = () => {
     const isHtml = /<[a-z][\s\S]*>/i.test(content);
     
     if (isHtml) {
-      return <div className="email-html-content" dangerouslySetInnerHTML={{ __html: content }} />;
+      const sanitized = content
+        .replace(/background(?:-color)?\s*:\s*[^;]+;?\s*/gi, '')
+        .replace(/bgcolor\s*=\s*["'][^"']*["']\s*/gi, '');
+      return <div className="email-html-content" dangerouslySetInnerHTML={{ __html: sanitized }} />;
     }
 
     // Helper to render inline formatting like *bold*

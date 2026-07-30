@@ -489,7 +489,8 @@ const EditEmail = () => {
           if (/style\s*=\s*"/i.test(m)) return m.replace(/style\s*=\s*"([^"]*)"/i, 'style="width:400px;height:auto;display:block;"');
           return m.replace('<img', '<img style="width:400px;height:auto;display:block;"');
         })
-        .replace(/font-size\s*:\s*[^;]+;?\s*/gi, '')
+        .replace(/background(?:-color)?\s*:\s*[^;]+;?\s*/gi, '')
+        .replace(/bgcolor\s*=\s*["'][^"']*["']\s*/gi, '')
         .replace(/<table(\s[^>]*)?>/gi, (m) => {
           if (m.includes('style="')) return m.replace(/style="([^"]*)"/, 'style="border-collapse:collapse;$1"');
           return '<table style="border-collapse:collapse;">';

@@ -1,7 +1,6 @@
 import os
 import ssl
 import logging
-import resend
 from datetime import datetime
 from dotenv import load_dotenv
 from pathlib import Path
@@ -15,129 +14,6 @@ logger = logging.getLogger(__name__)
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path, override=True)
 logger.info(f"Module initialized with env_path: {env_path}")
-
-# Configure Resend
-resend.api_key = os.getenv("RESEND_API_KEY")
-
-def send_smtp_fallback(to_email: str, subject: str, html_content: str, from_email: str, from_name: str, reply_to: Optional[str] = None, cc: Optional[str] = None) -> bool:
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
-    
-    sender_line = f"{from_name} <{from_email}>"
-    smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_user = os.getenv("SMTP_USER")
-    smtp_pass = os.getenv("SMTP_PASS")
-    
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = sender_line
-        msg['To'] = to_email
-        msg['Subject'] = subject
-        
-        if cc:
-            msg['Cc'] = cc
-            
-        if reply_to:
-            msg['Reply-To'] = reply_to
-        else:
-            msg['Reply-To'] = from_email
-            
-        import re as _re2
-        _plain_text = _re2.sub(r'<br\s*/?>', '\n', html_content)
-        _plain_text = _re2.sub(r'<p[^>]*>', '\n', _plain_text)
-        _plain_text = _re2.sub(r'<[^>]+>', '', _plain_text)
-        _plain_text = _re2.sub(r'&nbsp;', ' ', _plain_text)
-        _plain_text = _re2.sub(r'&amp;', '&', _plain_text)
-        _plain_text = _re2.sub(r'&lt;', '<', _plain_text)
-        _plain_text = _re2.sub(r'&gt;', '>', _plain_text)
-        _plain_text = _re2.sub(r'\n{3,}', '\n\n', _plain_text).strip()
-        alt_body = MIMEMultipart('alternative')
-        alt_body.attach(MIMEText(_plain_text, 'plain'))
-        alt_body.attach(MIMEText(html_content, 'html'))
-        msg.attach(alt_body)
-
-        # Prepare recipient list
-        recipients = [to_email]
-        if cc:
-            # Handle multiple CCs separated by commas
-            cc_list = [c.strip() for c in cc.split(',')]
-            recipients.extend(cc_list)
-
-        server = smtplib.SMTP(smtp_server, smtp_port)
-        server.starttls()
-        server.login(smtp_user, smtp_pass)
-        server.sendmail(from_email, recipients, msg.as_string())
-        server.quit()
-        logger.info(f"Email sent successfully via SMTP to {to_email} (CC: {cc})")
-        return True
-    except Exception as e:
-        logger.error(f"SMTP Dispatch Error: {str(e)}")
-        return False
-
-def format_outreach_html(text: str) -> str:
-    """
-    Converts markdown-style bold, bullets, and links into clean HTML.
-    Specifically targets:
-    - **Bold** -> <strong>
-    - • Bullet -> <li>
-    - [Link](url) -> <a href="url">
-    """
-    import re
-    
-    # If content already has HTML structure, pass through (markdown already handled it)
-    if re.search(r'<(ul|ol|li|p|table)[>\s]', text, re.IGNORECASE):
-        return text
-    
-    # Normalize bullet characters for markdown processing
-    text = text.replace('•', '*')
-    
-    # 1. Convert markdown links [text](url) to <a href="url">text</a>
-    text = re.sub(
-        r'\[(.*?)\]\((.*?)\)', 
-        r'<a href="\2" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', 
-        text
-    )
-
-    # 2. Convert bold/italic markdown into clean <strong> tags
-    text = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong style="color: #ffffff; font-size: 15px;">\1</strong>', text)
-    text = re.sub(r'\*\*(.*?)\*\*', r'<strong style="color: #ffffff; font-size: 18px;">\1</strong>', text)
-    text = re.sub(r'\*(.*?)\*', r'<em style="color: #cbd5e1;">\1</em>', text)
-    
-    # 3. Convert bullet points to proper list items
-    lines = text.split('\n')
-    formatted_lines = []
-    in_list = False
-    
-    for line in lines:
-        line = line.strip()
-        if line.startswith('* ') or line.startswith('- '):
-            if not in_list:
-                formatted_lines.append('<ul style="padding-left: 20px; color: #cbd5e1; margin-top: 8px;">')
-                in_list = True
-            content = line[2:].strip()
-            formatted_lines.append(f'<li style="margin-bottom: 4px;">{content}</li>')
-        else:
-            if in_list:
-                formatted_lines.append('</ul>')
-                in_list = False
-            if line:
-                formatted_lines.append(f'<p style="margin-bottom: 12px; line-height: 1.6; color: #cbd5e1;">{line}</p>')
-            else:
-                formatted_lines.append('<br>')
-                
-    if in_list:
-        formatted_lines.append('</ul>')
-        
-    result = "\n".join(formatted_lines)
-    # Strip any stray square brackets from non-HTML text
-    import re as _re
-    parts = _re.split(r'(<[^>]+>)', result)
-    for i, p in enumerate(parts):
-        if not (p.startswith('<') and p.endswith('>')):
-            parts[i] = p.replace('[', '').replace(']', '')
-    return ''.join(parts)
 
 
 def _get_signature_attachments(user_id: Optional[int]) -> list:
@@ -338,8 +214,8 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     if "You're receiving this because you interacted with LeadStream" not in html_content:
         html_content += build_unsubscribe_footer(lead_id)
 
-    # 2. Attempt Gmail API Dispatch (Highly Preferred for Outreach)
-    if user_id and not is_system_email:
+    # 2. Attempt Gmail API Dispatch (Gmail is the only dispatch method now)
+    if user_id:
         try:
             from app.services.google_service import get_gmail_service
             import base64
@@ -596,7 +472,8 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 logger.info(f"✅ Gmail API dispatch successful to {to_email} (CC: {cc}) — Message ID: {sent.get('id')}")
                 return True, "Success", sent_thread_id, sent_rfc_message_id
             else:
-                return False, "Gmail service not initialized. Ensure your Google account is linked with correct permissions.", None, None
+                logger.error(f"Gmail service not initialized for User {user_id}. Gmail must be connected to send emails.")
+                return False, "Gmail not connected. Please link your Google account in Settings.", None, None
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
@@ -612,108 +489,13 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 except:
                     pass
             
-            error_msg = f"Gmail API Error: {str(e)} {error_content}"
-            logger.error(f"❌ Gmail API dispatch failed for User {user_id} to {to_email}: {error_msg}\n{error_details}")
-            return False, error_msg, None, None
+            logger.error(f"❌ Gmail API dispatch failed for User {user_id} to {to_email}: {str(e)}")
+            logger.error(traceback.format_exc())
+            return False, f"Gmail API error: {str(e)}", None, None
 
-    # 2. Fallback to SMTP/Resend logic
-    if user_id and not is_system_email:
-        logger.error(f"Gmail API dispatch failed for User {user_id}. ABORTING FALLBACK to system SMTP for personalized outreach.")
-        return False, "Gmail API dispatch failed. Personalized outreach requires a working Google connection.", None, None
-
-    provider = os.getenv("EMAIL_PROVIDER", "resend").lower()
-    
-    if not from_email:
-        logger.error(f"ABORTING DISPATCH: No sender email provided for outreach to {to_email}.")
-        return False, "Sender email missing.", None, None
-
-    final_from_email = from_email
-    final_from_name = from_name or "LeadStream Outreach"
-    sender_line = f"{final_from_name} <{final_from_email}>"
-    
-    if is_system_email:
-        final_html = html_content
-    else:
-        # Process HTML Formatting (Markdown-to-HTML)
-        formatted_html = format_outreach_html(html_content)
-        # Strip ALL inline font-size so wrapper 18px cascades uniformly
-        import re as _fs_resend
-        formatted_html = _fs_resend.sub(r'font-size\s*:\s*[^;]+;?\s*', '', formatted_html)
-        
-        # Wrap in a clean container for professional appearance
-        final_html = f"""
-        <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.6; color: #333333; font-size: 18px; max-width: 600px; margin: auto;">
-            {formatted_html}
-        </div>
-        """
-    
-    logger.info(f"Targeting dispatch to {to_email} via {provider}. Sender: {sender_line}")
-
-    if provider == "resend":
-        try:
-            # Re-initialize API key to ensure it is fresh from the environment
-            load_dotenv(dotenv_path=env_path, override=True)
-            resend_key = os.getenv("RESEND_API_KEY")
-            
-            if not resend_key:
-                logger.error("RESEND_API_KEY is missing from environment.")
-                return False, "Resend API key missing.", None, None
-            
-            # Safe debug: only show prefix to verify key identity
-            key_prefix = resend_key[:6] if resend_key else "NONE"
-            logger.info(f"Attempting dispatch with Resend Key (prefix: {key_prefix}...)")
-            
-            resend.api_key = resend_key
-            
-            params = {
-                "from": sender_line,
-                "to": to_email,
-                "subject": subject,
-                "html": final_html,
-                "reply_to": from_email
-            }
-            
-            if cc:
-                params["cc"] = cc
-
-            if lead_id:
-                from app.models.lead import get_or_create_unsubscribe_token
-                try:
-                    unsub_token = get_or_create_unsubscribe_token(lead_id)
-                except Exception:
-                    unsub_token = None
-                base_url = os.getenv("FRONTEND_URL", "https://leadstreamai.onrender.com").rstrip('/')
-                if 'qvscl' in base_url.lower():
-                    logger.error(f"BLOCKED: FRONTEND_URL contains qvscl.com! Using fallback. Value was: {base_url}")
-                    base_url = os.getenv("RENDER_EXTERNAL_URL", "https://leadstreamai.onrender.com")
-                if unsub_token:
-                    unsub_url = f"{base_url.rstrip('/')}/unsubscribe?token={unsub_token}"
-                else:
-                    unsub_url = f"{base_url.rstrip('/')}/api/leads/unsubscribe/{lead_id}"
-                logger.info(f"UNSUBSCRIBE URL: Resend List-Unsubscribe URL set to: {unsub_url} (FRONTEND_URL={os.getenv('FRONTEND_URL', 'NOT SET')})")
-                import re as _unsub_re
-                _sender_mail = _unsub_re.search(r'[\w.+-]+@[\w.-]+', from_email or '')
-                _mailto_addr = _sender_mail.group(0) if _sender_mail else (from_email or '')
-                params["headers"] = {
-                    "List-Unsubscribe": f"<{unsub_url}>, <mailto:{_mailto_addr}?subject=unsub_{lead_id}>",
-                    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
-                }
-            
-            # Attachments already merged above with profile defaults
-
-            if attachments:
-                params["attachments"] = attachments
-
-            sent = resend.Emails.send(params)
-            sent_id = getattr(sent, "id", str(sent))
-            logger.info(f"Email sent successfully via Resend. ID: {sent_id}")
-            return True, "Success", None, None
-        except Exception as e:
-            logger.error(f"Resend dispatch failed: {str(e)}")
-            return False, str(e), None, None
-    else:
-        success = send_smtp_fallback(to_email, subject, final_html, final_from_email, final_from_name, reply_to=from_email, cc=cc)
-        return success, ("SMTP dispatch completed" if success else "SMTP dispatch failed"), None, None
+    # No SMTP/Resend fallback — Gmail API is the only dispatch method for outreach
+    logger.error(f"Cannot send email to {to_email}: No Gmail connection available for User {user_id}.")
+    return False, "Gmail not connected. Please link your Google account in Settings.", None, None
 
 def check_scheduled_emails():
     """
@@ -915,9 +697,10 @@ def send_admin_report(to_email: str, report_data: dict) -> bool:
         to_email=to_email or admin['email'],
         subject=subject,
         html_content=html_content,
-        from_email=os.getenv("SMTP_USER", admin['email']),
+        from_email=admin['email'],
         from_name="LeadStream Intelligence",
         is_system_email=True,
+        user_id=1,
         attachments=report_data.get("attachments")
     )
     return res[0] if isinstance(res, tuple) else res

@@ -532,7 +532,7 @@ const GmailDrafts = () => {
                                 <div className="p-1 rounded-xl bg-white/[0.01] border border-white/[0.03]">
                                     <div 
                                         className="text-[14px] text-slate-300 leading-relaxed font-medium p-4"
-                                        dangerouslySetInnerHTML={{ __html: renderEmailPreview(editingDraft.body) }}
+                                        dangerouslySetInnerHTML={{ __html: renderEmailPreview(editingDraft.body).replace(/background(?:-color)?\s*:\s*[^;]+;?\s*/gi, '').replace(/bgcolor\s*=\s*["'][^"']*["']\s*/gi, '') }}
                                     />
                                 </div>
                             </div>

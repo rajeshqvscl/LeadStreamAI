@@ -719,7 +719,7 @@ const Followups = () => {
                   <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500/40" />
                   <div
                     className="text-slate-300 text-[14px] leading-relaxed"
-                    dangerouslySetInnerHTML={{ __html: selectedLead.followup_draft || '<p class="animate-pulse italic text-slate-500">Generating draft...</p>' }}
+                    dangerouslySetInnerHTML={{ __html: (selectedLead.followup_draft || '<p class="animate-pulse italic text-slate-500">Generating draft...</p>').replace(/background(?:-color)?\s*:\s*[^;]+;?\s*/gi, '').replace(/bgcolor\s*=\s*["'][^"']*["']\s*/gi, '') }}
                   />
                 </div>
               )}

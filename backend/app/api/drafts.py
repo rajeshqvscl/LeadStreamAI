@@ -3238,7 +3238,6 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         import traceback
         traceback.print_exc()
         # Return error nicely instead of 500
-        from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=str(e) + "\n" + traceback.format_exc())
 
 class RefineRequest(BaseModel):
@@ -3331,35 +3330,41 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[s
 def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     try:
         if not check_daily_email_limit(user_id, 1):
-            from fastapi import HTTPException
             raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this email would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
         from app.services.email_service import send_email
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
-        # 1. Fetch User Data for Sender Identity
+        # 1. Fetch/Prepare Draft FIRST to get lead owner's user_id
+        cur.execute("SELECT first_name, last_name, email, email_draft, cc_email, draft_template_used, user_id FROM leads_raw WHERE id = %s", (draft_id,))
+        lead = cur.fetchone()
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        
+        # Resolve sender identity — use lead owner's profile if they have Gmail connected
         sender_email = None
         sender_name = "the team"
-        current_uid = normalize_user_id(user_id)
+        uid = normalize_user_id(user_id)  # default: approver's ID
         
-        if user_id:
-            cur.execute("SELECT email, full_name, username, google_id, job_title, phone, linkedin_url, signature, signature_mode FROM users WHERE id = %s", (current_uid,))
+        lead_owner_id = lead.get('user_id')
+        if lead_owner_id:
+            # Check if lead owner has Gmail connected
+            cur.execute("SELECT email, full_name, username, google_refresh_token FROM users WHERE id = %s", (lead_owner_id,))
+            owner_u = cur.fetchone()
+            if owner_u and owner_u.get('google_refresh_token'):
+                sender_email = owner_u['email']
+                sender_name = owner_u['full_name'] or owner_u['username'] or "the team"
+                uid = str(lead_owner_id)
+                logger.info(f"Using lead owner (user_id={lead_owner_id}) Gmail for dispatch: {sender_email}")
+        
+        if not sender_email and user_id:
+            # Fall back to approver's profile
+            cur.execute("SELECT email, full_name, username FROM users WHERE id = %s", (normalize_user_id(user_id),))
             u = cur.fetchone()
             if u:
                 sender_email = u['email']
                 sender_name = u['full_name'] or u['username'] or "the team"
-                # Crucial: Verify Google Link
-                if not u['google_id']:
-                    from fastapi import HTTPException
-                    raise HTTPException(status_code=400, detail="Gmail Not Connected. Please go to Settings and link your Google account to send emails from your own address.")
-
-        # 2. Fetch/Prepare Draft
-        cur.execute("SELECT first_name, last_name, email, email_draft, cc_email, draft_template_used FROM leads_raw WHERE id = %s", (draft_id,))
-        lead = cur.fetchone()
-        if not lead:
-            from fastapi import HTTPException
-            raise HTTPException(status_code=404, detail="Lead not found")
-
+        
         draft_content = lead.get('email_draft')
         template_name = lead.get('draft_template_used') if lead else None
         draft_content = heal_draft_content(draft_content, user_id, template_name=template_name)
@@ -3367,7 +3372,6 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         stored_cc = lead.get('cc_email')
         
         if not email:
-            from fastapi import HTTPException
             raise HTTPException(status_code=400, detail="Missing recipient email address for this lead.")
         
         if not draft_content:
@@ -3392,8 +3396,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         else:
             body = draft_content.strip()
         
-        # Real Dispatch — Gmail API if connected, else Resend/SMTP
-        uid = normalize_user_id(user_id)
+        # Real Dispatch — Gmail API only (SMTP/Resend fallback removed)
         logging.info(f"Triggering real email dispatch for lead {draft_id} from {sender_email} (User: {uid})")
         
         # Check if user has Gmail connected (so we can log correctly)
@@ -3416,8 +3419,11 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         if is_vismaya:
             cc_email = "rajesh.s@qvscl.com"
         
-        # --- Re-inject Signature of the CURRENT logged-in user ---
+        # --- Re-inject Signature of the user sending the email ---
         # Always uses the person's own hardcoded signature from inject_signature()
+        # Use lead owner's profile if available, else fall back to current user
+        sig_profile_user_id = uid if uid else normalize_user_id(user_id)
+        profile = get_sender_profile(sig_profile_user_id)
         body = inject_signature(body, profile, draft_id)
         
         user_id_int = int(uid) if uid else None
@@ -3438,7 +3444,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             attachments=body_attachments
         )
         
-        dispatch_method = "Gmail API" if has_gmail else "Resend/SMTP"
+        dispatch_method = "Gmail API" if has_gmail else "NO DISPATCH (Gmail not connected)"
 
         if success:
             # Fetch gmail_draft_id before updating the row
@@ -3485,7 +3491,6 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             conn.rollback()
             cur.close()
             conn.close()
-            from fastapi import HTTPException
             raise HTTPException(status_code=400, detail=f"Outreach dispatch failed: {error_msg}")
     except HTTPException:
         raise
@@ -3727,7 +3732,6 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     if leads_to_send and not check_daily_email_limit(user_id, len(leads_to_send)):
         cur.close()
         conn.close()
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
     
     sent_count = 0
@@ -3820,27 +3824,24 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-    # 1. Fetch sender info
+    # 1. Resolve default sender identity (approver) — will be overridden per-lead if owner has Gmail
     sender_email = None
     sender_name = "the team"
     uid = normalize_user_id(user_id)
 
     if uid:
-        cur.execute("SELECT email, full_name, username, google_id FROM users WHERE id = %s", (uid,))
+        cur.execute("SELECT email, full_name, username FROM users WHERE id = %s", (uid,))
         u = cur.fetchone()
         if u:
             sender_email = u['email']
             sender_name = u['full_name'] or u['username'] or "the team"
-            if not u['google_id']:
-                from fastapi import HTTPException
-                raise HTTPException(status_code=400, detail="Gmail Not Connected. Please link your Google account in Settings before sending.")
 
     from app.api.drafts import get_sender_profile
     profile = get_sender_profile(user_id)
 
     # 2. Fetch the requested leads
     cur.execute(
-        "SELECT id, email, email_draft, gmail_draft_id, cc_email, draft_template_used FROM leads_raw WHERE id = ANY(%s)",
+        "SELECT id, email, email_draft, gmail_draft_id, cc_email, draft_template_used, user_id FROM leads_raw WHERE id = ANY(%s)",
         (req.lead_ids,)
     )
     leads_to_send = cur.fetchall()
@@ -3848,7 +3849,6 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
     if leads_to_send and not check_daily_email_limit(user_id, len(leads_to_send)):
         cur.close()
         conn.close()
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
 
     sent_count = 0
@@ -3857,6 +3857,20 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
 
     for lead in leads_to_send:
         try:
+            # Resolve sender identity for this specific lead — use lead owner's Gmail if available
+            lead_uid = uid
+            lead_sender_email = sender_email
+            lead_sender_name = sender_name
+            lead_owner_id = lead.get('user_id')
+            if lead_owner_id:
+                cur.execute("SELECT email, full_name, username, google_refresh_token FROM users WHERE id = %s", (lead_owner_id,))
+                owner_u = cur.fetchone()
+                if owner_u and owner_u.get('google_refresh_token'):
+                    lead_sender_email = owner_u['email']
+                    lead_sender_name = owner_u['full_name'] or owner_u['username'] or "the team"
+                    lead_uid = str(lead_owner_id)
+                    logger.info(f"Batch: Using lead owner (user_id={lead_owner_id}) Gmail for dispatch to {lead['email']}: {lead_sender_email}")
+
             draft_content = lead['email_draft'] or ""
             template_name = lead.get('draft_template_used')
             draft_content = heal_draft_content(draft_content, user_id, profile, template_name=template_name)
@@ -3872,10 +3886,10 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
                 to_email=lead['email'],
                 subject=subject,
                 html_content=markdown_to_html(body),
-                from_email=sender_email,
-                from_name=sender_name,
+                from_email=lead_sender_email,
+                from_name=lead_sender_name,
                 lead_id=lead['id'],
-                user_id=uid,
+                user_id=int(lead_uid) if lead_uid else None,
                 cc=lead['cc_email'],
                 template_name=lead.get('draft_template_used')
             )
@@ -4122,12 +4136,10 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
         if not req.lead_ids:
             return {"message": "No leads provided"}
             
-        if not check_daily_email_limit(user_id, len(req.lead_ids)):
-            cur.close()
-            conn.close()
-            from fastapi import HTTPException
-            raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
-            
+        if not check_daily_email_limit(user_id, len(req.lead_ids)):        cur.close()
+        conn.close()
+        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
+    
         # 1. Fetch User Data
         uid = normalize_user_id(user_id)
         cur.execute("SELECT email, full_name, username, job_title, phone, linkedin_url FROM users WHERE id = %s", (uid,))
