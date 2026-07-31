@@ -173,7 +173,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
           preRange.selectNodeContents(editorRef.current);
           preRange.setEnd(range.endContainer, range.endOffset);
           savedOffset = preRange.toString().length;
-        } catch(e) { /* ignore */ }
+        } catch(_e) { /* ignore */ }
       }
 
       editorRef.current.innerHTML = expectedHtml;
@@ -192,7 +192,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
             newSel.removeAllRanges();
             newSel.addRange(range);
           }
-        } catch(e) { /* fallback */ }
+        } catch(_e) { /* fallback */ }
       }
     }
   }, [value, showSource, toHtml]);
@@ -327,7 +327,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
         } else {
           insert(`![](${imgUrl})\n`);
         }
-      } catch (err) {
+      } catch (_err) {
         alert('Failed to upload image');
       }
     };
@@ -372,7 +372,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
             insert(`[📎 ${file.name}](${fileUrl})`);
           }
         }
-      } catch (err) {
+      } catch (_err) {
         alert('Failed to upload file');
       } finally {
         setUploading(false);

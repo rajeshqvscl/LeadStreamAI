@@ -37,7 +37,7 @@ const BulkSearch = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [isRequestingAccess, setIsRequestingAccess] = useState(false);
-  const [lastFetched, setLastFetched] = useState(null);
+  const [_, setLastFetched] = useState(null);
 
   // Confirm Dialog State
   const [confirmDialog, setConfirmDialog] = useState({
@@ -172,7 +172,7 @@ const BulkSearch = () => {
     }
   };
 
-  const handleBulkGenerateDrafts = async () => {
+  const _handleBulkGenerateDrafts = async () => {
     if (selectedLeads.size === 0) return;
     setIsBulkActionLoading(true);
     try {
@@ -180,7 +180,7 @@ const BulkSearch = () => {
       showNotification('success', `Drafts generated and moved to Email Drafts.`);
       setSelectedLeads(new Set());
       fetchBulkLeads(pagination.page);
-    } catch (err) {
+    } catch (_err) {
       showNotification('error', 'Bulk draft generation failed');
     } finally {
       setIsBulkActionLoading(false);
@@ -265,13 +265,13 @@ const BulkSearch = () => {
     if (selectedLeads.size === 0) return;
     setIsBulkActionLoading(true);
     try {
-      const response = await api.post('/api/approve-bulk-domain-drafts', {
+      const _response = await api.post('/api/approve-bulk-domain-drafts', {
         lead_ids: Array.from(selectedLeads)
       });
       showNotification('success', `Approved leads moved to Email Drafts.`);
       setSelectedLeads(new Set());
       fetchBulkLeads(pagination.page);
-    } catch (err) {
+    } catch (_err) {
       showNotification('error', 'Bulk approval failed');
     } finally {
       setIsBulkActionLoading(false);
@@ -291,7 +291,7 @@ const BulkSearch = () => {
           showNotification('success', `${selectedLeads.size} leads deleted.`);
           fetchBulkLeads(pagination.page);
           setSelectedLeads(new Set());
-        } catch (err) {
+        } catch (_err) {
           showNotification('error', 'Bulk deletion failed');
         } finally {
           setIsBulkActionLoading(false);
@@ -301,14 +301,14 @@ const BulkSearch = () => {
     );
   };
 
-  const handleGenerateDraftSingle = async (id) => {
+  const _handleGenerateDraftSingle = async (id) => {
     setProcessingId(id);
     try {
       await api.post('/api/generate-draft', { lead_id: id });
       showNotification('success', 'Lead moved to Email Drafts.');
       fetchBulkLeads(pagination.page);
       navigate('/dashboard/emails?status=PENDING_APPROVAL');
-    } catch (err) {
+    } catch (_err) {
       showNotification('error', 'Failed to generate draft');
     } finally {
       setProcessingId(null);
@@ -321,7 +321,7 @@ const BulkSearch = () => {
       await api.post(`/api/approve-draft/${id}`);
       showNotification('success', 'Lead approved and moved to Email Drafts!');
       fetchBulkLeads(pagination.page);
-    } catch (err) {
+    } catch (_err) {
       showNotification('error', 'Failed to approve lead');
     } finally {
       setProcessingId(null);
@@ -337,7 +337,7 @@ const BulkSearch = () => {
           await api.post('/api/leads/bulk-delete', [id]);
           showNotification('success', 'Lead deleted');
           fetchBulkLeads(pagination.page);
-        } catch (err) {
+        } catch (_err) {
           showNotification('error', 'Failed to delete lead');
         }
       },
@@ -460,7 +460,7 @@ const BulkSearch = () => {
       await api.post('/api/auth/request-access', { user_id: user.id });
       showNotification('success', 'Access request dispatched to administrator.');
       setShowApprovalModal(false);
-    } catch (err) {
+    } catch (_err) {
       showNotification('error', 'Failed to send request');
     } finally {
       setIsRequestingAccess(false);

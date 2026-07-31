@@ -123,7 +123,7 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
         from app.models.lead import add_activity_log
         summary = req.email if req.mode == "email" else (req.name if req.mode == "name" else f"{req.title or ''} at {req.company or ''}")
         add_activity_log(None, "LEAD_SEARCH", f"Mode [{req.mode}] search: {summary or 'Discovery'}", "admin", user_id=user_id)
-    except:
+    except Exception:
         pass
 
     try:
@@ -195,7 +195,7 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
                 from app.models.lead import add_activity_log
                 details = f"Ingested {inserted} leads via {req.mode} mode"
                 add_activity_log(None, "BULK_INGESTION", details, "admin", user_id=user_id)
-            except: pass
+            except Exception: pass
 
         if len(leads) > 0 and user_id:
             try:

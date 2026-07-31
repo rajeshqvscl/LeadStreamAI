@@ -854,8 +854,6 @@ def check_daily_email_limit(user_id: Optional[str], batch_size: int = 1) -> bool
         cur.close()
         conn.close()
 
-_INLINED_IMAGE_CACHE = {}
-
 def _extract_body_attachments(body: str, user_id: Optional[int] = None) -> tuple:
     """Parse body for links pointing at uploaded files in /assets/ (both markdown and HTML forms).
     
@@ -931,27 +929,14 @@ def markdown_to_html(text, gmail_style=False):
     # Normalize newlines
     text = text.replace("\r\n", "\n")
 
-    # ── Inner helper: inline known asset images to base64 data URIs ──
+    # ── Inner helper: keep images as URL references (no base64 inlining) ──
     def _inline_img(m):
         tag = m.group(0)
         src_m = re.search(r'src="([^"]+)"', tag)
         if not src_m:
             return tag
         src = src_m.group(1)
-        known = {"PHOTO-2026-05-25-10-33-35.jpg": "image/jpeg", "kajal.png": "image/png", "qvscllogo.png": "image/png"}
-        for img_name, mime_type in known.items():
-            if img_name in src:
-                if img_name in _INLINED_IMAGE_CACHE:
-                    new_src = _INLINED_IMAGE_CACHE[img_name]
-                    return tag.replace(f'src="{src}"', f'src="{new_src}"')
-                img_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", img_name)
-                if os.path.exists(img_path):
-                    with open(img_path, "rb") as f:
-                        b64_data = base64.b64encode(f.read()).decode()
-                    new_src = f"data:{mime_type};base64,{b64_data}"
-                    _INLINED_IMAGE_CACHE[img_name] = new_src
-                    return tag.replace(f'src="{src}"', f'src="{new_src}"')
-        # Fallback: for base64 images not in known list, force full width
+        # Fallback: legacy data-URI images already in content get a fixed width
         if src.startswith("data:image/"):
             if re.search(r'style\s*=', tag, re.IGNORECASE):
                 tag = re.sub(r'style\s*=\s*"[^"]*"', 'style="width:400px;height:auto;display:block;"', tag, flags=re.IGNORECASE)
@@ -963,23 +948,6 @@ def markdown_to_html(text, gmail_style=False):
     def _inline_md_img(m):
         alt_text = m.group(1)
         src = m.group(2)
-        known = {"PHOTO-2026-05-25-10-33-35.jpg": "image/jpeg", "kajal.png": "image/png", "qvscllogo.png": "image/png"}
-        for img_name, mime_type in known.items():
-            if img_name in src:
-                if img_name in _INLINED_IMAGE_CACHE:
-                    new_src = _INLINED_IMAGE_CACHE[img_name]
-                    if img_name == "qvscllogo.png":
-                        return f'<img src="{new_src}" alt="{alt_text}" style="width:200px;height:auto;display:block;margin-top:10px;" />'
-                    return f'<img src="{new_src}" alt="{alt_text}" style="width:100%;height:auto;display:block;margin-top:25px;margin-bottom:25px;" />'
-                img_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", img_name)
-                if os.path.exists(img_path):
-                    with open(img_path, "rb") as f:
-                        b64_data = base64.b64encode(f.read()).decode()
-                    new_src = f"data:{mime_type};base64,{b64_data}"
-                    _INLINED_IMAGE_CACHE[img_name] = new_src
-                    if img_name == "qvscllogo.png":
-                        return f'<img src="{new_src}" alt="{alt_text}" style="width:200px;height:auto;display:block;margin-top:10px;" />'
-                    return f'<img src="{new_src}" alt="{alt_text}" style="width:100%;height:auto;display:block;margin-top:25px;margin-bottom:25px;" />'
         # Fallback: convert any unknown image markdown to an <img> tag
         return f'<img src="{src}" alt="{alt_text}" style="width:100%;height:auto;display:block;" />'
     
@@ -989,7 +957,11 @@ def markdown_to_html(text, gmail_style=False):
         text = text.replace("[[SIG_PLACEHOLDER]]", "")
         backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
         text = text.replace("[[BACKEND_URL]]", backend_url)
-        text = re.sub(r'https?://(?:localhost|127\.0\.0\.1)(?::\d+)?/assets/', f"{backend_url}/assets/", text)
+        # NOTE: stored asset URLs are used as-is. Uploads already store host-aware
+        # URLs (_asset_public_url) so localhost URLs render locally and production
+        # URLs render in production. (Previously this line rewrote localhost asset
+        # URLs to BACKEND_URL, which broke locally-uploaded images whose files only
+        # exist on the local backend.)
         # Convert markdown links [text](url) to HTML — but skip already-converted HTML tags
         text = re.sub(r'(?<!href=")(?<!src=")\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', text)
         text = re.sub(r'<img[^>]+>', _inline_img, text, flags=re.DOTALL | re.IGNORECASE)
@@ -1296,7 +1268,7 @@ def _extract_lead_name_from_payload(lead: dict) -> tuple:
     if isinstance(raw_payload, str):
         try:
             raw_payload = json.loads(raw_payload)
-        except:
+        except Exception:
             return ("", "")
     if not isinstance(raw_payload, dict):
         return ("", "")
@@ -2038,7 +2010,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 if service:
                     service.users().drafts().delete(userId='me', id=old_gmail_id).execute()
                     logger.info(f"Deleted old Gmail draft {old_gmail_id}")
-            except:
+            except Exception:
                 pass
 
         gmail_draft_id = None
@@ -2078,7 +2050,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         try:
             from app.models.lead import add_activity_log
             add_activity_log(req.lead_id, "DRAFT_GENERATED", f"Email draft regenerated using '{req.template_type}'", profile.get('username') or "system")
-        except:
+        except Exception:
             pass
 
         return {
@@ -2095,7 +2067,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         if conn:
             try:
                 conn.close()
-            except:
+            except Exception:
                 pass
 def _detect_campaign_key(template_name: str, content: str, description: str) -> str:
     name = template_name.lower()
@@ -2914,7 +2886,7 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
                 if service:
                     service.users().drafts().delete(userId='me', id=old_gmail_id).execute()
                     logger.info(f"🗑️ Deleted old Gmail draft {old_gmail_id} (template)")
-            except:
+            except Exception:
                 pass
 
         # --- Sync to Gmail Drafts (with PDF attachments) ---
@@ -2967,7 +2939,7 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
         try:
             from app.models.lead import add_activity_log
             add_activity_log(lead_id, "DRAFT_GENERATED", f"Custom template draft '{template_name}' generated {'(Gmail synced ✅)' if gmail_draft_id else ''}", "system")
-        except:
+        except Exception:
             pass
 
         return {
@@ -3071,7 +3043,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
                     conn_resolve.close()
                     if row:
                         resolved_uid = row['id']
-                except:
+                except Exception:
                     pass
 
         # Try Redis cache first
@@ -3405,7 +3377,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             from app.services.google_service import get_gmail_service
             svc = get_gmail_service(int(uid)) if uid else None
             has_gmail = svc is not None
-        except:
+        except Exception:
             pass
         
         cc_email = req.cc if (req and req.cc) else stored_cc
@@ -4114,7 +4086,7 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
         try:
             from app.models.lead import add_activity_log
             add_activity_log(None, "BULK_DRAFT_GENERATE", f"Generated domain-wise drafts for {total_leads_updated} leads across {total_groups} groups", "admin")
-        except:
+        except Exception:
             pass
         
         return {

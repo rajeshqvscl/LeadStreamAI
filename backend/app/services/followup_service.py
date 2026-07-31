@@ -403,7 +403,7 @@ def process_outreach_sequences():
             JOIN users u ON l.user_id = u.id
             WHERE l.followup_status = 'ACTIVE'
             AND l.email_status IN ('SENT', 'OPENED', 'CLICKED', 'REPLIED')
-            AND COALESCE(l.reply_intent, '') NOT IN ('INTERESTED', 'MEETING_REQUESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED')
+            AND COALESCE(l.reply_intent, '') NOT IN ('INTERESTED', 'MEETING_REQUESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED', 'NEEDS_MORE_INFO')
             AND l.followup_stage < 3
             AND (l.email_opt_in IS NULL OR l.email_opt_in = TRUE)
             AND (l.is_unsubscribed IS NULL OR l.is_unsubscribed = FALSE)
@@ -484,7 +484,7 @@ def process_outreach_sequences():
                             comp_cur.execute("UPDATE leads_raw SET followup_status = 'COMPLETED', updated_at = NOW() WHERE id = %s AND followup_status = 'ACTIVE'", (lead_id,))
                             lead_conn.commit()
                             comp_cur.close()
-                        except:
+                        except Exception:
                             pass
                         continue
 
@@ -539,7 +539,7 @@ def process_outreach_sequences():
                             if current_status != 'ACTIVE':
                                 logger.info(f"Lead {lead_id} followup_status is '{current_status}' — skipping")
                                 continue
-                            if current_reply_intent in ('INTERESTED', 'MEETING_REQUESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED'):
+                            if current_reply_intent in ('INTERESTED', 'MEETING_REQUESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED', 'NEEDS_MORE_INFO'):
                                 logger.info(f"Lead {lead_id} reply_intent is '{current_reply_intent}' — skipping")
                                 continue
                             if current_email_status in ('BOUNCED',):

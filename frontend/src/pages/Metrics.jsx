@@ -34,7 +34,7 @@ const RANGES = [
   { key: 'all', label: 'All' },
 ];
 
-const todayStr = () => new Date().toISOString().split('T')[0];
+const _todayStr = () => new Date().toISOString().split('T')[0];
 
 const getMonthRange = (year, month) => {
   const start = `${year}-${String(month + 1).padStart(2, '0')}-01`;

@@ -279,7 +279,7 @@ def get_leads(
         if isinstance(payload, str):
             try:
                 payload = json.loads(payload)
-            except:
+            except Exception:
                 payload = {}
         elif not payload:
             payload = {}
@@ -468,7 +468,7 @@ def list_followups(
                 else:
                     base_query += " AND followup_stage = %s"
                     params.append(stage_val)
-            except:
+            except Exception:
                 pass
         
         # Count total
@@ -479,7 +479,7 @@ def list_followups(
         try:
             page_val = int(page) if page is not None else 1
             per_page_val = int(per_page) if per_page is not None else 100
-        except:
+        except Exception:
             page_val, per_page_val = 1, 100
 
         # Fetch paginated results with first outreach and last activity in subqueries
@@ -567,7 +567,7 @@ def export_all_leads(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         payload = r.get("raw_payload") or {}
         if isinstance(payload, str):
             try: payload = json.loads(payload)
-            except: payload = {}
+            except Exception: payload = {}
             
         leads.append({
             "id": r["id"],
@@ -627,7 +627,7 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
     if isinstance(payload, str):
         try:
             payload = json.loads(payload)
-        except:
+        except Exception:
             payload = {}
     elif not payload:
         payload = {}
@@ -1017,7 +1017,7 @@ def get_user_name(user_id):
         cur.close()
         conn.close()
         return u['username'] if u else "unknown"
-    except:
+    except Exception:
         return "user"
 
 def normalize_user_id(user_id):
@@ -1358,7 +1358,7 @@ def bulk_import(
         if user_id:
             try:
                 db_user_id = int(user_id)
-            except:
+            except Exception:
                 pass
 
         for lead in leads:

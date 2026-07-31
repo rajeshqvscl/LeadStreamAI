@@ -7,7 +7,7 @@ const FamilyOffices = () => {
   const [offices, setOffices] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [_, setShowAddModal] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [discoveryTab, setDiscoveryTab] = useState('direct'); // 'direct' or 'bulk'
@@ -123,7 +123,7 @@ const FamilyOffices = () => {
     }
   };
 
-  const getFitClass = (fit) => {
+  const _getFitClass = (fit) => {
     const score = parseInt(fit) || 0;
     if (score >= 80 || fit?.toLowerCase().includes('high')) return 'badge-green bg-green-500/10 border-green-500/20 text-green-500';
     if (score >= 50 || fit?.toLowerCase().includes('med')) return 'badge-amber bg-amber-500/10 border-amber-500/20 text-amber-500';

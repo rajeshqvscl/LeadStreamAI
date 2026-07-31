@@ -12,7 +12,7 @@ const RocketReach = () => {
   const [successMessage, setSuccessMessage] = useState('');
   const [page, setPage] = useState(1);
   const [totalResults, setTotalResults] = useState(0);
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const _user = JSON.parse(localStorage.getItem('user') || '{}');
 
   useEffect(() => {
     fetchCreditStats();
@@ -22,7 +22,7 @@ const RocketReach = () => {
     try {
       const { data } = await api.get('/api/rocketreach/credits');
       if (data) setCreditStats(data);
-    } catch (e) {
+    } catch (_e) {
       // Credits not critical
     }
   };
@@ -52,7 +52,7 @@ const RocketReach = () => {
 
   const totalPages = Math.ceil(totalResults / 50);
   const hasNext = page < totalPages;
-  const hasPrev = page > 1;
+  const _hasPrev = page > 1;
 
   const handleAddToLeads = async (profile) => {
     setAddingLeads(prev => ({ ...prev, [profile.id]: true }));

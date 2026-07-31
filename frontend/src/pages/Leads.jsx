@@ -42,7 +42,7 @@ const Leads = () => {
   const [templatePickerStep, setTemplatePickerStep] = useState(0); // 0 = templates, 1 = signatures
   const [customTemplates, setCustomTemplates] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState('ai'); // 'ai' or template name
-  const [isTemplateGenerating, setIsTemplateGenerating] = useState(false);
+  const [isTemplateGenerating, _] = useState(false);
   const abortControllerRef = useRef(null);
   const pollIntervalRef = useRef(null);
   const currentTaskIdRef = useRef(null);
@@ -430,7 +430,7 @@ const Leads = () => {
   };
 
   // Bulk Email Actions
-  const handleGenerateDomainDrafts = async () => {
+  const _handleGenerateDomainDrafts = async () => {
     if (selectedLeads.size === 0) return;
     setIsBulkActionLoading(true);
     try {
@@ -1590,7 +1590,7 @@ const Leads = () => {
                       signatures={signatures}
                       loading={signaturesLoading}
                       selectedId={selectedSignatureId}
-                      onSelect={(id, name) => setSelectedSignatureId(id)}
+                      onSelect={(id) => setSelectedSignatureId(id)}
                     />
                   </div>
 

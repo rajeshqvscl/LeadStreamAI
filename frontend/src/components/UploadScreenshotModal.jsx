@@ -4,7 +4,7 @@ import api from '../services/api';
 
 const UploadScreenshotModal = ({ isOpen, onClose, onSaved }) => {
   const [step, setStep] = useState('upload');
-  const [mainFiles, setMainFiles] = useState([]);
+  const [_, setMainFiles] = useState([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -66,7 +66,7 @@ const UploadScreenshotModal = ({ isOpen, onClose, onSaved }) => {
       const text = data.body || '';
       const setter = idx === 1 ? setFollowup1 : idx === 2 ? setFollowup2 : setFollowup3;
       setter(text);
-    } catch (err) {
+    } catch (_err) {
       setError(`Follow-up ${idx} analysis failed`);
     } finally {
       setAnalyzingFup(null);

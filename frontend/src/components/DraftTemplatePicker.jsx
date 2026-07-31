@@ -211,7 +211,7 @@ const DraftTemplatePicker = ({ isOpen, onClose, selectedCount, onGenerate }) => 
                   signatures={signatures}
                   loading={signaturesLoading}
                   selectedId={selectedSignatureId}
-                  onSelect={(id, name) => setSelectedSignatureId(id)}
+                  onSelect={(id) => setSelectedSignatureId(id)}
                 />
               </div>
 

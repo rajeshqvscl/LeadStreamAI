@@ -34,12 +34,12 @@ const Dashboard = () => {
     inboxMessages: []
   });
 
-  const [adminStats, setAdminStats] = useState(null);
+  const [adminStats] = useState(null);
   const [velocity, setVelocity] = useState([]);
-  const [productivity, setProductivity] = useState([]);
-  const [activeUsers, setActiveUsers] = useState([]);
+  const [productivity] = useState([]);
+  const [activeUsers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [sendingReport, setSendingReport] = useState(false);
+  const [_, setSendingReport] = useState(false);
   const [period, setPeriod] = useState('daily');
   const [toast, setToast] = useState(null);
   const [selectedMsg, setSelectedMsg] = useState(null);
@@ -145,7 +145,7 @@ const Dashboard = () => {
     fetchCardDetail(detailModal.type, filterMonth, filterYear, newPage);
   };
 
-  const renderClickableText = (text) => {
+  const _renderClickableText = (text) => {
       if (!text) return text;
       const urlRegex = /(https?:\/\/[^\s]+)/g;
       return text.split(urlRegex).map((part, i) => {
@@ -197,7 +197,7 @@ const Dashboard = () => {
       if (data.url) {
         window.location.href = data.url;
       }
-    } catch (err) {
+    } catch (_err) {
       showToast('error', 'Failed to initialize Google security layer');
     }
   };
@@ -210,7 +210,7 @@ const Dashboard = () => {
       // Update local state to reflect disconnection
       setUser(prev => ({ ...prev, google_linked_at: null, google_email: null }));
       setData(prev => ({ ...prev, inboxMessages: [] }));
-    } catch (err) {
+    } catch (_err) {
       showToast('error', 'Failed to reset Intelligence Layer');
     }
   };
@@ -364,7 +364,7 @@ const Dashboard = () => {
     fetchVelocity();
   }, [isAdmin, period]);
 
-  const triggerReport = async () => {
+  const _triggerReport = async () => {
     setSendingReport(true);
     try {
       const resp = await axios.post('/api/users/report');

@@ -52,7 +52,7 @@ const MisReportPage = () => {
       const pages = reportRef.current.querySelectorAll('[data-page]');
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pageW = 210;
-      const pageH = 297;
+      const _pageH = 297;
 
       for (let i = 0; i < pages.length; i++) {
         const canvas = await html2canvas(pages[i], {
@@ -98,7 +98,7 @@ const MisReportPage = () => {
     );
   }
 
-  const { report = [], reverted, today_sent, today_followups, daily_limit, total_registry, bounces, drafts_generated } = data;
+  const { report = [], reverted, _today_sent, _today_followups, _daily_limit, total_registry, bounces, drafts_generated } = data;
   const personaData = data.persona_breakdown ? Object.entries(data.persona_breakdown).map(([k, v]) => ({ name: k, value: v })) : [];
   const sectorCounts = {};
   report.forEach(r => {

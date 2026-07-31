@@ -170,7 +170,6 @@ const LeadDetail = () => {
   const [pendingOptOut, setPendingOptOut] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(false);
   const [showDraftOptions, setShowDraftOptions] = useState(false);
-  const [selectedTemplate, setSelectedTemplate] = useState('standard');
   const [customTemplates, setCustomTemplates] = useState([]);
 
   const showNotification = (type, message) => {
@@ -302,7 +301,7 @@ const LeadDetail = () => {
       setIsDirty(false);
       fetchData();
       setTimeout(() => setStatusModal({ show: false }), 800);
-    } catch (err) {
+    } catch (_err) {
       setStatusModal({ show: false });
       showNotification('error', 'Failed to update lead');
     } finally {

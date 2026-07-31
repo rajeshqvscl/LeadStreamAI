@@ -44,7 +44,7 @@ const Inbox = () => {
         } catch { return dateStr; }
     };
 
-    const renderClickableText = (text) => {
+    const _renderClickableText = (text) => {
         if (!text) return text;
         const urlRegex = /(https?:\/\/[^\s]+)/g;
         return text.split(urlRegex).map((part, i) => {

@@ -150,7 +150,7 @@ const CompanyDatabase = () => {
     try {
       await api.patch(`/api/companies/${rowId}`, newRowData);
       setCompanies(prev => prev.map(c => c.id === rowId ? { ...c, [field]: newValue } : c));
-    } catch (err) {
+    } catch (_err) {
       showNotification('error', 'Storage Fault: Cell modification failed to persist.');
     }
   };
@@ -203,7 +203,7 @@ const CompanyDatabase = () => {
   // Export Logic
   const handleExport = () => {
     if (companies.length === 0) return;
-    const exportData = companies.map(({ id, ...rest }) => rest);
+    const exportData = companies.map(({ id: _id, ...rest }) => rest);
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "CompanyDatabase");
@@ -219,7 +219,7 @@ const CompanyDatabase = () => {
       showNotification('success', 'Registry Cleansed: All company profiles purged.');
       fetchTabs();
       setActiveBrowsingTab('ALL DATA');
-    } catch (err) {
+    } catch (_err) {
       showNotification('error', 'Purge Failure: Unable to wipe database shards.');
     }
   };
@@ -234,7 +234,7 @@ const CompanyDatabase = () => {
       const tabs = res.data.tabs || [];
       setSheetTabs(tabs);
       if (tabs.length > 0) setSelectedTab(tabs[0].name);
-    } catch (err) {
+    } catch (_err) {
       showNotification('error', 'Failed to load sheet tabs.');
     } finally {
       setIsLoadingTabs(false);
@@ -274,7 +274,7 @@ const CompanyDatabase = () => {
     }
   };
 
-  const handleFetchDetails = async (id) => {
+  const _handleFetchDetails = async (id) => {
     setProcessingId(id);
     showNotification('success', 'Intelligence Search Initiated: Querying global metadata...');
     try {
@@ -288,7 +288,7 @@ const CompanyDatabase = () => {
     }
   };
 
-  const handleGenerateDraft = async (id) => {
+  const _handleGenerateDraft = async (id) => {
     setProcessingId(id);
     try {
       await api.post(`/api/companies/${id}/generate-draft`);
@@ -302,11 +302,11 @@ const CompanyDatabase = () => {
     }
   };
 
-  const [isBulkDrafting, setIsBulkDrafting] = useState(false);
+  const [isBulkDrafting, _] = useState(false);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [templateTarget, setTemplateTarget] = useState(null); // null = bulk, or company id for single
 
-  const handleBulkGenerateDrafts = async () => {
+  const _handleBulkGenerateDrafts = async () => {
     if (selectedIds.length === 0) return;
     const taskId = `bulk-gen-${Date.now()}`;
     
@@ -452,7 +452,7 @@ const CompanyDatabase = () => {
       showNotification('success', 'Profile updated correctly.');
       fetchCompanies();
       setIsDrawerOpen(false);
-    } catch (err) {
+    } catch (_err) {
       showNotification('error', 'Update Error: Unable to save changes.');
     } finally {
       setIsSaving(false);
@@ -468,7 +468,7 @@ const CompanyDatabase = () => {
       await api.patch(`/api/companies/${id}`, updatedData);
       showNotification('success', `Status updated to ${newStatus}.`);
       fetchCompanies();
-    } catch (err) {
+    } catch (_err) {
       showNotification('error', 'Status Update Fault.');
     } finally {
       setProcessingId(null);
@@ -497,20 +497,20 @@ const CompanyDatabase = () => {
       showNotification('success', `${selectedIds.length} records purged.`);
       setSelectedIds([]);
       fetchCompanies();
-    } catch (err) {
+    } catch (_err) {
       showNotification('error', 'Bulk Purge Fault.');
     }
   };
 
   const handleBulkExport = () => {
-    const dataToExport = companies.filter(c => selectedIds.includes(c.id)).map(({ id, ...rest }) => rest);
+    const dataToExport = companies.filter(c => selectedIds.includes(c.id)).map(({ id: _id, ...rest }) => rest);
     const ws = XLSX.utils.json_to_sheet(dataToExport);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Selected_Companies");
     XLSX.writeFile(wb, `Bulk_Export_${new Date().getTime()}.xlsx`);
   };
 
-  const handleBulkEnrich = async () => {
+  const _handleBulkEnrich = async () => {
     if (selectedIds.length === 0) return;
     const taskId = `bulk-enrich-${Date.now()}`;
     

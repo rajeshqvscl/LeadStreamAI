@@ -325,14 +325,15 @@ def request_access(req: AccessRequest):
     </div>
     """
     
-    # Send email from system to admin
+    # Send email from system to admin (Gmail API only — SMTP removed system-wide)
     res = send_email(
         to_email=admin['email'],
         subject=subject,
         html_content=html_content,
-        from_email=os.getenv("SMTP_USER", admin['email']),
+        from_email=admin['email'],
         from_name="LeadStream Security",
-        is_system_email=True
+        is_system_email=True,
+        user_id=1
     )
     success = res[0] if isinstance(res, tuple) else res
     

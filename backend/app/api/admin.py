@@ -119,10 +119,6 @@ async def get_admin_velocity(
 async def dispatch_admin_report(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Full MIS Report with CSS bar charts and per-user summaries."""
     uid = normalize_user_id(user_id)
-    import os
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
 
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -409,21 +405,24 @@ async def dispatch_admin_report(user_id: Optional[str] = Header(None, alias="X-U
 </html>
 """
 
-        msg = MIMEMultipart()
-        msg['From'] = os.getenv("SENDER_EMAIL")
-        msg['To'] = admin_email
-        msg['Subject'] = f"📊 LeadStream MIS Report | {datetime.now().strftime('%d %b %Y, %H:%M')}"
-        msg.attach(MIMEText(html, 'html'))
-
-        try:
-            with smtplib.SMTP(os.getenv("SMTP_SERVER"), int(os.getenv("SMTP_PORT"))) as server:
-                server.starttls()
-                server.login(os.getenv("SMTP_USER"), os.getenv("SMTP_PASS"))
-                server.send_message(msg)
-            return {"success": True, "message": f"Full MIS report dispatched to {admin_email}"}
-        except Exception as e:
-            logger.error(f"MIS DISPATCH SMTP ERROR: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Email Dispatch Failed: {str(e)}")
+        # Dispatch via Gmail API only (SMTP removed system-wide)
+        from app.services.email_service import send_email
+        subject = f"📊 LeadStream MIS Report | {datetime.now().strftime('%d %b %Y, %H:%M')}"
+        res = send_email(
+            to_email=admin_email,
+            subject=subject,
+            html_content=html,
+            from_email=admin_email,
+            from_name="LeadStream MIS",
+            is_system_email=True,
+            user_id=1
+        )
+        success = res[0] if isinstance(res, tuple) else res
+        if not success:
+            err_detail = res[1] if isinstance(res, tuple) and len(res) > 1 else "Unknown error"
+            logger.error(f"MIS DISPATCH ERROR: {err_detail}")
+            raise HTTPException(status_code=500, detail=f"Email Dispatch Failed: {err_detail}")
+        return {"success": True, "message": f"Full MIS report dispatched to {admin_email}"}
 
     finally:
         cur.close()

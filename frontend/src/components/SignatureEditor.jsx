@@ -107,11 +107,11 @@ const SignatureEditor = ({ userId, onSave, onClose, children }) => {
         { headers: { 'X-User-Id': userId } }
       );
       const newSig = res.data;
-      const sigs = await fetchSignatures();
+      const _sigs = await fetchSignatures();
       setCurrentSigId(newSig.id);
       setCurrentName(newSig.name);
       setCurrentContent(newSig.content);
-    } catch (err) {
+    } catch (_err) {
       alert('Failed to create signature');
     }
   };
@@ -148,7 +148,7 @@ const SignatureEditor = ({ userId, onSave, onClose, children }) => {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       if (onSave) onSave(currentContent, 'custom');
-    } catch (err) {
+    } catch (_err) {
       alert('Failed to save signature');
     } finally {
       setSaving(false);
@@ -173,7 +173,7 @@ const SignatureEditor = ({ userId, onSave, onClose, children }) => {
           setCurrentContent('');
         }
       }
-    } catch (err) {
+    } catch (_err) {
       alert('Failed to delete signature');
     } finally {
       setDeletingId(null);
@@ -184,7 +184,7 @@ const SignatureEditor = ({ userId, onSave, onClose, children }) => {
     try {
       await api.put(`/api/signatures/${sigId}`, { is_default: true }, { headers: { 'X-User-Id': userId } });
       await fetchSignatures();
-    } catch (err) {
+    } catch (_err) {
       alert('Failed to set default signature');
     }
   };
@@ -203,7 +203,7 @@ const SignatureEditor = ({ userId, onSave, onClose, children }) => {
         const res = await api.post('/api/upload-signature-doc', formData);
         const extracted = res.data.text || '';
         if (extracted) setCurrentContent(extracted);
-      } catch (err) {
+      } catch (_err) {
         alert('Failed to extract signature from document');
       } finally {
         setUploadingDoc(false);
@@ -214,6 +214,27 @@ const SignatureEditor = ({ userId, onSave, onClose, children }) => {
 
   const mdToPreviewHtml = (text) => {
     let html = text;
+    // Protect ALL URLs first so the _ and * italic rules can't corrupt them
+    // (e.g. upload_123_456.jpg -> upload<em>123</em>456.jpg) — applies to both
+    // HTML src/href attributes and markdown (url) destinations
+    const urls = [];
+    html = html.replace(/https?:\/\/[^\s"'<>)\]]+/gi, (m) => {
+      urls.push(m);
+      // NOTE: token must contain NO underscores/asterisks so the markdown
+      // italic rules can't cross-match between adjacent placeholders
+      return `@@LSURL${urls.length - 1}@@`;
+    });
+    // Convert markdown images FIRST (their URLs are now safe placeholders)
+    html = html.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width:100%;height:auto;border-radius:8px;" />');
+    // Protect ALL <img> tags (pre-existing HTML + markdown-converted) so the
+    // _ and * italic rules can't corrupt src URLs (e.g. upload_123_456.jpg)
+    const imgTags = [];
+    html = html.replace(/<img[^>]*>/gi, (m) => {
+      imgTags.push(m);
+      // NOTE: token must contain NO underscores/asterisks so the markdown
+      // italic rules can't cross-match between adjacent placeholders
+      return `@@LSIMG${imgTags.length - 1}@@`;
+    });
     html = html.replace(/^###\s+(.*?)$/gm, '<h3 style="margin:0 0 4px 0;font-size:15px;font-weight:700;">$1</h3>');
     html = html.replace(/^##\s+(.*?)$/gm, '<h2 style="margin:0 0 4px 0;font-size:17px;font-weight:700;">$1</h2>');
     html = html.replace(/^#\s+(.*?)$/gm, '<h1 style="margin:0 0 4px 0;font-size:19px;font-weight:700;">$1</h1>');
@@ -221,10 +242,14 @@ const SignatureEditor = ({ userId, onSave, onClose, children }) => {
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     html = html.replace(/_(.*?)_/g, '<em>$1</em>');
     html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
-    html = html.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width:100%;height:auto;border-radius:8px;" />');
     html = html.replace(/(?<!href=")(?<!src=")\[([^\]]*)\]\(([^)]*)\)/g, '<a href="$2" target="_blank" style="color:#3b82f6;text-decoration:underline;">$1</a>');
     html = html.replace(/\n{2,}/g, '<br /><br />');
     html = html.replace(/\n/g, '<br />');
+    // Restore original <img> tags
+    html = html.replace(/@@LSIMG(\d+)@@/g, (m, i) => imgTags[parseInt(i, 10)] || m);
+    // Restore URLs (data:image URIs are untouched and handled below)
+    html = html.replace(/@@LSURL(\d+)@@/g, (m, i) => urls[parseInt(i, 10)] || m);
+    // Legacy data-URI images already in content get a fixed width
     html = html.replace(/<img\s+[^>]*src="data:image\/[^"]*"[^>]*>/gi, (m) => {
       if (/style\s*=\s*"/i.test(m)) return m.replace(/style\s*=\s*"([^"]*)"/i, 'style="width:400px;height:auto;display:block;"');
       return m.replace('<img', '<img style="width:400px;height:auto;display:block;"');
@@ -294,7 +319,7 @@ const SignatureEditor = ({ userId, onSave, onClose, children }) => {
                                   try {
                                     await api.put(`/api/signatures/${sig.id}`, { name: editNameValue.trim() }, { headers: { 'X-User-Id': userId } });
                                     await fetchSignatures();
-                                  } catch(e) {}
+                                  } catch(_e) { /* noop */ }
                                 }
                                 setEditingName(null);
                               }}
@@ -308,7 +333,7 @@ const SignatureEditor = ({ userId, onSave, onClose, children }) => {
                           )}
                         </div>
                         <p className="text-[9px] text-slate-600 truncate mt-0.5">
-                          {sig.content ? sig.content.replace(/[#*\[\]`>]/g, '').substring(0, 40) : 'Empty'}
+                          {sig.content ? sig.content.replace(/[#*[\]`>]/g, '').substring(0, 40) : 'Empty'}
                         </p>
                       </div>
                       {/* Actions on hover */}

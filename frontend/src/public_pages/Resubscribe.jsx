@@ -5,7 +5,7 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'https://lead-backend-g9d
 
 export default function Resubscribe() {
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
+  const _navigate = useNavigate();
   const token = searchParams.get('token');
 
   const [submitting, setSubmitting] = useState(false);

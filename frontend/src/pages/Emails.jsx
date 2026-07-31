@@ -8,7 +8,7 @@ import SignaturePicker from '../components/SignaturePicker';
 
 const Emails = () => {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams, _] = useSearchParams();
   const initialStatus = searchParams.get('status') || '';
   
   const [emails, setEmails] = useState([]);
@@ -28,10 +28,7 @@ const Emails = () => {
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [scheduledAt, setScheduledAt] = useState(null);
   const [sendingId, setSendingId] = useState(null);
-  const [approvingId, setApprovingId] = useState(null);
-  const [approveStep, setApproveStep] = useState(0);
   const [isBulkSending, setIsBulkSending] = useState(false);
-  const [bulkSendResult, setBulkSendResult] = useState(null); // { sent, failed, total }
   const stopBulkSendRef = useRef(false);
   const [bulkSendProgress, setBulkSendProgress] = useState({ sent: 0, failed: 0, total: 0, current: '' });
   
@@ -39,7 +36,6 @@ const Emails = () => {
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [templatePickerStep, setTemplatePickerStep] = useState(0); // 0 = templates, 1 = signatures
   const [selectedTemplate, setSelectedTemplate] = useState('ai');
-  const [isTemplateGenerating, setIsTemplateGenerating] = useState(false);
   const [customTemplates, setCustomTemplates] = useState([]);
   
   // ── Email-to-Lead mapping ref (survives page changes) ──
@@ -346,7 +342,7 @@ const Emails = () => {
           }, 1500);
         }
       }
-    } catch (err) {
+    } catch (_err) {
       window.dispatchEvent(new CustomEvent('TASK_UPDATE', { 
         detail: { id: taskId, title: 'Generation Failed', subtitle: 'Error in AI matrix', progress: 0, status: 'FAILED' } 
       }));
@@ -1031,7 +1027,7 @@ const Emails = () => {
                     signatures={signatures}
                     loading={signaturesLoading}
                     selectedId={selectedSignatureId}
-                    onSelect={(id, name) => setSelectedSignatureId(id)}
+                    onSelect={(id) => setSelectedSignatureId(id)}
                   />
                 </div>
 

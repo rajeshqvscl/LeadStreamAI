@@ -1,6 +1,6 @@
 import os
 import shutil
-from fastapi import APIRouter, HTTPException, Header, UploadFile, File
+from fastapi import APIRouter, HTTPException, Header, UploadFile, File, Request
 from typing import Optional
 from pydantic import BaseModel
 from app.models.prompt import get_all_prompts, create_prompt, update_prompt, delete_prompt
@@ -150,8 +150,22 @@ ALLOWED_DOCUMENT_TYPES = {
     'application/vnd.ms-excel': '.xls',
 }
 
+def _asset_public_url(request: Optional[Request], filename: str) -> str:
+    """Build a public URL for an uploaded asset that the requesting client can load.
+
+    - Local development (Host header contains localhost/127.0.0.1): point back to
+      the local backend (127.0.0.1:8000) so previews work immediately.
+    - Otherwise use the configured BACKEND_URL (production server).
+    """
+    if request is not None:
+        host = (request.headers.get("host") or "").lower()
+        if "localhost" in host or "127.0.0.1" in host:
+            return f"http://127.0.0.1:8000/assets/{filename}"
+    backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+    return f"{backend_url}/assets/{filename}"
+
 @router.post("/upload-image")
-def upload_image(file: UploadFile = File(...)):
+def upload_image(file: UploadFile = File(...), request: Request = None):
     """Upload an image to the assets folder and return its URL path.
     Falls back to file extension detection if content-type is not recognized."""
     import time, random
@@ -179,11 +193,10 @@ def upload_image(file: UploadFile = File(...)):
     dest_path = os.path.join(ASSETS_DIR, dest_name)
     with open(dest_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
-    backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
-    return {"filename": dest_name, "url": f"{backend_url}/assets/{dest_name}"}
+    return {"filename": dest_name, "url": _asset_public_url(request, dest_name)}
 
 @router.post("/upload-file")
-def upload_file(file: UploadFile = File(...)):
+def upload_file(file: UploadFile = File(...), request: Request = None):
     """Upload a document file (PDF, DOCX, XLSX) to the assets folder and return its URL.
     Falls back to file extension detection if content-type is not recognized."""
     import time, random
@@ -213,8 +226,7 @@ def upload_file(file: UploadFile = File(...)):
     dest_path = os.path.join(ASSETS_DIR, dest_name)
     with open(dest_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
-    backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
-    return {"filename": dest_name, "url": f"{backend_url}/assets/{dest_name}"}
+    return {"filename": dest_name, "url": _asset_public_url(request, dest_name)}
 
 @router.post("/upload-signature-doc")
 def upload_signature_doc(file: UploadFile = File(...)):

@@ -59,7 +59,7 @@ const AdminAuditLogs = () => {
     return Array.from(actions);
   }, [logs]);
 
-  const userOptions = useMemo(() => {
+  const _userOptions = useMemo(() => {
     const users = new Set();
     logs.forEach(l => {
       if (l.actor_username) users.add(l.actor_username);

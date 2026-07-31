@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   History, Mail, CheckCircle, Clock, AlertCircle, X,
@@ -9,7 +9,7 @@ import api from '../services/api';
 import { FOLLOWUP_CONFIG, LEAD_TYPES, STATUS_OPTIONS, getLeadType, getStageColor, getStageConfigs, getStageLabel } from '../services/followupConfig';
 
 const Followups = () => {
-  const navigate = useNavigate();
+  const _navigate = useNavigate();
 
   const [followups, setFollowups] = useState([]);
   const abortRef = useRef(null);

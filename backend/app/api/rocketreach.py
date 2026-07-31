@@ -167,7 +167,7 @@ def add_rocketreach_lead(
                 (new_id, uid)
             )
             conn.commit()
-        except:
+        except Exception:
             pass
 
         return {"message": "Lead added to pipeline successfully!", "lead_id": new_id}

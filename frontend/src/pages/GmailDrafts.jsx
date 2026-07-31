@@ -101,7 +101,7 @@ const GmailDrafts = () => {
       showNotification('success', 'Draft updated on Gmail account');
       setEditingDraft(null);
       fetchGmailDrafts(true);
-    } catch (err) {
+    } catch (_err) {
       showNotification('error', 'Failed to update draft');
     } finally {
       setIsProcessing(false);
@@ -115,7 +115,7 @@ const GmailDrafts = () => {
       await api.post(`/api/gmail/send-draft/${draftId}`);
       showNotification('success', 'Email sent successfully via Gmail');
       fetchGmailDrafts(true);
-    } catch (err) {
+    } catch (_err) {
       showNotification('error', 'Failed to send email');
     } finally {
       setIsProcessing(false);
@@ -132,7 +132,7 @@ const GmailDrafts = () => {
       });
       setEditingDraft({ ...editingDraft, body: res.data.refined });
       showNotification('success', `AI ${action} completed!`);
-    } catch (err) {
+    } catch (_err) {
       showNotification('error', 'AI refinement failed');
     } finally {
       setIsProcessing(false);
@@ -181,10 +181,10 @@ const GmailDrafts = () => {
       const lines = trimmed.split('\n');
       
       // Detect lists (must be star/dash/bullet followed by space)
-      if (lines.some(l => /^\s*[\*\-•]\s+/.test(l))) {
+      if (lines.some(l => /^\s*[*\-•]\s+/.test(l))) {
         let listHtml = '<ul style="margin: 0.8em 0; padding-left: 0; list-style: none;">';
         lines.forEach(l => {
-          const match = l.trim().match(/^[\*\-•]\s+(.*)/);
+          const match = l.trim().match(/^[*\-•]\s+(.*)/);
           if (match) {
             listHtml += `<li style="margin-bottom: 0.4em; position: relative; padding-left: 14px; line-height: 1.6; color: #cbd5e1;"><span style="position: absolute; left: 0; color: #94a3b8; font-size: 9px; top: 0px; display: inline-block; vertical-align: middle;">•</span>${match[1].trim()}</li>`;
           } else {

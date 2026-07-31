@@ -16,7 +16,7 @@ const Layout = () => {
   const [totalCompanies, setTotalCompanies] = useState(0);
   const [todaySent, setTodaySent] = useState(0);
   const [todayFollowups, setTodayFollowups] = useState(0);
-  const [userVersion, setUserVersion] = useState(0);
+  const [_, setUserVersion] = useState(0);
 
   useEffect(() => {
     const urlSearch = searchParams.get('search');

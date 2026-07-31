@@ -109,8 +109,11 @@ You're receiving this because you interacted with LeadStream.
 <a href="{_uurl}" style="color:#888;text-decoration:underline">Click here to unsubscribe</a>
 </p>"""
 
-def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None, lead_id: Optional[int] = None, is_system_email: bool = False, user_id: Optional[int] = None, cc: Optional[str] = None, thread_id: Optional[str] = None, in_reply_to: Optional[str] = None, template_name: Optional[str] = None) -> bool:
-    """Sends an email using Gmail API (if token available) or falls back to Provider/SMTP."""
+def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None, lead_id: Optional[int] = None, is_system_email: bool = False, user_id: Optional[int] = None, cc: Optional[str] = None, thread_id: Optional[str] = None, in_reply_to: Optional[str] = None, template_name: Optional[str] = None) -> tuple:
+    """Sends an email via the Gmail API (the only dispatch method; SMTP/Resend fallback removed).
+
+    Returns a 4-tuple: (success: bool, message: str, thread_id: Optional[str], rfc_message_id: Optional[str]).
+    """
     load_dotenv(dotenv_path=env_path, override=True)
     
     # Always CC lalit.h@qvscl.com if no CC is explicitly set
@@ -486,7 +489,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 try:
                     from app.services.google_service import invalidate_gmail_service_cache
                     invalidate_gmail_service_cache(int(uid_t))
-                except:
+                except Exception:
                     pass
             
             logger.error(f"❌ Gmail API dispatch failed for User {user_id} to {to_email}: {str(e)}")
@@ -585,7 +588,7 @@ def check_scheduled_emails():
                 conn.commit()
                 try:
                     add_activity_log(lead_id, "EMAIL_SENT", f"Scheduled email dispatched automatically", "system")
-                except:
+                except Exception:
                     pass
             else:
                 logger.error(f"Failed to send scheduled email {lead_id} to {to_email}")

@@ -77,7 +77,7 @@ const SignaturePicker = ({ signatures = [], loading = false, selectedId = null, 
             <p className="text-white font-bold text-sm">{sig.name}</p>
             {sig.content && (
               <p className="text-slate-500 text-[10px] mt-0.5 truncate max-w-[200px]">
-                {sig.content.replace(/[#*\[\]`>_]/g, '').replace(/\n/g, ' ').substring(0, 40)}
+                {sig.content.replace(/[#*[\]`>_]/g, '').replace(/\n/g, ' ').substring(0, 40)}
               </p>
             )}
           </div>
@@ -107,7 +107,7 @@ const SignaturePicker = ({ signatures = [], loading = false, selectedId = null, 
       <div className="space-y-2 max-h-[320px] overflow-y-auto custom-scrollbar pr-1.5">
         {signatures.map((sig, idx) => {
           const previewText = sig.content
-            ? sig.content.replace(/[#*\[\]`>_]/g, '').replace(/\n/g, ' ').substring(0, 60)
+            ? sig.content.replace(/[#*[\]`>_]/g, '').replace(/\n/g, ' ').substring(0, 60)
             : '';
           const isSelected = selectedId === sig.id;
 

@@ -156,7 +156,7 @@ def list_companies(
         conditions.append("user_id = %s")
         try:
             params.append(int(uid))
-        except:
+        except Exception:
             params.append(uid)
         
     # Apply Global Search — split into individual terms so each can match in different fields
@@ -182,7 +182,7 @@ def list_companies(
                         safe_key = re.sub(r'[^\w\s\-]', '', key)
                         conditions.append(f"row_data->>%s ILIKE %s")
                         params.extend([safe_key, f"%{value}%"])
-        except:
+        except Exception:
             pass
     
     base_where = ""
@@ -253,7 +253,7 @@ def get_unique_tabs(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         conditions.append("user_id = %s")
         try:
             params.append(int(uid))
-        except:
+        except Exception:
             params.append(uid)
     conditions.append("row_data->>'_source_tab' IS NOT NULL")
     where_clause = "WHERE " + " AND ".join(conditions)
@@ -511,7 +511,7 @@ def discover_gsheet_tabs_xlsx(doc_id: str) -> List[Dict[str, str]]:
                             "gid": s.get('sheetId') or str(i)
                         })
                 return tabs
-    except:
+    except Exception:
         return []
 
 def discover_gsheet_tabs_gviz(doc_id: str) -> List[Dict[str, str]]:
@@ -545,7 +545,7 @@ def discover_gsheet_tabs_gviz(doc_id: str) -> List[Dict[str, str]]:
             if name and gid:
                 tabs.append({"name": name, "gid": gid})
         return tabs
-    except:
+    except Exception:
         return []
 
 
@@ -860,7 +860,7 @@ def enrich_row_data_internal(data: Dict[str, Any]) -> Dict[str, Any]:
                 data[target_key] = ai_val
             
         return data
-    except:
+    except Exception:
         return data
 
 @router.post("/companies/{row_id}/generate-draft")
@@ -1031,7 +1031,7 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
         try:
             from app.models.lead import add_activity_log
             add_activity_log(lead_id, "DRAFT_GENERATED", f"Draft generated from Intelligence Grid {'(Gmail synced ✅)' if gmail_draft_id else ''}", sender_name)
-        except:
+        except Exception:
             pass
         
         return {"success": True, "lead_id": lead_id, "message": "Draft generated and moved to Lead Pipeline."}

@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 
 export default function UnsubscribeSuccess() {
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
+  const _navigate = useNavigate();
   const action = searchParams.get('action');
 
   const isUnsubscribed = action === 'unsubscribed';

@@ -343,7 +343,7 @@ const EditEmail = () => {
         } else {
           wrapSelection(`![](${imgUrl})\n`, '');
         }
-      } catch (err) {
+      } catch (_err) {
         alert('Failed to upload image');
       }
     };
@@ -376,7 +376,7 @@ const EditEmail = () => {
         } else {
           wrapSelection(`[${file.name}](${fileUrl})`, '');
         }
-      } catch (err) {
+      } catch (_err) {
         alert('Failed to upload file');
       } finally {
         setUploading(false);
@@ -622,13 +622,13 @@ const EditEmail = () => {
 
       const lines = trimmed.split('\n');
       
-      const isUnordered = lines.some(l => /^\s*[\*\-•]\s+/.test(l));
+      const isUnordered = lines.some(l => /^\s*[*\-•]\s+/.test(l));
       const isOrdered = lines.some(l => /^\s*\d+\.\s+/.test(l));
 
       if (isUnordered) {
         let listHtml = '<ul style="margin: 0.8em 0; padding-left: 0; list-style: none;">';
         lines.forEach(l => {
-          const match = l.trim().match(/^[\*\-•]\s+(.*)/);
+          const match = l.trim().match(/^[*\-•]\s+(.*)/);
           if (match) {
             listHtml += `<li style="margin-bottom: 0.4em; position: relative; padding-left: 14px; line-height: 1.6; color: #cbd5e1;"><span style="position: absolute; left: 0; color: #94a3b8; font-size: 9px; top: 0px; display: inline-block; vertical-align: middle;">•</span>${match[1].trim()}</li>`;
           } else if (l.trim()) {
@@ -810,7 +810,7 @@ const EditEmail = () => {
         try {
           const user = JSON.parse(userStr);
           isVismaya = ((user.username || user.full_name || '').toLowerCase()).includes('vismaya');
-        } catch (e) {}
+        } catch (_e) { /* noop */ }
       }
       setCc(lead.cc_email || (isVismaya ? 'rajesh.s@qvscl.com' : 'lalit.h@qvscl.com'));
       setRemarks(lead.remarks || '');
@@ -844,7 +844,7 @@ const EditEmail = () => {
           preRange.selectNodeContents(editorRef.current);
           preRange.setEnd(range.endContainer, range.endOffset);
           savedOffset = preRange.toString().length;
-        } catch(e) { /* ignore */ }
+        } catch(_e) { /* ignore */ }
       }
 
       editorRef.current.innerHTML = body;
@@ -863,12 +863,10 @@ const EditEmail = () => {
             newSel.removeAllRanges();
             newSel.addRange(range);
           }
-        } catch(e) { /* fallback — cursor stays where browser puts it */ }
+        } catch(_e) { /* fallback — cursor stays where browser puts it */ }
       }
     }
   }, [body, showSource]);
-
-  const [isSavingTask, setIsSavingTask] = useState(false);
 
 
   const handleSave = async (silent = false) => {

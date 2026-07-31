@@ -65,14 +65,14 @@ const AdminDashboard = () => {
   const [selectedLead, setSelectedLead] = useState(null);
   const [timelineData, setTimelineData] = useState(null);
   const [isTimelineLoading, setIsTimelineLoading] = useState(false);
-  const [ragStats, setRagStats] = useState(null);
-  const [isRagLoading, setIsRagLoading] = useState(false);
+  const [ragStats] = useState(null);
+  const [, setIsRagLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, pages: 1, limit: 50 });
   const [availableSectors, setAvailableSectors] = useState([]);
   const [availableOwners, setAvailableOwners] = useState([]);
   const [systemSettings, setSystemSettings] = useState({ auto_followup: false, outreach_daily_limit: 50 });
-  const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
+  const [_, setIsUpdatingSettings] = useState(false);
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
@@ -188,14 +188,14 @@ const AdminDashboard = () => {
     }
   };
 
-  const updateSystemSettings = async (updates) => {
+  const _updateSystemSettings = async (updates) => {
     setIsUpdatingSettings(true);
     try {
       const newSettings = { ...systemSettings, ...updates };
       await api.post('/api/admin/stats/settings', newSettings);
       setSystemSettings(newSettings);
       showNotification('success', 'System Intelligence parameters updated successfully.');
-    } catch (err) {
+    } catch (_err) {
       showNotification('error', 'Communication Error: Failed to synchronize settings.');
     } finally {
       setIsUpdatingSettings(false);
@@ -1188,7 +1188,7 @@ const AdminDashboard = () => {
                               await api.post(`/api/intelligence/analyze-lead/${lead.id}`);
                               fetchData();
                               setNotification({ type: 'success', message: 'Analysis Complete! Data enriched.' });
-                            } catch (err) {
+                            } catch (_err) {
                               setNotification({ type: 'error', message: 'Analysis failed. Check RAG connectivity.' });
                             }
                           }}
@@ -1690,7 +1690,7 @@ const AdminDashboard = () => {
                   showNotification('success', `Approved ${selectedLeadIds.size} leads successfully`);
                   setSelectedLeadIds(new Set());
                   fetchData();
-                } catch (err) {
+                } catch (_err) {
                   showNotification('error', 'Bulk approval failed');
                 } finally {
                   setIsBulkActionLoading(false);

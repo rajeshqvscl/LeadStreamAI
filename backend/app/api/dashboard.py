@@ -137,7 +137,7 @@ def get_dashboard_stats(
         log_clicks = log_row['log_clicks'] or 0
         unique_opens = max(unique_opens, log_opens)
         unique_clicks = max(unique_clicks, log_clicks)
-    except:
+    except Exception:
         pass
 
     # Also check campaign_events table for additional tracking
@@ -165,7 +165,7 @@ def get_dashboard_stats(
         ce_row = cur.fetchone()
         unique_opens = max(unique_opens, (ce_row['ce_opens'] or 0))
         unique_clicks = max(unique_clicks, (ce_row['ce_clicks'] or 0))
-    except:
+    except Exception:
         pass
 
     # Rate Calculations (using lead enrichment as fallback for pulse when no emails are sent)
@@ -232,7 +232,7 @@ def get_dashboard_stats(
             meeting_reminders = 0
         else:
             meeting_reminders = cur.fetchone()['total'] or 0
-    except:
+    except Exception:
         meeting_reminders = 0
 
     cur.close()
@@ -408,7 +408,7 @@ def get_card_detail(
             """
             cur.execute(breakdown_sql, user_params + date_params)
             company_breakdown = [dict(r) for r in cur.fetchall()]
-        except:
+        except Exception:
             pass
 
     elif card_type == 'optouts_detail':
@@ -539,7 +539,7 @@ def get_card_detail(
             cur.execute(f"SELECT followup_status, COUNT(*) as cnt FROM leads_raw WHERE {user_cond} AND persona IS NOT NULL AND persona != '' {date_cond} GROUP BY followup_status", all_params)
             followup_summary = [dict(r) for r in cur.fetchall()]
             result["followup_summary"] = followup_summary
-        except:
+        except Exception:
             pass
 
     cur.close()

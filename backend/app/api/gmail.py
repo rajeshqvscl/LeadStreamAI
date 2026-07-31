@@ -310,6 +310,27 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         llm = EmailGenerator()
         ai_data = llm.classify_reply(body)
         intent = ai_data.get("intent", "INTERESTED")
+
+        # ── HARD DECLINE-PHRASE OVERRIDE ──
+        # Deterministic safety net: if the reply body contains any known
+        # decline/pass phrase ("We will pass", "Not fit for us", "No, thankyou",
+        # "Please share a detailed deck", "we only invest in", etc.), force
+        # NOT_INTERESTED so follow-ups stop — regardless of what the LLM said.
+        from app.services.reply_workflow_service import detect_decline_phrase
+        decline_phrase = detect_decline_phrase(body)
+        if decline_phrase:
+            print(f"DEBUG: Decline phrase detected ('{decline_phrase}') — overriding intent to NOT_INTERESTED")
+            intent = "NOT_INTERESTED"
+            ai_data["intent"] = "NOT_INTERESTED"
+            if not ai_data.get("rejection_reason"):
+                ai_data["rejection_reason"] = decline_phrase
+            # Keep sentiment consistent with a decline so dashboards don't
+            # show a high-sentiment lead with a NOT_INTERESTED intent.
+            try:
+                cur_sent = int(ai_data.get("sentiment_score") or 0)
+                ai_data["sentiment_score"] = min(cur_sent, 20)
+            except (TypeError, ValueError):
+                ai_data["sentiment_score"] = 10
         
         # Extract check size / ticket size from the reply text (monetary values only)
         # LLM returns "deal_size" key — use it for both check_size and deal_size
@@ -354,7 +375,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             # 0. Wake-Up Check
             try:
                 s.get(RAG_URL, timeout=60, verify=False)
-            except:
+            except Exception:
                 pass
 
             # 1. RAG Processing (PDF vs Text)
@@ -559,7 +580,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                         due_at = datetime.datetime.fromisoformat(proposed_date_str)
                         if due_at.tzinfo:
                             due_at = due_at.replace(tzinfo=None)
-                    except:
+                    except Exception:
                         due_at = default_due.replace(tzinfo=None) if default_due.tzinfo else default_due
                 else:
                     due_at = default_due.replace(tzinfo=None) if default_due.tzinfo else default_due
@@ -735,7 +756,7 @@ def get_inbound_deals(
             intel = lead_dict.get('rag_intelligence')
             if isinstance(intel, str):
                 try: intel = json.loads(intel)
-                except: intel = {}
+                except Exception: intel = {}
             
             if not intel: intel = {}
 

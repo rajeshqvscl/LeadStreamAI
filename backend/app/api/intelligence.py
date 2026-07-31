@@ -303,7 +303,7 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
             # 0. Wake-Up Check
             try:
                 s.get(rag_url, timeout=60, verify=False)
-            except:
+            except Exception:
                 pass
 
             if file_data:
@@ -419,7 +419,7 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
                     rag_advice = f"### RAG VERDICT\n{structured.get('verdict')}\n\n### SUMMARY\n{structured.get('summary')}"
                     rag_intel = structured
                     rag_intel["answer"] = rag_advice
-                except:
+                except Exception:
                     rag_advice = raw_res
                     rag_intel = {"answer": rag_advice, "status": "LOCAL_AI_FALLBACK"}
 
@@ -580,7 +580,7 @@ async def get_rag_debug_stats(user_id: Optional[str] = Header(None, alias="X-Use
             res = requests.get(rag_url, timeout=5, verify=False)
             latency = round((time.time() - start) * 1000, 2)
             if res.status_code == 200: health = "ONLINE"
-        except: pass
+        except Exception: pass
         
         # 2. Database Stats
         cur.execute("SELECT COUNT(*) FROM leads_raw WHERE rag_intelligence IS NOT NULL")

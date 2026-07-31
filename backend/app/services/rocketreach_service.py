@@ -53,13 +53,13 @@ def _make_request(method, url, **kwargs):
             data = {}
             try:
                 data = r.json()
-            except: pass
+            except Exception: pass
             
             # RocketReach returns {"detail": "...", "wait": 123.4} or similar
             wait = data.get("wait") or r.headers.get("Retry-After")
             try:
                 wait_val = float(wait) if wait else None
-            except:
+            except Exception:
                 wait_val = None
                 
             raise RocketReachRateLimitError(
@@ -71,7 +71,7 @@ def _make_request(method, url, **kwargs):
             error_msg = r.text
             try:
                 error_msg = r.json().get('response', r.text)
-            except: pass
+            except Exception: pass
             raise Exception(f"RocketReach error ({r.status_code}): {error_msg}")
             
         return r.json()

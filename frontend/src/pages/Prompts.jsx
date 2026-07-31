@@ -150,7 +150,7 @@ const Prompts = () => {
       setForm({ name: '', content: '', description: '', followup_1: '', followup_2: '', followup_3: '', subject: '', cc: '', followup_count: 3 });
       setShowForm(false);
       fetchPrompts();
-    } catch (err) {
+    } catch (_err) {
       alert('Failed to create template');
     } finally {
       setCreating(false);
@@ -164,7 +164,7 @@ const Prompts = () => {
       setSaveSuccess(id);
       setTimeout(() => setSaveSuccess(null), 3000);
       fetchPrompts();
-    } catch (err) {
+    } catch (_err) {
       alert('Failed to save');
     } finally {
       setIsSaving(null);
@@ -178,7 +178,7 @@ const Prompts = () => {
       setSaveFieldSuccess({ id, field });
       setTimeout(() => setSaveFieldSuccess({ id: null, field: null }), 2000);
       fetchPrompts();
-    } catch (err) {
+    } catch (_err) {
       alert('Failed to save');
     } finally {
       setSaveField({ id: null, field: null });
@@ -233,7 +233,7 @@ const Prompts = () => {
     try {
       await api.post(`/api/prompts/${id}/attachment`, formData);
       fetchPrompts();
-    } catch (err) {
+    } catch (_err) {
       alert('Failed to upload attachment');
     } finally {
       setAttaching(null);
@@ -246,16 +246,16 @@ const Prompts = () => {
     try {
       await api.delete(`/api/prompts/${id}`, { headers: { 'X-User-Id': userId } });
       fetchPrompts();
-    } catch (err) {
+    } catch (_err) {
       alert('Failed to delete');
     } finally {
       setDeleting(null);
     }
   };
 
-  const renderEmailPreview = (text, showSigDisc = true, isFollowup = false) => {
+  const renderEmailPreview = (text, _showSigDisc = true, isFollowup = false) => {
     if (!text) return '<p class="text-slate-500 italic">(empty)</p>';
-    const backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+    const _backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
     // Resolve sender placeholders (needed regardless of HTML/markdown)
     const firstName = userSenderName.split(' ')[0] || userSenderName;
     text = text.replace(/\{\{Sender Name\}\}/g, userSenderName);
@@ -332,12 +332,12 @@ const Prompts = () => {
         return;
       }
       const lines = trimmed.split('\n');
-      const isUnordered = lines.some(l => /^\s*[\*\-•]\s+/.test(l));
+      const isUnordered = lines.some(l => /^\s*[*\-•]\s+/.test(l));
       const isOrdered = lines.some(l => /^\s*\d+\.\s+/.test(l));
       if (isUnordered) {
         let listHtml = '<ul style="margin: 0.8em 0; padding-left: 0; list-style: none;">';
         lines.forEach(l => {
-          const match = l.trim().match(/^[\*\-•]\s+(.*)/);
+          const match = l.trim().match(/^[*\-•]\s+(.*)/);
           if (match) listHtml += `<li style="margin-bottom: 0.4em; position: relative; padding-left: 14px; line-height: 1.6; color: #cbd5e1;"><span style="position: absolute; left: 0; color: #94a3b8; font-size: 9px; top: 0px; display: inline-block; vertical-align: middle;">•</span>${match[1].trim()}</li>`;
           else if (l.trim()) listHtml += ` ${l.trim()}`;
         });
@@ -442,7 +442,7 @@ const Prompts = () => {
                   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
                   storedUser.team = 'CLIENT';
                   localStorage.setItem('user', JSON.stringify(storedUser));
-                  try { await api.put('/api/auth/team', { team: 'CLIENT' }, { headers: { 'X-User-Id': storedUser.id || '1' } }); } catch(e) {}
+                  try { await api.put('/api/auth/team', { team: 'CLIENT' }, { headers: {} }); } catch { /* noop */ }
                 }}
                 className={`px-4 py-2 rounded-lg text-[12px] font-bold transition-all ${userTeam === 'CLIENT' ? 'bg-emerald-600 text-white shadow-[0_0_12px_rgba(16,185,129,0.3)]' : 'text-slate-400 hover:text-white'}`}
               >
@@ -454,7 +454,7 @@ const Prompts = () => {
                   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
                   storedUser.team = 'INVESTOR';
                   localStorage.setItem('user', JSON.stringify(storedUser));
-                  try { await api.put('/api/auth/team', { team: 'INVESTOR' }, { headers: { 'X-User-Id': storedUser.id || '1' } }); } catch(e) {}
+                  try { await api.put('/api/auth/team', { team: 'INVESTOR' }, { headers: {} }); } catch { /* noop */ }
                 }}
                 className={`px-4 py-2 rounded-lg text-[12px] font-bold transition-all ${userTeam === 'INVESTOR' ? 'bg-violet-600 text-white shadow-[0_0_12px_rgba(139,92,246,0.3)]' : 'text-slate-400 hover:text-white'}`}
               >

@@ -321,8 +321,7 @@ Looking forward to your response.
         Analyze this email reply from a potential investor/client and extract details in JSON format.
         
         CRITICAL RULES:
-        1. Identify the new response/reply at the very beginning/top of the text. Ignore any quoted historical thread or original outreach text trailing after it (e.g., descriptions of QVSCL, the climate agritech project, traction, etc.).
-        2. If the lead declines the opportunity in the new reply—even in a short sentence like "Pass from us", "Pass for now", "Not interested", "Not within our mandate", "Too early for us", "No thank you"—you MUST classify the intent as "NOT_INTERESTED" and set the sentiment_score between 0 and 20.
+        1. Identify the new response/reply at the very beginning/top of the text. Ignore any quoted historical thread or original outreach text trailing after it (e.g., descriptions of QVSCL, the climate agritech project, traction, etc.).         2. If the lead declines the opportunity in the new reply—even in a short sentence like "Pass from us", "Pass for now", "Not interested", "Not within our mandate", "Too early for us", "No thank you", "We will pass", "Not fit for us", "No, thankyou", "not a current fit for us", "We will pass on this opportunity", "we only invest in", "we only do", "Please share a detailed deck", "We will pass. Thanks for sharing."—you MUST classify the intent as "NOT_INTERESTED" and set the sentiment_score between 0 and 20.
         3. Do NOT let the details of the original outreach email (which is positive) confuse you. Focus 100% on the lead's new reply at the top.
         4. CRITICAL — deal_size: Extract the ticket size, investment range, check size, or revenue criteria (MONETARY VALUES ONLY, e.g., '$1M', '$500K-$1M', 'INR 100 cr+', '10-20 Cr') explicitly mentioned in the lead's NEW reply (the top part). Crucially: DO NOT include stage names like 'Series A', 'Series B', 'Seed', or 'Pre-Seed' — only extract numeric monetary values/ranges. If none is mentioned, set null.
          5. CRITICAL — pitch_deck_url: ONLY set if the lead's NEW reply explicitly includes a URL or attachment reference. Do not fabricate or copy from the quoted thread.
@@ -350,7 +349,7 @@ Looking forward to your response.
         json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
         if json_match:
             try: return json.loads(json_match.group(0))
-            except: pass
+            except Exception: pass
         return {"intent": "NOT_INTERESTED"}
 
 

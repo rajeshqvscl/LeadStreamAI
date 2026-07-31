@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Brain, FileText, Sparkles, Clock, RefreshCw, 
   ChevronRight, Search, Copy, CheckCircle2, 
@@ -35,7 +35,7 @@ const DealIntelligence = () => {
   const [syncLog, setSyncLog] = useState([]);
   const [syncProgress, setSyncProgress] = useState(0);
   const [showSyncPanel, setShowSyncPanel] = useState(false);
-  const [copySuccess, setCopySuccess] = useState(false);
+  const [_, setCopySuccess] = useState(false);
   const [showSuccessPulse, setShowSuccessPulse] = useState(false);
   const [page, setPage] = useState(1);
   const [totalDeals, setTotalDeals] = useState(0);
@@ -43,7 +43,6 @@ const DealIntelligence = () => {
   const [activeTab, setActiveTab] = useState('REVERT'); // REVERT, CLOUD
   const [cloudFeature, setCloudFeature] = useState(null);
   const [cloudOutput, setCloudOutput] = useState(null);
-  const [showDebug, setShowDebug] = useState(false);
   const [pdfFilter, setPdfFilter] = useState('with_pdf'); // 'with_pdf' or 'all'
   const [pitchMode, setPitchMode] = useState('general');
   const [demoDataLoaded, setDemoDataLoaded] = useState(false);
@@ -113,7 +112,7 @@ const DealIntelligence = () => {
             }).then(r => r.json());
             setCloudOutput(data);
             break;
-          case 'memory':
+          case 'memory': {
             // Create a session and get it
             const session = await fetch(`${baseUrl}/session/create`, {
               method: 'POST',
@@ -123,6 +122,7 @@ const DealIntelligence = () => {
             data = await fetch(`${baseUrl}/session/${session.session_id}`).then(r => r.json());
             setCloudOutput(data);
             break;
+          }
           case 'compare':
             data = await fetch(`${baseUrl}/documents/clusters`).then(r => r.json());
             setCloudOutput(data.clusters || []);
@@ -218,7 +218,7 @@ const DealIntelligence = () => {
   
   // LOGIC FIX: Ensure we find the score anywhere it might be hiding
   const displayScore = ragIntel.sentiment_score || ragIntel.score || selectedDeal?.sentiment_score || 0;
-  const formattedScore = typeof displayScore === 'number' ? displayScore.toFixed(2) : displayScore;
+  const _formattedScore = typeof displayScore === 'number' ? displayScore.toFixed(2) : displayScore;
 
   const handleAnalyze = async () => {
     if (!selectedDealId) return;
@@ -292,7 +292,7 @@ const DealIntelligence = () => {
     setSyncLog(prev => [...prev.slice(-8), `[${time}] ${msg}`]);
   };
 
-  const handleCopy = () => {
+  const _handleCopy = () => {
     const text = ragIntel.answer || selectedDeal?.rag_advice || '';
     navigator.clipboard.writeText(text);
     setCopySuccess(true);
@@ -356,7 +356,7 @@ const handleSendMessage = async () => {
     }
 };
 
-  const parseCitations = (content) => {
+  const _parseCitations = (content) => {
     if (!content) return null;
     const parts = content.split(/(\[Source: [^\]]+\])/);
     return parts.map((part, i) => {
@@ -367,7 +367,7 @@ const handleSendMessage = async () => {
     });
   };
 
-  const sections = getSections(selectedDeal?.rag_advice);
+  const _sections = getSections(selectedDeal?.rag_advice);
 
   if (loading) return (
     <div className="h-screen bg-[#05070a] flex flex-col items-center justify-center">
@@ -1316,7 +1316,7 @@ return (
                           setCloudFeature('tables');
                           setCloudOutput(res);
                           setActiveTab('CLOUD');
-                        } catch(e) { console.error('Failed to fetch tables'); }
+                        } catch(_e) { console.error('Failed to fetch tables'); }
                       }}
                       className="w-full flex items-center gap-2 px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[9px] font-black text-slate-400 uppercase tracking-widest transition-all"
                     >
@@ -1333,7 +1333,7 @@ return (
                           setCloudFeature('summary');
                           setCloudOutput(res);
                           setActiveTab('CLOUD');
-                        } catch(e) { console.error('Failed'); }
+                        } catch(_e) { console.error('Failed'); }
                       }}
                       className="w-full flex items-center gap-2 px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[9px] font-black text-slate-400 uppercase tracking-widest transition-all"
                     >

@@ -459,7 +459,7 @@ def get_gmail_message(user_id: int, message_id: str):
                         'body': f"Technical Error: {str(full_e)} | Raw Backup Error: {str(raw_e)}",
                         'is_restricted': True
                     }
-                except:
+                except Exception:
                     return None
     except Exception as e:
         print(f"Error in get_gmail_message for {message_id}: {e}")

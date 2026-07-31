@@ -62,7 +62,7 @@ const GenerateSector = () => {
       await api.post('/api/generate/bulk', { sector, ...formData });
       showNotification('success', `Bulk generation started for ${sector}`);
       fetchSectors();
-    } catch (err) {
+    } catch (_err) {
       showNotification('error', 'Failed to start bulk generation');
     } finally {
       setGeneratingSector(null);
@@ -74,7 +74,7 @@ const GenerateSector = () => {
       await api.post('/api/generate/save-settings', { sector, ...settings });
       showNotification('success', 'Strategy settings saved');
       fetchSectors();
-    } catch (err) {
+    } catch (_err) {
       showNotification('error', 'Failed to save settings');
     }
   };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import api from '../services/api';
 import { 
   TrendingUp, DollarSign, ExternalLink, 
@@ -44,7 +44,7 @@ const extractReply = (text) => {
     .replace(/o\\:\*\s*\{[^}]*\}/gi, '')
     .replace(/w\\:\*\s*\{[^}]*\}/gi, '')
     .replace(/\.shape\s*\{[^}]*\}/gi, '')
-    .replace(/[a-zA-Z][a-zA-Z0-9,.#:_>\-]*\s*\{[^}]*\}/g, '');
+    .replace(/[a-zA-Z][a-zA-Z0-9,.#:_>-]*\s*\{[^}]*\}/g, '');
   const patterns = [
     /\n-+\s*Original Message\s*-+\s*\n/i,
     /\nOn\s+.*?\d{4},\s+at\s+.*?\d{2}:\d{2}.*?wrote:\s*\n/i,
@@ -81,7 +81,7 @@ const formatIST = (dateStr) => {
   } catch { return { date: dateStr, time: '' }; }
 };
 
-const DealCard = React.memo(({ deal, onClick, formatIST, getStatusColor, getStatusLabel, stripHtml, extractReply }) => {
+const DealCard = React.memo(({ deal, onClick, formatIST, getStatusColor, getStatusLabel, extractReply }) => {
   const ist = formatIST(deal.updated_at);
   return (
     <div onClick={() => onClick(deal)} className="bg-[#131722] border border-white/5 rounded-[24px] p-1 group hover:border-emerald-500/30 transition-all cursor-pointer relative overflow-hidden hover:bg-white/[0.02]">
