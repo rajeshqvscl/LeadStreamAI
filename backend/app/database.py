@@ -531,6 +531,20 @@ def create_tables():
                 conn.rollback()
                 continue
 
+    # Sessions Table — real server-side auth tokens (verified by AuthMiddleware)
+    # NOTE: token has a UNIQUE constraint, which already creates an index —
+    # no extra index needed for the per-request token lookup.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS sessions (
+        id SERIAL PRIMARY KEY,
+        token TEXT UNIQUE NOT NULL,
+        user_id INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        expires_at TIMESTAMP NOT NULL
+    );
+    """)
+    conn.commit()
+
     # Family Offices Table
     cur.execute("""
     CREATE TABLE IF NOT EXISTS family_offices (

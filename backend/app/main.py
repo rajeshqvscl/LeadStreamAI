@@ -221,15 +221,10 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
             if is_allowed:
                 resp.headers["Access-Control-Allow-Origin"] = origin
                 resp.headers["Access-Control-Allow-Credentials"] = "true"
-            else:
-                resp.headers["Access-Control-Allow-Origin"] = "*"
-            resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-            req_hdrs = request.headers.get("Access-Control-Request-Headers", "")
-            if req_hdrs:
-                resp.headers["Access-Control-Allow-Headers"] = req_hdrs
-            else:
-                resp.headers["Access-Control-Allow-Headers"] = "*"
-            resp.headers["Access-Control-Max-Age"] = "600"
+                req_hdrs = request.headers.get("Access-Control-Request-Headers", "")
+                resp.headers["Access-Control-Allow-Headers"] = req_hdrs or "Content-Type, Authorization, X-User-Id"
+                resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+                resp.headers["Access-Control-Max-Age"] = "600"
             return resp
 
         response = await call_next(request)
@@ -237,13 +232,105 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
         if is_allowed:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Credentials"] = "true"
-        else:
-            response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "*"
+            req_hdrs = request.headers.get("Access-Control-Request-Headers", "")
+            response.headers["Access-Control-Allow-Headers"] = req_hdrs or "Content-Type, Authorization, X-User-Id"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
         response.headers["Vary"] = "Origin"
         return response
 
+# (CORS is registered at the END of the AUTH MIDDLEWARE section below so it
+# is OUTERMOST — see the ordering note there.)
+
+# ---------------------------------------------------------------------------
+# AUTH MIDDLEWARE — real session-token verification
+# ---------------------------------------------------------------------------
+# The frontend attaches `Authorization: Bearer <token>`. Every request to a
+# protected /api route must carry a valid session token created at login.
+# The verified user_id from the session REPLACES any client-supplied
+# X-User-Id header, so header spoofing (the old auth hole) is impossible.
+#
+# Public paths (no auth): login, Google OAuth callback, Gmail Pub/Sub
+# webhook, email tracking pixels, unsubscribe/resubscribe pages, static
+# assets, and the one-click admin approve landing page.
+
+_PUBLIC_PATH_EXACT = {"/"}
+
+_PUBLIC_PATH_PREFIXES = (
+    "/api/auth/login",
+    "/api/auth/google/callback",
+    "/api/gmail/pubsub-push",
+    "/api/track/",
+    "/api/unsubscribe",
+    "/api/resubscribe",
+    "/api/preferences",
+    "/api/admin/approve-user/",
+    "/unsubscribe",
+    "/resubscribe",
+    "/preferences",
+    "/static/",
+    "/assets/",
+    "/debug/",
+)
+
+
+def _verify_session(token: str):
+    """Returns the verified user_id for a valid, unexpired session token, else None."""
+    try:
+        from app.database import get_db_connection
+        conn = get_db_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT user_id FROM sessions WHERE token = %s AND expires_at > NOW()",
+                (token,),
+            )
+            row = cur.fetchone()
+            return row["user_id"] if row else None
+        finally:
+            cur.close()
+            conn.close()
+    except Exception:
+        return None
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # CORS preflight never carries credentials — let it through
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
+        path = request.url.path
+        if path in _PUBLIC_PATH_EXACT or path.startswith(_PUBLIC_PATH_PREFIXES):
+            return await call_next(request)
+
+        auth_header = request.headers.get("authorization", "")
+        token = None
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+
+        if not token:
+            return JSONResponse(status_code=401, content={"detail": "Authentication required"})
+
+        user_id = await asyncio.to_thread(_verify_session, token)
+        if not user_id:
+            return JSONResponse(status_code=401, content={"detail": "Invalid or expired session. Please log in again."})
+
+        # Override any client-supplied X-User-Id with the verified session user
+        request.scope["headers"] = [
+            (k, v) if k.lower() != b"x-user-id" else (b"x-user-id", str(user_id).encode())
+            for k, v in request.scope["headers"]
+        ]
+        request.state.user_id = str(user_id)
+        return await call_next(request)
+
+
+# Middleware order matters: Starlette's add_middleware inserts at position 0,
+# so the LAST registered middleware is OUTERMOST. Auth is registered FIRST
+# (inner); CORS is registered LAST (outermost) so that 401 responses raised by
+# AuthMiddleware still flow back through CORS and get CORS headers — otherwise
+# the browser would block them and the frontend's 401 interceptor could never
+# read the response to clear the stale token.
+app.add_middleware(AuthMiddleware)
 app.add_middleware(DynamicCORSMiddleware)
 
 from fastapi.exceptions import RequestValidationError
@@ -264,12 +351,14 @@ async def global_exception_handler(request: Request, exc: Exception):
     
     # Use same CORS logic as DynamicCORSMiddleware
     origin = request.headers.get("origin", "")
+    headers = {}
     if _origin_allowed(origin):
-        response_origin = origin
-        credential_header = "true"
-    else:
-        response_origin = "*"
-        credential_header = "false"
+        headers = {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-User-Id",
+        }
 
     return JSONResponse(
         status_code=500,
@@ -278,12 +367,7 @@ async def global_exception_handler(request: Request, exc: Exception):
             "message": str(exc),
             "traceback": error_details if os.getenv("DEBUG") == "True" else None
         },
-        headers={
-            "Access-Control-Allow-Origin": response_origin,
-            "Access-Control-Allow-Credentials": credential_header,
-            "Access-Control-Allow-Methods": "*",
-            "Access-Control-Allow-Headers": "*",
-        }
+        headers=headers
     )
 
 

@@ -80,8 +80,25 @@ def login(req: LoginRequest):
         except Exception:
             pass  # Non-blocking upgrade
 
+    # Create a real, server-side session token (verified by AuthMiddleware on every request)
+    import secrets
+    access_token = secrets.token_urlsafe(32)
+    expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=7)
+    try:
+        s_conn = get_db_connection()
+        s_cur = s_conn.cursor()
+        # Opportunistic cleanup of expired sessions to keep the table lean
+        s_cur.execute("DELETE FROM sessions WHERE expires_at <= NOW()")
+        s_cur.execute("INSERT INTO sessions (token, user_id, expires_at) VALUES (%s, %s, %s)", (access_token, user['id'], expires_at))
+        s_conn.commit()
+        s_cur.close()
+        s_conn.close()
+    except Exception as sess_err:
+        logger.error(f"Failed to create session: {sess_err}")
+        raise HTTPException(status_code=500, detail="Could not create session. Please try again.")
+
     return {
-        "access_token": str(uuid.uuid4()),
+        "access_token": access_token,
         "token_type": "bearer",
         "user": {
             "id": user['id'],
@@ -224,11 +241,24 @@ def update_signature_mode(req: SignatureModeUpdateRequest, user_id: Optional[str
 # --- LOGOUT & STATE RESET ---
 
 @router.post("/auth/logout")
-def logout(user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Handles logout."""
-    if not user_id:
-        return {"success": True}
-        
+def logout(request: Request, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Handles logout — revokes the server-side session token."""
+    auth_header = request.headers.get("authorization", "")
+    token = None
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header[7:].strip()
+
+    if token:
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("DELETE FROM sessions WHERE token = %s", (token,))
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Logout session revoke failed: {e}")
+
     return {"success": True, "message": "Logged out"}
 
 # --- ACCESS REQUEST & APPROVAL ---

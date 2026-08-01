@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Mail, Loader2, RefreshCw, ExternalLink, Search, X, User, Send, ShieldAlert, Sparkles } from 'lucide-react';
 import api from '../services/api';
-import axios from 'axios'; // For direct auth calls
 
 const GmailSent = () => {
   const [messages, setMessages] = useState([]);
@@ -80,7 +79,10 @@ const GmailSent = () => {
   const handleDisconnect = async () => {
     if (!window.confirm('NUCLEAR RESET: This will completely wipe all Google tokens. Are you sure?')) return;
     try {
-      await axios.post('/api/auth/google/disconnect', {}, { headers: { 'X-User-Id': localStorage.getItem('user_id') } });
+      // Use the shared api client so X-User-Id comes from the logged-in user's
+      // profile (not the stale localStorage 'user_id' key) and the Bearer token
+      // is attached — otherwise this would disconnect the ADMIN's Gmail instead.
+      await api.post('/api/auth/google/disconnect');
       window.location.reload();
     } catch (err) {
       console.error('Failed to disconnect', err);
