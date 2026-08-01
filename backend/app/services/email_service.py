@@ -67,6 +67,27 @@ def _get_signature_attachments(user_id: Optional[int]) -> list:
         logger.error(f"Error fetching signature attachments for user {user_id}: {e}")
         return []
 
+# Per-account email font preference (applies to draft/followup emails).
+# The font is applied as the final wrapper in send_email(), so it wins over
+# markdown-rendered content that has no inline font-family of its own.
+USER_EMAIL_FONTS = {
+    2: "Arial, sans-serif",  # Ayush
+    3: "Inter, serif",  # Kajal
+    4: "Inter, serif",  # Yashika
+    5: "Inter, serif",  # Palak
+}
+DEFAULT_EMAIL_FONT = "Georgia, serif"
+
+
+def get_user_email_font(user_id) -> str:
+    """Resolve the preferred email font for a user id."""
+    try:
+        uid = int(user_id) if user_id is not None else None
+    except (TypeError, ValueError):
+        uid = None
+    return USER_EMAIL_FONTS.get(uid, DEFAULT_EMAIL_FONT)
+
+
 def strip_old_unsubscribe_links(html_content: str) -> str:
     """Remove legacy inject_signature unsubscribe links from content before the footer.
     Never touches the footer's own link (which is after 'You're receiving this because')."""
@@ -363,8 +384,9 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 html_content = _fs_re.sub(r'font-size\s*:\s*[^;]+;?\s*', '', html_content)
 
                 # Wrap in clean email template for professional appearance in Gmail
+                email_font = get_user_email_font(user_id)
                 html_content = f"""
-                <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.6; color: #333333; font-size: 18px;">
+                <div style="font-family: {email_font}; line-height: 1.6; color: #333333; font-size: 18px;">
                     {html_content}
                 </div>
                 """

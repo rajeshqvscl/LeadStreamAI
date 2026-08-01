@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Mail, Loader2, RefreshCw, ExternalLink, Calendar, Search, Filter, Edit3, Send, X, Save, Sparkles, Type, Bold, Italic, Wand2, Shield, Zap, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
 import api from '../services/api';
+import { sanitizeHtml } from '../utils/sanitizeHtml';
 
 const GmailDrafts = () => {
   const [drafts, setDrafts] = useState([]);
@@ -194,7 +195,7 @@ const GmailDrafts = () => {
         listHtml += '</ul>';
         htmlParts.push(listHtml);
       } else if (lines.length >= 2 && lines.every(l => !l.trim() || (l.trim().startsWith('|') && l.trim().endsWith('|')))) {
-        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-family:Arial,sans-serif;font-size:18px;">';
+        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-family:Georgia,serif;font-size:18px;">';
         const dataLines = lines.filter(l => l.trim() && !l.trim().match(/^\|[-:\s]+\|$/));
         dataLines.forEach((line, i) => {
           const cells = line.trim().split('|').slice(1, -1).map(c => c.trim());
@@ -228,9 +229,9 @@ const GmailDrafts = () => {
       .replace(/font-size\s*:\s*[^;]+;?\s*/gi, '')
       .replace(/<table(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
-          return m.replace(/style="([^"]*)"/, 'style="$1;border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:18px;"');
+          return m.replace(/style="([^"]*)"/, 'style="$1;border-collapse:collapse;margin-bottom:18px;font-family:Georgia,serif;font-size:18px;"');
         }
-        return m.replace('<table', '<table style="border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:18px;"');
+        return m.replace('<table', '<table style="border-collapse:collapse;margin-bottom:18px;font-family:Georgia,serif;font-size:18px;"');
       })
       .replace(/<th(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
@@ -532,7 +533,7 @@ const GmailDrafts = () => {
                                 <div className="p-1 rounded-xl bg-white/[0.01] border border-white/[0.03]">
                                     <div 
                                         className="text-[14px] text-slate-300 leading-relaxed font-medium p-4"
-                                        dangerouslySetInnerHTML={{ __html: renderEmailPreview(editingDraft.body).replace(/background(?:-color)?\s*:\s*[^;]+;?\s*/gi, '').replace(/bgcolor\s*=\s*["'][^"']*["']\s*/gi, '') }}
+                                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(renderEmailPreview(editingDraft.body)) }}
                                     />
                                 </div>
                             </div>

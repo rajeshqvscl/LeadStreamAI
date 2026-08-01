@@ -6,6 +6,7 @@ import {
   ExternalLink, RefreshCw, X, ChevronRight, 
   ShieldAlert, Sparkles, Search, Filter 
 } from 'lucide-react';
+import { sanitizeHtml } from '../utils/sanitizeHtml';
 
 const Inbox = () => {
     const [messages, setMessages] = useState([]);
@@ -96,9 +97,8 @@ const Inbox = () => {
         const isHtml = /<[a-z][\s\S]*>/i.test(content);
         
         if (isHtml) {
-          const sanitized = content
-            .replace(/background(?:-color)?\s*:\s*[^;]+;?\s*/gi, '')
-            .replace(/bgcolor\s*=\s*["'][^"']*["']\s*/gi, '');
+          // Sanitize with DOMPurify to block stored XSS from email HTML
+          const sanitized = sanitizeHtml(content);
           return <div className="email-html-content" dangerouslySetInnerHTML={{ __html: sanitized }} />;
         }
     

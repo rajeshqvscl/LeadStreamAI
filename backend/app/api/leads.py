@@ -783,14 +783,40 @@ def mark_lead_responded(lead_id: int, user_id: Optional[str] = Header(None, alia
         conn = get_db_connection()
         cur = conn.cursor()
         
-        # Stop follow-up sequence
-        cur.execute("""
-            UPDATE leads_raw 
-            SET is_responded = TRUE, 
-                followup_status = 'STOPPED', 
-                updated_at = NOW() 
-            WHERE id = %s
-        """, (lead_id,))
+        uid = normalize_user_id(user_id)
+        is_admin = (str(user_id).lower() == 'admin')
+        
+        # Stop follow-up sequence — scoped to owner unless admin (prevents cross-account changes)
+        if is_admin:
+            cur.execute("""
+                UPDATE leads_raw 
+                SET is_responded = TRUE, 
+                    followup_status = 'STOPPED', 
+                    updated_at = NOW() 
+                WHERE id = %s
+            """, (lead_id,))
+        elif uid:
+            cur.execute("""
+                UPDATE leads_raw 
+                SET is_responded = TRUE, 
+                    followup_status = 'STOPPED', 
+                    updated_at = NOW() 
+                WHERE id = %s AND user_id = %s
+            """, (lead_id, uid))
+        else:
+            cur.execute("""
+                UPDATE leads_raw 
+                SET is_responded = TRUE, 
+                    followup_status = 'STOPPED', 
+                    updated_at = NOW() 
+                WHERE id = %s AND user_id IS NULL
+            """, (lead_id,))
+        
+        if cur.rowcount == 0:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=404, detail="Lead not found or access denied")
         
         from app.models.lead import add_activity_log
         add_activity_log(lead_id, "RESPONDED", "Marked as responded (Follow-up stopped)", get_user_name(user_id))
@@ -799,18 +825,33 @@ def mark_lead_responded(lead_id: int, user_id: Optional[str] = Header(None, alia
         cur.close()
         conn.close()
         return {"message": "Lead marked as responded. Follow-ups stopped."}
+    except HTTPException:
+        raise
     except Exception as e:
         return {"error": str(e)}
 
 
 @router.post("/leads/{lead_id}/save-followup-draft")
 def save_followup_draft(lead_id: int, req: ApproveFollowupRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Saves a follow-up draft for later review."""
+    """Saves a follow-up draft for later review — scoped to owner unless admin."""
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
-        cur.execute("UPDATE leads_raw SET followup_draft = %s, updated_at = NOW() WHERE id = %s", (req.custom_body, lead_id))
+        uid = normalize_user_id(user_id)
+        is_admin = (str(user_id).lower() == 'admin')
+        if is_admin:
+            cur.execute("UPDATE leads_raw SET followup_draft = %s, updated_at = NOW() WHERE id = %s", (req.custom_body, lead_id))
+        elif uid:
+            cur.execute("UPDATE leads_raw SET followup_draft = %s, updated_at = NOW() WHERE id = %s AND user_id = %s", (req.custom_body, lead_id, uid))
+        else:
+            cur.execute("UPDATE leads_raw SET followup_draft = %s, updated_at = NOW() WHERE id = %s AND user_id IS NULL", (req.custom_body, lead_id))
+        
+        if cur.rowcount == 0:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            return {"error": "Lead not found or access denied"}
         conn.commit()
         cur.close()
         conn.close()
@@ -1094,22 +1135,44 @@ def create_manual_lead(req: LeadCreate, user_id: Optional[str] = Header(None, al
         raise HTTPException(status_code=400, detail=f"Storage Conflict: {str(e)}")
 
 @router.post("/leads/bulk-labels")
-def bulk_labels(req: BulkLabelRequest):
+def bulk_labels(req: BulkLabelRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
     
+    uid = normalize_user_id(user_id)
+    is_admin = (str(user_id).lower() == 'admin')
+    
     try:
-        cur.execute("""
-            UPDATE leads_raw 
-            SET labels = (
-                SELECT ARRAY_AGG(DISTINCT l) 
-                FROM UNNEST(COALESCE(labels, '{}') || %s) l
-            )
-            WHERE id = ANY(%s)
-        """, (req.labels, req.lead_ids))
+        if is_admin:
+            cur.execute("""
+                UPDATE leads_raw 
+                SET labels = (
+                    SELECT ARRAY_AGG(DISTINCT l) 
+                    FROM UNNEST(COALESCE(labels, '{}') || %s) l
+                )
+                WHERE id = ANY(%s)
+            """, (req.labels, req.lead_ids))
+        elif uid:
+            cur.execute("""
+                UPDATE leads_raw 
+                SET labels = (
+                    SELECT ARRAY_AGG(DISTINCT l) 
+                    FROM UNNEST(COALESCE(labels, '{}') || %s) l
+                )
+                WHERE id = ANY(%s) AND user_id = %s
+            """, (req.labels, req.lead_ids, uid))
+        else:
+            cur.execute("""
+                UPDATE leads_raw 
+                SET labels = (
+                    SELECT ARRAY_AGG(DISTINCT l) 
+                    FROM UNNEST(COALESCE(labels, '{}') || %s) l
+                )
+                WHERE id = ANY(%s) AND user_id IS NULL
+            """, (req.labels, req.lead_ids))
         
         conn.commit()
-        add_activity_log(None, "LABEL_ASSIGNED", f"Assigned labels {req.labels} to {len(req.lead_ids)} leads", "admin")
+        add_activity_log(None, "LABEL_ASSIGNED", f"Assigned labels {req.labels} to {len(req.lead_ids)} leads", get_user_name(user_id))
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -1120,16 +1183,32 @@ def bulk_labels(req: BulkLabelRequest):
     return {"message": "Labels assigned successfully"}
 
 @router.post("/leads/{lead_id}/remove-label")
-def remove_lead_label(lead_id: int, req: LabelRemoveRequest):
+def remove_lead_label(lead_id: int, req: LabelRemoveRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
     
+    uid = normalize_user_id(user_id)
+    is_admin = (str(user_id).lower() == 'admin')
+    
     try:
-        cur.execute("""
-            UPDATE leads_raw 
-            SET labels = ARRAY_REMOVE(labels, %s)
-            WHERE id = %s
-        """, (req.label, lead_id))
+        if is_admin:
+            cur.execute("""
+                UPDATE leads_raw 
+                SET labels = ARRAY_REMOVE(labels, %s)
+                WHERE id = %s
+            """, (req.label, lead_id))
+        elif uid:
+            cur.execute("""
+                UPDATE leads_raw 
+                SET labels = ARRAY_REMOVE(labels, %s)
+                WHERE id = %s AND user_id = %s
+            """, (req.label, lead_id, uid))
+        else:
+            cur.execute("""
+                UPDATE leads_raw 
+                SET labels = ARRAY_REMOVE(labels, %s)
+                WHERE id = %s AND user_id IS NULL
+            """, (req.label, lead_id))
         
         conn.commit()
     except Exception as e:
@@ -1144,11 +1223,18 @@ class BulkUpdateSourceReq(BaseModel):
     source: str
 
 @router.post("/leads/bulk-approve")
-def bulk_approve(req: List[int]):
+def bulk_approve(req: List[int], user_id: Optional[str] = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
+    uid = normalize_user_id(user_id)
+    is_admin = (str(user_id).lower() == 'admin')
     try:
-        cur.execute("UPDATE leads_raw SET source = 'direct' WHERE id = ANY(%s)", (req,))
+        if is_admin:
+            cur.execute("UPDATE leads_raw SET source = 'direct' WHERE id = ANY(%s)", (req,))
+        elif uid:
+            cur.execute("UPDATE leads_raw SET source = 'direct' WHERE id = ANY(%s) AND user_id = %s", (req, uid))
+        else:
+            cur.execute("UPDATE leads_raw SET source = 'direct' WHERE id = ANY(%s) AND user_id IS NULL", (req,))
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -1306,11 +1392,18 @@ def process_unsubscribe(lead_id: int, conn=None, cur=None):
             conn.close()
 
 @router.post("/leads/bulk-delete")
-def bulk_delete(req: List[int]):
+def bulk_delete(req: List[int], user_id: Optional[str] = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
+    uid = normalize_user_id(user_id)
+    is_admin = (str(user_id).lower() == 'admin')
     try:
-        cur.execute("DELETE FROM leads_raw lr WHERE id = ANY(%s)", (req,))
+        if is_admin:
+            cur.execute("DELETE FROM leads_raw lr WHERE id = ANY(%s)", (req,))
+        elif uid:
+            cur.execute("DELETE FROM leads_raw lr WHERE id = ANY(%s) AND user_id = %s", (req, uid))
+        else:
+            cur.execute("DELETE FROM leads_raw lr WHERE id = ANY(%s) AND user_id IS NULL", (req,))
         conn.commit()
     except Exception as e:
         conn.rollback()

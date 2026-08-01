@@ -208,7 +208,7 @@ At a time when institutional investors and strategic healthcare operators are ac
 
 **Investment Snapshot**
 
-<table style="border-collapse: collapse; border: 1px solid #999; font-family: Arial, sans-serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
+<table style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
 <thead>
 <tr style="background-color: #ffffff;">
 <th style="padding: 2px 4px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 18px;">Particulars</th>
@@ -258,7 +258,7 @@ This is a key indicator because it demonstrates that the current opportunity is 
 
 The business benefits from a highly favorable payer mix:
 
-<table style="border-collapse: collapse; border: 1px solid #d0d0d0; font-family: Arial, sans-serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
+<table style="border-collapse: collapse; border: 1px solid #d0d0d0; font-family: Georgia, serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
 <thead>
 <tr style="background-color: #ffffff;">
 <th style="padding: 2px 4px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 18px;">REVENUE MIX</th>
@@ -322,7 +322,7 @@ This materially lowers execution and capital deployment risk relative to greenfi
 
 On a normalized basis, the platform has already demonstrated healthy operational growth:
 
-<table style="border-collapse: collapse; border: 1px solid #d0d0d0; font-family: Arial, sans-serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
+<table style="border-collapse: collapse; border: 1px solid #d0d0d0; font-family: Georgia, serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
 <thead>
 <tr style="background-color: #ffffff;">
 <th style="padding: 2px 4px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 18px;">Metric</th>
@@ -385,10 +385,10 @@ I have attached the **Q V Strategic Consulting business profile** and **Investme
 
 SIG_START
 --
-<span style="color: #008000; font-weight: bold; font-family: Arial, sans-serif; font-size: 14px;">Thanks & Best Regards,</span>
-<strong style="color: #000000; font-family: Arial, sans-serif; font-size: 14px; display: block; margin-top: 2px; margin-bottom: 2px;">***{{Sender Name}}***</strong>
-<span style="color: #000000; font-family: Arial, sans-serif; font-size: 14px; display: block; margin-bottom: 2px;">{{Sender Title}}</span>
-<a href="{{Sender LinkedIn}}" style="color: #0000ee; text-decoration: underline; font-family: Arial, sans-serif; font-size: 14px; display: block; margin-bottom: 2px;">Add Me On Linkedin</a>            <a href="https://www.qvscl.com" style="color: #0000ee; text-decoration: underline; font-family: Arial, sans-serif; font-size: 14px; display: block; margin-bottom: 4px;">Quantum Value Strategic Consulting</a>
+<span style="color: #008000; font-weight: bold; font-family: Georgia, serif; font-size: 14px;">Thanks & Best Regards,</span>
+<strong style="color: #000000; font-family: Georgia, serif; font-size: 14px; display: block; margin-top: 2px; margin-bottom: 2px;">***{{Sender Name}}***</strong>
+<span style="color: #000000; font-family: Georgia, serif; font-size: 14px; display: block; margin-bottom: 2px;">{{Sender Title}}</span>
+<a href="{{Sender LinkedIn}}" style="color: #0000ee; text-decoration: underline; font-family: Georgia, serif; font-size: 14px; display: block; margin-bottom: 2px;">Add Me On Linkedin</a>            <a href="https://www.qvscl.com" style="color: #0000ee; text-decoration: underline; font-family: Georgia, serif; font-size: 14px; display: block; margin-bottom: 4px;">Quantum Value Strategic Consulting</a>
 
             <strong>Strictly Private and Confidential.</strong>
 
@@ -573,7 +573,7 @@ If this aligns with your portfolio focus and does not conflict with it, I'd be h
 Looking forward to your response.
 SIG_START
 --
-<div style="color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4;">
+<div style="color: #000000; font-family: Georgia, serif; font-size: 13px; line-height: 1.4;">
 Thanks & Regards,<br>
 <strong>{{Sender Name}}</strong><br>
 {{Sender Title}}<br>
@@ -924,7 +924,7 @@ def _extract_body_attachments(body: str, user_id: Optional[int] = None) -> tuple
                     logger.warning(f"Drive upload failed for {filename}: {e}")
     return attachments, url_replacements
 
-def markdown_to_html(text, gmail_style=False):
+def markdown_to_html(text, gmail_style=False, font_family="Georgia, serif"):
     import re
     # Normalize newlines
     text = text.replace("\r\n", "\n")
@@ -1078,7 +1078,7 @@ def markdown_to_html(text, gmail_style=False):
             for l in lines:
                 l_strip = l.strip()
                 content = re.sub(r'^\s*[◦◦•\-\*]\s+', '', l_strip)
-                list_html += f"<li style='margin-bottom: 4px; line-height: 1.6; font-family: Arial, sans-serif;'>{content}</li>"
+                list_html += f"<li style='margin-bottom: 4px; line-height: 1.6; font-family: Georgia, serif;'>{content}</li>"
             list_html += "</ul>"
             html_parts.append(list_html)
         elif any(re.match(r'^\s*[\*\-•]\s+', l) for l in lines):
@@ -1088,7 +1088,7 @@ def markdown_to_html(text, gmail_style=False):
                 match = re.match(r'^[\*\-•]\s+(.*)', l_strip)
                 if match:
                     content = match.group(1)
-                    list_html += f"<li style='margin-bottom: 6px; line-height: 1.6; font-family: Arial, sans-serif;'>{content}</li>"
+                    list_html += f"<li style='margin-bottom: 6px; line-height: 1.6; font-family: Georgia, serif;'>{content}</li>"
                 else:
                     list_html += f" {l_strip}"
             list_html += "</ul>"
@@ -1097,7 +1097,7 @@ def markdown_to_html(text, gmail_style=False):
             # Check if this is a markdown table
             lines = p.split("\n")
             if len(lines) >= 2 and all(l.strip().startswith("|") and l.strip().endswith("|") for l in lines):
-                table_html = "<table style='width:100%;border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:18px;'>"
+                table_html = "<table style='width:100%;border-collapse:collapse;margin-bottom:18px;font-family:Georgia,serif;font-size:18px;'>"
                 for i, line in enumerate(lines):
                     line = line.strip()
                     if not line: continue
@@ -1162,7 +1162,7 @@ def markdown_to_html(text, gmail_style=False):
     result = _strip_stray_brackets(result)
 
     if gmail_style:
-        result = f"<div style='padding: 0 40px; font-family: Arial, sans-serif;'>{result}</div>"
+        result = f"<div style='padding: 0 40px; font-family: {font_family};'>{result}</div>"
     return result
 
 class DraftRequest(BaseModel):
@@ -1827,7 +1827,7 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 
     # ── Minimal fallback — no disclaimer, no images, just contact info ──
     sig_html = f"""
-<div style="color: #000000; font-family: Arial, sans-serif; font-size: 18px; line-height: 1.4; text-align: left; margin-top: 4px;">
+<div style="color: #000000; font-family: Georgia, serif; font-size: 18px; line-height: 1.4; text-align: left; margin-top: 4px;">
 --<br>
 <i>Thanks &amp; Regards,</i><br>
 <i><strong>{name}</strong></i><br>
@@ -1998,7 +1998,8 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         if subject_found:
             body_with_sig = "\n".join(new_body_lines).strip()
         
-        html_body = markdown_to_html(body_with_sig, gmail_style=is_yashika)
+        from app.services.email_service import get_user_email_font
+        html_body = markdown_to_html(body_with_sig, gmail_style=is_yashika, font_family=get_user_email_font(user_id))
         email_content = f"Subject: {subject}\n\n{body_with_sig}"
         
         old_gmail_id = lead.get('gmail_draft_id')
@@ -2312,7 +2313,7 @@ At a time when institutional investors and strategic healthcare operators are ac
 
 <strong>Investment Snapshot</strong>
 
-<table style="border-collapse: collapse; border: 1px solid #999; font-family: Arial, sans-serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
+<table style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
 <thead>
 <tr style="background-color: #ffffff;">
 <th style="padding: 2px 8px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 9pt;">PARTICULARS</th>
@@ -2362,7 +2363,7 @@ This is a key indicator because it demonstrates that the current opportunity is 
 
 The business benefits from a highly favorable payer mix:
 
-<table style="border-collapse: collapse; border: 1px solid #999; font-family: Arial, sans-serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
+<table style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
 <thead>
 <tr style="background-color: #ffffff;">
 <th style="padding: 2px 8px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 9pt;">REVENUE MIX</th>
@@ -2424,7 +2425,7 @@ This materially lowers execution and capital deployment risk relative to greenfi
 
 <strong>6. Strong Historical Momentum</strong>
 
-<table style="border-collapse: collapse; border: 1px solid #999; font-family: Arial, sans-serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
+<table style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
 <thead>
 <tr style="background-color: #ffffff;">
 <th style="padding: 2px 8px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 9pt;">METRIC</th>
@@ -2673,7 +2674,7 @@ Thank you again for your consideration."""
             "You can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)"
         ).replace(
             "SIG_START\n--\nThanks & Regards,\n\n***{{Sender Name}}***\n{{Sender Title}}\n[LinkedIn]({{Sender LinkedIn}})\n{{Sender Phone}}\n\nImportant:",
-            "SIG_START\n--\n<div style=\"color: #000000; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4;\">\nThanks & Regards,<br>\n<strong>{{Sender Name}}</strong><br>\n{{Sender Title}}<br>\n{{Sender Phone}}<br>\n<a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color:#1d5fd0;text-decoration:underline;\">Company LinkedIn</a><br>\n<a href=\"https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link\" style=\"color:#1d5fd0;text-decoration:underline;\">Company Documents</a>\n</div>\nImportant:"
+            "SIG_START\n--\n<div style=\"color: #000000; font-family: Georgia, serif; font-size: 13px; line-height: 1.4;\">\nThanks & Regards,<br>\n<strong>{{Sender Name}}</strong><br>\n{{Sender Title}}<br>\n{{Sender Phone}}<br>\n<a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color:#1d5fd0;text-decoration:underline;\">Company LinkedIn</a><br>\n<a href=\"https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link\" style=\"color:#1d5fd0;text-decoration:underline;\">Company Documents</a>\n</div>\nImportant:"
         )
         cur.execute(
             "UPDATE prompts SET content = %s, description = %s, owner_username = 'kajal' WHERE name = 'kajal_mam_agritech'",

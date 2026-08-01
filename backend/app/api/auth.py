@@ -30,11 +30,68 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
+# --- Login brute-force protection (in-memory sliding window) ---
+# Simple per-username+IP limiter. In-memory is fine for a single-instance
+# deployment; swap for Redis if multiple app instances run behind a LB.
+import threading as _threading
+import time as _time
+from collections import defaultdict as _defaultdict
+
+_login_attempts = _defaultdict(list)   # key -> [failure timestamps]
+_login_blocked = _defaultdict(float)    # key -> blocked_until (epoch)
+_login_attempts_lock = _threading.Lock()
+LOGIN_MAX_ATTEMPTS = 5          # failures allowed before lockout
+LOGIN_WINDOW_SECONDS = 300      # failures counted within this 5-minute window
+LOGIN_LOCKOUT_SECONDS = 900     # 15-minute lockout after max attempts
+
+
+def _client_ip(request) -> str:
+    """Resolve real client IP, honoring X-Forwarded-For when behind a proxy (Render/nginx)."""
+    if request is None:
+        return "unknown"
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _check_login_rate_limit(username: str, request) -> str:
+    key = f"{username.strip().lower()}|{_client_ip(request)}"
+    now = _time.time()
+    with _login_attempts_lock:
+        # Hard lockout: if currently blocked, reject regardless of new attempts
+        if _login_blocked[key] > now:
+            raise HTTPException(status_code=429, detail="Too many login attempts. Please wait 15 minutes and try again.")
+        # Drop failures outside the counting window
+        _login_attempts[key] = [t for t in _login_attempts[key] if now - t < LOGIN_WINDOW_SECONDS]
+        if len(_login_attempts[key]) >= LOGIN_MAX_ATTEMPTS:
+            # Enforce a REAL 15-minute lockout, not just a sliding window
+            _login_blocked[key] = now + LOGIN_LOCKOUT_SECONDS
+            raise HTTPException(status_code=429, detail="Too many login attempts. Please wait 15 minutes and try again.")
+        return key
+
+
+def _record_login_attempt(key: str):
+    with _login_attempts_lock:
+        _login_attempts[key].append(_time.time())
+        # Opportunistic cleanup to avoid unbounded growth
+        if len(_login_attempts) > 10000 or len(_login_blocked) > 10000:
+            cutoff = _time.time() - LOGIN_WINDOW_SECONDS
+            for k in list(_login_attempts.keys()):
+                _login_attempts[k] = [t for t in _login_attempts[k] if t >= cutoff]
+                if not _login_attempts[k]:
+                    del _login_attempts[k]
+            for k in list(_login_blocked.keys()):
+                if _login_blocked[k] <= _time.time():
+                    del _login_blocked[k]
+
+
 @router.post("/auth/login")
-def login(req: LoginRequest):
-    import uuid
+def login(req: LoginRequest, request: Request = None):
     from app.database import get_db_connection
     from fastapi import HTTPException
+    
+    rate_key = _check_login_rate_limit(req.username, request)
     
     username = req.username.strip()
     password = req.password
@@ -51,9 +108,11 @@ def login(req: LoginRequest):
     conn.close()
     
     if not user:
+        _record_login_attempt(rate_key)
         raise HTTPException(status_code=401, detail="Invalid username or password")
         
     if not user['is_active']:
+        _record_login_attempt(rate_key)
         raise HTTPException(status_code=403, detail="Account is deactivated")
         
     # Verify password hash (support both bcrypt and legacy SHA256)
@@ -61,12 +120,14 @@ def login(req: LoginRequest):
     # Detect if it's a bcrypt hash (starts with $2b$ or $2a$)
     if stored_hash.startswith('$2'):
         if not bcrypt.checkpw(password.encode(), stored_hash.encode()):
+            _record_login_attempt(rate_key)
             raise HTTPException(status_code=401, detail="Invalid username or password")
     else:
         # Legacy SHA256 fallback
         import hashlib
         password_hash = hashlib.sha256(password.encode()).hexdigest()
         if password_hash != stored_hash:
+            _record_login_attempt(rate_key)
             raise HTTPException(status_code=401, detail="Invalid username or password")
         # Upgrade to bcrypt on successful login
         new_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
@@ -96,6 +157,11 @@ def login(req: LoginRequest):
     except Exception as sess_err:
         logger.error(f"Failed to create session: {sess_err}")
         raise HTTPException(status_code=500, detail="Could not create session. Please try again.")
+
+    # Successful login — clear any failed-attempt history + lockout for this user+IP
+    with _login_attempts_lock:
+        _login_attempts.pop(rate_key, None)
+        _login_blocked.pop(rate_key, None)
 
     return {
         "access_token": access_token,

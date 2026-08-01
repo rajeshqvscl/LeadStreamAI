@@ -68,6 +68,7 @@ def create_reminder(data: dict, user_id: Optional[str] = Header(None, alias="X-U
 def update_reminder(reminder_id: int, data: dict, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
+    is_admin = (str(user_id or '').lower() == 'admin')
     try:
         fields = []
         values = []
@@ -80,9 +81,20 @@ def update_reminder(reminder_id: int, data: dict, user_id: Optional[str] = Heade
         if not fields:
             return {"message": "No fields to update"}
         values.append(reminder_id)
-        cur.execute(f"UPDATE reminders SET {', '.join(fields)} WHERE id = %s", values)
+        # Scope update to the owner unless admin (prevents cross-account changes)
+        if is_admin:
+            cur.execute(f"UPDATE reminders SET {', '.join(fields)} WHERE id = %s", values)
+        else:
+            uid = int(user_id) if user_id and user_id.isdigit() else 0
+            values.append(uid)
+            cur.execute(f"UPDATE reminders SET {', '.join(fields)} WHERE id = %s AND user_id = %s", values)
+        if cur.rowcount == 0:
+            conn.rollback()
+            raise HTTPException(404, "Reminder not found or access denied")
         conn.commit()
         return {"message": "Reminder updated"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
     finally:
@@ -90,11 +102,16 @@ def update_reminder(reminder_id: int, data: dict, user_id: Optional[str] = Heade
         conn.close()
 
 @router.delete("/reminders/{reminder_id}")
-def delete_reminder(reminder_id: int):
+def delete_reminder(reminder_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
+    is_admin = (str(user_id or '').lower() == 'admin')
     try:
-        cur.execute("DELETE FROM reminders WHERE id = %s", (reminder_id,))
+        if is_admin:
+            cur.execute("DELETE FROM reminders WHERE id = %s", (reminder_id,))
+        else:
+            uid = int(user_id) if user_id and user_id.isdigit() else 0
+            cur.execute("DELETE FROM reminders WHERE id = %s AND user_id = %s", (reminder_id, uid))
         conn.commit()
         return {"message": "Reminder deleted"}
     finally:

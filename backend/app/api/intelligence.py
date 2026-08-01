@@ -15,21 +15,53 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 router = APIRouter()
 logger = structlog.get_logger(__name__)
 
+
+def normalize_user_id(user_id: Optional[str]) -> Optional[str]:
+    """Resolve the X-User-Id header to a usable user id string.
+
+    The auth middleware already injects the verified numeric user id on every
+    request; this is a defensive helper for legacy direct calls.
+    """
+    if not user_id:
+        return None
+    s = str(user_id).strip()
+    if s.lower() == "admin":
+        return "admin"
+    if s.isdigit():
+        return s
+    return None
+
+
+def _is_admin(user_id: Optional[str], uid: Optional[str]) -> bool:
+    """Admin = legacy 'admin' string OR numeric user id 1 (the admin account)."""
+    return str(user_id or "").lower() == "admin" or str(uid) == "1"
+
+
 @router.post("/leads/auto-enrich-sectors")
 async def auto_enrich_sectors(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """
     Batched classification of leads into Investors vs Clients based on sophisticated keyword analysis.
     """
     try:
+        uid = normalize_user_id(user_id)
+        is_admin = _is_admin(user_id, uid)
         conn = get_db_connection()
         cur = conn.cursor()
         
-        # 1. Fetch all leads that need classification or are currently unrefined, with owner name
-        cur.execute("""
-            SELECT l.id, l.company_name, l.designation, l.remarks, l.sector, l.lead_type, u.username 
-            FROM leads_raw l
-            LEFT JOIN users u ON l.user_id = u.id
-        """)
+        # 1. Fetch leads that need classification, scoped to the calling account (admin sees all)
+        if is_admin:
+            cur.execute("""
+                SELECT l.id, l.company_name, l.designation, l.remarks, l.sector, l.lead_type, u.username 
+                FROM leads_raw l
+                LEFT JOIN users u ON l.user_id = u.id
+            """)
+        else:
+            cur.execute("""
+                SELECT l.id, l.company_name, l.designation, l.remarks, l.sector, l.lead_type, u.username 
+                FROM leads_raw l
+                LEFT JOIN users u ON l.user_id = u.id
+                WHERE l.user_id = %s
+            """, (uid,))
         leads = cur.fetchall()
         
         updated_count = 0
@@ -69,17 +101,27 @@ async def ai_deep_classify(user_id: Optional[str] = Header(None, alias="X-User-I
     Targeted specifically at 'Other' or 'NULL' sectors.
     """
     try:
+        uid = normalize_user_id(user_id)
+        is_admin = _is_admin(user_id, uid)
         llm = EmailGenerator()
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
-        # 1. Fetch leads labeled as 'Other' or NULL
-        cur.execute("""
-            SELECT id, company_name, designation, remarks, email_draft
-            FROM leads_raw 
-            WHERE sector = 'Other' OR sector IS NULL 
-            LIMIT 50
-        """)
+        # 1. Fetch leads labeled as 'Other' or NULL, scoped to the calling account (admin sees all)
+        if is_admin:
+            cur.execute("""
+                SELECT id, company_name, designation, remarks, email_draft
+                FROM leads_raw 
+                WHERE sector = 'Other' OR sector IS NULL 
+                LIMIT 50
+            """)
+        else:
+            cur.execute("""
+                SELECT id, company_name, designation, remarks, email_draft
+                FROM leads_raw 
+                WHERE (sector = 'Other' OR sector IS NULL) AND user_id = %s
+                LIMIT 50
+            """, (uid,))
         leads = cur.fetchall()
         
         if not leads:
@@ -243,11 +285,17 @@ async def analyze_lead_manually(lead_id: int, user_id: Optional[str] = Header(No
     Manually triggers RAG analysis for a specific lead if it has a pitch deck URL.
     """
     try:
+        uid = normalize_user_id(user_id)
+        is_admin = _is_admin(user_id, uid)
         conn = get_db_connection()
         import psycopg2.extras
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
-        cur.execute("SELECT id, first_name, last_name, email, company_name, persona, sector, lead_type, pitch_deck_url, remarks, email_draft FROM leads_raw WHERE id = %s", (lead_id,))
+        # Ownership check — only the lead's owner (or admin) may trigger analysis
+        if is_admin:
+            cur.execute("SELECT id, first_name, last_name, email, company_name, persona, sector, lead_type, pitch_deck_url, remarks, email_draft FROM leads_raw WHERE id = %s", (lead_id,))
+        else:
+            cur.execute("SELECT id, first_name, last_name, email, company_name, persona, sector, lead_type, pitch_deck_url, remarks, email_draft FROM leads_raw WHERE id = %s AND user_id = %s", (lead_id, uid))
         lead = cur.fetchone()
         
         if not lead:
@@ -499,11 +547,16 @@ async def compare_leads(lead_ids: List[int], user_id: Optional[str] = Header(Non
     Multi-Document Comparison: Aggregates insights across multiple leads for side-by-side analysis.
     """
     try:
+        uid = normalize_user_id(user_id)
+        is_admin = _is_admin(user_id, uid)
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
-        # 1. Fetch data for all requested leads
-        cur.execute("SELECT id, company_name, sector, rag_advice, rag_intelligence FROM leads_raw WHERE id = ANY(%s)", (lead_ids,))
+        # 1. Fetch data for all requested leads, scoped to the calling account (admin sees all)
+        if is_admin:
+            cur.execute("SELECT id, company_name, sector, rag_advice, rag_intelligence FROM leads_raw WHERE id = ANY(%s)", (lead_ids,))
+        else:
+            cur.execute("SELECT id, company_name, sector, rag_advice, rag_intelligence FROM leads_raw WHERE id = ANY(%s) AND user_id = %s", (lead_ids, uid))
         leads = cur.fetchall()
         
         if not leads:
@@ -562,8 +615,8 @@ async def get_rag_debug_stats(user_id: Optional[str] = Header(None, alias="X-Use
     """
     Retrieval Debug Panel: Returns performance and health metrics for the RAG system.
     """
-    # Simple role check
-    if str(user_id).lower() != 'admin':
+    # Simple role check — legacy 'admin' string OR the admin account (user id 1)
+    if str(user_id).lower() != 'admin' and str(user_id) != '1':
         raise HTTPException(status_code=403, detail="Admin access required")
         
     try:
@@ -606,16 +659,21 @@ async def get_rag_debug_stats(user_id: Optional[str] = Header(None, alias="X-Use
             conn.close()
 
 @router.get("/leads/{lead_id}/ai-timeline")
-async def get_lead_ai_timeline(lead_id: int):
+async def get_lead_ai_timeline(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """
     Summarizes the journey of a lead from ingestion to current state using LLM.
     """
     try:
+        uid = normalize_user_id(user_id)
+        is_admin = _is_admin(user_id, uid)
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
-        # 1. Fetch Lead basic info
-        cur.execute("SELECT first_name, last_name, company_name, created_at, remarks, sector, lead_type FROM leads_raw WHERE id = %s", (lead_id,))
+        # 1. Fetch Lead basic info (owner-scoped; admin sees all)
+        if is_admin:
+            cur.execute("SELECT first_name, last_name, company_name, created_at, remarks, sector, lead_type FROM leads_raw WHERE id = %s", (lead_id,))
+        else:
+            cur.execute("SELECT first_name, last_name, company_name, created_at, remarks, sector, lead_type FROM leads_raw WHERE id = %s AND user_id = %s", (lead_id, uid))
         lead = cur.fetchone()
         if not lead:
             raise HTTPException(status_code=404, detail="Lead not found")

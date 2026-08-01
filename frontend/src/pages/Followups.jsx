@@ -6,6 +6,7 @@ import {
   Building2, CheckSquare, Square, Cpu, Save
 } from 'lucide-react';
 import api from '../services/api';
+import { sanitizeHtml } from '../utils/sanitizeHtml';
 import { FOLLOWUP_CONFIG, LEAD_TYPES, STATUS_OPTIONS, getLeadType, getStageColor, getStageConfigs, getStageLabel } from '../services/followupConfig';
 
 const Followups = () => {
@@ -719,7 +720,7 @@ const Followups = () => {
                   <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500/40" />
                   <div
                     className="text-slate-300 text-[14px] leading-relaxed"
-                    dangerouslySetInnerHTML={{ __html: (selectedLead.followup_draft || '<p class="animate-pulse italic text-slate-500">Generating draft...</p>').replace(/background(?:-color)?\s*:\s*[^;]+;?\s*/gi, '').replace(/bgcolor\s*=\s*["'][^"']*["']\s*/gi, '') }}
+                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(selectedLead.followup_draft || '<p class="animate-pulse italic text-slate-500">Generating draft...</p>') }}
                   />
                 </div>
               )}

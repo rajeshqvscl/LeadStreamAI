@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from '../services/api';
+import { sanitizeHtml } from '../utils/sanitizeHtml';
 import { Link } from 'react-router-dom';
 import {
   Users, CheckSquare, Rocket, BarChart3, Sparkles, Activity,
@@ -244,9 +245,8 @@ const Dashboard = () => {
     const isHtml = /<[a-z][\s\S]*>/i.test(content);
     
     if (isHtml) {
-      const sanitized = content
-        .replace(/background(?:-color)?\s*:\s*[^;]+;?\s*/gi, '')
-        .replace(/bgcolor\s*=\s*["'][^"']*["']\s*/gi, '');
+      // Sanitize with DOMPurify to block stored XSS from email HTML
+      const sanitized = sanitizeHtml(content);
       return <div className="email-html-content" dangerouslySetInnerHTML={{ __html: sanitized }} />;
     }
 

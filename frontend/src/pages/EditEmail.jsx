@@ -4,6 +4,7 @@ import { ChevronLeft, Sparkles, Loader2, Save, Wand2, Type, Briefcase, BarChart3
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import api from '../services/api';
+import { sanitizeHtml } from '../utils/sanitizeHtml';
 import SignatureEditor from '../components/SignatureEditor';
 
 const mdToHtml = (md) => {
@@ -650,7 +651,7 @@ const EditEmail = () => {
         listHtml += '</ol>';
         htmlParts.push(listHtml);
       } else if (lines.length >= 2 && lines.every(l => !l.trim() || (l.trim().startsWith('|') && l.trim().endsWith('|')))) {
-        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-family:Arial,sans-serif;font-size:18px;">';
+        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-family:Georgia,serif;font-size:18px;">';
         const dataLines = lines.filter(l => l.trim() && !l.trim().match(/^\|[-:\s]+\|$/));
         dataLines.forEach((line, i) => {
           const cells = line.trim().split('|').slice(1, -1).map(c => c.trim());
@@ -705,9 +706,9 @@ const EditEmail = () => {
     finalHtml = finalHtml
       .replace(/<table(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
-          return m.replace(/style="([^"]*)"/, 'style="$1;border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:18px;"');
+          return m.replace(/style="([^"]*)"/, 'style="$1;border-collapse:collapse;margin-bottom:18px;font-family:Georgia,serif;font-size:18px;"');
         }
-        return m.replace('<table', '<table style="border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:18px;"');
+        return m.replace('<table', '<table style="border-collapse:collapse;margin-bottom:18px;font-family:Georgia,serif;font-size:18px;"');
       })
       .replace(/<th(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
@@ -1424,7 +1425,7 @@ const EditEmail = () => {
 
               <div
                 className={`text-[13px] leading-relaxed font-medium ${body ? 'text-slate-300' : 'text-slate-600 italic text-[11px]'}`}
-                dangerouslySetInnerHTML={{ __html: renderEmailPreview(body) }}
+                dangerouslySetInnerHTML={{ __html: sanitizeHtml(renderEmailPreview(body)) }}
               />
 
               {/* Attachments Section */}

@@ -1,7 +1,6 @@
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional
-import random
 import structlog
 
 from app.services.rocketreach_service import search_leads
@@ -32,6 +31,12 @@ class LeadRequest(BaseModel):
     linkedin_url: Optional[str] = None
 
 def categorize_lead(payload):
+    """Classifies a lead by persona and assigns a deterministic, keyword-based fit score.
+
+    The fit score is NOT an AI prediction — it is a stable heuristic derived from the
+    title keywords so that identical inputs always produce identical scores (no random
+    noise that used to fake 'AI classification' metrics).
+    """
     title = str(payload.get("current_title", "")).lower()
     
     # Skip pure engineering roles (no leadership indicator)
@@ -39,7 +44,7 @@ def categorize_lead(payload):
     leadership_override = any(x in title for x in ["cto", "vp", "head", "director", "chief", "lead engineer"])
     is_pure_engineer = any(x in title for x in engineer_keywords)
     if is_pure_engineer and not leadership_override:
-        return "OTHER", random.randint(10, 30)
+        return "OTHER", 20
         
     # FOUNDER — top-level founders, CEOs, managing directors, C-suite execs
     founder_keywords = [
@@ -53,14 +58,14 @@ def categorize_lead(payload):
         "president", "group chairman", "owner"
     ]
     if any(x in title for x in founder_keywords):
-        return "FOUNDER", random.randint(90, 99)
+        return "FOUNDER", 95
     
     # INVESTOR — vc, capital, equity, investors
     investor_keywords = [
         "investor", "venture", "vc", "capital", "equity", "investment"
     ]
     if any(x in title for x in investor_keywords):
-        return "INVESTOR", random.randint(80, 95)
+        return "INVESTOR", 90
         
     # PARTNER — partner roles, VP
     partner_keywords = [
@@ -68,10 +73,10 @@ def categorize_lead(payload):
         "vice president", "vp "
     ]
     if any(x in title for x in partner_keywords):
-        return "PARTNER", random.randint(75, 90)
+        return "PARTNER", 85
     
-    # Other
-    return "OTHER", random.randint(40, 65)
+    # Other — default deterministic score
+    return "OTHER", 50
 
 @router.post("/ingest-leads")
 def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):

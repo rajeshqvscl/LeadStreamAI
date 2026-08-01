@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Mail, Loader2, RefreshCw, ExternalLink, Search, X, User, Send, ShieldAlert, Sparkles } from 'lucide-react';
 import api from '../services/api';
+import { sanitizeHtml } from '../utils/sanitizeHtml';
 
 const GmailSent = () => {
   const [messages, setMessages] = useState([]);
@@ -96,9 +97,8 @@ const GmailSent = () => {
     const isHtml = /<[a-z][\s\S]*>/i.test(content);
     
     if (isHtml) {
-      const sanitized = content
-        .replace(/background(?:-color)?\s*:\s*[^;]+;?\s*/gi, '')
-        .replace(/bgcolor\s*=\s*["'][^"']*["']\s*/gi, '');
+      // Sanitize with DOMPurify to block stored XSS from email HTML
+      const sanitized = sanitizeHtml(content);
       return <div className="email-html-content" dangerouslySetInnerHTML={{ __html: sanitized }} />;
     }
 

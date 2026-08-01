@@ -990,11 +990,14 @@ def schedule_manual_meeting(lead_id: int, data: dict = Body(...), user_id: Optio
     custom_time_str = data.get('meeting_time')
     
     try:
-        # Fetch lead details
-        cur.execute("SELECT id, first_name, last_name, email FROM leads_raw WHERE id = %s", (lead_id,))
+        # Fetch lead details — scoped to owner unless admin (prevents cross-account meetings)
+        if user_id == "admin":
+            cur.execute("SELECT id, first_name, last_name, email FROM leads_raw WHERE id = %s", (lead_id,))
+        else:
+            cur.execute("SELECT id, first_name, last_name, email FROM leads_raw WHERE id = %s AND user_id = %s", (lead_id, uid))
         lead = cur.fetchone()
         if not lead:
-            raise HTTPException(status_code=404, detail="Lead not found")
+            raise HTTPException(status_code=404, detail="Lead not found or access denied")
             
         if custom_time_str:
             meeting_time = datetime.datetime.fromisoformat(custom_time_str.replace('Z', '+00:00'))
