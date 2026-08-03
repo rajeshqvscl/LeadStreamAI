@@ -999,7 +999,8 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
             service = get_gmail_service(int(uid))
             if service:
                 # Use HTML for better consistency
-                html_body = markdown_to_html(body)
+                from app.services.email_service import get_user_email_font
+                html_body = markdown_to_html(body, font_family=get_user_email_font(uid))
                 message = MIMEText(html_body, 'html')
                 message['to'] = email
                 message['subject'] = subject
@@ -1269,10 +1270,11 @@ def send_company_email(row_id: int, user_id: Optional[str] = Header(None, alias=
             body = parts[1].strip() if len(parts) > 1 else ""
 
         # 5. Real Dispatch
+        from app.services.email_service import get_user_email_font
         success, error_msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=lead['email'],
             subject=subject,
-            html_content=markdown_to_html(body),
+            html_content=markdown_to_html(body, font_family=get_user_email_font(uid)),
             from_email=sender_email,
             from_name=sender_name,
             lead_id=lead_id,

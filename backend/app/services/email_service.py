@@ -70,13 +70,17 @@ def _get_signature_attachments(user_id: Optional[int]) -> list:
 # Per-account email font preference (applies to draft/followup emails).
 # The font is applied as the final wrapper in send_email(), so it wins over
 # markdown-rendered content that has no inline font-family of its own.
+# NOTE: Kajal/Yashika/Palak use plain `sans-serif` (generic sans family).
+SANS_SERIF_FONT = "sans-serif"
 USER_EMAIL_FONTS = {
     2: "Arial, sans-serif",  # Ayush
-    3: "Inter, serif",  # Kajal
-    4: "Inter, serif",  # Yashika
-    5: "Inter, serif",  # Palak
+    3: SANS_SERIF_FONT,  # Kajal
+    4: SANS_SERIF_FONT,  # Yashika
+    5: SANS_SERIF_FONT,  # Palak
 }
-DEFAULT_EMAIL_FONT = "Georgia, serif"
+# Default for everyone else (admin/test/vismaya/...) — sans-serif.
+# Ayush (2) keeps his own explicit mapping above and is never affected.
+DEFAULT_EMAIL_FONT = SANS_SERIF_FONT
 
 
 def get_user_email_font(user_id) -> str:
@@ -584,7 +588,7 @@ def check_scheduled_emails():
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=to_email,
                 subject=subject,
-                html_content=markdown_to_html(body),
+                html_content=markdown_to_html(body, font_family=get_user_email_font(user_id)),
                 from_email=sender_email,
                 from_name=sender_name,
                 lead_id=lead_id,

@@ -12,6 +12,7 @@ from app.models.lead import get_lead_by_id
 from app.models.draft import insert_draft
 from app.database import get_db_connection
 from app.services.llm_services import EmailGenerator
+from app.services.email_service import get_user_email_font
 from app.services.vision_service import analyze_template_screenshot
 import psycopg2.extras
 import logging
@@ -573,7 +574,7 @@ If this aligns with your portfolio focus and does not conflict with it, I'd be h
 Looking forward to your response.
 SIG_START
 --
-<div style="color: #000000; font-family: Georgia, serif; font-size: 13px; line-height: 1.4;">
+<div style="color: #000000; font-family: sans-serif; font-size: 13px; line-height: 1.4;">
 Thanks & Regards,<br>
 <strong>{{Sender Name}}</strong><br>
 {{Sender Title}}<br>
@@ -924,7 +925,7 @@ def _extract_body_attachments(body: str, user_id: Optional[int] = None) -> tuple
                     logger.warning(f"Drive upload failed for {filename}: {e}")
     return attachments, url_replacements
 
-def markdown_to_html(text, gmail_style=False, font_family="Georgia, serif"):
+def markdown_to_html(text, gmail_style=False, font_family="sans-serif"):
     import re
     # Normalize newlines
     text = text.replace("\r\n", "\n")
@@ -1078,7 +1079,7 @@ def markdown_to_html(text, gmail_style=False, font_family="Georgia, serif"):
             for l in lines:
                 l_strip = l.strip()
                 content = re.sub(r'^\s*[◦◦•\-\*]\s+', '', l_strip)
-                list_html += f"<li style='margin-bottom: 4px; line-height: 1.6; font-family: Georgia, serif;'>{content}</li>"
+                list_html += f"<li style='margin-bottom: 4px; line-height: 1.6; font-family: {font_family};'>{content}</li>"
             list_html += "</ul>"
             html_parts.append(list_html)
         elif any(re.match(r'^\s*[\*\-•]\s+', l) for l in lines):
@@ -1088,7 +1089,7 @@ def markdown_to_html(text, gmail_style=False, font_family="Georgia, serif"):
                 match = re.match(r'^[\*\-•]\s+(.*)', l_strip)
                 if match:
                     content = match.group(1)
-                    list_html += f"<li style='margin-bottom: 6px; line-height: 1.6; font-family: Georgia, serif;'>{content}</li>"
+                    list_html += f"<li style='margin-bottom: 6px; line-height: 1.6; font-family: {font_family};'>{content}</li>"
                 else:
                     list_html += f" {l_strip}"
             list_html += "</ul>"
@@ -1097,7 +1098,7 @@ def markdown_to_html(text, gmail_style=False, font_family="Georgia, serif"):
             # Check if this is a markdown table
             lines = p.split("\n")
             if len(lines) >= 2 and all(l.strip().startswith("|") and l.strip().endswith("|") for l in lines):
-                table_html = "<table style='width:100%;border-collapse:collapse;margin-bottom:18px;font-family:Georgia,serif;font-size:18px;'>"
+                table_html = f"<table style='width:100%;border-collapse:collapse;margin-bottom:18px;font-family:{font_family};font-size:18px;'>"
                 for i, line in enumerate(lines):
                     line = line.strip()
                     if not line: continue
@@ -1827,7 +1828,7 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 
     # ── Minimal fallback — no disclaimer, no images, just contact info ──
     sig_html = f"""
-<div style="color: #000000; font-family: Georgia, serif; font-size: 18px; line-height: 1.4; text-align: left; margin-top: 4px;">
+<div style="color: #000000; font-family: sans-serif; font-size: 18px; line-height: 1.4; text-align: left; margin-top: 4px;">
 --<br>
 <i>Thanks &amp; Regards,</i><br>
 <i><strong>{name}</strong></i><br>
@@ -2674,7 +2675,7 @@ Thank you again for your consideration."""
             "You can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)"
         ).replace(
             "SIG_START\n--\nThanks & Regards,\n\n***{{Sender Name}}***\n{{Sender Title}}\n[LinkedIn]({{Sender LinkedIn}})\n{{Sender Phone}}\n\nImportant:",
-            "SIG_START\n--\n<div style=\"color: #000000; font-family: Georgia, serif; font-size: 13px; line-height: 1.4;\">\nThanks & Regards,<br>\n<strong>{{Sender Name}}</strong><br>\n{{Sender Title}}<br>\n{{Sender Phone}}<br>\n<a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color:#1d5fd0;text-decoration:underline;\">Company LinkedIn</a><br>\n<a href=\"https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link\" style=\"color:#1d5fd0;text-decoration:underline;\">Company Documents</a>\n</div>\nImportant:"
+            "SIG_START\n--\n<div style=\"color: #000000; font-family: sans-serif; font-size: 13px; line-height: 1.4;\">\nThanks & Regards,<br>\n<strong>{{Sender Name}}</strong><br>\n{{Sender Title}}<br>\n{{Sender Phone}}<br>\n<a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color:#1d5fd0;text-decoration:underline;\">Company LinkedIn</a><br>\n<a href=\"https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link\" style=\"color:#1d5fd0;text-decoration:underline;\">Company Documents</a>\n</div>\nImportant:"
         )
         cur.execute(
             "UPDATE prompts SET content = %s, description = %s, owner_username = 'kajal' WHERE name = 'kajal_mam_agritech'",
@@ -2872,7 +2873,7 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
         body_with_sig = inject_signature(final_body, profile, lead_id)
 
         # RE-GENERATE html_body AFTER deduplication
-        html_body = markdown_to_html(body_with_sig)
+        html_body = markdown_to_html(body_with_sig, font_family=get_user_email_font(user_id))
 
         # Full content for local DB storage
         email_content = f"Subject: {final_subject}\n\n{body_with_sig}"
@@ -3183,7 +3184,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
                 "fit_score": r.get("fit_score", 0),
                 "subject": subject,
                 "body": body.replace("[[BACKEND_URL]]", backend_url),
-                "html_body": markdown_to_html(body.replace("[[BACKEND_URL]]", backend_url)),
+                "html_body": markdown_to_html(body.replace("[[BACKEND_URL]]", backend_url), font_family=get_user_email_font(user_id)),
                 "attachments": [],
                 "draft_template_used": r.get("draft_template_used") or "",
                 "status": r["email_status"] or "PENDING_APPROVAL",
@@ -3259,7 +3260,7 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[s
             uid = normalize_user_id(user_id)
             service = get_gmail_service(int(uid))
             if service:
-                html_body = markdown_to_html(full_body)
+                html_body = markdown_to_html(full_body, font_family=get_user_email_font(uid))
                 from app.services.email_service import build_unsubscribe_footer, strip_old_unsubscribe_links
                 html_body = strip_old_unsubscribe_links(html_body)
                 html_body += build_unsubscribe_footer(draft_id)
@@ -3407,7 +3408,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         success, error_msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=email,
             subject=subject,
-            html_content=markdown_to_html(body),
+            html_content=markdown_to_html(body, font_family=get_user_email_font(uid)),
             from_email=sender_email,
             from_name=sender_name,
             lead_id=draft_id,
@@ -3745,7 +3746,7 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=lead['email'],
                 subject=subject,
-                html_content=markdown_to_html(body),
+                html_content=markdown_to_html(body, font_family=get_user_email_font(uid_val)),
                 from_email=sender_email,
                 from_name=sender_name,
                 lead_id=lead['id'],
@@ -3858,7 +3859,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=lead['email'],
                 subject=subject,
-                html_content=markdown_to_html(body),
+                html_content=markdown_to_html(body, font_family=get_user_email_font(lead_uid)),
                 from_email=lead_sender_email,
                 from_name=lead_sender_name,
                 lead_id=lead['id'],
@@ -4051,7 +4052,7 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
                                 logger.warning(f"⚠️ Could not delete old draft {old_gmail_id}: {de}")
 
                         # Use HTML for better consistency with individual drafts
-                        html_body = markdown_to_html(body)
+                        html_body = markdown_to_html(body, font_family=get_user_email_font(user_id))
                         from app.services.email_service import build_unsubscribe_footer, strip_old_unsubscribe_links
                         html_body = strip_old_unsubscribe_links(html_body)
                         html_body += build_unsubscribe_footer(lead_item['id'])
@@ -4175,7 +4176,7 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                 success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                     to_email=lead['email'],
                     subject=subject,
-                    html_content=markdown_to_html(final_body),
+                    html_content=markdown_to_html(final_body, font_family=get_user_email_font(uid)),
                     from_email=sender_email,
                     from_name=sender_name,
                     lead_id=lead['id'],

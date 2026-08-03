@@ -6,7 +6,7 @@ import psycopg2.extras
 import re
 
 from app.database import get_db_connection
-from app.services.email_service import send_email
+from app.services.email_service import send_email, get_user_email_font
 from app.api.drafts import get_sender_profile, inject_signature, markdown_to_html
 from app.services.llm_services import LLMService
 from app.models.lead import add_activity_log
@@ -337,7 +337,7 @@ def generate_followup_preview(lead_id: int, user_id: int):
         
         # Convert plain text to HTML with proper signature spacing
         body_with_sig = body + f"\n\n--\nRegards,\n{name}"
-        full_body = markdown_to_html(body_with_sig)
+        full_body = markdown_to_html(body_with_sig, font_family=get_user_email_font(user_id))
 
         return {
             "lead_id": lead_id,
@@ -651,7 +651,7 @@ def process_outreach_sequences():
                     name = " ".join([p.capitalize() for p in name.split()])
                     first_name = name.split()[0] if name else name
 
-                    body_html = markdown_to_html(body)
+                    body_html = markdown_to_html(body, font_family=get_user_email_font(uid))
                     sig_html = f'<p style="margin-top: 4px; font-size: 14px;">--<br>Regards,<br>{first_name}</p>'
                     full_body = body_html + sig_html
 

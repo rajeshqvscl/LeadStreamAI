@@ -936,10 +936,11 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
             WHERE id = %s AND email_status IN ('PENDING_APPROVAL', 'APPROVED', 'SCHEDULED')
         """, (lead_id,))
 
+        from app.services.email_service import get_user_email_font
         success, msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=lead['email'],
             subject=saved_subject,
-            html_content=markdown_to_html(body),
+            html_content=markdown_to_html(body, font_family=get_user_email_font(uid)),
             from_email=profile.get('sender_email') or profile.get('username'),
             from_name=profile.get('full_name') or profile.get('username'),
             lead_id=lead_id,

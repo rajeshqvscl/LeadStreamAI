@@ -93,7 +93,8 @@ def force_send_stage1():
         name = " ".join([p.capitalize() for p in name.split()])
         first_name = name.split()[0] if name else name
 
-        body_html = markdown_to_html(body)
+        from app.services.email_service import get_user_email_font
+        body_html = markdown_to_html(body, font_family=get_user_email_font(YASHIKA_UID))
         sig_html = f'<p style="margin-top: 4px;">--<br>Regards,<br>{first_name}</p>'
         full_body = body_html + sig_html
 
