@@ -104,7 +104,8 @@ def get_metrics(
     drafts_generated = cur.fetchone()['count'] or 0
 
     # Reverted = leads that replied
-    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause} AND (is_responded = TRUE OR email_status IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED'))", full_params)
+    # Bounced leads are never 'replied' — exclude them from the reverted (replied) count.
+    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause} AND (email_status IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED') OR (is_responded = TRUE AND email_status NOT ILIKE 'BOUNCED'))", full_params)
     reverted = cur.fetchone()['count'] or 0
 
     # Total leads (with range)
@@ -310,12 +311,12 @@ def get_metrics(
             action = 'Rejected'
         elif status == 'BOUNCED':
             action = 'Bounced'
-        elif status == 'CLICKED' or r.get('is_responded'):
+        elif status in ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED') or r.get('is_responded'):
+            action = 'Replied'
+        elif status == 'CLICKED':
             action = 'Clicked'
         elif status == 'OPENED':
             action = 'Opened'
-        elif status in ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED'):
-            action = 'Replied'
         elif status in ('SENT', 'CONTACTED'):
             action = 'Sent'
         else:
@@ -352,48 +353,8 @@ def get_metrics(
         if not company_name:
             company_name = 'Individual'
 
-        # Sector: check draft_template_used first, then infer from subject, fallback to DB
-        template = (r.get('draft_template_used') or '').strip().lower()
-        sector_from_template = {
-            'kajal_mam_jv': 'Real Estate',
-            'kajal_mam_hyphen': 'Logistics',
-            'kajal_mam_health_ecosystem': 'HealthTech',
-            'kajal_mam_agritech': 'AgriTech',
-            'kajal_mam_qvscl_intro': 'Corporate Advisory',
-            'yashika_draft_ai_tech': 'AI Hiring',
-            'yashika_draft_agritech': 'AgriTech',
-            'palak_mam_corporate_advisory': 'Corporate Advisory',
-            'palak_mam_mna_fundraising': 'M&A / Fundraising',
-            'palak_mam_draft_1': 'M&A / Strategic Partnership',
-        }.get(template)
-        if sector_from_template:
-            sector = sector_from_template
-        else:
-            subject = r.get('first_outreach_subject') or ''
-            s_lower = subject.lower()
-            if 'climate' in s_lower or any(w in s_lower for w in ['agritech', 'agriculture', 'agri ', 'agricultural']):
-                sector = 'AgriTech'
-            elif 'hiring' in s_lower or 'recruitment' in s_lower or 'talent' in s_lower:
-                sector = 'AI Hiring'
-            elif 'health' in s_lower or 'diagnostics' in s_lower or 'pharma' in s_lower:
-                sector = 'HealthTech'
-            elif 'warehouse' in s_lower or 'logistics' in s_lower or 'fulfilment' in s_lower:
-                sector = 'Logistics'
-            elif 'real estate' in s_lower or 'realestate' in s_lower or 'property' in s_lower or 'jv' in s_lower or 'joint venture' in s_lower:
-                sector = 'Real Estate'
-            elif 'corporate' in s_lower or 'advisory' in s_lower:
-                sector = 'Corporate Advisory'
-            elif 'fund' in s_lower or 'invest' in s_lower or 'capital' in s_lower or 'venture' in s_lower:
-                sector = 'Investment'
-            elif 'ai' in s_lower or 'software' in s_lower or 'saas' in s_lower or 'tech' in s_lower:
-                sector = 'AI / Tech'
-            else:
-                sector = r['sector'] or 'Other'
-
-        # Yashika-specific: only AI Hiring, AgriTech (from templates) or Other
-        if _investor_user_templates and 'yashika' in (resolved_name or '').lower():
-            if sector not in ('AI Hiring', 'AgriTech', 'Other'):
-                sector = 'Other'
+        # Sector: taken directly from the lead's own data column (no template inference)
+        sector = (r.get('sector') or '').strip() or 'Other'
 
         report.append({
             "name": f"{r['first_name'] or ''} {r['last_name'] or ''}".strip(),

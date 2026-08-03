@@ -45,140 +45,14 @@ CASE
 END
 """
 
+# Sector is taken directly from the lead's own data (leads_raw.sector column),
+# with industry as a fallback. No draft-template or email-content inference.
 SECTOR_CASE_SQL = """
-CASE
-    -- Vismaya templates: explicit template-name mapping
-    WHEN l.draft_template_used = 'vismaya_leadstream'
-      THEN 'SAAS'
-
-    -- Kajal templates: explicit template-name mapping (highest priority)
-    WHEN l.draft_template_used = 'kajal_mam_jv'
-      THEN 'REAL ESTATE'
-    WHEN l.draft_template_used = 'kajal_mam_hyphen'
-      THEN 'LOGISTICS'
-    WHEN l.draft_template_used = 'kajal_mam_health_ecosystem'
-      THEN 'HEALTHCARE'
-    WHEN l.draft_template_used = 'kajal_mam_agritech'
-      THEN 'AGRITECH'
-    WHEN l.draft_template_used = 'kajal_mam_qvscl_intro'
-      THEN 'CORPORATE ADVISORY'
-
-    -- Yashika templates: explicit template-name mapping
-    WHEN l.draft_template_used = 'yashika_draft_ai_tech'
-      THEN 'AI HIRING'
-    WHEN l.draft_template_used = 'yashika_draft_agritech'
-      THEN 'AGRITECH'
-
-    -- Palak templates: explicit template-name mapping
-    WHEN l.draft_template_used = 'palak_mam_corporate_advisory'
-      THEN 'CORPORATE ADVISORY'
-    WHEN l.draft_template_used = 'palak_mam_mna_fundraising'
-      THEN 'M&A / FUNDRAISING'
-    WHEN l.draft_template_used = 'palak_mam_Draft_1'
-      THEN 'M&A / STRATEGIC PARTNERSHIP'
-
-    -- 1. Real Estate (JV / Noida NCR)
-    WHEN COALESCE(l.email_draft, '') ~* 'JV & Investment|JV, Investment|Noida NCR|Leasing \\| Noida NCR'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'JV & Investment|JV, Investment|Noida NCR|Leasing \\| Noida NCR'
-      THEN 'REAL ESTATE'
-
-    -- 2. Logistics (Warehousing & Fulfilment)
-    WHEN COALESCE(l.email_draft, '') ~* 'Warehousing & Fulfilment|67K\\+ Warehouses'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'Warehousing & Fulfilment|67K\\+ Warehouses'
-      THEN 'LOGISTICS'
-
-    -- 3. AI Hiring (Gigin)
-    WHEN COALESCE(l.email_draft, '') ~* 'vertical AI-powered hiring|hiring intelligence|gigin|hiring platform'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'vertical AI-powered hiring|hiring intelligence|gigin|hiring platform'
-      THEN 'AI HIRING'
-
-    -- 4. Corporate Advisory (content fallback)
-    WHEN COALESCE(l.email_draft, '') ~* 'Corporate Advisory/ Equity Fund Raising|Corporate Advisory/Equity Fund|QVSCL: Capital & Growth Solutions'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'Corporate Advisory/ Equity Fund Raising|Corporate Advisory/Equity Fund|QVSCL: Capital & Growth Solutions'
-      THEN 'CORPORATE ADVISORY'
-
-    -- 5. M&A / Fundraising (content fallback)
-    WHEN COALESCE(l.email_draft, '') ~* 'Supporting Growth Through M&A and Fundraising'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'Supporting Growth Through M&A and Fundraising'
-      THEN 'M&A / FUNDRAISING'
-
-    -- 6. M&A / Strategic Partnership (content fallback)
-    WHEN COALESCE(l.email_draft, '') ~* 'India Entry Advisory|Partnership Opportunity|Strategic Partnership'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'India Entry Advisory|Partnership Opportunity|Strategic Partnership'
-      THEN 'M&A / STRATEGIC PARTNERSHIP'
-
-    -- 7. Climate Tech
-    WHEN COALESCE(l.email_draft, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|cleantech|sustainability'
-      OR COALESCE(l.remarks, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|cleantech|sustainability'
-      OR COALESCE(l.persona, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|cleantech|sustainability'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|cleantech|sustainability'
-      OR COALESCE(l.last_outreach_subject, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|cleantech|sustainability'
-      OR COALESCE(l.sector, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|cleantech|sustainability'
-      OR COALESCE(l.industry, '') ~* 'climate|carbon|solar|renewable|green tech|clean tech|cleantech|sustainability'
-      THEN 'CLIMATE TECH'
-
-    -- 8. AI Hiring (Fallback)
-    WHEN COALESCE(l.email_draft, '') ~* 'hiring|recruitment|talent|hrtech'
-      OR COALESCE(l.remarks, '') ~* 'hiring|recruitment|talent|hrtech'
-      OR COALESCE(l.persona, '') ~* 'hiring|recruitment|talent|hrtech'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'hiring|recruitment|talent|hrtech'
-      OR COALESCE(l.last_outreach_subject, '') ~* 'hiring|recruitment|talent|hrtech'
-      OR COALESCE(l.sector, '') ~* 'hiring|recruitment|talent|hrtech'
-      OR COALESCE(l.industry, '') ~* 'hiring|recruitment|talent|hrtech'
-      THEN 'AI HIRING'
-
-    -- 9. Healthcare
-    WHEN COALESCE(l.email_draft, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
-      OR COALESCE(l.remarks, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
-      OR COALESCE(l.persona, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
-      OR COALESCE(l.last_outreach_subject, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
-      OR COALESCE(l.sector, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
-      OR COALESCE(l.industry, '') ~* 'hospital|healthcare|medical|health tech|clinical|pharma|clinic'
-      THEN 'HEALTHCARE'
-
-    -- 10. Agritech — word-boundary matching to avoid over-matching
-    WHEN COALESCE(l.email_draft, '') ~* '\yagritech\y|\yagriculture\y|\yagri\y|\yfarming\y|\yfoodtech\y|\yagtech\y|\yagribusiness\y'
-      OR COALESCE(l.remarks, '') ~* '\yagritech\y|\yagriculture\y|\yagri\y|\yfarming\y|\yfoodtech\y|\yagtech\y|\yagribusiness\y'
-      OR COALESCE(l.persona, '') ~* '\yagritech\y|\yagriculture\y|\yagri\y|\yfarming\y|\yfoodtech\y|\yagtech\y|\yagribusiness\y'
-      OR COALESCE(l.first_outreach_subject, '') ~* '\yagritech\y|\yagriculture\y|\yagri\y|\yfarming\y|\yfoodtech\y|\yagtech\y|\yagribusiness\y'
-      OR COALESCE(l.last_outreach_subject, '') ~* '\yagritech\y|\yagriculture\y|\yagri\y|\yfarming\y|\yfoodtech\y|\yagtech\y|\yagribusiness\y'
-      OR COALESCE(l.sector, '') ~* '\yagritech\y|\yagriculture\y|\yagri\y|\yfarming\y|\yfoodtech\y|\yagtech\y|\yagribusiness\y'
-      OR COALESCE(l.industry, '') ~* '\yagritech\y|\yagriculture\y|\yagri\y|\yfarming\y|\yfoodtech\y|\yagtech\y|\yagribusiness\y'
-      THEN 'AGRITECH'
-
-    -- 11. Edtech
-    WHEN COALESCE(l.email_draft, '') ~* 'edtech|education|school|learning'
-      OR COALESCE(l.remarks, '') ~* 'edtech|education|school|learning'
-      OR COALESCE(l.persona, '') ~* 'edtech|education|school|learning'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'edtech|education|school|learning'
-      OR COALESCE(l.last_outreach_subject, '') ~* 'edtech|education|school|learning'
-      OR COALESCE(l.sector, '') ~* 'edtech|education|school|learning'
-      OR COALESCE(l.industry, '') ~* 'edtech|education|school|learning'
-      THEN 'EDTECH'
-
-    -- 12. Fintech
-    WHEN COALESCE(l.email_draft, '') ~* 'fintech|banking|finance|payments'
-      OR COALESCE(l.remarks, '') ~* 'fintech|banking|finance|payments'
-      OR COALESCE(l.persona, '') ~* 'fintech|banking|finance|payments'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'fintech|banking|finance|payments'
-      OR COALESCE(l.last_outreach_subject, '') ~* 'fintech|banking|finance|payments'
-      OR COALESCE(l.sector, '') ~* 'fintech|banking|finance|payments'
-      OR COALESCE(l.industry, '') ~* 'fintech|banking|finance|payments'
-      THEN 'FINTECH'
-
-    -- 13. SaaS
-    WHEN COALESCE(l.email_draft, '') ~* 'saas|software|b2b saas'
-      OR COALESCE(l.remarks, '') ~* 'saas|software|b2b saas'
-      OR COALESCE(l.persona, '') ~* 'saas|software|b2b saas'
-      OR COALESCE(l.first_outreach_subject, '') ~* 'saas|software|b2b saas'
-      OR COALESCE(l.last_outreach_subject, '') ~* 'saas|software|b2b saas'
-      OR COALESCE(l.sector, '') ~* 'saas|software|b2b saas'
-      OR COALESCE(l.industry, '') ~* 'saas|software|b2b saas'
-      THEN 'SAAS'
-
-    ELSE COALESCE(NULLIF(TRIM(UPPER(l.sector)), 'OTHER'), NULLIF(TRIM(UPPER(l.industry)), 'OTHER'), 'OTHER')
-END
+COALESCE(
+    NULLIF(TRIM(UPPER(l.sector)), ''),
+    NULLIF(TRIM(UPPER(l.industry)), ''),
+    'OTHER'
+)
 """
 
 class BulkApproveRequest(BaseModel):
@@ -284,8 +158,9 @@ def get_all_leads_admin(
             params.append(type.upper())
         if status and status != 'ALL':
             if status.upper() == 'REPLIED':
-                # STRICT: Must have is_responded flag OR status is explicitly REPLIED
-                where_clauses.append("(l.email_status ILIKE 'REPLIED' OR l.is_responded = TRUE)")
+                # STRICT: Must have is_responded flag (on a non-bounced lead) OR status is explicitly REPLIED.
+                # BOUNCED leads are never 'replied' — the bounce handler must not mark them responded.
+                where_clauses.append("(l.email_status ILIKE 'REPLIED' OR (l.is_responded = TRUE AND l.email_status NOT ILIKE 'BOUNCED'))")
             elif status == 'Interested':
                 where_clauses.append("l.reply_intent = 'INTERESTED'")
             else:
@@ -349,9 +224,9 @@ def get_all_leads_admin(
             SELECT DISTINCT sector_name FROM (
                 SELECT ({SECTOR_CASE_SQL}) as sector_name FROM leads_raw l
                 UNION
-                SELECT TRIM(BOTH FROM s) as sector_name
+                SELECT UPPER(TRIM(BOTH FROM s)) as sector_name
                 FROM leads_raw, regexp_split_to_table(COALESCE(sector, 'Other'), ',') as s
-                WHERE TRIM(BOTH FROM s) != '' AND TRIM(BOTH FROM s) != 'Other'
+                WHERE TRIM(BOTH FROM s) != '' AND UPPER(TRIM(BOTH FROM s)) != 'OTHER'
             ) combined ORDER BY 1 ASC
         """)
         all_sectors = [r[0] for r in cur.fetchall() if r[0]]
@@ -438,7 +313,8 @@ def export_all_leads_admin(
             params.append(type.upper())
         if status and status != 'ALL':
             if status.upper() == 'REPLIED':
-                where_clauses.append("(l.email_status ILIKE 'REPLIED' OR l.is_responded = TRUE)")
+                # BOUNCED leads are never 'replied' — exclude them from the replied filter.
+                where_clauses.append("(l.email_status ILIKE 'REPLIED' OR (l.is_responded = TRUE AND l.email_status NOT ILIKE 'BOUNCED'))")
             elif status == 'Interested':
                 where_clauses.append("l.reply_intent = 'INTERESTED'")
             else:

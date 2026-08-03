@@ -495,7 +495,7 @@ def update_gmail_draft(user_id: int, draft_id: str, subject: str, body: str):
         for p in paragraphs:
             lines = p.strip().split('\n')
             if all(l.strip().startswith('|') and l.strip().endswith('|') for l in lines if l.strip()):
-                table_html = '<table style="width:100%;border-collapse:collapse;margin-bottom:18px;font-family:Arial,sans-serif;font-size:13px;">'
+                table_html = '<table style="width:100%;border-collapse:collapse;margin-bottom:18px;font-family:sans-serif;font-size:13px;">'
                 for i, line in enumerate(lines):
                     line = line.strip()
                     if not line:

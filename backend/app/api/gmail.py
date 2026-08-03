@@ -1378,9 +1378,10 @@ def poll_all_users_for_replies():
                                             UPDATE leads_raw
                                             SET email_status = 'BOUNCED',
                                                 followup_status = 'STOPPED',
-                                                is_responded = TRUE,
                                                 updated_at = NOW()
-                                            WHERE LOWER(email) = %s AND email_status != 'BOUNCED'
+                                            WHERE LOWER(email) = %s
+                                              AND email_status != 'BOUNCED'
+                                              AND is_responded = FALSE
                                             RETURNING id
                                         """, (failed_email,))
                                         bounced_ids = cur.fetchall()

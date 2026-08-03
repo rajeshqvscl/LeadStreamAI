@@ -487,7 +487,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
     }
     if (editorRef.current) {
       editorRef.current.focus();
-      let tableHtml = `<table style="width:100%;border-collapse:collapse;margin-bottom:1em;font-family:Georgia,serif;font-size:13px;">`;
+      let tableHtml = `<table style="width:100%;border-collapse:collapse;margin-bottom:1em;font-family:sans-serif;font-size:13px;">`;
       for (let r = 0; r < rows; r++) {
         tableHtml += '<tr>';
         for (let c = 0; c < cols; c++) {

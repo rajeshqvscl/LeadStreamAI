@@ -651,7 +651,7 @@ const EditEmail = () => {
         listHtml += '</ol>';
         htmlParts.push(listHtml);
       } else if (lines.length >= 2 && lines.every(l => !l.trim() || (l.trim().startsWith('|') && l.trim().endsWith('|')))) {
-        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-family:Georgia,serif;font-size:18px;">';
+        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-family:sans-serif;font-size:18px;">';
         const dataLines = lines.filter(l => l.trim() && !l.trim().match(/^\|[-:\s]+\|$/));
         dataLines.forEach((line, i) => {
           const cells = line.trim().split('|').slice(1, -1).map(c => c.trim());
@@ -706,9 +706,9 @@ const EditEmail = () => {
     finalHtml = finalHtml
       .replace(/<table(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
-          return m.replace(/style="([^"]*)"/, 'style="$1;border-collapse:collapse;margin-bottom:18px;font-family:Georgia,serif;font-size:18px;"');
+          return m.replace(/style="([^"]*)"/, 'style="$1;border-collapse:collapse;margin-bottom:18px;font-family:sans-serif;font-size:18px;"');
         }
-        return m.replace('<table', '<table style="border-collapse:collapse;margin-bottom:18px;font-family:Georgia,serif;font-size:18px;"');
+        return m.replace('<table', '<table style="border-collapse:collapse;margin-bottom:18px;font-family:sans-serif;font-size:18px;"');
       })
       .replace(/<th(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
