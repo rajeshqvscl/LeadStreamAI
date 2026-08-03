@@ -86,6 +86,9 @@ const GmailSent = () => {
       await api.post('/api/auth/google/disconnect');
       window.location.reload();
     } catch (err) {
+      // Surface the real reason (expired session, DB issue, etc.) so it can be fixed fast
+      const detail = err.response?.data?.detail || err.message || 'Unknown error';
+      alert(`Failed to reset Intelligence Layer: ${detail}`);
       console.error('Failed to disconnect', err);
     }
   };

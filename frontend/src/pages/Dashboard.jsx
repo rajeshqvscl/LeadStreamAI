@@ -211,8 +211,10 @@ const Dashboard = () => {
       // Update local state to reflect disconnection
       setUser(prev => ({ ...prev, google_linked_at: null, google_email: null }));
       setData(prev => ({ ...prev, inboxMessages: [] }));
-    } catch (_err) {
-      showToast('error', 'Failed to reset Intelligence Layer');
+    } catch (err) {
+      // Surface the real reason (expired session, DB issue, etc.) so it can be fixed fast
+      const detail = err.response?.data?.detail || err.message || 'Unknown error';
+      showToast('error', `Failed to reset Intelligence Layer: ${detail}`);
     }
   };
 

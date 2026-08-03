@@ -542,6 +542,8 @@ def check_scheduled_emails():
             LEFT JOIN users u ON l.user_id = u.id
             WHERE l.email_status = 'SCHEDULED'
               AND l.scheduled_at <= NOW()
+              AND COALESCE(l.is_responded, FALSE) = FALSE
+              AND COALESCE(l.followup_status, '') != 'STOPPED'
               AND (l.email_opt_in IS NULL OR l.email_opt_in = TRUE)
               AND (l.is_unsubscribed IS NULL OR l.is_unsubscribed = FALSE)
               AND l.email NOT IN (SELECT email FROM unsubscribe_list)

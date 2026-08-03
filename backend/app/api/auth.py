@@ -181,24 +181,53 @@ def login(req: LoginRequest, request: Request = None):
 
 @router.post("/auth/google/disconnect")
 def disconnect_google(user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Forcefully removes all Google tokens for a user (Nuclear Reset)."""
+    """Forcefully removes all Google tokens for a user (Nuclear Reset).
+
+    Schema-robust: builds the SET clause from the google_* columns that
+    actually exist on the users table, so it never 500s on a missing column
+    (e.g. legacy DBs without google_linked_at / google_email). Also
+    invalidates the cached Gmail/Calendar services so a reconnect always
+    builds fresh credentials.
+    """
     uid = user_id if user_id and user_id.isdigit() else "1"
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("""
-            UPDATE users 
-            SET google_access_token = NULL, 
-                google_refresh_token = NULL, 
-                google_token_expiry = NULL,
-                google_linked_at = NULL,
-                google_email = NULL
-            WHERE id = %s
-        """, (uid,))
+        # Determine which google_* columns exist (protects against schema drift)
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'users' AND column_name LIKE 'google_%'"
+        )
+        available = {row['column_name'] for row in cur.fetchall()}
+        target_cols = [
+            "google_access_token",
+            "google_refresh_token",
+            "google_token_expiry",
+            "google_linked_at",
+            "google_email",
+        ]
+        settable = [c for c in target_cols if c in available]
+        if not settable:
+            raise HTTPException(status_code=500, detail="No google_* columns found in users table")
+
+        set_clause = ", ".join(f"{c} = NULL" for c in settable)
+        cur.execute(f"UPDATE users SET {set_clause} WHERE id = %s", (uid,))
         conn.commit()
+
+        # Drop cached Google/Calendar services so reconnects build fresh tokens
+        try:
+            from app.services.google_service import invalidate_gmail_service_cache
+            invalidate_gmail_service_cache(int(uid))
+        except Exception as cache_err:
+            logger.warning(f"Failed to invalidate Google service cache on disconnect: {cache_err}")
+
         return {"status": "success", "message": "Intelligence Layer disconnected."}
+    except HTTPException:
+        conn.rollback()
+        raise
     except Exception as e:
         conn.rollback()
+        logger.error(f"Google disconnect failed for user {uid}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()

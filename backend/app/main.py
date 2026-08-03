@@ -62,6 +62,42 @@ async def scheduler_loop():
                 logger.error(f"Scheduler error: {e}")
         await asyncio.sleep(10)
 
+# Daily reply-monitoring cleanup + report runs at these IST hours
+_REPLY_CLEANUP_HOURS_IST = (10, 16)
+
+async def reply_cleanup_loop():
+    """
+    Runs the reply-monitoring job twice a day (10:00 & 16:00 IST):
+      - deletes remaining generated follow-ups for replied leads
+      - sends the admin email report + in-app reminder notification
+    The loop sleeps precisely until the next scheduled slot.
+    """
+    from datetime import datetime, timedelta, timezone
+    IST = timezone(timedelta(hours=5, minutes=30))
+    while True:
+        try:
+            now = datetime.now(IST)
+            candidates = [
+                datetime(now.year, now.month, now.day, h, 0, 0, tzinfo=IST)
+                for h in _REPLY_CLEANUP_HOURS_IST
+            ]
+            future = [c for c in candidates if c > now]
+            next_run = min(future) if future else candidates[0] + timedelta(days=1)
+            wait_seconds = (next_run - now).total_seconds()
+            logger.info(
+                "Reply monitor: next cleanup at %s IST (in %.1f h)",
+                next_run.strftime("%d %b %Y %I:%M %p"),
+                wait_seconds / 3600,
+            )
+            await asyncio.sleep(wait_seconds)
+            from app.services.reply_cleanup_service import run_daily_reply_cleanup_and_report
+            await asyncio.to_thread(run_daily_reply_cleanup_and_report)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Reply monitor loop error: {e}")
+            await asyncio.sleep(60)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
@@ -71,9 +107,11 @@ async def lifespan(app: FastAPI):
         logger.warning("App will still start — DB may be temporarily unavailable")
     t1 = asyncio.create_task(scheduler_loop())
     t2 = asyncio.create_task(maintenance_loop())
+    t3 = asyncio.create_task(reply_cleanup_loop())
     yield
     t1.cancel()
     t2.cancel()
+    t3.cancel()
 
 app = FastAPI(lifespan=lifespan)
 

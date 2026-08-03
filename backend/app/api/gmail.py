@@ -497,6 +497,22 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             conn.commit()
             invalidate_inbound_deals_cache(str(user_id))
 
+            # Audit: log the reply so the daily 10:00 / 16:00 IST report can list it
+            try:
+                from app.models.lead import add_activity_log
+                add_activity_log(lead_id, "REPLY_DETECTED", f"Reply detected from {sender_email} — intent: {intent}", "system", user_id)
+            except Exception as reply_log_err:
+                logger.warning(f"Reply detection log failed: {reply_log_err}")
+
+            # Immediately delete any remaining generated follow-ups for replied
+            # leads (followup_draft, pending/scheduled states) and move them to
+            # the 'replied' state. Idempotent + only touches reply-signal leads.
+            try:
+                from app.services.reply_cleanup_service import cleanup_replied_leads
+                cleanup_replied_leads()
+            except Exception as cleanup_err:
+                logger.warning(f"Reply cleanup sweep failed: {cleanup_err}")
+
             # Stop followups for ALL other leads from the same company/domain
             try:
                 cur.execute("SELECT company_name FROM leads_raw WHERE id = %s", (lead_id,))

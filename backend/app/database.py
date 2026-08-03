@@ -512,6 +512,8 @@ def create_tables():
         ("google_access_token", "TEXT"),
         ("google_refresh_token", "TEXT"),
         ("google_token_expiry", "TIMESTAMP"),
+        ("google_linked_at", "TIMESTAMP"),
+        ("google_email", "TEXT"),
         ("team", "TEXT DEFAULT 'CLIENT'"),
         ("signature", "TEXT"),
         ("signature_mode", "TEXT DEFAULT 'custom'"),
@@ -657,6 +659,17 @@ def create_tables():
         user_name TEXT,
         created_at TIMESTAMP DEFAULT NOW(),
         completed_at TIMESTAMP
+    );
+    """)
+    conn.commit()
+
+    # ── app_settings Table (key/value store for background-job state, e.g.
+    #    the daily reply-monitor's last-report timestamp) ──
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at TIMESTAMP DEFAULT NOW()
     );
     """)
     conn.commit()
