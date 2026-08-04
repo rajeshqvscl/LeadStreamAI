@@ -12,7 +12,7 @@ from app.models.lead import get_lead_by_id
 from app.models.draft import insert_draft
 from app.database import get_db_connection
 from app.services.llm_services import EmailGenerator
-from app.services.email_service import get_user_email_font
+from app.services.email_service import get_user_email_font, get_user_email_font_size
 from app.services.vision_service import analyze_template_screenshot
 import psycopg2.extras
 import logging
@@ -163,7 +163,6 @@ Thanks & Regards,
 [LinkedIn]({{Sender LinkedIn}})
 {{Sender Phone}}
 
-Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you.
 SIG_END"""
 
     cur.execute("SELECT id FROM prompts WHERE name = 'yashika_draft_ai_tech'")
@@ -583,7 +582,6 @@ Thanks & Regards,<br>
 {{Sender Phone}}
 </div>
 <img src="[[BACKEND_URL]]/assets/kajal.png" style="width: 150px; height: auto; display: block; margin-top: 10px;" />
-Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at Quantum Value Strategic Consulting LLP by electronic mail message reply. Thank you.
 SIG_END"""
 
     cur.execute(
@@ -661,6 +659,33 @@ Thank you again for your consideration."""
     # Fix kajal_mam_jv: remove CONFIDENTIAL disclaimer
     cur.execute(
         "UPDATE prompts SET content = REPLACE(content, '<div style=\"text-align: center; margin-top: 25px; font-weight: bold; color: #444; font-size: 12px; letter-spacing: 1.5px;\">CONFIDENTIAL | FOR PRIVATE CIRCULATION ONLY</div>', '') WHERE name = 'kajal_mam_jv'"
+    )
+    conn.commit()
+
+    # Remove the 'Important: This message...' legal disclaimer from ALL stored prompt
+    # templates (content + followup columns). Only the standard legal disclaimer is
+    # stripped here — 'Strictly Private and Confidential' blocks are preserved.
+    cur.execute(
+        """
+        UPDATE prompts SET
+            content = regexp_replace(content, '\\n?\\s*\\*?Important: This message.*?Thank you\\.\\*?\\s*\\n?', '', 'g'),
+            followup_1 = regexp_replace(COALESCE(followup_1, ''), '\\n?\\s*\\*?Important: This message.*?Thank you\\.\\*?\\s*\\n?', '', 'g'),
+            followup_2 = regexp_replace(COALESCE(followup_2, ''), '\\n?\\s*\\*?Important: This message.*?Thank you\\.\\*?\\s*\\n?', '', 'g'),
+            followup_3 = regexp_replace(COALESCE(followup_3, ''), '\\n?\\s*\\*?Important: This message.*?Thank you\\.\\*?\\s*\\n?', '', 'g')
+        WHERE content ILIKE '%Important: This message%'
+           OR followup_1 ILIKE '%Important: This message%'
+           OR followup_2 ILIKE '%Important: This message%'
+           OR followup_3 ILIKE '%Important: This message%'
+        """
+    )
+    # Also strip from saved signature content (outreach + followup) on every startup,
+    # so previously-saved signatures with the old disclaimer get self-healed too.
+    cur.execute(
+        """
+        UPDATE user_signatures SET
+            content = regexp_replace(content, '\\n?\\s*\\*?Important: This message.*?Thank you\\.\\*?\\s*\\n?', '', 'g')
+        WHERE content ILIKE '%Important: This message%'
+        """
     )
     conn.commit()
 
@@ -925,10 +950,18 @@ def _extract_body_attachments(body: str, user_id: Optional[int] = None) -> tuple
                     logger.warning(f"Drive upload failed for {filename}: {e}")
     return attachments, url_replacements
 
-def markdown_to_html(text, gmail_style=False, font_family="sans-serif"):
+def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_size="15px"):
     import re
     # Normalize newlines
     text = text.replace("\r\n", "\n")
+
+    # ── Strip SIG_START/SIG_END marker blocks (template signature markers) ──
+    # The real signature is injected separately (inject_signature / followup sig), so
+    # these markers must never leak into the rendered email. Apply here (before both
+    # the rich-HTML and markdown paths) so plain-markdown templates like Palak's
+    # don't render "SIG_START"/"SIG_END" as visible text.
+    text = re.sub(r'SIG_START.*?SIG_END', '', text, flags=re.DOTALL)
+    text = text.replace("[[SIG_PLACEHOLDER]]", "")
 
     # ── Inner helper: keep images as URL references (no base64 inlining) ──
     def _inline_img(m):
@@ -985,9 +1018,9 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif"):
     text = re.sub(r'(?<!href=")(https?://[^\s<]+)', r'<a href="\1" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', text)
     
     # 2b. Headings (### / ## / # at start of a line)
-    text = re.sub(r'^###\s+(.*?)$', r'<h3 style="margin:0 0 6px 0;font-size:15px;font-weight:700;">\1</h3>', text, flags=re.MULTILINE)
-    text = re.sub(r'^##\s+(.*?)$', r'<h2 style="margin:0 0 6px 0;font-size:17px;font-weight:700;">\1</h2>', text, flags=re.MULTILINE)
-    text = re.sub(r'^#\s+(.*?)$', r'<h1 style="margin:0 0 6px 0;font-size:19px;font-weight:700;">\1</h1>', text, flags=re.MULTILINE)
+    text = re.sub(r'^###\s+(.*?)$', r'<h3 style="margin:0 0 6px 0;font-size:' + font_size + ';font-weight:700;">\1</h3>', text, flags=re.MULTILINE)
+    text = re.sub(r'^##\s+(.*?)$', r'<h2 style="margin:0 0 6px 0;font-size:' + font_size + ';font-weight:700;">\1</h2>', text, flags=re.MULTILINE)
+    text = re.sub(r'^#\s+(.*?)$', r'<h1 style="margin:0 0 6px 0;font-size:' + font_size + ';font-weight:700;">\1</h1>', text, flags=re.MULTILINE)
     
     # 3. Smart Signature Styling (Grey & Italic)
     signature_html = ""
@@ -1024,14 +1057,14 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif"):
             if is_legal and not is_strictly_private:
                 # Standard legal disclaimer: tiny and grey
                 line = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', line)
-                line = f'<span style="font-size: 18px; color: #999; font-style: normal; line-height: 1.2; display: block; margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px;">{line}</span>'
+                line = f'<span style="font-size: {font_size}; color: #999; font-style: normal; line-height: 1.2; display: block; margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px;">{line}</span>'
             elif is_strictly_private:
                 # Premium Hospital Disclaimer: Bold, prominent, and full-size
                 line = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', line)
                 # Ensure "Strictly Private" itself is bolded if not already
                 if "<strong>" not in line and "strictly private" in line.lower():
                      line = re.sub(r"(?i)(strictly private and confidential)", r"<strong>\1</strong>", line)
-                line = f'<div style="font-size: 18px; color: #444; font-weight: normal; line-height: 1.4; display: block; margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">{line}</div>'
+                line = f'<div style="font-size: {font_size}; color: #444; font-weight: normal; line-height: 1.4; display: block; margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">{line}</div>'
             elif "<div" in line or "<img" in line or (not gmail_style and ("<span" in line or "<a" in line or "<strong" in line)):
                 pass
             else:
@@ -1041,7 +1074,7 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif"):
                     line = line.replace("Website", '<a href="https://qvscl.com" style="color: #0066cc; text-decoration: underline;">Website</a>')
                 # Handle names/titles in signature (bold them if they are in ***)
                 line = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong>\1</strong>', line)
-                line = f'<span style="color: #666; font-style: italic; display: block; margin-bottom: 0px; font-size: 18px;">{line}</span>'
+                line = f'<span style="color: #666; font-style: italic; display: block; margin-bottom: 0px; font-size: {font_size};">{line}</span>'
             
             formatted_sig_lines.append(line)
         
@@ -1098,7 +1131,7 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif"):
             # Check if this is a markdown table
             lines = p.split("\n")
             if len(lines) >= 2 and all(l.strip().startswith("|") and l.strip().endswith("|") for l in lines):
-                table_html = f"<table style='width:100%;border-collapse:collapse;margin-bottom:18px;font-family:{font_family};font-size:18px;'>"
+                table_html = f"<table style='width:100%;border-collapse:collapse;margin-bottom:18px;font-family:{font_family};font-size:{font_size};'>"
                 for i, line in enumerate(lines):
                     line = line.strip()
                     if not line: continue
@@ -1117,7 +1150,6 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif"):
                     html_parts.append(p.strip())
                 else:
                     content = p.replace("\n", "<br>")
-                    font_size = "15px" if gmail_style else "14px"
                     p_style = f"margin-top: 0; margin-bottom: 18px; line-height: 1.6; font-size: {font_size};" if gmail_style else f"margin-top: 0; margin-bottom: 8px; line-height: 1.4; font-size: {font_size};"
                     html_parts.append(f"<p style='{p_style}'>{content}</p>")
     
@@ -1339,7 +1371,7 @@ def get_sender_profile(user_id: Optional[str]) -> dict:
             # Also fetch all saved signatures for this user (multiple signatures support)
             try:
                 cur.execute(
-                    "SELECT id, name, content, is_default FROM user_signatures WHERE user_id = %s ORDER BY is_default DESC, created_at ASC",
+                    "SELECT id, name, content, is_default, sig_type FROM user_signatures WHERE user_id = %s ORDER BY is_default DESC, created_at ASC",
                     (uid,)
                 )
                 sig_rows = cur.fetchall()
@@ -1364,6 +1396,44 @@ def get_sender_profile(user_id: Optional[str]) -> dict:
         "signatures": []
     }
 
+def get_followup_signature_markdown(user_id: Optional[str]) -> str:
+    """Returns the user's saved FOLLOWUP signature (sig_type='followup') as markdown,
+    with placeholders resolved. Returns '' if no followup signature is saved.
+    This is what followup emails (preview / manual send / auto-pilot) append to the body."""
+    try:
+        uid = normalize_user_id(user_id)
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute(
+            "SELECT content FROM user_signatures WHERE user_id = %s AND sig_type = 'followup' ORDER BY is_default DESC, created_at ASC LIMIT 1",
+            (uid,)
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if not row or not row.get('content') or not str(row['content']).strip():
+            return ""
+
+        profile = get_sender_profile(user_id)
+        raw_name = profile.get('full_name') or profile.get('username') or 'The Team'
+        name = " ".join([p.capitalize() for p in raw_name.split()])
+        first_name = name.split(' ')[0] if ' ' in name else name
+        title = profile.get('job_title') or 'Analyst'
+        linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
+        phone = profile.get('phone') or "8527083798"
+
+        content = str(row['content'])
+        content = content.replace('{{Sender Name}}', name)
+        content = content.replace('{{Sender First Name}}', first_name)
+        content = content.replace('{{Sender Title}}', title)
+        content = content.replace('{{Sender LinkedIn}}', linkedin)
+        content = content.replace('{{Sender Phone}}', phone)
+        return content.strip()
+    except Exception as e:
+        logger.error(f"Error fetching followup signature for user {user_id}: {e}")
+        return ""
+
+
 def get_hardcoded_signature_markdown(profile: dict) -> str:
     """Returns the user's saved signature (from user_signatures table) in markdown format,
     with fallback to a simple text signature if no saved signatures exist."""
@@ -1373,8 +1443,9 @@ def get_hardcoded_signature_markdown(profile: dict) -> str:
     linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
     phone = profile.get('phone') or "8527083798"
 
-    # Use saved signature from user_signatures table if available
-    saved_sigs = profile.get('signatures', [])
+    # Use saved OUTREACH signature from user_signatures table if available
+    # (sig_type='followup' entries are for followups only and must NOT leak into main emails)
+    saved_sigs = [s for s in profile.get('signatures', []) if s.get('sig_type', 'outreach') != 'followup']
     if saved_sigs:
         # Prefer default signature, else first one
         default_sig = None
@@ -1489,26 +1560,38 @@ class SignatureCreateRequest(BaseModel):
     name: str = "My Signature"
     content: str
     attachment_file: Optional[str] = None
+    sig_type: Optional[str] = "outreach"
 
 class SignatureUpdateRequest(BaseModel):
     name: Optional[str] = None
     content: Optional[str] = None
     is_default: Optional[bool] = None
     attachment_file: Optional[str] = None
+    sig_type: Optional[str] = None
 
 @router.get("/signatures")
-def list_signatures(user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """List all saved signatures for the current user."""
+def list_signatures(user_id: Optional[str] = Header(None, alias="X-User-Id"), type: Optional[str] = None):
+    """List all saved signatures for the current user.
+    Pass ?type=followup to list followup-only signatures, ?type=outreach for main ones.
+    Omitting type returns all signatures."""
     uid = normalize_user_id(user_id)
     conn = None
     cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cur.execute(
-            "SELECT id, name, content, is_default, created_at, updated_at, attachment_file FROM user_signatures WHERE user_id = %s ORDER BY is_default DESC, created_at ASC",
-            (uid,)
-        )
+        if type:
+            cur.execute(
+                "SELECT id, name, content, is_default, created_at, updated_at, attachment_file, sig_type FROM user_signatures WHERE user_id = %s AND sig_type = %s ORDER BY is_default DESC, created_at ASC",
+                (uid, type)
+            )
+        else:
+            # Default (no ?type) = outreach only — followup-only signatures must NOT
+            # leak into the outreach SignaturePicker / draft modals.
+            cur.execute(
+                "SELECT id, name, content, is_default, created_at, updated_at, attachment_file, sig_type FROM user_signatures WHERE user_id = %s AND sig_type != 'followup' ORDER BY is_default DESC, created_at ASC",
+                (uid,)
+            )
         rows = cur.fetchall()
         return [dict(r) for r in rows]
     except Exception as e:
@@ -1535,14 +1618,17 @@ def create_signature(req: SignatureCreateRequest, user_id: Optional[str] = Heade
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
-        # If this is the first signature, make it default
-        cur.execute("SELECT COUNT(*) FROM user_signatures WHERE user_id = %s", (uid,))
+        sig_type = (req.sig_type or "outreach").strip().lower()
+        if sig_type not in ("outreach", "followup"):
+            sig_type = "outreach"
+        # If this is the first signature of this type, make it default
+        cur.execute("SELECT COUNT(*) FROM user_signatures WHERE user_id = %s AND sig_type = %s", (uid, sig_type))
         count = cur.fetchone()[0]
         is_default = (count == 0)
         
         cur.execute(
-            "INSERT INTO user_signatures (user_id, name, content, is_default, attachment_file) VALUES (%s, %s, %s, %s, %s) RETURNING id, name, content, is_default, created_at, updated_at, attachment_file",
-            (uid, req.name, req.content, is_default, req.attachment_file)
+            "INSERT INTO user_signatures (user_id, name, content, is_default, attachment_file, sig_type) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id, name, content, is_default, created_at, updated_at, attachment_file, sig_type",
+            (uid, req.name, req.content, is_default, req.attachment_file, sig_type)
         )
         new_sig = dict(cur.fetchone())
         conn.commit()
@@ -1562,10 +1648,13 @@ def update_signature(sig_id: int, req: SignatureUpdateRequest, user_id: Optional
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
-        # Verify ownership
-        cur.execute("SELECT id FROM user_signatures WHERE id = %s AND user_id = %s", (sig_id, uid))
-        if not cur.fetchone():
+        # Verify ownership + capture the current sig_type so default-unsetting
+        # only touches signatures of the SAME type (outreach vs followup)
+        cur.execute("SELECT sig_type FROM user_signatures WHERE id = %s AND user_id = %s", (sig_id, uid))
+        row = cur.fetchone()
+        if not row:
             raise HTTPException(status_code=404, detail="Signature not found")
+        target_sig_type = row['sig_type'] if isinstance(row, dict) else row[0]
         
         updates = []
         params = []
@@ -1576,11 +1665,17 @@ def update_signature(sig_id: int, req: SignatureUpdateRequest, user_id: Optional
             updates.append("content = %s")
             params.append(req.content)
         if req.is_default is not None:
-            # If setting this as default, unset all others first
+            # If setting this as default, unset all others of the same sig_type first
             if req.is_default:
-                cur.execute("UPDATE user_signatures SET is_default = FALSE WHERE user_id = %s", (uid,))
+                cur.execute("UPDATE user_signatures SET is_default = FALSE WHERE user_id = %s AND sig_type = %s", (uid, target_sig_type))
             updates.append("is_default = %s")
             params.append(req.is_default)
+        if req.sig_type is not None:
+            sig_type = req.sig_type.strip().lower()
+            if sig_type not in ("outreach", "followup"):
+                sig_type = "outreach"
+            updates.append("sig_type = %s")
+            params.append(sig_type)
         
         if not updates and req.attachment_file is None:
             return {"message": "No fields to update"}
@@ -1598,7 +1693,7 @@ def update_signature(sig_id: int, req: SignatureUpdateRequest, user_id: Optional
         params.append(sig_id)  # Must be LAST — used by WHERE id = %s
         
         cur.execute(
-            f"UPDATE user_signatures SET {', '.join(updates)} WHERE id = %s RETURNING id, name, content, is_default, created_at, updated_at, attachment_file",
+            f"UPDATE user_signatures SET {', '.join(updates)} WHERE id = %s RETURNING id, name, content, is_default, created_at, updated_at, attachment_file, sig_type",
             params
         )
         updated = dict(cur.fetchone())
@@ -1805,8 +1900,9 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
     linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
     phone = profile.get('phone') or "8527083798"
 
-    # ── Use saved signature from user_signatures table if available ──
-    saved_sigs = profile.get('signatures', [])
+    # ── Use saved OUTREACH signature from user_signatures table if available ──
+    # (sig_type='followup' entries are for followups only and must NOT leak into main emails)
+    saved_sigs = [s for s in profile.get('signatures', []) if s.get('sig_type', 'outreach') != 'followup']
     if saved_sigs:
         # Prefer default signature, else first one
         default_sig = None
@@ -1999,8 +2095,8 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         if subject_found:
             body_with_sig = "\n".join(new_body_lines).strip()
         
-        from app.services.email_service import get_user_email_font
-        html_body = markdown_to_html(body_with_sig, gmail_style=is_yashika, font_family=get_user_email_font(user_id))
+        from app.services.email_service import get_user_email_font, get_user_email_font_size
+        html_body = markdown_to_html(body_with_sig, gmail_style=is_yashika, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id))
         email_content = f"Subject: {subject}\n\n{body_with_sig}"
         
         old_gmail_id = lead.get('gmail_draft_id')
@@ -2632,7 +2728,6 @@ Thanks & Regards,
 [LinkedIn]({{Sender LinkedIn}})
 {{Sender Phone}}
 
-Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you.
 SIG_END"""
 
         yashika_agritech_followup1 = """Hi {{First Name}},
@@ -2674,8 +2769,8 @@ Thank you again for your consideration."""
             "QVSCL Profile: [Company Profile](https://drive.google.com/file/d/1Z2QPI0M9hBGjLx9Vu_wktfLp6aTvhD1S/view)\nManaging Partner Profile: [Mr. Lalit Hhuria](https://drive.google.com/file/d/1zoXE6-m1AUMpvJkm31EZZOclKd7w-DZM/view)",
             "You can access our company documents here: [Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)"
         ).replace(
-            "SIG_START\n--\nThanks & Regards,\n\n***{{Sender Name}}***\n{{Sender Title}}\n[LinkedIn]({{Sender LinkedIn}})\n{{Sender Phone}}\n\nImportant:",
-            "SIG_START\n--\n<div style=\"color: #000000; font-family: sans-serif; font-size: 13px; line-height: 1.4;\">\nThanks & Regards,<br>\n<strong>{{Sender Name}}</strong><br>\n{{Sender Title}}<br>\n{{Sender Phone}}<br>\n<a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color:#1d5fd0;text-decoration:underline;\">Company LinkedIn</a><br>\n<a href=\"https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link\" style=\"color:#1d5fd0;text-decoration:underline;\">Company Documents</a>\n</div>\nImportant:"
+            "SIG_START\n--\nThanks & Regards,\n\n***{{Sender Name}}***\n{{Sender Title}}\n[LinkedIn]({{Sender LinkedIn}})\n{{Sender Phone}}\n\n",
+            "SIG_START\n--\n<div style=\"color: #000000; font-family: sans-serif; font-size: 13px; line-height: 1.4;\">\nThanks & Regards,<br>\n<strong>{{Sender Name}}</strong><br>\n{{Sender Title}}<br>\n{{Sender Phone}}<br>\n<a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color:#1d5fd0;text-decoration:underline;\">Company LinkedIn</a><br>\n<a href=\"https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link\" style=\"color:#1d5fd0;text-decoration:underline;\">Company Documents</a>\n</div>\n"
         )
         cur.execute(
             "UPDATE prompts SET content = %s, description = %s, owner_username = 'kajal' WHERE name = 'kajal_mam_agritech'",
@@ -2873,7 +2968,7 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
         body_with_sig = inject_signature(final_body, profile, lead_id)
 
         # RE-GENERATE html_body AFTER deduplication
-        html_body = markdown_to_html(body_with_sig, font_family=get_user_email_font(user_id))
+        html_body = markdown_to_html(body_with_sig, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id))
 
         # Full content for local DB storage
         email_content = f"Subject: {final_subject}\n\n{body_with_sig}"
@@ -3184,7 +3279,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
                 "fit_score": r.get("fit_score", 0),
                 "subject": subject,
                 "body": body.replace("[[BACKEND_URL]]", backend_url),
-                "html_body": markdown_to_html(body.replace("[[BACKEND_URL]]", backend_url), font_family=get_user_email_font(user_id)),
+                "html_body": markdown_to_html(body.replace("[[BACKEND_URL]]", backend_url), font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id)),
                 "attachments": [],
                 "draft_template_used": r.get("draft_template_used") or "",
                 "status": r["email_status"] or "PENDING_APPROVAL",
@@ -3260,7 +3355,7 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[s
             uid = normalize_user_id(user_id)
             service = get_gmail_service(int(uid))
             if service:
-                html_body = markdown_to_html(full_body, font_family=get_user_email_font(uid))
+                html_body = markdown_to_html(full_body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid))
                 from app.services.email_service import build_unsubscribe_footer, strip_old_unsubscribe_links
                 html_body = strip_old_unsubscribe_links(html_body)
                 html_body += build_unsubscribe_footer(draft_id)
@@ -3408,7 +3503,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         success, error_msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=email,
             subject=subject,
-            html_content=markdown_to_html(body, font_family=get_user_email_font(uid)),
+            html_content=markdown_to_html(body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid)),
             from_email=sender_email,
             from_name=sender_name,
             lead_id=draft_id,
@@ -3746,7 +3841,7 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=lead['email'],
                 subject=subject,
-                html_content=markdown_to_html(body, font_family=get_user_email_font(uid_val)),
+                html_content=markdown_to_html(body, font_family=get_user_email_font(uid_val), font_size=get_user_email_font_size(uid_val)),
                 from_email=sender_email,
                 from_name=sender_name,
                 lead_id=lead['id'],
@@ -3859,7 +3954,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=lead['email'],
                 subject=subject,
-                html_content=markdown_to_html(body, font_family=get_user_email_font(lead_uid)),
+                html_content=markdown_to_html(body, font_family=get_user_email_font(lead_uid), font_size=get_user_email_font_size(lead_uid)),
                 from_email=lead_sender_email,
                 from_name=lead_sender_name,
                 lead_id=lead['id'],
@@ -4052,7 +4147,7 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
                                 logger.warning(f"⚠️ Could not delete old draft {old_gmail_id}: {de}")
 
                         # Use HTML for better consistency with individual drafts
-                        html_body = markdown_to_html(body, font_family=get_user_email_font(user_id))
+                        html_body = markdown_to_html(body, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id))
                         from app.services.email_service import build_unsubscribe_footer, strip_old_unsubscribe_links
                         html_body = strip_old_unsubscribe_links(html_body)
                         html_body += build_unsubscribe_footer(lead_item['id'])
@@ -4176,7 +4271,7 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                 success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                     to_email=lead['email'],
                     subject=subject,
-                    html_content=markdown_to_html(final_body, font_family=get_user_email_font(uid)),
+                    html_content=markdown_to_html(final_body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid)),
                     from_email=sender_email,
                     from_name=sender_name,
                     lead_id=lead['id'],

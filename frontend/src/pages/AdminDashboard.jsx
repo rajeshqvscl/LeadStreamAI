@@ -112,7 +112,8 @@ const AdminDashboard = () => {
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const allColumns = [
     { key: 'name', label: 'Name' }, { key: 'company', label: 'Company' },
-    { key: 'email', label: 'Email Address' }, { key: 'type', label: 'Type' },
+    { key: 'email', label: 'Email Address' }, { key: 'phone', label: 'Phone No.' },
+    { key: 'location', label: 'Location' }, { key: 'type', label: 'Type' },
     { key: 'template_used', label: 'Template Used' },
     { key: 'sector', label: 'Sector' }, { key: 'intent', label: 'Intent' },
     { key: 'rag', label: 'RAG Analysis' }, { key: 'check_size', label: 'Check Size' },
@@ -121,7 +122,7 @@ const AdminDashboard = () => {
     { key: 'status', label: 'Status' }, { key: 'sent_draft', label: 'Sent/Draft' },
     { key: 'owner', label: 'Owner' }, { key: 'actions', label: 'Actions' },
   ];
-  const [visibleColumns, setVisibleColumns] = useState(new Set(['name', 'company', 'type', 'sector', 'check_size', 'status', 'stage', 'followups', 'owner', 'sent_draft', 'actions']));
+  const [visibleColumns, setVisibleColumns] = useState(new Set(['name', 'company', 'email', 'phone', 'location', 'type', 'sector', 'check_size', 'status', 'stage', 'followups', 'owner', 'sent_draft', 'actions']));
   const activeFilterCount = [filters.type, filters.status, filters.intent, filters.owner, filters.sector].filter(v => v !== 'ALL').length;
   const [chartRange, setChartRange] = useState('ALL');
 
@@ -432,7 +433,7 @@ const AdminDashboard = () => {
       if (debouncedSearch) exportParams.set('search', debouncedSearch);
       const res = await api.get(`/api/admin/leads/export?${exportParams.toString()}`);
       const allLeads = res.data.leads || [];
-      const headers = ['Name','Email','Designation','Company','Type','Status','Intent','Score','Check Size','Rejection Reason','Sector/Industry','Owner','Last Interaction','AI Strategy','Analyst Report','Key Signals','Confidence %'].join(',');
+      const headers = ['Name','Email','Phone No.','Location','Designation','Company','Type','Status','Intent','Score','Check Size','Rejection Reason','Sector/Industry','Owner','Last Interaction','AI Strategy','Analyst Report','Key Signals','Confidence %'].join(',');
       const rows = allLeads.map(l => {
         const clean = (val) => `"${(val || '').toString().replace(/"/g, '""')}"`;
         const rejectionReason = l.reply_intent === 'NOT_INTERESTED' ? (l.rejection_reason || 'Not Interested') : 'N/A';
@@ -446,7 +447,7 @@ const AdminDashboard = () => {
           const isAiHiring = sectorLower.includes('hiring') || draftLower.includes('hiring') || personaLower.includes('hiring') || subjLower.includes('hiring') || sectorLower.includes('recruitment') || draftLower.includes('recruitment') || draftLower.includes('gigin');
           derivedType = isAiHiring ? 'Gigin AI' : 'Agrivijay';
         }
-        return [clean(`${l.first_name} ${l.last_name}`),clean(l.email),clean(l.designation),clean(getDisplayCompany(l)),clean(derivedType),clean(l.email_status),clean(l.reply_intent),clean(l.sentiment_score),clean(l.deal_size),clean(rejectionReason),clean(l.sector || 'Other'),clean(l.owner_name),clean(parseUtcDate(l.updated_at).toLocaleDateString()),clean(l.rag_intelligence?.strategy || 'General Outreach'),clean(l.rag_advice || 'Analyst Review Pending'),clean(Array.isArray(l.rag_intelligence?.signals) ? l.rag_intelligence.signals.join(' | ') : (l.rag_intelligence?.signals || 'N/A')),clean(l.rag_intelligence?.confidence || 'N/A')].join(',');
+        return [clean(`${l.first_name} ${l.last_name}`),clean(l.email),clean(l.phone || ''),clean(l.location || ''),clean(l.designation),clean(getDisplayCompany(l)),clean(derivedType),clean(l.email_status),clean(l.reply_intent),clean(l.sentiment_score),clean(l.deal_size),clean(rejectionReason),clean(l.sector || 'Other'),clean(l.owner_name),clean(parseUtcDate(l.updated_at).toLocaleDateString()),clean(l.rag_intelligence?.strategy || 'General Outreach'),clean(l.rag_advice || 'Analyst Review Pending'),clean(Array.isArray(l.rag_intelligence?.signals) ? l.rag_intelligence.signals.join(' | ') : (l.rag_intelligence?.signals || 'N/A')),clean(l.rag_intelligence?.confidence || 'N/A')].join(',');
       });
       const csv = [headers, ...rows].join('\n');
       const blob = new Blob([csv], { type: 'text/csv' });
@@ -881,6 +882,8 @@ const AdminDashboard = () => {
                 {visibleColumns.has('name') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Name</th>}
                 {visibleColumns.has('company') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Company</th>}
                 {visibleColumns.has('email') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Email Address</th>}
+                {visibleColumns.has('phone') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Phone No.</th>}
+                {visibleColumns.has('location') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Location</th>}
                 {visibleColumns.has('type') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Type</th>}
                 {visibleColumns.has('template_used') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Template Used</th>}
                 {visibleColumns.has('sector') && <th className="px-1 py-1 border border-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Sector</th>}
@@ -946,7 +949,16 @@ const AdminDashboard = () => {
                   {visibleColumns.has('email') && <td className="px-1 py-1 border border-white/5">
                     <div>
                       <div className="text-[12px] font-bold text-white break-words">{lead.email}</div>
-                      {lead.phone && <div className="text-[9px] text-slate-500 font-medium">{lead.phone}</div>}
+                    </div>
+                  </td>}
+                  {visibleColumns.has('phone') && <td className="px-1 py-1 border border-white/5">
+                    <div className="text-[11px] font-bold text-slate-300 whitespace-nowrap">
+                      {lead.phone ? <span className="flex items-center gap-1"><span className="text-emerald-400">☎</span> {lead.phone}</span> : <span className="text-slate-700">—</span>}
+                    </div>
+                  </td>}
+                  {visibleColumns.has('location') && <td className="px-1 py-1 border border-white/5">
+                    <div className="text-[11px] font-bold text-slate-300 whitespace-nowrap">
+                      {lead.location ? lead.location : <span className="text-slate-700">—</span>}
                     </div>
                   </td>}
                   {visibleColumns.has('type') && <td className="px-1 py-1 border border-white/5">

@@ -698,6 +698,15 @@ def create_tables():
     except psycopg2.Error:
         conn.rollback()
 
+    # Add sig_type column ('outreach' = main email signature, 'followup' = followup-only signature)
+    try:
+        cur.execute("""
+            ALTER TABLE user_signatures ADD COLUMN IF NOT EXISTS sig_type TEXT NOT NULL DEFAULT 'outreach';
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
     # Add index for fast lookup by user
     try:
         cur.execute("""

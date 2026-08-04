@@ -6,6 +6,10 @@ from datetime import datetime, timezone
 
 router = APIRouter(tags=["Metrics"])
 
+# All dispatched outreach statuses (must match admin_dashboard /stats/global —
+# PostgreSQL IN is case-sensitive, so both endpoints share the same literals).
+_SENT_STATUS_SQL = "('SENT', 'OPENED', 'CLICKED', 'REPLIED', 'CLOSED', 'Meeting Scheduled', 'Contacted', 'Interested')"
+
 def _period_clause(val):
     v = (val or '').strip().lower()
     if v == 'daily':
@@ -49,9 +53,29 @@ def get_metrics(
     date_from: str = Query(None),
     date_to: str = Query(None),
     status: str = Query(None),
+    for_user: Optional[str] = Query(None, description="Admin-only override: 'all' for global scope, or a user id/username to view. Non-admins are always limited to their own data."),
 ):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    # ── Admin-only view override (for_user) ──
+    # Admins can view 'all' users or a specific user. Regular users can only
+    # ever see their own data — even if they pass for_user, it is ignored.
+    _view_label = None
+    if for_user is not None and str(for_user).strip():
+        _fv = str(for_user).strip()
+        _caller_id = int(user_id.strip()) if (user_id or '').strip().isdigit() else None
+        _caller_admin = False
+        if _caller_id is not None:
+            cur.execute("SELECT role FROM users WHERE id = %s", (_caller_id,))
+            _c = cur.fetchone()
+            _caller_admin = bool(_c and _c.get('role') == 'ADMIN')
+        if _fv.lower() == 'all':
+            if _caller_admin:
+                user_id = None  # global scope
+                _view_label = 'All Users'
+        elif _caller_admin or (_caller_id is not None and _fv == str(_caller_id)):
+            user_id = _fv
 
     rng = _period_clause(period)
     dte = _date_clause(date_from, date_to)
@@ -187,16 +211,38 @@ def get_metrics(
     cur.execute(f"SELECT COUNT(*) FROM leads_raw {where_clause} AND email_status = 'BOUNCED'", full_params)
     bounce_count = cur.fetchone()['count'] or 0
 
-    # Sent
-    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause} AND email_status IN ('SENT', 'OPENED', 'REPLIED', 'Meeting Scheduled', 'Contacted', 'Interested', 'CLICKED')", full_params)
+    # Sent (all dispatched outreach statuses — CLOSED is a reply outcome, still sent)
+    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause} AND email_status IN {_SENT_STATUS_SQL}", full_params)
     sent = cur.fetchone()['count'] or 0
 
     delivered = max(sent - bounce_count, 0)
-    unique_opens = reverted
+
+    # Unique opens/clicks come from the tracking-pixel activity log — far more
+    # accurate than email_status, which only holds the LATEST status and loses
+    # earlier OPENED/CLICKED events.
+    #
+    # COHORT METHOD: count opens/clicks among the SAME cohort of leads the
+    # sent/delivered numbers use (the `where_clause` scope). Filtering the open
+    # events by their own date would misalign the numerator and denominator
+    # (e.g. leads sent in June that opened in July), producing >100% rates.
+    cur.execute(
+        f"""SELECT COUNT(DISTINCT al.lead_id)
+            FROM activity_log al JOIN leads_raw l ON l.id = al.lead_id
+            WHERE al.action = 'OPENED' AND l.id IN (SELECT id FROM leads_raw {where_clause} AND email_status IN {_SENT_STATUS_SQL})""",
+        full_params,
+    )
+    unique_opens = cur.fetchone()['count'] or 0
+    cur.execute(
+        f"""SELECT COUNT(DISTINCT al.lead_id)
+            FROM activity_log al JOIN leads_raw l ON l.id = al.lead_id
+            WHERE al.action = 'CLICKED' AND l.id IN (SELECT id FROM leads_raw {where_clause} AND email_status IN {_SENT_STATUS_SQL})""",
+        full_params,
+    )
+    unique_clicks = cur.fetchone()['count'] or 0
     unique_engaged = reverted
-    unique_clicks = 0
 
     open_rate = (unique_opens / delivered * 100) if delivered > 0 else 0.0
+    click_rate = (unique_clicks / delivered * 100) if delivered > 0 else 0.0
     bounce_rate = (bounce_count / sent * 100) if sent > 0 else 0.0
     engagement_rate = (unique_engaged / delivered * 100) if delivered > 0 else 0.0
     conversion_rate = (unique_engaged / leads_count * 100) if leads_count > 0 else 0.0
@@ -391,6 +437,7 @@ def get_metrics(
         "bounces": bounce_count,
 
         "open_rate": round(open_rate, 2),
+        "click_rate": round(click_rate, 2),
         "bounce_rate": round(bounce_rate, 2),
         "engagement_rate": round(engagement_rate, 2),
         "conversion_rate": round(conversion_rate, 2),
@@ -399,6 +446,7 @@ def get_metrics(
         "industry_breakdown": industry_breakdown,
         "country_breakdown": country_breakdown,
         "report": report,
+        "report_for": _view_label or resolved_name or "All Users",
 
         "timestamp": datetime.now(timezone.utc).isoformat()
     }

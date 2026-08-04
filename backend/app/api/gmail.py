@@ -658,11 +658,11 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                     cur.execute("SELECT email, full_name FROM users WHERE id = %s", (user_id,))
                     sender_user = cur.fetchone()
                     
-                    from app.services.email_service import get_user_email_font
+                    from app.services.email_service import get_user_email_font, get_user_email_font_size
                     send_email(
                         to_email=sender_email,
                         subject=f"Meeting Scheduled: {lead_name} x LeadStream",
-                        html_content=markdown_to_html(lead_confirm_body, font_family=get_user_email_font(user_id)),
+                        html_content=markdown_to_html(lead_confirm_body, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id)),
                         from_email=sender_user['email'],
                         from_name=sender_user['full_name'],
                         is_system_email=True
@@ -1052,11 +1052,11 @@ def schedule_manual_meeting(lead_id: int, data: dict = Body(...), user_id: Optio
         confirm_body = f"Hi {lead['first_name'] or 'there'},\n\nI've scheduled our strategy session for {meeting_time.strftime('%A, %B %d at %I:%M %p UTC')}.\n\nYou can join via Google Meet here: {event_data['meet_link']}\n\nLooking forward to it!"
         
         # Final Dispatch: Prefer Gmail API for personalized scheduling
-        from app.services.email_service import get_user_email_font
+        from app.services.email_service import get_user_email_font, get_user_email_font_size
         res = send_email(
             to_email=lead['email'],
             subject=f"Meeting Scheduled: {lead_name} x LeadStream",
-            html_content=markdown_to_html(confirm_body, font_family=get_user_email_font(uid)),
+            html_content=markdown_to_html(confirm_body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid)),
             from_email=sender_user['email'],
             from_name=sender_user['full_name'],
             is_system_email=False,
@@ -1134,11 +1134,11 @@ Best regards,
 LeadStream Strategy Division
             """
 
-            from app.services.email_service import get_user_email_font
+            from app.services.email_service import get_user_email_font, get_user_email_font_size
             send_email(
                 to_email=updated_lead['email'],
                 subject=f"Confirmed: Rescheduled Strategy Session - {updated_lead['first_name'] or ''}",
-                html_content=markdown_to_html(reschedule_body, font_family=get_user_email_font(uid)),
+                html_content=markdown_to_html(reschedule_body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid)),
                 from_email=sender_email,
                 from_name=sender_user['full_name'] if sender_user else "LeadStream Team",
                 is_system_email=False,

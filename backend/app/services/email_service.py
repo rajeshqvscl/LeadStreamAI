@@ -82,6 +82,14 @@ USER_EMAIL_FONTS = {
 # Ayush (2) keeps his own explicit mapping above and is never affected.
 DEFAULT_EMAIL_FONT = SANS_SERIF_FONT
 
+# Per-account email font size (applies to the final send_email() wrapper).
+# Default for everyone is 15px. Ayush (2) is explicitly kept at 18px.
+USER_EMAIL_FONT_SIZES = {
+    2: "18px",  # Ayush — keeps the larger size
+    5: "13px",  # Palak — smaller size
+}
+DEFAULT_EMAIL_FONT_SIZE = "15px"
+
 
 def get_user_email_font(user_id) -> str:
     """Resolve the preferred email font for a user id."""
@@ -90,6 +98,15 @@ def get_user_email_font(user_id) -> str:
     except (TypeError, ValueError):
         uid = None
     return USER_EMAIL_FONTS.get(uid, DEFAULT_EMAIL_FONT)
+
+
+def get_user_email_font_size(user_id) -> str:
+    """Resolve the preferred email font size (px string) for a user id."""
+    try:
+        uid = int(user_id) if user_id is not None else None
+    except (TypeError, ValueError):
+        uid = None
+    return USER_EMAIL_FONT_SIZES.get(uid, DEFAULT_EMAIL_FONT_SIZE)
 
 
 def strip_old_unsubscribe_links(html_content: str) -> str:
@@ -382,15 +399,16 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                         pixel_html = f'<img src="{pixel_url}" width="1" height="1" style="display:none" />'
                         html_content = html_content + pixel_html
 
-                # Strip ALL inline font-size from html_content so wrapper 18px cascades uniformly
+                # Strip ALL inline font-size from html_content so wrapper font-size cascades uniformly
                 # This prevents any <span style="font-size:12px"> in the saved draft from overriding the wrapper
                 import re as _fs_re
                 html_content = _fs_re.sub(r'font-size\s*:\s*[^;]+;?\s*', '', html_content)
 
                 # Wrap in clean email template for professional appearance in Gmail
                 email_font = get_user_email_font(user_id)
+                email_font_size = get_user_email_font_size(user_id)
                 html_content = f"""
-                <div style="font-family: {email_font}; line-height: 1.6; color: #333333; font-size: 18px;">
+                <div style="font-family: {email_font}; line-height: 1.6; color: #333333; font-size: {email_font_size};">
                     {html_content}
                 </div>
                 """
@@ -588,7 +606,7 @@ def check_scheduled_emails():
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=to_email,
                 subject=subject,
-                html_content=markdown_to_html(body, font_family=get_user_email_font(user_id)),
+                html_content=markdown_to_html(body, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id)),
                 from_email=sender_email,
                 from_name=sender_name,
                 lead_id=lead_id,

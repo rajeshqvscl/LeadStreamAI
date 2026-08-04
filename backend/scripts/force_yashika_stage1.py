@@ -9,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 import psycopg2.extras
 
 from app.database import get_db_connection
-from app.services.email_service import send_email
+from app.services.email_service import send_email, get_user_email_font_size
 from app.api.drafts import get_sender_profile, markdown_to_html
 from app.services.followup_service import get_template_followup, get_original_outreach_subject, is_generic_followup
 
@@ -94,7 +94,7 @@ def force_send_stage1():
         first_name = name.split()[0] if name else name
 
         from app.services.email_service import get_user_email_font
-        body_html = markdown_to_html(body, font_family=get_user_email_font(YASHIKA_UID))
+        body_html = markdown_to_html(body, font_family=get_user_email_font(YASHIKA_UID), font_size=get_user_email_font_size(YASHIKA_UID))
         sig_html = f'<p style="margin-top: 4px;">--<br>Regards,<br>{first_name}</p>'
         full_body = body_html + sig_html
 

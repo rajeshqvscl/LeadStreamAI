@@ -6,8 +6,8 @@ import psycopg2.extras
 import re
 
 from app.database import get_db_connection
-from app.services.email_service import send_email, get_user_email_font
-from app.api.drafts import get_sender_profile, inject_signature, markdown_to_html
+from app.services.email_service import send_email, get_user_email_font, get_user_email_font_size
+from app.api.drafts import markdown_to_html, get_followup_signature_markdown
 from app.services.llm_services import LLMService
 from app.models.lead import add_activity_log
 
@@ -330,14 +330,12 @@ def generate_followup_preview(lead_id: int, user_id: int):
         orig_subject = get_original_outreach_subject(lead)
         subject = f"Re: {orig_subject}"
 
-        # Inject Signature
-        profile = get_sender_profile(str(user_id))
-        name = profile.get('full_name') or profile.get('username') or 'Team'
-        name = " ".join([p.capitalize() for p in name.split()])
-        
-        # Convert plain text to HTML with proper signature spacing
-        body_with_sig = body + f"\n\n--\nRegards,\n{name}"
-        full_body = markdown_to_html(body_with_sig, font_family=get_user_email_font(user_id))
+        # Inject the user's saved FOLLOWUP signature (from Signatures page).
+        # No hardcoded "Regards, Name" fallback — if no followup signature is
+        # saved, the followup goes out without any signature.
+        followup_sig = get_followup_signature_markdown(str(user_id))
+        body_with_sig = body + (f"\n\n{followup_sig}" if followup_sig else "")
+        full_body = markdown_to_html(body_with_sig, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id))
 
         return {
             "lead_id": lead_id,
@@ -441,6 +439,8 @@ def process_outreach_sequences():
             remaining_allowance = 999999
 
             sent_count = 0
+            # Fetch the user's saved FOLLOWUP signature ONCE per user (not per-lead)
+            followup_sig = get_followup_signature_markdown(str(uid))
             for lead in group:
                 # Re-check working hours before EVERY send to prevent weekend/hour bleed
                 reason = _recheck_working_hours()
@@ -646,26 +646,27 @@ def process_outreach_sequences():
                         logger.info(f"Lead {lead_id} is Defence (found in body) — skipping")
                         continue
 
-                    profile = get_sender_profile(str(uid))
-                    name = profile.get('full_name') or profile.get('username') or 'Team'
-                    name = " ".join([p.capitalize() for p in name.split()])
-                    first_name = name.split()[0] if name else name
+                    # Append the user's saved FOLLOWUP signature (fetched once per user above).
+                    # No hardcoded "Regards, Name" fallback — if no followup signature
+                    # is saved, the followup goes out without any signature.
+                    if followup_sig:
+                        body = body.rstrip() + f"\n\n{followup_sig}"
 
-                    body_html = markdown_to_html(body, font_family=get_user_email_font(uid))
-                    sig_html = f'<p style="margin-top: 4px; font-size: 14px;">--<br>Regards,<br>{first_name}</p>'
-                    full_body = body_html + sig_html
+                    body_html = markdown_to_html(body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid))
+                    full_body = body_html
 
                     logger.info(f"PREVIEW [{lead['email']}]: body=\"{body}\"")
 
-                    # Stop any old pending drafts for this lead before sending new one
+                    # Touch updated_at so any stale pending-approval state is no longer
+                    # the newest change. email_status is NOT set to 'STOPPED' — that
+                    # value belongs to followup_status only and corrupts delivery
+                    # metrics. The claim below moves the lead to 'SENT' on success.
                     try:
                         stop_cur = lead_conn.cursor()
-                        stop_cur.execute("""
-                            UPDATE leads_raw
-                            SET email_status = 'STOPPED',
-                                updated_at = NOW()
-                            WHERE id = %s AND email_status IN ('PENDING_APPROVAL', 'APPROVED', 'SCHEDULED')
-                        """, (lead_id,))
+                        stop_cur.execute(
+                            "UPDATE leads_raw SET updated_at = NOW() WHERE id = %s AND email_status IN ('PENDING_APPROVAL', 'APPROVED', 'SCHEDULED')",
+                            (lead_id,),
+                        )
                         lead_conn.commit()
                         stop_cur.close()
                     except Exception as stop_err:

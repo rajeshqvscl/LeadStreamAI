@@ -448,7 +448,7 @@ const SignatureEditor = ({ userId, onSave, onClose, children }) => {
                       <div
                         style={{ color: '#666', fontFamily: 'Arial, sans-serif', fontSize: '13px', lineHeight: '1.4' }}
                         dangerouslySetInnerHTML={{
-                          __html: mdToPreviewHtml(currentContent) + `<div style="font-size: 10px; color: #999999; line-height: 1.2; margin-top: 6px;">Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you.</div>`
+                          __html: mdToPreviewHtml(currentContent)
                         }}
                       />
                     ) : (

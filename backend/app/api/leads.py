@@ -886,7 +886,7 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
         if (lead.get('email_status') or '').upper() == 'BOUNCED':
             raise HTTPException(status_code=400, detail="Cannot send follow-up to a bounced lead.")
 
-        from app.api.drafts import get_sender_profile, inject_signature, markdown_to_html
+        from app.api.drafts import get_sender_profile, markdown_to_html, get_followup_signature_markdown
         profile = get_sender_profile(user_id)
         
         # If custom body provided, use it. Otherwise use DB draft.
@@ -902,10 +902,11 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
             stage = (lead['followup_stage'] or 0) + 1
             body_text = get_template_followup(lead, stage)
 
-        # RE-INJECT SIGNATURE of the CURRENT user
-        name = profile.get('full_name') or profile.get('username') or 'Team'
-        name = " ".join([p.capitalize() for p in name.split()])
-        final_body = body_text + f"\n\n--\nRegards,\n{name}"
+        # Inject the user's saved FOLLOWUP signature (from Signatures page).
+        # No hardcoded "Regards, Name" fallback — if no followup signature
+        # is saved, the followup goes out without any signature.
+        followup_sig = get_followup_signature_markdown(user_id)
+        final_body = body_text + (f"\n\n{followup_sig}" if followup_sig else "")
         
         # Parse subject/body from draft if needed
         subject = "Following up"
@@ -928,19 +929,20 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
         orig_subject = get_original_outreach_subject(lead)
         saved_subject = f"Re: {orig_subject}"
 
-        # Stop any old pending drafts for this lead before sending new follow-up
-        cur.execute("""
-            UPDATE leads_raw
-            SET email_status = 'STOPPED',
-                updated_at = NOW()
-            WHERE id = %s AND email_status IN ('PENDING_APPROVAL', 'APPROVED', 'SCHEDULED')
-        """, (lead_id,))
+        # Touch updated_at so any stale pending-approval state is no longer the
+        # newest change. email_status is NOT set to 'STOPPED' — that value belongs
+        # to followup_status only and corrupts delivery metrics (SENT/OPENED/...).
+        # On success below the lead is moved to email_status='SENT' anyway.
+        cur.execute(
+            "UPDATE leads_raw SET updated_at = NOW() WHERE id = %s AND email_status IN ('PENDING_APPROVAL', 'APPROVED', 'SCHEDULED')",
+            (lead_id,),
+        )
 
-        from app.services.email_service import get_user_email_font
+        from app.services.email_service import get_user_email_font, get_user_email_font_size
         success, msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=lead['email'],
             subject=saved_subject,
-            html_content=markdown_to_html(body, font_family=get_user_email_font(uid)),
+            html_content=markdown_to_html(body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid)),
             from_email=profile.get('sender_email') or profile.get('username'),
             from_name=profile.get('full_name') or profile.get('username'),
             lead_id=lead_id,
@@ -1347,14 +1349,17 @@ def process_unsubscribe(lead_id: int, conn=None, cur=None):
 
         email = lead['email']
 
-        # Mark this lead as opted out, stop follow-ups
+        # Mark this lead as opted out, stop follow-ups.
+        # NOTE: email_status is intentionally NOT touched here — 'STOPPED' is a
+        # followup_status value, not an email status. Unsubscribing must not
+        # overwrite the real delivery state (SENT/OPENED/...) that metrics rely on;
+        # the is_unsubscribed / email_opt_in flags already block future sends.
         cur.execute("""
             UPDATE leads_raw
             SET email_opt_in = FALSE,
                 is_unsubscribed = TRUE,
                 followup_status = 'STOPPED',
                 followup_stage = 0,
-                email_status = 'STOPPED',
                 updated_at = NOW()
             WHERE id = %s
         """, (lead_id,))
@@ -1367,7 +1372,6 @@ def process_unsubscribe(lead_id: int, conn=None, cur=None):
                     is_unsubscribed = TRUE,
                     followup_status = 'STOPPED',
                     followup_stage = 0,
-                    email_status = 'STOPPED',
                     updated_at = NOW()
                 WHERE email = %s AND id != %s AND (email_opt_in IS NULL OR email_opt_in = TRUE)
             """, (email, lead_id))

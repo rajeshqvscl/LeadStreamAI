@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import { Download, FileText, LayoutGrid } from 'lucide-react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
@@ -19,6 +20,32 @@ const getMonthRange = (year, month) => {
   return { start, end };
 };
 
+const BarBlock = ({ title, items, color }) => {
+  const total = (items || []).reduce((s, x) => s + (x.value || 0), 0) || 1;
+  return (
+    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 12px', background: '#fff' }}>
+      <div style={{ fontSize: 11, fontWeight: 800, color: '#1e1b4b', marginBottom: 8 }}>{title}</div>
+      {(!items || items.length === 0) && (
+        <div style={{ fontSize: 9, color: '#9ca3af', textAlign: 'center', padding: '14px 0' }}>No data available</div>
+      )}
+      {(items || []).map((item, i) => {
+        const pct = ((item.value || 0) / total) * 100;
+        return (
+          <div key={i} style={{ marginBottom: 5 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#374151', fontWeight: 600, gap: 8 }}>
+              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</span>
+              <span style={{ color: '#6b7280', flexShrink: 0 }}>{item.value} · {pct.toFixed(1)}%</span>
+            </div>
+            <div style={{ background: '#f3f4f6', borderRadius: 3, height: 6, marginTop: 2, overflow: 'hidden' }}>
+              <div style={{ width: `${Math.min(pct, 100)}%`, background: color, height: '100%', borderRadius: 3 }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 const MisReportPage = () => {
   const navigate = useNavigate();
   const now = new Date();
@@ -27,6 +54,13 @@ const MisReportPage = () => {
   const [downloading, setDownloading] = useState(false);
   const [selYear, setSelYear] = useState(now.getFullYear());
   const [selMonth, setSelMonth] = useState(now.getMonth());
+  const [mode, setMode] = useState('compact');
+  const [isAdmin] = useState(() => {
+    try { return (JSON.parse(localStorage.getItem('user') || '{}').role) === 'ADMIN'; } catch { return false; }
+  });
+  const [viewUser, setViewUser] = useState('all');
+  const [userList, setUserList] = useState([]);
+  const [downloadingCsv, setDownloadingCsv] = useState(false);
   const reportRef = useRef();
 
   useEffect(() => {
@@ -34,7 +68,10 @@ const MisReportPage = () => {
       setLoading(true);
       try {
         const { start, end } = getMonthRange(selYear, selMonth);
-        const res = await api.get(`/api/metrics?period=all&date_from=${start}&date_to=${end}&_t=${Date.now()}`);
+        const params = { period: 'all', date_from: start, date_to: end, _t: Date.now() };
+        // Admin can view all users or a specific user; regular users always see their own data
+        if (isAdmin && viewUser) params.for_user = viewUser;
+        const res = await api.get('/api/metrics', { params });
         setData(res.data);
       } catch (err) {
         console.error('Failed to load report data', err);
@@ -43,7 +80,15 @@ const MisReportPage = () => {
       }
     };
     fetchData();
-  }, [selYear, selMonth]);
+  }, [selYear, selMonth, isAdmin, viewUser]);
+
+  // Admin: load user list for the scope selector
+  useEffect(() => {
+    if (!isAdmin) return;
+    api.get('/api/users/')
+      .then(res => setUserList(res.data.users || []))
+      .catch(err => console.error('Failed to load users for selector', err));
+  }, [isAdmin]);
 
   const handleDownloadPDF = useCallback(async () => {
     if (!reportRef.current) return;
@@ -78,6 +123,30 @@ const MisReportPage = () => {
       setDownloading(false);
     }
   }, [selMonth, selYear]);
+
+  const handleDownloadCSV = useCallback(() => {
+    if (!data || !data.report || !data.report.length) {
+      alert('No report data to export.');
+      return;
+    }
+    setDownloadingCsv(true);
+    try {
+      const headers = ['Name', 'Email', 'Company', 'Sector', 'Action', 'Follow-up', 'Date'];
+      const rows = data.report.map(r => [
+        r.name || '', r.email || '', r.company || '', r.sector || '', r.action || '', r.followup || '', r.date || ''
+      ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+      const csv = [headers.join(','), ...rows].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `MIS_Report_${MONTHS[selMonth]}_${selYear}_${(data.report_for || 'All_Users').replace(/\s+/g, '_')}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloadingCsv(false);
+    }
+  }, [data, selMonth, selYear]);
 
   if (loading) {
     return (
@@ -135,10 +204,36 @@ const MisReportPage = () => {
             className="text-sm font-semibold text-gray-700 bg-gray-100 border border-gray-200 rounded-lg px-2 py-1">
             {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
           </select>
+          {isAdmin && (
+            <>
+              <span className="text-gray-300">|</span>
+              <select value={viewUser} onChange={e => setViewUser(e.target.value)}
+                className="text-sm font-semibold text-gray-700 bg-gray-100 border border-gray-200 rounded-lg px-2 py-1 max-w-[190px]">
+                <option value="all">All Users</option>
+                {userList.map(u => (
+                  <option key={u.id} value={u.id}>{u.full_name || u.username}</option>
+                ))}
+              </select>
+            </>
+          )}
           <span className="text-gray-300">|</span>
           <span className="text-gray-700 font-bold text-sm">MIS Report — {monthLabel}</span>
         </div>
         <div className="flex items-center gap-2">
+          <div className="flex bg-gray-100 border border-gray-200 rounded-lg overflow-hidden">
+            <button onClick={() => setMode('compact')}
+              className={`px-4 py-2 text-xs font-bold transition-colors flex items-center gap-1.5 ${mode === 'compact' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-200'}`}>
+              <FileText className="w-3.5 h-3.5" />1-Page
+            </button>
+            <button onClick={() => setMode('full')}
+              className={`px-4 py-2 text-xs font-bold transition-colors flex items-center gap-1.5 ${mode === 'full' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-200'}`}>
+              <LayoutGrid className="w-3.5 h-3.5" />Full
+            </button>
+          </div>
+          <button onClick={handleDownloadCSV} disabled={downloadingCsv}
+            className="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 shadow-sm disabled:opacity-50 flex items-center gap-1.5">
+            <Download className="w-3.5 h-3.5" />{downloadingCsv ? 'Exporting...' : 'CSV'}
+          </button>
           <button onClick={handleDownloadPDF} disabled={downloading}
             className="px-5 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-700 shadow-sm disabled:opacity-50">
             {downloading ? 'Downloading...' : 'Download PDF'}
@@ -167,7 +262,75 @@ const MisReportPage = () => {
           .section-title { font-size: 16px; font-weight: 800; color: #1e1b4b; border-bottom: 3px solid #6366f1; padding-bottom: 6px; margin-bottom: 16px; }
           .cover-title { font-size: 36px; font-weight: 900; color: #1e1b4b; letter-spacing: -1px; }
           .cover-sub { font-size: 14px; color: #6b7280; margin-top: 8px; }
-        `}</style>
+        `}        </style>
+
+        {mode === 'compact' ? (
+          <div data-page="compact" className="px-7 py-7" style={{ minHeight: '235mm' }}>
+            {/* Header band */}
+            <div style={{ background: 'linear-gradient(135deg, #1e1b4b, #4338ca)', borderRadius: 10, padding: '16px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#fff', marginBottom: 12 }}>
+              <div>
+                <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: 3, opacity: 0.75 }}>LEADSTREAMAI</div>
+                <div style={{ fontSize: 19, fontWeight: 900, marginTop: 2 }}>MIS Report — {monthLabel}</div>
+                <div style={{ fontSize: 10, opacity: 0.85, marginTop: 3 }}>Report for: <strong>{data.report_for || 'All Users'}</strong></div>
+              </div>
+              <div style={{ textAlign: 'right', fontSize: 8.5, opacity: 0.85, lineHeight: 1.7 }}>
+                <div>Generated: {new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                <div>Classification: Internal — Management Only</div>
+              </div>
+            </div>
+
+            {/* KPI cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8, marginBottom: 10 }}>
+              {[
+                ['Total Leads', data.total_leads || 0],
+                ['Drafts Pending', drafts_generated],
+                ['Emails Sent', data.sent || 0],
+                ['Replied', reverted],
+                ['Follow-ups', data.total_followups || 0],
+                ['Bounced', bounces],
+              ].map(([l, v]) => (
+                <div key={l} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 8px', textAlign: 'center', background: '#fff' }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: '#1e1b4b' }}>{v}</div>
+                  <div style={{ fontSize: 7.5, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, marginTop: 2 }}>{l}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Rates strip */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 10 }}>
+              {[
+                ['Open Rate', `${data.open_rate || 0}%`],
+                ['Engagement Rate', `${data.engagement_rate || 0}%`],
+                ['Bounce Rate', `${data.bounce_rate || 0}%`],
+                ['Conversion Rate', `${data.conversion_rate || 0}%`],
+              ].map(([l, v]) => (
+                <div key={l} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '8px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f9fafb' }}>
+                  <span style={{ fontSize: 8.5, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5 }}>{l}</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: '#4338ca' }}>{v}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Two-column: persona + action */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+              <BarBlock title="Lead Type Distribution" items={personaData.slice(0, 6)} color="#6366f1" />
+              <BarBlock title="Action Breakdown" items={actionData.slice(0, 6)} color="#10b981" />
+            </div>
+
+            {/* Two-column: industries + countries */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <BarBlock title="Top Industries" items={industryData.slice(0, 6)} color="#f59e0b" />
+              <BarBlock title="Geographic Coverage" items={countryData.slice(0, 6)} color="#ef4444" />
+            </div>
+
+            {/* Footer */}
+            <div style={{ marginTop: 12, borderTop: '2px solid #4338ca', paddingTop: 8, display: 'flex', justifyContent: 'space-between', fontSize: 8, color: '#6b7280' }}>
+              <span>LeadStreamAI — Automated Management Information System Report</span>
+              <span>Confidential · Computer-generated · {monthLabel}</span>
+            </div>
+          </div>
+        ) : (
+        <>
 
         {/* PAGE 1: COVER */}
         <div data-page="cover" className="px-12 py-16" style={{ pageBreakAfter: 'always' }}>
@@ -529,6 +692,8 @@ const MisReportPage = () => {
             <p className="mt-1">Confidential — For internal management use only.</p>
           </div>
         </div>
+        </>
+        )}
       </div>
     </div>
   );

@@ -31,6 +31,7 @@ const Signatures = () => {
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const userId = user.id || 'admin';
 
+  const [sigType, setSigType] = useState('outreach'); // 'outreach' | 'followup'
   const [signatures, setSignatures] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentSigId, setCurrentSigId] = useState(null);
@@ -48,9 +49,10 @@ const Signatures = () => {
   const [currentAttachments, setCurrentAttachments] = useState([]);
   const [showAttachments, setShowAttachments] = useState(false);
 
-  const fetchSignatures = useCallback(async () => {
+  const fetchSignatures = useCallback(async (type) => {
     try {
-      const res = await api.get('/api/signatures', { headers: { 'X-User-Id': userId } });
+      const t = type || sigType;
+      const res = await api.get('/api/signatures', { params: { type: t }, headers: { 'X-User-Id': userId } });
       const sigs = res.data || [];
       setSignatures(sigs);
       return sigs;
@@ -58,7 +60,7 @@ const Signatures = () => {
       console.error('Failed to fetch signatures', err);
       return [];
     }
-  }, [userId]);
+  }, [userId, sigType]);
 
   const fetchPdfs = useCallback(async () => {
     try {
@@ -74,7 +76,7 @@ const Signatures = () => {
     let cancelled = false;
     setLoading(true);
     fetchPdfs();
-    fetchSignatures().then(async sigs => {
+    fetchSignatures(sigType).then(async sigs => {
       if (cancelled) return;
       if (sigs.length > 0) {
         const defaultSig = sigs.find(s => s.is_default) || sigs[0];
@@ -84,6 +86,13 @@ const Signatures = () => {
         const atts = defaultSig.attachment_file ? defaultSig.attachment_file.split(',').map(s => s.trim()).filter(Boolean) : [];
         setCurrentAttachments(atts);
         setShowAttachments(atts.length > 0);
+      } else if (sigType === 'followup') {
+        // Followup tab has no outreach fallback — empty editor only
+        setCurrentSigId(null);
+        setCurrentName('');
+        setCurrentContent('');
+        setCurrentAttachments([]);
+        setShowAttachments(false);
       } else if (user.signature) {
         setCurrentSigId(null);
         setCurrentName('My Signature');
@@ -132,7 +141,7 @@ const Signatures = () => {
       }
     });
     return () => { cancelled = true; };
-  }, [fetchSignatures, fetchPdfs]);
+  }, [fetchSignatures, fetchPdfs, sigType]);
 
   const selectSignature = (sig) => {
     setCurrentSigId(sig.id);
@@ -152,10 +161,10 @@ const Signatures = () => {
 
     try {
       const res = await api.post('/api/signatures',
-        { name: 'New Signature', content: defaultContent },
+        { name: sigType === 'followup' ? 'Followup Signature' : 'New Signature', content: defaultContent, sig_type: sigType },
         { headers: { 'X-User-Id': userId } }
       );
-      const _sigs = await fetchSignatures();
+      const _sigs = await fetchSignatures(sigType);
       setCurrentSigId(res.data.id);
       setCurrentName(res.data.name);
       setCurrentContent(res.data.content);
@@ -174,26 +183,29 @@ const Signatures = () => {
       const attachmentVal = currentAttachments.length > 0 ? currentAttachments.join(', ') : '';
       if (currentSigId) {
         await api.put(`/api/signatures/${currentSigId}`,
-          { name: currentName, content: currentContent, attachment_file: attachmentVal },
+          { name: currentName, content: currentContent, attachment_file: attachmentVal, sig_type: sigType },
           { headers: { 'X-User-Id': userId } }
         );
       } else {
         const res = await api.post('/api/signatures',
-          { name: currentName, content: currentContent, attachment_file: attachmentVal },
+          { name: currentName, content: currentContent, attachment_file: attachmentVal, sig_type: sigType },
           { headers: { 'X-User-Id': userId } }
         );
         setCurrentSigId(res.data.id);
       }
-      // Keep legacy users.signature field in sync
-      await api.put('/api/auth/signature', { signature: currentContent }, { headers: { 'X-User-Id': userId } });
-      await api.put('/api/auth/signature-mode', { signature_mode: 'custom' }, { headers: { 'X-User-Id': userId } });
+      // Followup signatures are followup-only — never touch the main email signature
+      if (sigType !== 'followup') {
+        // Keep legacy users.signature field in sync
+        await api.put('/api/auth/signature', { signature: currentContent }, { headers: { 'X-User-Id': userId } });
+        await api.put('/api/auth/signature-mode', { signature_mode: 'custom' }, { headers: { 'X-User-Id': userId } });
 
-      const u = JSON.parse(localStorage.getItem('user') || '{}');
-      u.signature = currentContent;
-      u.signature_mode = 'custom';
-      localStorage.setItem('user', JSON.stringify(u));
+        const u = JSON.parse(localStorage.getItem('user') || '{}');
+        u.signature = currentContent;
+        u.signature_mode = 'custom';
+        localStorage.setItem('user', JSON.stringify(u));
+      }
 
-      await fetchSignatures();
+      await fetchSignatures(sigType);
       // If attachments were cleared, update UI to reflect that
       if (!attachmentVal) {
         setCurrentAttachments([]);
@@ -213,7 +225,7 @@ const Signatures = () => {
     setDeletingId(sigId);
     try {
       await api.delete(`/api/signatures/${sigId}`, { headers: { 'X-User-Id': userId } });
-      const sigs = await fetchSignatures();
+      const sigs = await fetchSignatures(sigType);
       if (currentSigId === sigId) {
         if (sigs.length > 0) {
           const defaultSig = sigs.find(s => s.is_default) || sigs[0];
@@ -255,7 +267,7 @@ const Signatures = () => {
   const handleSetDefault = async (sigId) => {
     try {
       await api.put(`/api/signatures/${sigId}`, { is_default: true }, { headers: { 'X-User-Id': userId } });
-      await fetchSignatures();
+      await fetchSignatures(sigType);
     } catch (_err) {
       alert('Failed to set default signature');
     }
@@ -348,6 +360,29 @@ const Signatures = () => {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {/* Signature type tabs: outreach vs followup */}
+          <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-xl p-1">
+            <button
+              onClick={() => setSigType('outreach')}
+              className={`px-4 py-2 rounded-lg text-[12px] font-bold transition-all ${
+                sigType === 'outreach'
+                  ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.3)]'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Outreach
+            </button>
+            <button
+              onClick={() => setSigType('followup')}
+              className={`px-4 py-2 rounded-lg text-[12px] font-bold transition-all ${
+                sigType === 'followup'
+                  ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.3)]'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Followup
+            </button>
+          </div>
           <button
             onClick={handleNewSignature}
             className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-[13px] font-bold transition-all hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(147,51,234,0.3)]"
@@ -407,7 +442,7 @@ const Signatures = () => {
                             if (editNameValue.trim()) {
                               try {
                                 await api.put(`/api/signatures/${sig.id}`, { name: editNameValue.trim() }, { headers: { 'X-User-Id': userId } });
-                                await fetchSignatures();
+                                await fetchSignatures(sigType);
                               } catch(_e) { /* noop */ }
                             }
                             setEditingName(null);
@@ -538,7 +573,7 @@ const Signatures = () => {
                       <div
                         style={{ color: '#666', fontFamily: 'Arial, sans-serif', fontSize: '13px', lineHeight: '1.4' }}
                         dangerouslySetInnerHTML={{
-                          __html: mdToPreviewHtml(currentContent) + `<div style="font-size: 10px; color: #999999; line-height: 1.2; margin-top: 6px;">Important: This message and its attachments are intended only for the addressee and may contain legally privileged and/or confidential information. If you are not the intended recipient, you are hereby notified that you must not use, disseminate, or copy this material in any form, or take any action based upon it. If you have received this message by error, please immediately delete it and its attachments and notify the sender at QV Strategic Consulting LLP by electronic mail message reply. Thank you.</div>`
+                          __html: mdToPreviewHtml(currentContent)
                         }}
                       />
                     ) : (

@@ -58,6 +58,151 @@ COALESCE(
 class BulkApproveRequest(BaseModel):
     lead_ids: List[int]
 
+
+def _safe_payload(payload):
+    """Parses a lead's raw_payload (JSONB) into a dict, tolerating strings."""
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, str):
+        try:
+            return json.loads(payload)
+        except Exception:
+            return {}
+    return {}
+
+
+# Keys used to discover phone / location inside company-database payloads
+# (raw_payload stores the original company registry row, e.g. 'Phone', 'Mobile',
+#  'Contact Number', 'Location', 'City', 'Country', 'State', ...).
+_PHONE_HINTS = ["phone", "mobile", "contact number", "contact no", "telephone", "cell", "whatsapp"]
+_LOCATION_HINTS = ["location", "city", "country", "state", "address", "headquarters", "region", "place"]
+
+# Words that disqualify a payload key from being treated as a location — these
+# columns hold emails/URLs, not physical places (e.g. 'Email Address',
+# 'Website Address', 'Mailing Address' should never appear in Location).
+_NON_LOCATION_KEY_WORDS = ["email", "e-mail", "website", "web", "url", "link", "profile", "domain", "www", "http"]
+
+# Keys that carry the INVESTING sector for investor-type leads (from the
+# company-database payload / family-office sheet row, e.g. 'Investment Sectors',
+# 'Sector Focus', 'Target Sectors', 'Preferred Sectors', 'Category', ...).
+# Ordered from most specific to most generic.
+_INVESTOR_SECTOR_HINTS = [
+    "investment sectors", "investing sector", "sector focus", "focus sector",
+    "target sector", "target sectors", "preferred sector", "preferred sectors",
+    "focus sectors", "investment focus", "portfolio focus", "investment thesis",
+    "mandate", "strategic fit", "sectors", "category",
+]
+
+# Generic sector placeholders that should never be treated as a real investing sector.
+_GENERIC_SECTOR_SET = {s.lower() for s in ["investor", "client", "other", "investor - general", ""]}
+
+# Known raw_payload keys (JSONB) that hold an investing sector for investor leads.
+# Used to include payload-derived investor sectors in the sector dropdown + filter.
+_PAYLOAD_SECTOR_KEYS_SQL = """
+    COALESCE(raw_payload->>'Investment Sectors', '') || ',' ||
+    COALESCE(raw_payload->>'Investing Sector', '') || ',' ||
+    COALESCE(raw_payload->>'Sector Focus', '') || ',' ||
+    COALESCE(raw_payload->>'Target Sectors', '') || ',' ||
+    COALESCE(raw_payload->>'Preferred Sectors', '') || ',' ||
+    COALESCE(raw_payload->>'Focus Sectors', '') || ',' ||
+    COALESCE(raw_payload->>'Investment Focus', '') || ',' ||
+    COALESCE(raw_payload->>'Portfolio Focus', '') || ',' ||
+    COALESCE(raw_payload->>'Category', '')
+""".strip()
+
+
+
+def _hint_match(key: str, hint: str) -> bool:
+    """True when a normalized payload key matches a hint.
+    Matches the hint as a standalone word or as a trailing fragment,
+    so 'Phone'/'Work Phone' match but 'Company Number' does not."""
+    if not key:
+        return False
+    words = key.split()
+    return any(w == hint for w in words) or key.endswith(hint)
+
+
+def extract_investor_sector(row: dict) -> str:
+    """Returns the INVESTING sector for an investor-type lead if present in the
+    data. For investors the payload's investing sector takes priority (that is
+    the sector they invest in — exactly what the user asked to surface); the
+    lead's own sector column is used as fallback when the payload has nothing.
+    Returns '' when not found or when the lead is not an investor."""
+    lead_type = str(row.get("lead_type") or "").upper()
+    if lead_type != "INVESTOR":
+        return ""
+
+    own_sector = str(row.get("sector") or "").strip()
+
+    # 1. Company-database payload first — the investing-sector keys.
+    payload = _safe_payload(row.get("raw_payload"))
+    if payload:
+        norm = {}
+        for k, v in payload.items():
+            norm[str(k).strip().lower().replace("_", " ").replace("-", " ")] = v
+        for hint in _INVESTOR_SECTOR_HINTS:
+            for k, v in norm.items():
+                if _hint_match(k, hint) and v and str(v).strip():
+                    val = str(v).strip()
+                    if val.lower() in ("", "n/a", "na", "none", "-", "—", "null"):
+                        continue
+                    return val
+
+    # 2. Fallback — lead's own sector column (skip generic classifier placeholders).
+    if own_sector and own_sector.lower() not in _GENERIC_SECTOR_SET:
+        return own_sector
+
+    return ""
+
+
+def extract_phone_location(row: dict):
+    """Returns (phone, location) for an admin lead row.
+
+    Source order — fetched strictly from THIS lead data:
+      1. Lead pipeline's own columns (leads_raw.phone / city / country)
+      2. Company-database payload fallback (leads_raw.raw_payload, which holds the
+         original company registry row when the lead came from the company DB)
+    """
+    phone = str(row.get("phone") or "").strip()
+    city = str(row.get("city") or "").strip()
+    country = str(row.get("country") or "").strip()
+    location = ", ".join(x for x in [city, country] if x).strip()
+
+    payload = _safe_payload(row.get("raw_payload"))
+    if payload:
+        norm = {}
+        for k, v in payload.items():
+            norm[str(k).strip().lower().replace("_", " ").replace("-", " ")] = v
+
+        if not phone:
+            for hint in _PHONE_HINTS:
+                for k, v in norm.items():
+                    if _hint_match(k, hint) and v and str(v).strip():
+                        phone = str(v).strip()
+                        break
+                if phone:
+                    break
+
+        if not location:
+            loc_parts, seen = [], set()
+            for hint in _LOCATION_HINTS:
+                for k, v in norm.items():
+                    # Skip keys that are email/website columns (e.g. 'Email Address')
+                    # and skip values that look like emails.
+                    if not _hint_match(k, hint) or not v:
+                        continue
+                    if any(w in k for w in _NON_LOCATION_KEY_WORDS):
+                        continue
+                    lv = str(v).strip()
+                    if not lv or "@" in lv or lv.lower().startswith(("http://", "https://", "www.")):
+                        continue
+                    if lv.lower() not in seen:
+                        loc_parts.append(lv)
+                        seen.add(lv.lower())
+            location = ", ".join(loc_parts)
+
+    return phone, location
+
 @router.post("/leads/bulk-approve")
 def bulk_approve_leads(req: BulkApproveRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """
@@ -173,9 +318,24 @@ def get_all_leads_admin(
             where_clauses.append("u.username ILIKE %s")
             params.append(owner)
         if sector and sector != 'ALL':
-            where_clauses.append(f"( ({SECTOR_CASE_SQL}) = %s OR COALESCE(l.sector, '') ILIKE '%%' || %s || '%%' )")
-            params.append(sector.upper())
-            params.append(sector)
+            # Sector filter also matches investing-sector keys inside the investor payload
+            where_clauses.append(f"""(
+                ({SECTOR_CASE_SQL}) = %s
+                OR COALESCE(l.sector, '') ILIKE '%%' || %s || '%%'
+                OR (({TYPE_CASE_SQL}) = 'INVESTOR' AND (
+                        l.raw_payload->>'Investment Sectors' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Investing Sector' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Sector Focus' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Target Sectors' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Preferred Sectors' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Focus Sectors' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Investment Focus' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Portfolio Focus' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Category' ILIKE '%%' || %s || '%%'
+                ))
+            )""")
+            params.extend([sector.upper(), sector])
+            params.extend([sector] * 9)
         if search:
             where_clauses.append("(l.first_name ILIKE %s OR l.last_name ILIKE %s OR l.company_name ILIKE %s OR l.email ILIKE %s)")
             s_param = f"%{search}%"
@@ -194,7 +354,7 @@ def get_all_leads_admin(
 
         # 3. Fetch leads
         query = f"""
-            SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.company_name, l.family_office_name, l.designation, 
+            SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.city, l.country, l.raw_payload, l.company_name, l.family_office_name, l.designation, 
                    ({SECTOR_CASE_SQL}) as sector, ({TYPE_CASE_SQL}) as lead_type, l.reply_intent, l.sentiment_score, l.deal_size, l.check_size, l.source,
                    l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
                    l.followup_stage, l.followup_status, l.last_outreach_at, l.email_status,
@@ -220,6 +380,7 @@ def get_all_leads_admin(
         total_count = cur.fetchone()[0]
         
         # 5. Dynamic Filters — sectors including both derived + individual raw values
+        #    + investing-sector keys from investor payloads (company DB / family office)
         cur.execute(f"""
             SELECT DISTINCT sector_name FROM (
                 SELECT ({SECTOR_CASE_SQL}) as sector_name FROM leads_raw l
@@ -227,6 +388,14 @@ def get_all_leads_admin(
                 SELECT UPPER(TRIM(BOTH FROM s)) as sector_name
                 FROM leads_raw, regexp_split_to_table(COALESCE(sector, 'Other'), ',') as s
                 WHERE TRIM(BOTH FROM s) != '' AND UPPER(TRIM(BOTH FROM s)) != 'OTHER'
+                UNION
+                SELECT UPPER(TRIM(BOTH FROM sec)) as sector_name
+                FROM leads_raw,
+                regexp_split_to_table(
+                    {_PAYLOAD_SECTOR_KEYS_SQL},
+                    ','
+                ) as sec
+                WHERE TRIM(BOTH FROM sec) != '' AND UPPER(TRIM(BOTH FROM sec)) != 'OTHER'
             ) combined ORDER BY 1 ASC
         """)
         all_sectors = [r[0] for r in cur.fetchall() if r[0]]
@@ -248,6 +417,16 @@ def get_all_leads_admin(
                         domain_part = email.split("@")[-1].split(".")[0].lower()
                         if domain_part not in generic_domains:
                             row["company_name"] = domain_part.capitalize()
+            # Phone + Location — from the lead's own data / company-db payload
+            phone, location = extract_phone_location(row)
+            row["phone"] = phone
+            row["location"] = location
+            # For investor leads, surface the investing sector when present in the data
+            investor_sector = extract_investor_sector(row)
+            if investor_sector:
+                row["sector"] = investor_sector
+            # raw_payload is only needed server-side for extraction — keep responses lean
+            row.pop("raw_payload", None)
             lead_list.append(row)
 
         result = {
@@ -327,9 +506,24 @@ def export_all_leads_admin(
             where_clauses.append("u.username ILIKE %s")
             params.append(owner)
         if sector and sector != 'ALL':
-            where_clauses.append(f"( ({SECTOR_CASE_SQL}) = %s OR COALESCE(l.sector, '') ILIKE '%%' || %s || '%%' )")
-            params.append(sector.upper())
-            params.append(sector)
+            # Sector filter also matches investing-sector keys inside the investor payload
+            where_clauses.append(f"""(
+                ({SECTOR_CASE_SQL}) = %s
+                OR COALESCE(l.sector, '') ILIKE '%%' || %s || '%%'
+                OR (({TYPE_CASE_SQL}) = 'INVESTOR' AND (
+                        l.raw_payload->>'Investment Sectors' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Investing Sector' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Sector Focus' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Target Sectors' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Preferred Sectors' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Focus Sectors' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Investment Focus' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Portfolio Focus' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Category' ILIKE '%%' || %s || '%%'
+                ))
+            )""")
+            params.extend([sector.upper(), sector])
+            params.extend([sector] * 9)
         if search:
             where_clauses.append("(l.first_name ILIKE %s OR l.last_name ILIKE %s OR l.company_name ILIKE %s OR l.email ILIKE %s)")
             s_param = f"%{search}%"
@@ -350,7 +544,7 @@ def export_all_leads_admin(
 
         # 3. Fetch leads with derived + raw sector
         query = f"""
-            SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.company_name, l.family_office_name, l.designation, 
+            SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.city, l.country, l.raw_payload, l.company_name, l.family_office_name, l.designation, 
                    ({SECTOR_CASE_SQL}) as sector, l.sector as raw_sector, ({TYPE_CASE_SQL}) as lead_type, l.reply_intent, l.sentiment_score, l.deal_size, l.check_size,
                    l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
                    l.email_status, l.followup_status,
@@ -363,8 +557,23 @@ def export_all_leads_admin(
         """
         cur.execute(query, tuple(params))
         leads = cur.fetchall()
+
+        export_rows = []
+        for l in leads:
+            row = dict(l)
+            # Phone + Location — from the lead's own data / company-db payload
+            phone, location = extract_phone_location(row)
+            row["phone"] = phone
+            row["location"] = location
+            # For investor leads, surface the investing sector when present in the data
+            investor_sector = extract_investor_sector(row)
+            if investor_sector:
+                row["sector"] = investor_sector
+            # raw_payload is only needed server-side for extraction — keep responses lean
+            row.pop("raw_payload", None)
+            export_rows.append(row)
         
-        return {"leads": [dict(l) for l in leads]}
+        return {"leads": export_rows}
         
     except HTTPException:
         raise
@@ -459,8 +668,12 @@ def get_global_stats(
         a_where = f"WHERE {' AND '.join(a_clauses)}"
         from_act = "FROM activity_log al JOIN leads_raw l ON al.lead_id = l.id LEFT JOIN users u ON l.user_id = u.id"
 
-        # Total leads (only sent, not all records)
-        cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND l.email_status = 'SENT'", tuple(l_params))
+        # Total leads (all dispatched outreach statuses — NOT just exact 'SENT',
+        # since leads that progressed to OPENED/CLICKED/REPLIED are no longer 'SENT')
+        # Same literal values as metrics.py's sent set — PostgreSQL IN is
+        # case-sensitive, so both endpoints must count the exact same statuses.
+        _SENT_STATUSES = "('SENT', 'OPENED', 'CLICKED', 'REPLIED', 'CLOSED', 'Meeting Scheduled', 'Contacted', 'Interested')"
+        cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND l.email_status IN {_SENT_STATUSES}", tuple(l_params))
         total_leads = cur.fetchone()[0]
         
         # Interested (Intent)
@@ -487,30 +700,36 @@ def get_global_stats(
         cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND (l.reply_intent ILIKE 'INTERESTED' OR l.reply_intent ILIKE 'MEETING_SCHEDULED' OR l.is_responded = TRUE)", tuple(l_params))
         engaged = cur.fetchone()[0]
         
-        # System Reach (leads with emails sent)
-        cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND l.email_status IS NOT NULL", tuple(l_params))
-        system_reach = cur.fetchone()[0]
-        
-        # Open Rate (using email_status - SENT means delivered)
-        cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND l.email_status = 'OPENED'", tuple(l_params))
-        opened = cur.fetchone()[0]
-        
-        # Click Rate (leads who clicked)
-        cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND l.email_status = 'CLICKED'", tuple(l_params))
-        clicked = cur.fetchone()[0]
-        
-        # Bounce Rate (invalid emails)
+        # System Reach = delivered (sent minus bounced)
+        # Bounce Rate (invalid emails) — computed BEFORE rates so delivered is accurate
         cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND l.email_status = 'BOUNCED'", tuple(l_params))
         bounced = cur.fetchone()[0]
+        system_reach = max(total_leads - bounced, 0)
+        
+        # Unique opens/clicks from the tracking-pixel activity log, measured over
+        # the SAME sent cohort as total_leads/delivered (COHORT METHOD). Filtering
+        # open events by their own date would misalign numerator vs denominator
+        # (e.g. leads sent in June opening in July) and produce >100% rates.
+        cur.execute(
+            f"SELECT COUNT(DISTINCT al.lead_id) FROM activity_log al WHERE al.action = 'OPENED' AND al.lead_id IN (SELECT l.id {from_l} {l_where} AND l.email_status IN {_SENT_STATUSES})",
+            tuple(l_params),
+        )
+        opened = cur.fetchone()[0]
+        
+        cur.execute(
+            f"SELECT COUNT(DISTINCT al.lead_id) FROM activity_log al WHERE al.action = 'CLICKED' AND al.lead_id IN (SELECT l.id {from_l} {l_where} AND l.email_status IN {_SENT_STATUSES})",
+            tuple(l_params),
+        )
+        clicked = cur.fetchone()[0]
         
         # Opt-outs
         cur.execute(f"SELECT COUNT(*) {from_l} {l_where} AND l.reply_intent = 'NOT_INTERESTED'", tuple(l_params))
         opt_outs = cur.fetchone()[0]
         
-        # Open Rate %
+        # Rates — all over delivered (sent - bounced)
         open_rate = round((opened / system_reach * 100), 1) if system_reach > 0 else 0
         click_rate = round((clicked / system_reach * 100), 1) if system_reach > 0 else 0
-        bounce_rate = round((bounced / system_reach * 100), 1) if system_reach > 0 else 0
+        bounce_rate = round((bounced / total_leads * 100), 1) if total_leads > 0 else 0
         
         # Conversion Rate
         conversion_rate = round((engaged / total_leads * 100), 1) if total_leads > 0 else 0
@@ -609,6 +828,7 @@ def get_global_stats(
             "click_rate": click_rate,
             "bounced": bounced,
             "bounce_rate": bounce_rate,
+            "conversion_rate": conversion_rate,
             "opt_outs": opt_outs,
             "intent_breakdown": intent_breakdown,
             "owner_breakdown": owner_breakdown,
@@ -683,9 +903,24 @@ def get_filtered_breakdowns(
             clauses.append("u.username ILIKE %s")
             params.append(owner)
         if sector and sector != 'ALL':
-            clauses.append(f"( ({SECTOR_CASE_SQL}) = %s OR COALESCE(l.sector, '') ILIKE '%%' || %s || '%%' )")
-            params.append(sector.upper())
-            params.append(sector)
+            # Sector filter also matches investing-sector keys inside the investor payload
+            clauses.append(f"""(
+                ({SECTOR_CASE_SQL}) = %s
+                OR COALESCE(l.sector, '') ILIKE '%%' || %s || '%%'
+                OR (({TYPE_CASE_SQL}) = 'INVESTOR' AND (
+                        l.raw_payload->>'Investment Sectors' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Investing Sector' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Sector Focus' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Target Sectors' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Preferred Sectors' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Focus Sectors' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Investment Focus' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Portfolio Focus' ILIKE '%%' || %s || '%%'
+                     OR l.raw_payload->>'Category' ILIKE '%%' || %s || '%%'
+                ))
+            )""")
+            params.extend([sector.upper(), sector])
+            params.extend([sector] * 9)
         if period and period != 'ALL':
             if period == 'DAILY':
                 clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date")

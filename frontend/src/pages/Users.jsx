@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Plus, UserCircle, Shield, ShieldCheck, ShieldAlert, Mail, MoreHorizontal, Edit2, Trash2, X, Loader2, Check, AlertCircle, Play, RotateCcw, UserPlus } from 'lucide-react';
+import { Search, Plus, UserCircle, Shield, ShieldCheck, ShieldAlert, Mail, MoreHorizontal, Edit2, Trash2, X, Loader2, Check, AlertCircle, Play, RotateCcw, UserPlus, Download } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
@@ -131,6 +131,28 @@ const Users = () => {
     }
   };
 
+  const exportUsersCSV = () => {
+    if (!users.length) {
+      alert('No users to export.');
+      return;
+    }
+    const headers = ['Name', 'Username', 'Email', 'Role', 'Team', 'Sector', 'Status', 'Approved', 'Job Title', 'Phone', 'LinkedIn', 'Created At'];
+    const rows = users.map(u => [
+      u.full_name || '', u.username, u.email, u.role, u.team || '', u.sector || '',
+      u.is_active ? 'Active' : 'Suspended', u.is_approved ? 'Approved' : 'Pending',
+      u.job_title || '', u.phone || '', u.linkedin_url || '',
+      u.created_at ? new Date(u.created_at).toLocaleString() : ''
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `USERS_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleHardDelete = async (id) => {
     if (!window.confirm('CRITICAL: Permanent deletion cannot be undone. Delete this user record forever?')) return;
     try {
@@ -148,12 +170,20 @@ const Users = () => {
           <h1 className="text-2xl font-bold text-white">System Access Control</h1>
           <p className="text-slate-400 text-sm mt-1">Manage administrative permissions and monitor system-wide user activity.</p>
         </div>
-        <button
-          onClick={() => handleOpenDrawer()}
-          className="btn btn-primary px-6 py-2.5 shadow-blue-500/20"
-        >
-          <Plus className="w-5 h-5 mr-2" /> Provision User
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={exportUsersCSV}
+            className="btn btn-ghost px-5 py-2.5 border-white/10 hover:border-emerald-500/30 hover:text-emerald-400"
+          >
+            <Download className="w-4 h-4 mr-2" /> Export Users CSV
+          </button>
+          <button
+            onClick={() => handleOpenDrawer()}
+            className="btn btn-primary px-6 py-2.5 shadow-blue-500/20"
+          >
+            <Plus className="w-5 h-5 mr-2" /> Provision User
+          </button>
+        </div>
       </div>
 
       <div className="card bg-slate-800/20 border-white/5 backdrop-blur-md overflow-hidden shadow-2xl">
