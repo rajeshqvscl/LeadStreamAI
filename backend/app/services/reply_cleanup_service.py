@@ -115,6 +115,7 @@ def cleanup_replied_leads(scope_user_id=None, dry_run: bool = False) -> dict:
                         UPDATE leads_raw
                         SET followup_status = %s,
                             is_responded = TRUE,
+                            replied_at = COALESCE(replied_at, NOW()),
                             email_status = CASE
                                 WHEN email_status IN ('REPLIED', 'CLOSED', 'BOUNCED') THEN email_status
                                 ELSE %s

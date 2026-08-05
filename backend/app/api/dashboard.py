@@ -78,11 +78,17 @@ def get_dashboard_stats(
     cr_date = lr_date
     cr_date_params = lr_date_params
 
-    # Replied-lead counts must be filtered on updated_at (when the reply was
-    # detected / lead state changed), NOT created_at (when the lead was
-    # imported). A lead imported in May that replied in August must show up in
-    # August's reply count. Same parameters as lr_date — only the column differs.
-    lr_date_replied = lr_date.replace("created_at", "updated_at") if lr_date else ""
+    # Replied-lead counts must be filtered on replied_at (the actual reply
+    # received timestamp — set by the reply handler / backfill), NOT created_at
+    # (lead import) and NOT updated_at (polluted by bulk backfills). A lead
+    # imported in May that replied in August must show up in August's reply
+    # count. Leads with replied_at IS NULL are unsourced flags (no reply
+    # evidence) and are excluded. Same parameters as lr_date — only the column
+    # differs.
+    lr_date_replied = lr_date.replace("created_at", "replied_at") if lr_date else ""
+    # Sent/opened/clicked/bounced counts keep filtering on updated_at (when the
+    # event actually happened) — replied_at only makes sense for replied leads.
+    lr_date_updated = lr_date.replace("created_at", "updated_at") if lr_date else ""
 
     # Single query for all counts
     company_count_sql = user_cond if is_admin or resolved_id is not None else "1=1"
@@ -90,16 +96,16 @@ def get_dashboard_stats(
     cur.execute(f"""
         SELECT
             (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date}) AS total_ingested,
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date_replied} AND (is_responded = TRUE OR reply_intent IN ('INTERESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED') OR email_status IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED', 'NOT_INTERESTED'))) AS total_leads,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date_replied} AND replied_at IS NOT NULL) AS total_leads,
             (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND validation_status = 'VALID') AS valid_leads,
             (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND persona IS NOT NULL AND persona != '') AS classified,
             (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND (email_status = 'PENDING_APPROVAL' OR email_status = 'pending')) AS pending,
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date_replied} AND email_status = 'SENT') AS sent,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date_updated} AND email_status = 'SENT') AS sent,
             (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND email_draft IS NOT NULL) AS refined,
             (SELECT COUNT(*) FROM company_registry WHERE {company_count_sql} {cr_date}) AS total_companies,
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date_replied} AND email_status = 'OPENED') AS unique_opens,
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date_replied} AND email_status = 'CLICKED') AS unique_clicks,
-            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date_replied} AND email_status = 'BOUNCED') AS total_bounces,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date_updated} AND email_status = 'OPENED') AS unique_opens,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date_updated} AND email_status = 'CLICKED') AS unique_clicks,
+            (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date_updated} AND email_status = 'BOUNCED') AS total_bounces,
             (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND email IS NOT NULL AND email != '') AS with_email,
             (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND linkedin_url IS NOT NULL AND linkedin_url != '') AS with_linkedin
     """, all_params * 13 if all_params else [])
@@ -470,21 +476,22 @@ def get_card_detail(
         cur.execute(data_sql, all_params + [per_page, offset])
 
     elif card_type == 'pipeline':
-        # Replies are filtered on updated_at (when the reply was detected), not
-        # created_at (lead import time) — same rule as /dashboard/stats total_leads.
-        # Uses the SAME replied-lead formula as /dashboard/stats total_leads so the
-        # drill-down matches the card count exactly.
-        replied_date = date_cond.replace("created_at", "updated_at") if date_cond else ""
-        replied_cond = "(is_responded = TRUE OR reply_intent IN ('INTERESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED') OR email_status IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED', 'NOT_INTERESTED'))"
+        # Replies are filtered on replied_at (the actual reply timestamp), not
+        # created_at (lead import time) and not updated_at (backfill-polluted) —
+        # same rule as /dashboard/stats total_leads. Uses the SAME replied-lead
+        # formula as /dashboard/stats total_leads so the drill-down matches the
+        # card count exactly.
+        replied_date = date_cond.replace("created_at", "replied_at") if date_cond else ""
+        replied_cond = "replied_at IS NOT NULL"
         all_params = user_params + date_params
         count_sql = f"SELECT COUNT(*) FROM leads_raw WHERE {user_cond} AND {replied_cond} {replied_date}"
         cur.execute(count_sql, all_params)
         total = cur.fetchone()[0] or 0
         data_sql = f"""
             SELECT id, first_name, last_name, email, company_name, persona,
-                   email_status, created_at, updated_at, source, is_unsubscribed
+                   email_status, created_at, updated_at, replied_at, source, is_unsubscribed
             FROM leads_raw WHERE {user_cond} AND {replied_cond} {replied_date}
-            ORDER BY updated_at DESC LIMIT %s OFFSET %s
+            ORDER BY replied_at DESC NULLS LAST LIMIT %s OFFSET %s
         """
         cur.execute(data_sql, all_params + [per_page, offset])
 

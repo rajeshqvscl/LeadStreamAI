@@ -468,6 +468,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         cur.execute(f"""
             UPDATE leads_raw 
             SET is_responded = TRUE,
+                replied_at = COALESCE(replied_at, NOW()),
                 email_status = %s,
                 reply_intent = %s,
                 check_size = COALESCE(%s, check_size),

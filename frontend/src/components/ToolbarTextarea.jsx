@@ -68,6 +68,24 @@ const htmlToMd = (html) => {
     return '';
   });
   md = md.replace(/<\/span>/gi, '</span>');
+  // Legacy <font color/face/size> tags (older execCommand foreColor output) -> styled span
+  md = md.replace(/<font\s+([^>]*)>/gi, (m, attrs) => {
+    const styles = [];
+    const mColor = attrs.match(/color\s*=\s*["']?([^"'\s>]+)["']?/i);
+    const mFace = attrs.match(/face\s*=\s*["']?([^"'\s>]+)["']?/i);
+    const mSize = attrs.match(/size\s*=\s*["']?([^"'\s>]+)["']?/i);
+    if (mColor) styles.push(`color: ${mColor[1]}`);
+    if (mFace) styles.push(`font-family: ${mFace[1]}`);
+    if (mSize) {
+      let sz = mSize[1];
+      const sizeMap = { '1': '10px', '2': '12px', '3': '14px', '4': '16px', '5': '18px', '6': '22px', '7': '28px' };
+      if (/^[+-]\d+$/.test(sz)) sz = String(3 + parseInt(sz, 10)); // HTML relative size (base 3)
+      const px = sizeMap[sz] || '';
+      if (px) styles.push(`font-size: ${px}`);
+    }
+    return styles.length ? `<span style="${styles.join('; ')};">` : '';
+  });
+  md = md.replace(/<\/font\s*>/gi, '</span>');
   md = md.replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&nbsp;/gi, ' ');
   md = md.replace(/\n{3,}/g, '\n\n');
   return md.trim();
@@ -210,9 +228,13 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
 
   // ── WYSIWYG execCommand ────────────────────────────────────────────
 
-  const execWysiwyg = useCallback((cmd, cmdValue = null) => {
+  const execWysiwyg = useCallback((cmd, cmdValue = null, useCss = false) => {
     if (!editorRef.current || showSource) return;
     editorRef.current.focus();
+    // styleWithCSS is a STICKY document-level setting — always set it explicitly.
+    // true  -> foreColor/hiliteColor emit <span style="color:..."> (survive save)
+    // false -> bold/italic/underline keep producing <b>/<i>/<u> (convert to **/*)
+    document.execCommand('styleWithCSS', false, useCss);
     document.execCommand(cmd, false, cmdValue);
     syncFromEditor();
   }, [showSource, syncFromEditor]);
@@ -450,7 +472,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
       insert(`<span style="color:${color};">`, `</span>`);
       return;
     }
-    execWysiwyg('foreColor', color);
+    execWysiwyg('foreColor', color, true);
   };
 
   const applyBgColor = (color) => {
@@ -459,7 +481,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
       insert(`<span style="background-color:${color};">`, `</span>`);
       return;
     }
-    execWysiwyg('hiliteColor', color);
+    execWysiwyg('hiliteColor', color, true);
   };
 
   const handleInsertTable = () => {

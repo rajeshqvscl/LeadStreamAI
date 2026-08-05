@@ -11,6 +11,7 @@ import base64
 from app.models.lead import get_lead_by_id
 from app.models.draft import insert_draft
 from app.database import get_db_connection
+from app.utils.signature_clean import clean_signature_markdown
 from app.services.llm_services import EmailGenerator
 from app.services.email_service import get_user_email_font, get_user_email_font_size
 from app.services.vision_service import analyze_template_screenshot
@@ -40,6 +41,18 @@ except Exception as re_err:
     logger.warning(f"NOTICE: Redis is not active inside drafts.py. Falling back to direct database. Error: {re_err}")
     redis_client = None
     redis_available = False
+
+# Dead SIG_START/SIG_END template signature blocks are stripped from stored
+# prompts after every seed. The real signature is injected separately at send
+# time (inject_signature), so these blocks are never used and would otherwise
+# show up as literal text in the Prompts / EditEmail editors.
+_STRIP_TEMPLATE_SIG_SQL = (
+    "UPDATE prompts SET "
+    "content = regexp_replace("
+    "regexp_replace(content, '(?:\r\n|\n|^)[ \t]*SIG_START.*?SIG_END[ \t]*(?:\r\n|\n)?', '', 'gs'), "
+    "'(?:\r\n|\n|^)[ \t]*SIG_START(?:(?!SIG_END).)*$', '', 's') "
+    "WHERE content ILIKE '%SIG_START%'"
+)
 
 def invalidate_pending_drafts_cache(user_id: str = "*"):
     if redis_available and redis_client:
@@ -168,8 +181,9 @@ SIG_END"""
     cur.execute("SELECT id FROM prompts WHERE name = 'yashika_draft_ai_tech'")
     row = cur.fetchone()
     if row:
+        # Seed ONLY when still a placeholder (never clobber user edits).
         cur.execute(
-            "UPDATE prompts SET content = %s, description = %s WHERE name = 'yashika_draft_ai_tech'",
+            "UPDATE prompts SET content = %s, description = %s WHERE name = 'yashika_draft_ai_tech' AND (content IS NULL OR content = '' OR content = 'placeholder')",
             (latest_content, latest_description)
         )
     else:
@@ -395,14 +409,16 @@ SIG_START
 The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
 SIG_END"""
 
-    # 2. Force-update ayush_hospital_draft with the same 18px content
+    # 2. Seed ayush_hospital_draft ONLY when missing or still a placeholder —
+    #    never overwrite a template the user has edited (self-healing must not
+    #    clobber user changes).
     cur.execute(
-        "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_hospital_draft'",
+        "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_hospital_draft' AND (content IS NULL OR content = '' OR content = 'placeholder')",
         (hospital_content, hospital_description)
     )
     if cur.rowcount == 0:
         cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type) VALUES ('ayush_hospital_draft', %s, %s, 'CUSTOM_DRAFT')",
+            "INSERT INTO prompts (name, description, content, prompt_type) SELECT 'ayush_hospital_draft', %s, %s, 'CUSTOM_DRAFT' WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'ayush_hospital_draft')",
             (hospital_description, hospital_content)
         )
     conn.commit()
@@ -466,14 +482,15 @@ Thanks & Regards,
 The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
 SIG_END"""
 
-    # FORCE UPDATE
+    # FORCE UPDATE -> seed ONLY when missing or still a placeholder (never
+    # clobber user edits).
     cur.execute(
-        "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s, followup_3 = NULL WHERE name = 'palak_mam_corporate_advisory'",
+        "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s, followup_3 = NULL WHERE name = 'palak_mam_corporate_advisory' AND (content IS NULL OR content = '' OR content = 'placeholder')",
         (palak_corp_content, palak_corp_description, palak_corp_followup1, palak_corp_followup2)
     )
     if cur.rowcount == 0:
         cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type, followup_1, followup_2) VALUES ('palak_mam_corporate_advisory', %s, %s, 'CUSTOM_DRAFT', %s, %s)",
+            "INSERT INTO prompts (name, description, content, prompt_type, followup_1, followup_2) SELECT 'palak_mam_corporate_advisory', %s, %s, 'CUSTOM_DRAFT', %s, %s WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'palak_mam_corporate_advisory')",
             (palak_corp_description, palak_corp_content, palak_corp_followup1, palak_corp_followup2)
         )
     conn.commit()
@@ -584,13 +601,14 @@ Thanks & Regards,<br>
 <img src="[[BACKEND_URL]]/assets/kajal.png" style="width: 150px; height: auto; display: block; margin-top: 10px;" />
 SIG_END"""
 
+    # Seed ONLY when missing or still a placeholder (never clobber user edits).
     cur.execute(
-        "UPDATE prompts SET content = %s, description = %s WHERE name = 'kajal_mam_health_ecosystem'",
+        "UPDATE prompts SET content = %s, description = %s WHERE name = 'kajal_mam_health_ecosystem' AND (content IS NULL OR content = '' OR content = 'placeholder')",
         (kajal_ecosystem_content, kajal_ecosystem_description)
     )
     if cur.rowcount == 0:
         cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type, owner_username) VALUES ('kajal_mam_health_ecosystem', %s, %s, 'CUSTOM_DRAFT', 'kajal')",
+            "INSERT INTO prompts (name, description, content, prompt_type, owner_username) SELECT 'kajal_mam_health_ecosystem', %s, %s, 'CUSTOM_DRAFT', 'kajal' WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'kajal_mam_health_ecosystem')",
             (kajal_ecosystem_description, kajal_ecosystem_content)
         )
     conn.commit()
@@ -645,13 +663,14 @@ This will be my final follow-up regarding the opportunity I shared earlier. If i
 
 Thank you again for your consideration."""
 
+    # Seed ONLY when missing or still a placeholder (never clobber user edits).
     cur.execute(
-        "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s, followup_3 = %s WHERE name = 'kajal_mam_qvscl_intro'",
+        "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s, followup_3 = %s WHERE name = 'kajal_mam_qvscl_intro' AND (content IS NULL OR content = '' OR content = 'placeholder')",
         (kajal_qvscl_content, kajal_qvscl_description, kajal_qvscl_followup1, kajal_qvscl_followup2, kajal_qvscl_followup3)
     )
     if cur.rowcount == 0:
         cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1, followup_2, followup_3) VALUES ('kajal_mam_qvscl_intro', %s, %s, 'CUSTOM_DRAFT', 'kajal', %s, %s, %s)",
+            "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1, followup_2, followup_3) SELECT 'kajal_mam_qvscl_intro', %s, %s, 'CUSTOM_DRAFT', 'kajal', %s, %s, %s WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'kajal_mam_qvscl_intro')",
             (kajal_qvscl_description, kajal_qvscl_content, kajal_qvscl_followup1, kajal_qvscl_followup2, kajal_qvscl_followup3)
         )
     conn.commit()
@@ -740,13 +759,14 @@ Looking forward to your response.
 Best regards,
 Palak"""
 
+    # Seed ONLY when missing or still a placeholder (never clobber user edits).
     cur.execute(
-        "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s WHERE name = 'palak_mam_mna_fundraising'",
+        "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s WHERE name = 'palak_mam_mna_fundraising' AND (content IS NULL OR content = '' OR content = 'placeholder')",
         (palak_mna_content, palak_mna_description, palak_mna_followup1, palak_mna_followup2)
     )
     if cur.rowcount == 0:
         cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1, followup_2) VALUES ('palak_mam_mna_fundraising', %s, %s, 'CUSTOM_DRAFT', 'palak', %s, %s)",
+            "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1, followup_2) SELECT 'palak_mam_mna_fundraising', %s, %s, 'CUSTOM_DRAFT', 'palak', %s, %s WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'palak_mam_mna_fundraising')",
             (palak_mna_description, palak_mna_content, palak_mna_followup1, palak_mna_followup2)
         )
     conn.commit()
@@ -807,15 +827,22 @@ Would this week or next work for a quick call?
 
 Looking forward to hearing from you!"""
 
+    # Seed ONLY when missing or still a placeholder (never clobber user edits).
     cur.execute(
-        "UPDATE prompts SET content = %s, description = %s, owner_username = 'vismaya', followup_1 = %s, followup_2 = %s WHERE name = 'vismaya_leadstream'",
+        "UPDATE prompts SET content = %s, description = %s, owner_username = 'vismaya', followup_1 = %s, followup_2 = %s WHERE name = 'vismaya_leadstream' AND (content IS NULL OR content = '' OR content = 'placeholder')",
         (vismaya_content, vismaya_description, vismaya_followup1, vismaya_followup2)
     )
     if cur.rowcount == 0:
         cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1, followup_2) VALUES ('vismaya_leadstream', %s, %s, 'CUSTOM_DRAFT', 'vismaya', %s, %s)",
+            "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1, followup_2) SELECT 'vismaya_leadstream', %s, %s, 'CUSTOM_DRAFT', 'vismaya', %s, %s WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'vismaya_leadstream')",
             (vismaya_description, vismaya_content, vismaya_followup1, vismaya_followup2)
         )
+    conn.commit()
+
+    # Strip dead SIG_START/SIG_END template signature blocks after seeding — the
+    # real signature is injected separately at send time (inject_signature), so
+    # these blocks would otherwise re-appear as literal text in the editors.
+    cur.execute(_STRIP_TEMPLATE_SIG_SQL)
     conn.commit()
 
     cur.close()
@@ -963,6 +990,27 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
     text = re.sub(r'SIG_START.*?SIG_END', '', text, flags=re.DOTALL)
     text = text.replace("[[SIG_PLACEHOLDER]]", "")
 
+    # ── Protect rich-text spans / underline so they survive BOTH paths ──
+    # A saved signature may contain <span style="color:..."> (color / highlight /
+    # font / size) — the WYSIWYG editor produces these and clean_signature_markdown
+    # now keeps them. Swap to safe tokens here so (a) the rich-HTML detection below
+    # does NOT get triggered by a colored signature (which would skip markdown
+    # processing for the whole body), and (b) the markdown regexes can't mangle the
+    # tags. Restored at the end of each path via _restore_rich().
+    _rich_tokens = []
+
+    def _protect_rich(m):
+        _rich_tokens.append(m.group(0))
+        return f"\u0000LSRICH{len(_rich_tokens) - 1}\u0000"
+
+    text = re.sub(r"<span\b[^>]*>|</span\s*>", _protect_rich, text, flags=re.IGNORECASE)
+    text = re.sub(r"<u\b[^>]*>|</u\s*>", _protect_rich, text, flags=re.IGNORECASE)
+
+    def _restore_rich(s):
+        for i, tag in enumerate(_rich_tokens):
+            s = s.replace(f"\u0000LSRICH{i}\u0000", tag)
+        return s
+
     # ── Inner helper: keep images as URL references (no base64 inlining) ──
     def _inline_img(m):
         tag = m.group(0)
@@ -982,6 +1030,10 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
     def _inline_md_img(m):
         alt_text = m.group(1)
         src = m.group(2)
+        # Resolve the [[BACKEND_URL]] placeholder the same way the rich-HTML
+        # branch does (line ~1012), so markdown images render correctly.
+        backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+        src = src.replace("[[BACKEND_URL]]", backend_url)
         # Fallback: convert any unknown image markdown to an <img> tag
         return f'<img src="{src}" alt="{alt_text}" style="width:100%;height:auto;display:block;" />'
     
@@ -996,10 +1048,33 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
         # URLs render in production. (Previously this line rewrote localhost asset
         # URLs to BACKEND_URL, which broke locally-uploaded images whose files only
         # exist on the local backend.)
+        # A saved signature is stored as markdown and appended raw to the body
+        # (inject_signature). If the body is HTML (WYSIWYG) we land in this rich
+        # branch, so convert the signature's markdown remnants too — otherwise
+        # ***Name*** / **bold** / *italic* / ![logo](url) would leak as literal
+        # text into the sent email. Images FIRST (before links, matching the
+        # markdown path's ordering) so ![alt](url) is not eaten by the link regex.
+        text = re.sub(r'!\[(.*?)\]\((.*?)\)', _inline_md_img, text)
         # Convert markdown links [text](url) to HTML — but skip already-converted HTML tags
         text = re.sub(r'(?<!href=")(?<!src=")\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', text)
+        text = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong><em>\1</em></strong>', text)
+        text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
+        def _rich_ital(m):
+            inner = m.group(1)
+            if inner.startswith(' ') or inner.endswith(' '):
+                return m.group(0)
+            return f'<i>{inner}</i>'
+        text = re.sub(r'\*([^*\n]+)\*', _rich_ital, text)
+        # Standalone '--' / '—' signature separator line -> styled marker (same
+        # look as the markdown path's smart-signature block).
+        text = re.sub(r'(?m)^\s*(?:--|—)\s*$', '<span style="color: #666; font-style: italic; display: block;">--</span>', text)
+        # An appended markdown signature uses \n line breaks. In HTML those would
+        # collapse to spaces, so convert them to <br> — but ONLY newlines outside
+        # HTML tag structure (\n not followed by '<') so existing HTML bodies
+        # with newlines between block/table tags are never mangled.
+        text = re.sub(r'\n(?!<)', '<br>', text)
         text = re.sub(r'<img[^>]+>', _inline_img, text, flags=re.DOTALL | re.IGNORECASE)
-        return text
+        return _restore_rich(text)
 
     text = re.sub(r'!\[(.*?)\]\((.*?)\)', _inline_md_img, text)
     text = re.sub(r'<img[^>]+>', _inline_img, text, flags=re.DOTALL | re.IGNORECASE)
@@ -1015,12 +1090,21 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
     text = re.sub(r'(?<!href=")(?<!src=")\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', text)
     
     # 2a. Convert bare URLs (not already inside <a> tag) to clickable links
-    text = re.sub(r'(?<!href=")(https?://[^\s<]+)', r'<a href="\1" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', text)
+    # Also skip URLs already inside src="..." (markdown images) so <img> srcs
+    # don't get wrapped in an <a> tag.
+    text = re.sub(r'(?<!href=")(?<!src=")(https?://[^\s<]+)', r'<a href="\1" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', text)
     
     # 2b. Headings (### / ## / # at start of a line)
     text = re.sub(r'^###\s+(.*?)$', r'<h3 style="margin:0 0 6px 0;font-size:' + font_size + ';font-weight:700;">\1</h3>', text, flags=re.MULTILINE)
     text = re.sub(r'^##\s+(.*?)$', r'<h2 style="margin:0 0 6px 0;font-size:' + font_size + ';font-weight:700;">\1</h2>', text, flags=re.MULTILINE)
     text = re.sub(r'^#\s+(.*?)$', r'<h1 style="margin:0 0 6px 0;font-size:' + font_size + ';font-weight:700;">\1</h1>', text, flags=re.MULTILINE)
+    
+    # 2c. Single-* italic MUST be converted here (before the signature-block split
+    # below at step 3) — signature lines are extracted into `signature_html` before
+    # the step-5 markdown pass runs, so *italic* in a saved signature would leak
+    # the literal asterisks into the rendered email otherwise. `***` and `**` are
+    # already handled above (lines 1.5), so only bare single-* remains here.
+    text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
     
     # 3. Smart Signature Styling (Grey & Italic)
     signature_html = ""
@@ -1091,6 +1175,8 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
     # 5. Standard Markdown
     text = re.sub(r'<b>(.*?)</b>', r'__BOLD__\1__BOLD__', text)
     text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+    # Single-* italic already converted in step 2c (before the signature split) —
+    # this pass is a defensive leftover that can only match lone/unpaired stars.
     text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
     text = text.replace('__BOLD__', '<b>')
 
@@ -1196,7 +1282,7 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
 
     if gmail_style:
         result = f"<div style='padding: 0 40px; font-family: {font_family};'>{result}</div>"
-    return result
+    return _restore_rich(result)
 
 class DraftRequest(BaseModel):
     lead_id: int
@@ -1626,9 +1712,12 @@ def create_signature(req: SignatureCreateRequest, user_id: Optional[str] = Heade
         count = cur.fetchone()[0]
         is_default = (count == 0)
         
+        # Normalize any WYSIWYG HTML (<br>, <span>, &nbsp;, ...) to clean markdown
+        # so the <br>-laden format can never be stored again.
+        clean_content = clean_signature_markdown(req.content or "")
         cur.execute(
             "INSERT INTO user_signatures (user_id, name, content, is_default, attachment_file, sig_type) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id, name, content, is_default, created_at, updated_at, attachment_file, sig_type",
-            (uid, req.name, req.content, is_default, req.attachment_file, sig_type)
+            (uid, req.name, clean_content, is_default, req.attachment_file, sig_type)
         )
         new_sig = dict(cur.fetchone())
         conn.commit()
@@ -1662,8 +1751,10 @@ def update_signature(sig_id: int, req: SignatureUpdateRequest, user_id: Optional
             updates.append("name = %s")
             params.append(req.name)
         if req.content is not None:
+            # Normalize any WYSIWYG HTML (<br>, <span>, &nbsp;, ...) to clean markdown
+            # so the <br>-laden format can never be stored again.
             updates.append("content = %s")
-            params.append(req.content)
+            params.append(clean_signature_markdown(req.content))
         if req.is_default is not None:
             # If setting this as default, unset all others of the same sig_type first
             if req.is_default:
@@ -2246,8 +2337,10 @@ def list_custom_draft_templates(user_id: Optional[str] = Header(None, alias="X-U
             "kajal_mam_qvscl_intro": "kajal",
             "vismaya_leadstream": "vismaya",
         }
+        # Seed owner_username ONLY for un-owned templates — never clobber an
+        # existing ownership assignment.
         for tpl_name, owner in owner_seed.items():
-            cur.execute("UPDATE prompts SET owner_username = %s WHERE name = %s AND (owner_username IS NULL OR owner_username != %s)", (owner, tpl_name, owner))
+            cur.execute("UPDATE prompts SET owner_username = %s WHERE name = %s AND owner_username IS NULL", (owner, tpl_name))
         conn.commit()
 
         # Seed kajal_mam_agritech if it doesn't exist (will get correct content from the update below)
@@ -2260,8 +2353,9 @@ def list_custom_draft_templates(user_id: Optional[str] = Header(None, alias="X-U
             conn.commit()
 
         # Self-healing database update:
-        # Check if 'yashika_draft_ai_tech' has the correct placeholder and Subject prefix.
-        # If not, update it dynamically in the database so the user doesn't need to run scripts!
+        # Check if 'yashika_draft_ai_tech' is still the placeholder sentinel.
+        # If so, refresh it with the latest seed. User-edited content is NEVER
+        # overwritten here.
         latest_description = "AI-Powered Hiring Infrastructure Platform fundraising draft ($1M)"
         latest_content = """Subject: AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |
 
@@ -2370,11 +2464,10 @@ Thanks & Regards,
 The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
 SIG_END"""
         
-        # Select and verify if the database entry needs to be fixed.
+        # Only refresh the placeholder sentinel (never clobber user edits).
         cur.execute("SELECT content FROM prompts WHERE name = 'yashika_draft_ai_tech'")
         row = cur.fetchone()
-        if not row or "Subject:" not in row[0] or "Kajal" in row[0] or "Total capital raised in previous rounds: $3M" not in row[0] or "<strong>Headquarters:</strong>" in row[0] and "• <strong>Headquarters:</strong>" not in row[0]:
-            # Perform automatic update to correct placeholder, layout and subject prefix
+        if not row or (row[0] or '').strip() in ('', 'placeholder'):
             cur.execute(
                 "UPDATE prompts SET content = %s, description = %s WHERE name = 'yashika_draft_ai_tech'",
                 (latest_content, latest_description)
@@ -2594,9 +2687,9 @@ Thanks & Regards,
 The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
 SIG_END"""
 
-        # FORCE UPDATE EVERY TIME the templates are listed
+        # Seed ONLY when missing or still a placeholder (never clobber user edits).
         cur.execute(
-            "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_hospital_draft'",
+            "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_hospital_draft' AND (content IS NULL OR content = '' OR content = 'placeholder')",
             (hospital_content, hospital_description)
         )
 
@@ -2641,13 +2734,14 @@ Thanks & Regards,
 The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
 SIG_END"""
 
+        # Seed ONLY when missing or still a placeholder (never clobber user edits).
         cur.execute(
-            "UPDATE prompts SET content = %s, description = %s WHERE name = 'palak_mam_corporate_advisory'",
+            "UPDATE prompts SET content = %s, description = %s WHERE name = 'palak_mam_corporate_advisory' AND (content IS NULL OR content = '' OR content = 'placeholder')",
             (palak_corp_content, palak_corp_description)
         )
         if cur.rowcount == 0:
             cur.execute(
-                "INSERT INTO prompts (name, description, content, prompt_type) VALUES ('palak_mam_corporate_advisory', %s, %s, 'CUSTOM_DRAFT')",
+                "INSERT INTO prompts (name, description, content, prompt_type) SELECT 'palak_mam_corporate_advisory', %s, %s, 'CUSTOM_DRAFT' WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'palak_mam_corporate_advisory')",
                 (palak_corp_description, palak_corp_content)
             )
         conn.commit()
@@ -2750,13 +2844,14 @@ This will be my final follow-up regarding the Climate Agritech Platform opportun
 
 Thank you again for your consideration."""
 
+        # Seed ONLY when missing or still a placeholder (never clobber user edits).
         cur.execute(
-            "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s, followup_3 = %s WHERE name = 'yashika_draft_agritech'",
+            "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s, followup_3 = %s WHERE name = 'yashika_draft_agritech' AND (content IS NULL OR content = '' OR content = 'placeholder')",
             (agritech_content, agritech_description, yashika_agritech_followup1, yashika_agritech_followup2, yashika_agritech_followup3)
         )
         if cur.rowcount == 0:
             cur.execute(
-                "INSERT INTO prompts (name, description, content, prompt_type, followup_1, followup_2, followup_3) VALUES ('yashika_draft_agritech', %s, %s, 'CUSTOM_DRAFT', %s, %s, %s)",
+                "INSERT INTO prompts (name, description, content, prompt_type, followup_1, followup_2, followup_3) SELECT 'yashika_draft_agritech', %s, %s, 'CUSTOM_DRAFT', %s, %s, %s WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'yashika_draft_agritech')",
                 (agritech_description, agritech_content, yashika_agritech_followup1, yashika_agritech_followup2, yashika_agritech_followup3)
             )
         conn.commit()
@@ -2772,12 +2867,18 @@ Thank you again for your consideration."""
             "SIG_START\n--\nThanks & Regards,\n\n***{{Sender Name}}***\n{{Sender Title}}\n[LinkedIn]({{Sender LinkedIn}})\n{{Sender Phone}}\n\n",
             "SIG_START\n--\n<div style=\"color: #000000; font-family: sans-serif; font-size: 13px; line-height: 1.4;\">\nThanks & Regards,<br>\n<strong>{{Sender Name}}</strong><br>\n{{Sender Title}}<br>\n{{Sender Phone}}<br>\n<a href=\"https://www.linkedin.com/company/qvscl/\" style=\"color:#1d5fd0;text-decoration:underline;\">Company LinkedIn</a><br>\n<a href=\"https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link\" style=\"color:#1d5fd0;text-decoration:underline;\">Company Documents</a>\n</div>\n"
         )
+        # Seed ONLY when missing or still a placeholder (never clobber user edits).
         cur.execute(
-            "UPDATE prompts SET content = %s, description = %s, owner_username = 'kajal' WHERE name = 'kajal_mam_agritech'",
+            "UPDATE prompts SET content = %s, description = %s, owner_username = 'kajal' WHERE name = 'kajal_mam_agritech' AND (content IS NULL OR content = '' OR content = 'placeholder')",
             (kajal_agritech_content, agritech_description)
         )
         conn.commit()
-            
+
+        # NOTE: SIG_START/SIG_END blocks are stripped at module load (seeding)
+        # and never written back by user saves, so no need to strip here — this
+        # GET endpoint must stay read-only for template content.
+
+
         # Filter by owner_username so each user only sees their own templates
         # ADMIN users see ALL templates
         owner_filter = None
@@ -3531,6 +3632,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
                     followup_status = 'ACTIVE',
                     followup_stage = 0,
                     is_responded = FALSE,
+                    replied_at = NULL,
                     gmail_draft_id = NULL,
                     last_outreach_subject = %s,
                     first_outreach_subject = COALESCE(first_outreach_subject, %s),
@@ -3863,7 +3965,8 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
                         gmail_message_id = %s,
                         followup_status = 'ACTIVE',
                         followup_stage = 0,
-                        is_responded = FALSE
+                        is_responded = FALSE,
+                        replied_at = NULL
                     WHERE id = %s
                 """, (subject, subject, new_thread_id, new_rfc_message_id, lead['id']))
                 add_activity_log(lead['id'], "EMAIL_SENT", f"Email dispatched via Resend from {sender_email}", "system")
@@ -3978,6 +4081,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
                         followup_status = 'ACTIVE',
                         followup_stage = 0,
                         is_responded = FALSE,
+                        replied_at = NULL,
                         gmail_draft_id = NULL
                     WHERE id = %s
                 """, (sender_name, subject, subject, new_thread_id, new_rfc_message_id, lead['id']))
@@ -4294,7 +4398,8 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                             gmail_message_id = %s,
                             followup_status = 'ACTIVE',
                             followup_stage = 0,
-                            is_responded = FALSE
+                            is_responded = FALSE,
+                            replied_at = NULL
                         WHERE id = %s
                     """, (email_content, subject, subject, new_thread_id, new_rfc_message_id, lead['id']))
                     add_activity_log(lead['id'], "EMAIL_SENT", f"Bulk domain email dispatched via Gmail API from {sender_email}", "system")

@@ -182,16 +182,25 @@ const Signatures = () => {
     try {
       const attachmentVal = currentAttachments.length > 0 ? currentAttachments.join(', ') : '';
       if (currentSigId) {
-        await api.put(`/api/signatures/${currentSigId}`,
+        const res = await api.put(`/api/signatures/${currentSigId}`,
           { name: currentName, content: currentContent, attachment_file: attachmentVal, sig_type: sigType },
           { headers: { 'X-User-Id': userId } }
         );
+        // Reflect the EXACT stored content (backend normalizes WYSIWYG HTML to
+        // clean markdown) so the editor never shows something different from
+        // what is actually saved — prevents "my changes didn't save" confusion.
+        if (res.data && res.data.content != null) {
+          setCurrentContent(res.data.content);
+        }
       } else {
         const res = await api.post('/api/signatures',
           { name: currentName, content: currentContent, attachment_file: attachmentVal, sig_type: sigType },
           { headers: { 'X-User-Id': userId } }
         );
         setCurrentSigId(res.data.id);
+        if (res.data && res.data.content != null) {
+          setCurrentContent(res.data.content);
+        }
       }
       // Followup signatures are followup-only — never touch the main email signature
       if (sigType !== 'followup') {

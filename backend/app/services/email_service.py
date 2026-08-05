@@ -628,7 +628,8 @@ def check_scheduled_emails():
                         gmail_message_id = %s,
                         followup_status = 'ACTIVE',
                         followup_stage = 0,
-                        is_responded = FALSE
+                        is_responded = FALSE,
+                        replied_at = NULL
                     WHERE id = %s
                 """, (subject, subject, new_thread_id, new_rfc_message_id, lead_id))
                 conn.commit()

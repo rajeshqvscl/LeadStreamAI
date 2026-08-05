@@ -298,7 +298,10 @@ def update_signature(req: SignatureUpdateRequest, user_id: Optional[str] = Heade
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("UPDATE users SET signature = %s WHERE id = %s", (req.signature, real_uid))
+        # Normalize any WYSIWYG HTML (<br>, <span>, &nbsp;, ...) to clean markdown
+        # so the <br>-laden format can never be stored again.
+        from app.utils.signature_clean import clean_signature_markdown
+        cur.execute("UPDATE users SET signature = %s WHERE id = %s", (clean_signature_markdown(req.signature), real_uid))
         conn.commit()
         return {"message": "Signature updated successfully"}
     except Exception as e:

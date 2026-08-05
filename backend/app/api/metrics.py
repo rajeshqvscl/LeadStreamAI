@@ -46,6 +46,29 @@ def _date_clause_report(date_from, date_to):
         clauses.append(f"AND l.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < (%s::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata'")
     return " ".join(clauses)
 
+# Replied-lead time clauses use replied_at (the actual reply-received timestamp),
+# NOT updated_at (which is polluted by bulk backfills and other lead edits).
+# A lead with replied_at = NULL is an unsourced flag — never counted in the
+# monthly reply numbers (exposed separately as `unsourced_replied`).
+
+def _period_clause_replied(val):
+    v = (val or '').strip().lower()
+    if v == 'daily':
+        return "AND replied_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date AND replied_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < ((NOW() AT TIME ZONE 'Asia/Kolkata')::date + INTERVAL '1 day')"
+    elif v == 'weekly':
+        return "AND replied_at >= NOW() - INTERVAL '7 days'"
+    elif v == 'monthly':
+        return "AND replied_at >= NOW() - INTERVAL '30 days'"
+    return ""
+
+def _date_clause_replied(date_from, date_to):
+    clauses = []
+    if date_from:
+        clauses.append(f"AND replied_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= %s::date AT TIME ZONE 'Asia/Kolkata'")
+    if date_to:
+        clauses.append(f"AND replied_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < (%s::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata'")
+    return " ".join(clauses)
+
 @router.get("/metrics")
 def get_metrics(
     user_id: Optional[str] = Header(None, alias="X-User-Id"),
@@ -127,10 +150,20 @@ def get_metrics(
     cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause} AND email_status = 'PENDING_APPROVAL'", full_params)
     drafts_generated = cur.fetchone()['count'] or 0
 
-    # Reverted = leads that replied
-    # Bounced leads are never 'replied' — exclude them from the reverted (replied) count.
-    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause} AND (email_status IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED') OR (is_responded = TRUE AND email_status NOT ILIKE 'BOUNCED'))", full_params)
+    # Reverted = leads that replied (VERIFIED — has a real reply timestamp).
+    # Bounced leads are never 'replied' — exclude them. Date filtering is on
+    # replied_at (actual reply time), not updated_at (polluted by backfills).
+    rng_replied = _period_clause_replied(period)
+    dte_replied = _date_clause_replied(date_from, date_to)
+    where_replied = f"WHERE {where_base} {rng_replied} {dte_replied}".strip()
+    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_replied} AND replied_at IS NOT NULL AND email_status NOT ILIKE 'BOUNCED'", full_params)
     reverted = cur.fetchone()['count'] or 0
+
+    # Unsourced reply flags — is_responded=TRUE but no reply event evidence
+    # (replied_at IS NULL). These cannot be dated, so they are excluded from the
+    # monthly reply count and reported separately for transparency.
+    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw WHERE {where_base} AND is_responded = TRUE AND replied_at IS NULL", tuple(params))
+    unsourced_replied = cur.fetchone()['count'] or 0
 
     # Total leads (with range)
     cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause}", full_params)
@@ -339,7 +372,7 @@ def get_metrics(
                COALESCE(l.lead_type, 'CLIENT') as lead_type,
                l.email_status, l.followup_status, l.followup_stage,
                l.is_responded, l.is_unsubscribed, l.reply_intent, l.check_size,
-               l.updated_at, l.first_outreach_subject, l.draft_template_used,
+               l.updated_at, l.replied_at, l.first_outreach_subject, l.draft_template_used,
                (SELECT al.details FROM activity_log al WHERE al.lead_id = l.id AND al.action = 'BOUNCED' ORDER BY al.created_at DESC LIMIT 1) as bounce_reason
         FROM leads_raw l
         {report_filter}
@@ -402,6 +435,11 @@ def get_metrics(
         # Sector: taken directly from the lead's own data column (no template inference)
         sector = (r.get('sector') or '').strip() or 'Other'
 
+        replied_ts = r['replied_at']
+        replied_at_display = None
+        if replied_ts:
+            replied_at_display = replied_ts.isoformat() if hasattr(replied_ts, 'isoformat') else str(replied_ts)
+
         report.append({
             "name": f"{r['first_name'] or ''} {r['last_name'] or ''}".strip(),
             "email": r['email'] or '',
@@ -410,6 +448,7 @@ def get_metrics(
             "action": action,
             "followup": followup_display,
             "date": updated,
+            "replied_at": replied_at_display,
             "bounce_reason": r.get('bounce_reason') or '',
             "first_outreach_subject": r.get('first_outreach_subject') or '',
             "check_size": r.get('check_size') or '',
@@ -428,6 +467,7 @@ def get_metrics(
         "daily_limit": daily_limit,
         "drafts_generated": drafts_generated,
         "reverted": reverted,
+        "unsourced_replied": unsourced_replied,
         "total_leads": leads_count,
         "sent": period_email_sent if date_from or date_to else sent,
         "delivered": delivered,

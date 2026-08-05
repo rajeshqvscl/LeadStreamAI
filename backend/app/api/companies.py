@@ -1294,6 +1294,7 @@ def send_company_email(row_id: int, user_id: Optional[str] = Header(None, alias=
                     followup_status = 'ACTIVE',
                     followup_stage = 0,
                     is_responded = FALSE,
+                    replied_at = NULL,
                     updated_at = NOW()
                 WHERE id = %s
             """, (subject, subject, new_thread_id, new_rfc_message_id, lead_id))

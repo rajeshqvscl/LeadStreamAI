@@ -791,6 +791,7 @@ def mark_lead_responded(lead_id: int, user_id: Optional[str] = Header(None, alia
             cur.execute("""
                 UPDATE leads_raw 
                 SET is_responded = TRUE, 
+                    replied_at = COALESCE(replied_at, NOW()), 
                     followup_status = 'STOPPED', 
                     updated_at = NOW() 
                 WHERE id = %s
@@ -799,6 +800,7 @@ def mark_lead_responded(lead_id: int, user_id: Optional[str] = Header(None, alia
             cur.execute("""
                 UPDATE leads_raw 
                 SET is_responded = TRUE, 
+                    replied_at = COALESCE(replied_at, NOW()), 
                     followup_status = 'STOPPED', 
                     updated_at = NOW() 
                 WHERE id = %s AND user_id = %s
@@ -807,6 +809,7 @@ def mark_lead_responded(lead_id: int, user_id: Optional[str] = Header(None, alia
             cur.execute("""
                 UPDATE leads_raw 
                 SET is_responded = TRUE, 
+                    replied_at = COALESCE(replied_at, NOW()), 
                     followup_status = 'STOPPED', 
                     updated_at = NOW() 
                 WHERE id = %s AND user_id IS NULL

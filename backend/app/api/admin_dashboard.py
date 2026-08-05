@@ -301,6 +301,12 @@ def get_all_leads_admin(
         if type and type != 'ALL':
             where_clauses.append(f"({TYPE_CASE_SQL}) = %s")
             params.append(type.upper())
+        # REPLIED status filters by replied_at (the actual reply timestamp); all
+        # other statuses keep filtering on updated_at. replied_at IS NULL means
+        # the lead was flagged replied without event evidence (unsourced) — such
+        # leads only appear when no period filter is applied.
+        _replied_view = bool(status and status.upper() == 'REPLIED')
+        _date_col = 'l.replied_at' if _replied_view else 'l.updated_at'
         if status and status != 'ALL':
             if status.upper() == 'REPLIED':
                 # STRICT: Must have is_responded flag (on a non-bounced lead) OR status is explicitly REPLIED.
@@ -342,13 +348,13 @@ def get_all_leads_admin(
             params.extend([s_param, s_param, s_param, s_param])
         if period and period != 'ALL':
             if period == 'DAILY':
-                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
+                where_clauses.append(f"{_date_col} AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
             elif period == 'WEEKLY':
-                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '6 days'")
+                where_clauses.append(f"{_date_col} AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '6 days'")
             elif period == 'MONTHLY':
-                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '29 days'")
+                where_clauses.append(f"{_date_col} AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '29 days'")
             elif period == 'QUARTERLY':
-                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '89 days'")
+                where_clauses.append(f"{_date_col} AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '89 days'")
             
         where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
@@ -356,7 +362,7 @@ def get_all_leads_admin(
         query = f"""
             SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.city, l.country, l.raw_payload, l.company_name, l.family_office_name, l.designation, 
                    ({SECTOR_CASE_SQL}) as sector, ({TYPE_CASE_SQL}) as lead_type, l.reply_intent, l.sentiment_score, l.deal_size, l.check_size, l.source,
-                   l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
+                   l.user_id, l.created_at, l.updated_at, l.replied_at, l.rag_advice, l.rag_intelligence,
                    l.followup_stage, l.followup_status, l.last_outreach_at, l.email_status,
                    l.persona, l.email_draft, l.first_outreach_subject, l.last_outreach_subject, l.remarks, l.rejection_reason,
                    u.username as owner_name,
@@ -490,6 +496,10 @@ def export_all_leads_admin(
         if type and type != 'ALL':
             where_clauses.append(f"({TYPE_CASE_SQL}) = %s")
             params.append(type.upper())
+        # REPLIED status filters by replied_at (the actual reply timestamp); all
+        # other statuses keep filtering on updated_at.
+        _replied_view = bool(status and status.upper() == 'REPLIED')
+        _date_col = 'l.replied_at' if _replied_view else 'l.updated_at'
         if status and status != 'ALL':
             if status.upper() == 'REPLIED':
                 # BOUNCED leads are never 'replied' — exclude them from the replied filter.
@@ -530,15 +540,15 @@ def export_all_leads_admin(
             params.extend([s_param, s_param, s_param, s_param])
         if period and period != 'ALL':
             if period == 'DAILY':
-                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
+                where_clauses.append(f"{_date_col} AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
             elif period == 'WEEKLY':
-                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '6 days'")
+                where_clauses.append(f"{_date_col} AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '6 days'")
             elif period == 'MONTHLY':
-                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '29 days'")
+                where_clauses.append(f"{_date_col} AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '29 days'")
             elif period == 'QUARTERLY':
-                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '89 days'")
+                where_clauses.append(f"{_date_col} AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '89 days'")
             elif period == 'YEARLY':
-                where_clauses.append("l.updated_at AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '364 days'")
+                where_clauses.append(f"{_date_col} AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '364 days'")
 
         where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
@@ -546,7 +556,7 @@ def export_all_leads_admin(
         query = f"""
             SELECT l.id, l.first_name, l.last_name, l.email, l.phone, l.city, l.country, l.raw_payload, l.company_name, l.family_office_name, l.designation, 
                    ({SECTOR_CASE_SQL}) as sector, l.sector as raw_sector, ({TYPE_CASE_SQL}) as lead_type, l.reply_intent, l.sentiment_score, l.deal_size, l.check_size,
-                   l.user_id, l.created_at, l.updated_at, l.rag_advice, l.rag_intelligence,
+                   l.user_id, l.created_at, l.updated_at, l.replied_at, l.rag_advice, l.rag_intelligence,
                    l.email_status, l.followup_status,
                    l.persona, l.email_draft, l.first_outreach_subject, l.last_outreach_subject,
                    u.username as owner_name

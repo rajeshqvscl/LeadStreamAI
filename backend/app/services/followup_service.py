@@ -266,18 +266,25 @@ def get_template_followup(lead: dict, stage: int) -> str:
     return template.format(name=lead_name)
 
 def get_original_outreach_subject(lead: dict) -> str:
-    """Helper to extract the genuine original email subject to maintain correct threading."""
-    # 1. Try first_outreach_subject
-    subject = lead.get('first_outreach_subject')
+    """Helper to extract the genuine original email subject to maintain correct threading.
+
+    PREFERS last_outreach_subject (the most recent email actually sent) because the
+    follow-up replies into THAT email's thread — using the first outreach subject when
+    a lead received multiple different outreach emails caused Gmail to show the
+    follow-up as a separate mail trail (subject mismatch). Falls back to
+    first_outreach_subject / email_draft for older leads.
+    """
+    # 1. Try last_outreach_subject (subject of the email the follow-up actually replies to)
+    subject = lead.get('last_outreach_subject')
     if subject and subject.strip() and subject.lower() != "following up":
         subj = subject.strip()
         while subj.lower().startswith("re:"):
             subj = subj[3:].strip()
         if subj and subj.lower() != "following up":
             return subj
-            
-    # 2. Try last_outreach_subject
-    subject = lead.get('last_outreach_subject')
+
+    # 2. Try first_outreach_subject
+    subject = lead.get('first_outreach_subject')
     if subject and subject.strip() and subject.lower() != "following up":
         subj = subject.strip()
         while subj.lower().startswith("re:"):
@@ -591,7 +598,10 @@ def process_outreach_sequences():
                                         existing_thread_id = heal_thread_id
                                         existing_msg_id = heal_msg_id
                                         if heal_subject:
+                                            # Update BOTH subject fields so get_original_outreach_subject()
+                                            # (which prefers last_outreach_subject) picks up the healed subject.
                                             lead['first_outreach_subject'] = heal_subject
+                                            lead['last_outreach_subject'] = heal_subject
 
                                         heal_cur = lead_conn.cursor()
                                         heal_cur.execute("""
@@ -599,9 +609,10 @@ def process_outreach_sequences():
                                             SET gmail_thread_id = %s,
                                                 gmail_message_id = %s,
                                                 first_outreach_subject = COALESCE(first_outreach_subject, %s),
+                                                last_outreach_subject = COALESCE(last_outreach_subject, %s),
                                                 updated_at = NOW()
                                             WHERE id = %s
-                                        """, (heal_thread_id, heal_msg_id, heal_subject, lead_id))
+                                        """, (heal_thread_id, heal_msg_id, heal_subject, heal_subject, lead_id))
                                         lead_conn.commit()
                                         heal_cur.close()
                         except Exception as heal_err:

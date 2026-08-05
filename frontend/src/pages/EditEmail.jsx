@@ -84,6 +84,29 @@ const htmlToMd = (html) => {
 
 const isHtml = (str) => /<[a-z][\s\S]*>/i.test(str);
 
+// A saved signature is stored as markdown and appended raw to the body
+// (inject_signature). When the body is HTML (WYSIWYG) the markdown remnants —
+// ***Name*** / [Website](url) / '--' separator / \n line breaks — would
+// otherwise show as literal text or collapsed lines. Convert them in the editor
+// and the preview so both match the rendered email.
+const convertHtmlMarkdownRemnants = (html) => {
+  if (!html) return html;
+  return html
+    .replace(/!\[(.*?)\]\((.*?)\)/g, (m, alt, src) => `<img src="${src}" alt="${alt}" style="max-width:200px;height:auto;">`)
+    .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*\n]+)\*/g, (m, inner) => {
+      if (inner.startsWith(' ') || inner.endsWith(' ')) return m;
+      return `<em>${inner}</em>`;
+    })
+    .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>')
+    .replace(/^\s*(--|—)\s*$/gm, '<div style="color:#475569; font-style:italic;">--</div>')
+    // Signature lines use \n breaks. Convert them to <br> — but only outside
+    // HTML tag structure (\n not followed by '<') so existing HTML bodies with
+    // newlines between block/table tags are never mangled.
+    .replace(/\n(?!<)/g, '<br>');
+};
+
 const EditEmail = () => {
   const { draftId } = useParams();
   const navigate = useNavigate();
@@ -514,6 +537,10 @@ const EditEmail = () => {
           }
           return '<td style="padding:1px 4px;border:1px solid #475569;text-align:left;font-size:18px;">';
         });
+      // A markdown signature is appended raw to the body (inject_signature). When
+      // the body is HTML we land here, so convert any markdown remnants or they'd
+      // show as literal text / collapsed lines in the preview.
+      html = convertHtmlMarkdownRemnants(html);
       return `<div style="color: #cbd5e1; font-size: 18px; line-height: 1.6;">${html}</div>`;
     }
 
@@ -759,7 +786,7 @@ const EditEmail = () => {
       setUserSignature(sigUser.signature || '');
 
       // Convert markdown body to HTML for WYSIWYG editor
-      let finalBody = isHtml(bd) ? bd : mdToHtml(bd);
+      let finalBody = isHtml(bd) ? convertHtmlMarkdownRemnants(bd) : mdToHtml(bd);
 
       // ── Auto-insert concise table from template if body doesn't already have one ──
       const templateName = lead.draft_template_used;

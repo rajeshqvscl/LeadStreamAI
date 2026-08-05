@@ -167,7 +167,7 @@ const MisReportPage = () => {
     );
   }
 
-  const { report = [], reverted, _today_sent, _today_followups, _daily_limit, total_registry, bounces, drafts_generated } = data;
+  const { report = [], reverted, unsourced_replied = 0, _today_sent, _today_followups, _daily_limit, total_registry, bounces, drafts_generated } = data;
   const personaData = data.persona_breakdown ? Object.entries(data.persona_breakdown).map(([k, v]) => ({ name: k, value: v })) : [];
   const sectorCounts = {};
   report.forEach(r => {
@@ -285,8 +285,8 @@ const MisReportPage = () => {
                 ['Total Leads', data.total_leads || 0],
                 ['Drafts Pending', drafts_generated],
                 ['Emails Sent', data.sent || 0],
-                ['Replied', reverted],
-                ['Follow-ups', data.total_followups || 0],
+                ['Replied (verified)', reverted],
+                ['Replies (unsourced)', unsourced_replied],
                 ['Bounced', bounces],
               ].map(([l, v]) => (
                 <div key={l} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 8px', textAlign: 'center', background: '#fff' }}>

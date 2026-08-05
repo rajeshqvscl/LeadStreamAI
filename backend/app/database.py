@@ -201,7 +201,11 @@ def create_tables():
         ("rejection_reason", "TEXT"),
         # Unsubscribe token for secure token-based opt-out
         ("email_opt_in", "BOOLEAN DEFAULT TRUE"),
-        ("unsubscribe_token", "TEXT")
+        ("unsubscribe_token", "TEXT"),
+        # Timestamp of when the lead's reply was actually received/detected.
+        # NULL means the lead was flagged replied but no reply event evidence
+        # exists (unsourced/manual flag) — excluded from monthly reply counts.
+        ("replied_at", "TIMESTAMP")
     ]
     # Skip ALTER TABLEs if all columns already exist (saves ~11s on Neon)
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'leads_raw'")
@@ -722,16 +726,30 @@ def create_tables():
     # existing data from the legacy users.signature column so every user gets
     # their old signature as a named entry in the new table automatically.
     try:
-        cur.execute("""
-            INSERT INTO user_signatures (user_id, name, content, is_default)
-            SELECT id, 'My Signature', signature, TRUE
-            FROM users
-            WHERE signature IS NOT NULL AND signature != ''
-            AND NOT EXISTS (
-                SELECT 1 FROM user_signatures WHERE user_signatures.user_id = users.id
-            );
-        """)
-        migrated = cur.rowcount
+        # Read legacy signatures first, sanitize each (WYSIWYG HTML -> markdown),
+        # then insert. Keeps the migration from ever re-seeding dirty HTML.
+        cur.execute(
+            "SELECT id, signature FROM users WHERE signature IS NOT NULL AND signature != ''"
+        )
+        legacy_rows = cur.fetchall()
+        migrated = 0
+        for legacy in legacy_rows:
+            try:
+                from app.utils.signature_clean import clean_signature_markdown
+                clean = clean_signature_markdown(legacy[1])
+            except Exception:
+                clean = legacy[1]
+            if not clean:
+                continue
+            cur.execute(
+                """INSERT INTO user_signatures (user_id, name, content, is_default)
+                   SELECT %s, 'My Signature', %s, TRUE
+                   WHERE NOT EXISTS (
+                       SELECT 1 FROM user_signatures WHERE user_id = %s
+                   )""",
+                (legacy[0], clean, legacy[0]),
+            )
+            migrated += cur.rowcount
         if migrated > 0:
             logger.info(f"Migrated {migrated} legacy signature(s) to user_signatures table")
         conn.commit()
