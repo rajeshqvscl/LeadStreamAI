@@ -412,17 +412,66 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
 
                 # Strip inline font-size from html_content so the wrapper font-size
                 # cascades uniformly — this prevents any <span style="font-size:12px">
-                # in the saved draft from overriding the wrapper. Tables are EXEMPT:
-                # their cell font-sizes (e.g. a 9pt header row) are part of the design
-                # and would otherwise all jump to the wrapper size and look wrong.
+                # in the saved draft from overriding the wrapper. TABLES and the
+                # SIGNATURE BLOCK are EXEMPT: their font-sizes (e.g. a 9pt header row,
+                # or the 8px disclaimer line set in the signature editor) are part of
+                # the design and must survive to the sent email.
                 import re as _fs_re
-                def _strip_fontsize_outside_tables(html: str) -> str:
-                    _parts = re.split(r'(<table[^>]*>.*?</table>)', html, flags=re.DOTALL | re.IGNORECASE)
-                    for _i, _part in enumerate(_parts):
-                        if not _part.lower().startswith('<table'):
-                            _parts[_i] = _fs_re.sub(r'font-size\s*:\s*[^;]+;?\s*', '', _part)
-                    return ''.join(_parts)
-                html_content = _strip_fontsize_outside_tables(html_content)
+
+                def _strip_fontsize_preserving_design(html: str) -> str:
+                    # Regions to keep untouched: tables + signature container div
+                    protected = []
+
+                    # 1) Tables
+                    for _m in _fs_re.finditer(r'<table[^>]*>.*?</table>', html, flags=_fs_re.DOTALL | _fs_re.IGNORECASE):
+                        protected.append((_m.start(), _m.end()))
+
+                    # 2) Signature container — markdown_to_html wraps the signature
+                    # in <div style="...border-top: 1px solid #f0f0f0...">...</div>.
+                    # It can contain nested <div>s (empty-line spacers, legal blocks),
+                    # so find the matching close with a depth count.
+                    _sig_open = _fs_re.compile(
+                        r'<div[^>]*border-top:\s*1px\s+solid\s+#f0f0f0[^>]*>',
+                        _fs_re.IGNORECASE,
+                    )
+                    for _m in _sig_open.finditer(html):
+                        _depth = 1
+                        _i = _m.end()
+                        while _i < len(html) and _depth > 0:
+                            _o = html.find('<div', _i)
+                            _c = html.find('</div', _i)
+                            if _c == -1:
+                                break
+                            if _o != -1 and _o < _c:
+                                _depth += 1
+                                _i = _o + 4
+                            else:
+                                _depth -= 1
+                                _i = _c + 5
+                        if _depth == 0:
+                            protected.append((_m.start(), _i))
+
+                    # Strip font-size only OUTSIDE the protected regions.
+                    # Merge overlapping/adjacent ranges first (e.g. a <table>
+                    # inside the signature container) so content is never emitted
+                    # twice.
+                    protected.sort()
+                    _merged = []
+                    for (_s, _e) in protected:
+                        if _merged and _s <= _merged[-1][1]:
+                            _merged[-1] = (_merged[-1][0], max(_merged[-1][1], _e))
+                        else:
+                            _merged.append((_s, _e))
+                    _out = []
+                    _pos = 0
+                    for (_s, _e) in _merged:
+                        _out.append(_fs_re.sub(r'font-size\s*:\s*[^;]+;?\s*', '', html[_pos:_s]))
+                        _out.append(html[_s:_e])
+                        _pos = _e
+                    _out.append(_fs_re.sub(r'font-size\s*:\s*[^;]+;?\s*', '', html[_pos:]))
+                    return ''.join(_out)
+
+                html_content = _strip_fontsize_preserving_design(html_content)
 
                 # Wrap in clean email template for professional appearance in Gmail
                 email_font = get_user_email_font(user_id)

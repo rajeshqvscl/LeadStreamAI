@@ -1107,6 +1107,17 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
         # markdown path's ordering) so ![alt](url) is not eaten by the link regex.
         text = _convert_markdown_remnants(text)
         text = re.sub(r'<img[^>]+>', _inline_img, text, flags=re.DOTALL | re.IGNORECASE)
+        # Wrap the signature block (everything after the '--' separator) in the
+        # SAME signature container div the markdown path produces — the send-time
+        # font-size strip in email_service protects this container (like tables),
+        # so custom font-sizes set in the signature editor survive in the email
+        # even when the body is WYSIWYG HTML (rich branch).
+        _sig_marker = '<span style="color: #666; font-style: italic; display: block;">--</span>'
+        if _sig_marker in text:
+            _head, _sep, _sig = text.partition(_sig_marker)
+            if _sig.strip():
+                _sig_style = "margin-top: 4px; border-top: 1px solid #f0f0f0; padding-top: 6px; line-height: 1.4;"
+                text = _head + f'<div style="{_sig_style}">' + _sig_marker + _sig.strip() + '</div>'
         return _restore_rich(text)
 
     text = re.sub(r'!\[(.*?)\]\((.*?)\)', _inline_md_img, text)
