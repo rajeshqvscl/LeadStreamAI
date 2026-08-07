@@ -61,7 +61,10 @@ _STRIP_TEMPLATE_SIG_SQL = (
 # keyed by the exact asset FILENAME so ONLY this specific logo is affected —
 # every other user's signature images (e.g. Ayush's) render exactly as before.
 _LOGO_FORCED_STYLES = {
-    "upload_1786095549294_2711.webp": "width:150px;height:150px;object-fit:contain;display:block;",
+    # .jpg is intentional: the asset is a JPEG and is committed to the repo, so it
+    # survives Render deploys and is served as image/jpeg (the .webp name returned
+    # application/octet-stream on Render, which email clients refuse to render).
+    "upload_1785476979958_9473.jpg": "width:150px;height:150px;object-fit:contain;display:block;",
 }
 
 
