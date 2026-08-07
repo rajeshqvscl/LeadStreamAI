@@ -5,6 +5,7 @@ import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import api from '../services/api';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
+import { applyForcedLogoStyles } from '../utils/logoSize';
 import SignatureEditor from '../components/SignatureEditor';
 
 const mdToHtml = (md) => {
@@ -48,7 +49,8 @@ const mdToHtml = (md) => {
   html = html.replace(/^#\s+(.*?)$/gm, '<h1>$1</h1>');
   html = html.replace(/^[-*_]{3,}\s*$/gm, '<hr style="border: none; border-top: 2px solid #475569; margin: 16px 0;">');
   html = html.replace(/\n/g, '<br>');
-  return html;
+  // Palak's logo must preview at 150x150 (backend forces the same size in sent emails).
+  return applyForcedLogoStyles(html);
 };
 
 const htmlToMd = (html) => {
@@ -91,7 +93,7 @@ const isHtml = (str) => /<[a-z][\s\S]*>/i.test(str);
 // and the preview so both match the rendered email.
 const convertHtmlMarkdownRemnants = (html) => {
   if (!html) return html;
-  return html
+  const converted = html
     .replace(/!\[(.*?)\]\((.*?)\)/g, (m, alt, src) => `<img src="${src}" alt="${alt}" style="max-width:200px;height:auto;">`)
     .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
@@ -111,6 +113,8 @@ const convertHtmlMarkdownRemnants = (html) => {
     .replace(/(<\/?(?:div|table|tbody|thead|tfoot|tr|td|th|p|h[1-6]|ul|ol|li|blockquote|section|article|header|footer|main|aside|nav|form|fieldset|figure|figcaption|hr|pre|address|br)[^>]*>)\n/gi, '$1@@LSBLOCKNL@@')
     .replace(/\n/g, '<br>')
     .replace(/@@LSBLOCKNL@@/g, '\n');
+  // Palak's logo must preview at 150x150 (backend forces the same size in sent emails).
+  return applyForcedLogoStyles(converted);
 };
 
 const EditEmail = () => {

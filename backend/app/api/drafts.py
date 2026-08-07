@@ -54,6 +54,29 @@ _STRIP_TEMPLATE_SIG_SQL = (
     "WHERE content ILIKE '%SIG_START%'"
 )
 
+# ── Forced signature-logo display size (Palak-only) ──
+# Palak's QVSCL logo must ALWAYS render at 150x150 in sent emails, even if the
+# saved signature is re-saved through the editor (which converts the HTML <img>
+# back to plain markdown and would otherwise lose the explicit size). The map is
+# keyed by the exact asset FILENAME so ONLY this specific logo is affected —
+# every other user's signature images (e.g. Ayush's) render exactly as before.
+_LOGO_FORCED_STYLES = {
+    "upload_1786095549294_2711.webp": "width:150px;height:150px;object-fit:contain;display:block;",
+}
+
+
+def _forced_logo_style(src: str) -> Optional[str]:
+    """Return the forced inline style for a known logo asset URL, else None.
+
+    Matches by filename (last path segment, ignoring query/hash), so both the
+    markdown and the HTML forms of Palak's logo get the same fixed size.
+    """
+    if not src:
+        return None
+    fname = src.rstrip("/").rsplit("/", 1)[-1].split("?")[0].split("#")[0]
+    return _LOGO_FORCED_STYLES.get(fname)
+
+
 def invalidate_pending_drafts_cache(user_id: str = "*"):
     if redis_available and redis_client:
         try:
@@ -994,7 +1017,8 @@ def _convert_markdown_remnants(text: str, convert_newlines: bool = True) -> str:
         src = m.group(2)
         backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
         src = src.replace("[[BACKEND_URL]]", backend_url)
-        return f'<img src="{src}" alt="{alt_text}" style="width:100%;height:auto;display:block;" />'
+        style = _forced_logo_style(src) or "width:100%;height:auto;display:block;"
+        return f'<img src="{src}" alt="{alt_text}" style="{style}" />'
 
     # Images FIRST (before links) so ![alt](url) is not eaten by the link regex.
     text = re.sub(r'!\[(.*?)\]\((.*?)\)', _md_img, text)
@@ -1069,6 +1093,7 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
         if not src_m:
             return tag
         src = src_m.group(1)
+        forced = _forced_logo_style(src)
         # Fallback: legacy data-URI images already in content get a fixed width
         if src.startswith("data:image/"):
             if re.search(r'style\s*=', tag, re.IGNORECASE):
@@ -1076,6 +1101,13 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
             else:
                 tag = tag.replace(' src="', ' style="width:400px;height:auto;display:block;" src="')
             return tag
+        # Palak's logo: force the fixed 150x150 style regardless of how the
+        # stored content wrote it (HTML form re-saved by the editor, etc.).
+        if forced:
+            if re.search(r'style\s*=', tag, re.IGNORECASE):
+                tag = re.sub(r'style\s*=\s*"[^"]*"', f'style="{forced}"', tag, flags=re.IGNORECASE)
+            else:
+                tag = tag.replace(' src="', f' style="{forced}" src="')
         return tag
 
     def _inline_md_img(m):
@@ -1085,8 +1117,9 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
         # branch does (line ~1012), so markdown images render correctly.
         backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
         src = src.replace("[[BACKEND_URL]]", backend_url)
+        style = _forced_logo_style(src) or "width:100%;height:auto;display:block;"
         # Fallback: convert any unknown image markdown to an <img> tag
-        return f'<img src="{src}" alt="{alt_text}" style="width:100%;height:auto;display:block;" />'
+        return f'<img src="{src}" alt="{alt_text}" style="{style}" />'
     
     # ── If text is already rich HTML, skip markdown processing ──
     if re.search(r'<(div|table|span|p|h[1-6]|ul|ol|li|br|img|a|strong|em|b|i|u|font)[\s>]', text, re.IGNORECASE) or '</' in text:

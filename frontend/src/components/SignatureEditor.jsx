@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Pen, Save, Loader2, CheckCircle2, X, FileUp, Sparkles, Plus, Trash2, Star, Copy, Pencil } from 'lucide-react';
 import api from '../services/api';
 import ToolbarTextarea from './ToolbarTextarea';
+import { applyForcedLogoStyles } from '../utils/logoSize';
 
 const TEMPLATES = [
   {
@@ -254,7 +255,9 @@ const SignatureEditor = ({ userId, onSave, onClose, children }) => {
       if (/style\s*=\s*"/i.test(m)) return m.replace(/style\s*=\s*"([^"]*)"/i, 'style="width:400px;height:auto;display:block;"');
       return m.replace('<img', '<img style="width:400px;height:auto;display:block;"');
     });
-    return html;
+    // Palak's logo (stored as markdown after editor re-save) must preview at
+    // 150x150 — same forced size the backend applies to sent emails.
+    return applyForcedLogoStyles(html);
   };
 
   return (

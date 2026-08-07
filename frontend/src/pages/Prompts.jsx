@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Loader2, CheckCircle2, AlertCircle, Trash2, ChevronDown, ChevronUp, Save, Upload, Paperclip, AtSign, FileText, Eye } from 'lucide-react';
 import api from '../services/api';
 import ToolbarTextarea from '../components/ToolbarTextarea';
+import { applyForcedLogoStyles } from '../utils/logoSize';
 
 import mammoth from 'mammoth';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -300,6 +301,8 @@ const Prompts = () => {
           }
           return '<td style="padding:1px 4px;border:1px solid #475569;text-align:left;font-size:18px;">';
         });
+      // Palak's logo must preview at 150x150 (backend forces the same size in sent emails).
+      html = applyForcedLogoStyles(html);
       return `<div style="color:#cbd5e1;font-size:18px;line-height:1.5;">${html}</div>`;
     }
 
@@ -397,6 +400,8 @@ const Prompts = () => {
       if (inner.startsWith(' ') || inner.endsWith(' ')) return m;
       return `<em>${inner}</em>`;
     });
+    // Palak's logo must preview at 150x150 (backend forces the same size in sent emails).
+    finalHtml = applyForcedLogoStyles(finalHtml);
     // Ensure all HTML tables have visible borders — force concise padding/font-size!
     finalHtml = finalHtml
       .replace(/<table(\s[^>]*)?>/gi, (m) => {

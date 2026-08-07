@@ -3,6 +3,7 @@ import { Pen, Save, Loader2, CheckCircle2, FileUp, Upload, Sparkles, Plus, Trash
 import { Link } from 'react-router-dom';
 import api from '../services/api';
 import ToolbarTextarea from '../components/ToolbarTextarea';
+import { applyForcedLogoStyles } from '../utils/logoSize';
 
 const TEMPLATES = [
   {
@@ -347,7 +348,9 @@ const Signatures = () => {
       if (/style\s*=\s*"/i.test(m)) return m.replace(/style\s*=\s*"([^"]*)"/i, 'style="width:400px;height:auto;display:block;"');
       return m.replace('<img', '<img style="width:400px;height:auto;display:block;"');
     });
-    return html;
+    // Palak's logo (stored as markdown after editor re-save) must preview at
+    // 150x150 — same forced size the backend applies to sent emails.
+    return applyForcedLogoStyles(html);
   };
 
   return (
