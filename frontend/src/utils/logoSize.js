@@ -12,7 +12,7 @@
  */
 
 const FORCED_LOGO_STYLES = {
-  'upload_1786095549294_2711.webp': 'width:150px;height:150px;object-fit:contain;display:block;',
+  'upload_1786095549294_2711.webp': 'width:100px;height:100px;object-fit:contain;display:block;',
 };
 
 /** Resolve the forced inline style for a logo asset URL, else null. */
