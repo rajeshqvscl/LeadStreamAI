@@ -977,6 +977,57 @@ def _extract_body_attachments(body: str, user_id: Optional[int] = None) -> tuple
                     logger.warning(f"Drive upload failed for {filename}: {e}")
     return attachments, url_replacements
 
+
+def _convert_markdown_remnants(text: str, convert_newlines: bool = True) -> str:
+    """Convert raw markdown remnants embedded in an HTML body (typically a
+    signature appended by inject_signature) into HTML.
+
+    Handles ![img](url), [text](url), ***bold italic***, **bold**, *italic*,
+    standalone '--' / '—' separator lines, and (optionally) \n -> <br> using the
+    block-tag-aware rule so existing tables/divs are never mangled. Used by the
+    rich-HTML branch of markdown_to_html (convert_newlines=True) and by the
+    draft healer (convert_newlines=False — newlines stay so Subject-line parsing
+    and the frontend/send-time renderers handle them).
+    """
+    def _md_img(m):
+        alt_text = m.group(1)
+        src = m.group(2)
+        backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+        src = src.replace("[[BACKEND_URL]]", backend_url)
+        return f'<img src="{src}" alt="{alt_text}" style="width:100%;height:auto;display:block;" />'
+
+    # Images FIRST (before links) so ![alt](url) is not eaten by the link regex.
+    text = re.sub(r'!\[(.*?)\]\((.*?)\)', _md_img, text)
+    # Markdown links [text](url) — skip already-converted HTML href/src.
+    text = re.sub(r'(?<!href=")(?<!src=")\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', text)
+    text = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong><em>\1</em></strong>', text)
+    text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
+
+    def _rich_ital(m):
+        inner = m.group(1)
+        if inner.startswith(' ') or inner.endswith(' '):
+            return m.group(0)
+        return f'<i>{inner}</i>'
+    text = re.sub(r'\*([^*\n]+)\*', _rich_ital, text)
+    # Standalone '--' / '—' signature separator line -> styled marker (same
+    # look as the markdown path's smart-signature block).
+    text = re.sub(r'(?m)^\s*(?:--|—)\s*$', '<span style="color: #666; font-style: italic; display: block;">--</span>', text)
+
+    if convert_newlines:
+        # Signature lines use \n breaks. Convert them to <br> — but only when the
+        # newline is NOT adjacent to a block-level HTML tag (<div>, <table>, <p>, ...),
+        # so existing HTML bodies with newlines between block/table tags are never
+        # mangled. Newlines before inline tags (<strong>, <em>, <a>, <img>, ...)
+        # MUST become <br>, otherwise signature lines like "Analyst\n<a href=...>"
+        # collapse to "Analyst Website" when rendered.
+        _block_tags = r'(?:div|table|tbody|thead|tfoot|tr|td|th|p|h[1-6]|ul|ol|li|blockquote|section|article|header|footer|main|aside|nav|form|fieldset|figure|figcaption|hr|pre|address|br)'
+        text = re.sub(r'\n(?=[ \t]*(?:</?)' + _block_tags + r'[\s/>])', '@@LSBLOCKNL@@', text, flags=re.IGNORECASE)
+        text = re.sub(r'(<(?:/?)(?:' + _block_tags + r')[^>]*>)\n', r'\1' + '@@LSBLOCKNL@@', text, flags=re.IGNORECASE)
+        text = re.sub(r'\n', '<br>', text)
+        text = text.replace('@@LSBLOCKNL@@', '\n')
+    return text
+
+
 def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_size="15px"):
     import re
     # Normalize newlines
@@ -1054,25 +1105,7 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
         # ***Name*** / **bold** / *italic* / ![logo](url) would leak as literal
         # text into the sent email. Images FIRST (before links, matching the
         # markdown path's ordering) so ![alt](url) is not eaten by the link regex.
-        text = re.sub(r'!\[(.*?)\]\((.*?)\)', _inline_md_img, text)
-        # Convert markdown links [text](url) to HTML — but skip already-converted HTML tags
-        text = re.sub(r'(?<!href=")(?<!src=")\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', text)
-        text = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong><em>\1</em></strong>', text)
-        text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
-        def _rich_ital(m):
-            inner = m.group(1)
-            if inner.startswith(' ') or inner.endswith(' '):
-                return m.group(0)
-            return f'<i>{inner}</i>'
-        text = re.sub(r'\*([^*\n]+)\*', _rich_ital, text)
-        # Standalone '--' / '—' signature separator line -> styled marker (same
-        # look as the markdown path's smart-signature block).
-        text = re.sub(r'(?m)^\s*(?:--|—)\s*$', '<span style="color: #666; font-style: italic; display: block;">--</span>', text)
-        # An appended markdown signature uses \n line breaks. In HTML those would
-        # collapse to spaces, so convert them to <br> — but ONLY newlines outside
-        # HTML tag structure (\n not followed by '<') so existing HTML bodies
-        # with newlines between block/table tags are never mangled.
-        text = re.sub(r'\n(?!<)', '<br>', text)
+        text = _convert_markdown_remnants(text)
         text = re.sub(r'<img[^>]+>', _inline_img, text, flags=re.DOTALL | re.IGNORECASE)
         return _restore_rich(text)
 
@@ -1150,7 +1183,15 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
                      line = re.sub(r"(?i)(strictly private and confidential)", r"<strong>\1</strong>", line)
                 line = f'<div style="font-size: {font_size}; color: #444; font-weight: normal; line-height: 1.4; display: block; margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">{line}</div>'
             elif "<div" in line or "<img" in line or (not gmail_style and ("<span" in line or "<a" in line or "<strong" in line)):
-                pass
+                # Already-formatted HTML line — keep as-is. The signature lines are
+                # joined with no separator below, so inline lines need a <br> or the
+                # whole signature collapses onto one line. Block elements (lines
+                # ending in </div>, display:block images) separate themselves.
+                # NOTE: mutate `line` (do NOT append here) — every line is appended
+                # exactly once by the shared `formatted_sig_lines.append(line)` below.
+                if (not line.rstrip().endswith("</div>") and not line.rstrip().endswith("<br>")
+                        and not ("<img" in line and "display:block" in line)):
+                    line = line + "<br>"
             else:
                 # Handle links before wrapping in span
                 line = re.sub(r'(?<!href=")(?<!src=")\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', line)
@@ -1920,6 +1961,12 @@ def heal_draft_content(email_draft: str, user_id: Optional[str], profile: Option
             flags=re.IGNORECASE
         )
                 
+    # Stored drafts may contain raw markdown signature remnants (appended by
+    # inject_signature and stored pre-render). Convert the markers to HTML so
+    # drafts display rendered everywhere. Newlines are left as-is here — callers
+    # split on \n for the Subject line, and the frontend/send-time renderers
+    # convert them to <br> themselves.
+    healed = _convert_markdown_remnants(healed, convert_newlines=False)
     return healed
 
 def _md_to_html(text: str) -> str:
@@ -2188,7 +2235,10 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         
         from app.services.email_service import get_user_email_font, get_user_email_font_size
         html_body = markdown_to_html(body_with_sig, gmail_style=is_yashika, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id))
-        email_content = f"Subject: {subject}\n\n{body_with_sig}"
+        # Store the RENDERED HTML (html_body) so drafts display correctly in every
+        # view — the raw body_with_sig would bake markdown signature remnants
+        # (***Name***, [Website](url)) into the stored draft as literal text.
+        email_content = f"Subject: {subject}\n\n{html_body}"
         
         old_gmail_id = lead.get('gmail_draft_id')
         uid_int = int(normalize_user_id(user_id))
@@ -3072,7 +3122,8 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
         html_body = markdown_to_html(body_with_sig, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id))
 
         # Full content for local DB storage
-        email_content = f"Subject: {final_subject}\n\n{body_with_sig}"
+        # Store the RENDERED HTML (html_body) — see note in generate_email_internal.
+        email_content = f"Subject: {final_subject}\n\n{html_body}"
 
         # --- Delete OLD Gmail Draft if it exists ---
         old_gmail_id = lead.get('gmail_draft_id')

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Signature Preview — Kajal</title>
+<style>
+  body { background: #0a0f1a; color: #cbd5e1; font-family: -apple-system, 'Segoe UI', Arial, sans-serif; padding: 32px; }
+  .card { background: #fff; color: #1e293b; border-radius: 12px; padding: 28px 32px; max-width: 720px; margin: 0 auto 28px; box-shadow: 0 8px 30px rgba(0,0,0,.35); }
+  .card h2 { margin: 0 0 4px; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: #64748b; font-weight: 700; }
+  .card .sub { color: #94a3b8; font-size: 11px; margin-bottom: 16px; }
+  hr.sep { border: none; border-top: 1px dashed #334155; margin: 18px 0; }
+  .badge { display:inline-block; background:#05966920; border:1px solid #059669; color:#34d399; font-size:10px; font-weight:800; letter-spacing:1px; padding:2px 8px; border-radius:6px; margin-bottom:10px;}
+</style>
+</head>
+<body>
+  <div class="card">
+    <span class="badge">✓ RENDERED — signature alone (email style)</span>
+    <h2>Kajal Narang</h2>
+    <div class="sub">user_signatures id=5 · markdown_to_html output</div>
+    <div style="font-size:15px; line-height:1.5;"><div style="margin-top: 4px; border-top: 1px solid #f0f0f0; padding-top: 6px; line-height: 1.4;"><span style="color: #666; font-style: italic; display: block; margin-bottom: 0px; font-size: 15px;">--</span><span style="color: #666; font-style: italic; display: block; margin-bottom: 0px; font-size: 15px;">Thanks & Regards,</span><div style="height: 3px;"></div><strong><em>Kajal Narang</em></strong><span style="color: #666; font-style: italic; display: block; margin-bottom: 0px; font-size: 15px;">Deputy Manager - Corporate Finance</span><a href="https://qvscl.com" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">Website</a> | <a href="https://www.linkedin.com/in/kajal-narang-investmentanalyst/" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">LinkedIn</a><span style="color: #666; font-style: italic; display: block; margin-bottom: 0px; font-size: 15px;">+91 7982721309</span><a href="https://www.linkedin.com/company/qvscl/" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">Company Linkedin</a><a href="https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">Company Documents</a></div></div>
+  </div>
+
+  <div class="card">
+    <span class="badge">✓ FULL EMAIL — HTML body + signature</span>
+    <h2>Real send path</h2>
+    <div class="sub">markdown_to_html(body + sig) — exactly what the recipient gets</div>
+    <div style="font-size:15px; line-height:1.5;">Dear Sravanthi,<br><br>I hope you're doing well.<br><br>I'm Kajal from QVSCL (Gurugram). We are currently raising a Series A+ round.<br><br><strong>Business Overview</strong><br><strong>Sector:</strong> FoodTech / Supply Chain / Agritech / ClimateTech
+<span style="color: #666; font-style: italic; display: block;">--</span><br>Thanks & Regards,<br>
+<strong><em>Kajal Narang</em></strong><br>Deputy Manager - Corporate Finance
+<a href="https://qvscl.com" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">Website</a> | <a href="https://www.linkedin.com/in/kajal-narang-investmentanalyst/" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">LinkedIn</a><br>+91 7982721309
+<a href="https://www.linkedin.com/company/qvscl/" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">Company Linkedin</a>
+<a href="https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">Company Documents</a></div>
+  </div>
+
+  <div class="card">
+    <span class="badge">RAW MARKDOWN (stored in DB)</span>
+    <h2>Stored signature content</h2>
+    <div class="sub">what inject_signature appends before rendering</div>
+    <pre style="white-space:pre-wrap; font-size:12px; background:#0f172a; color:#94a3b8; padding:14px; border-radius:8px;">--
+Thanks &amp; Regards,
+
+***Kajal Narang***
+Deputy Manager - Corporate Finance
+[Website](https://qvscl.com) | [LinkedIn](https://www.linkedin.com/in/kajal-narang-investmentanalyst/)
++91 7982721309
+[Company Linkedin](https://www.linkedin.com/company/qvscl/)
+[Company Documents](https://drive.google.com/drive/folders/10kjiUJljms_tNARki9Uo0H1Du6nxPIaW?usp=drive_link)</pre>
+  </div>
+</body>
+</html>

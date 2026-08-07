@@ -1,4 +1,5 @@
 import os
+import re
 import ssl
 import logging
 from datetime import datetime
@@ -86,6 +87,8 @@ DEFAULT_EMAIL_FONT = SANS_SERIF_FONT
 # Default for everyone is 15px. Ayush (2) is explicitly kept at 18px.
 USER_EMAIL_FONT_SIZES = {
     2: "18px",  # Ayush — keeps the larger size
+    3: "14px",  # Kajal — requested smaller size
+    4: "15px",  # Yashika — keep at default size
     5: "13px",  # Palak — smaller size
 }
 DEFAULT_EMAIL_FONT_SIZE = "15px"
@@ -209,8 +212,16 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
             pass
     
     import markdown
-    # Convert markdown to HTML for a premium look
-    if not html_content.strip().startswith('<'):
+    # Convert markdown to HTML for a premium look — but ONLY for genuinely
+    # plain-text / markdown content. If the body already contains known HTML
+    # tags (even when it does NOT start with a tag — e.g. WYSIWYG-edited bodies
+    # that begin with raw text like "Dear X,&nbsp;" followed by <div>/<table>
+    # markup), pass it through untouched. Otherwise the plain-text fallback
+    # below wraps EVERY line — including <table>/<tr>/<th> tags — in <p>
+    # elements, which breaks table rendering in Gmail. The known-tag list
+    # mirrors markdown_to_html's rich-branch check so prose mentioning things
+    # like "<filename>" is never mistaken for HTML.
+    if not re.search(r'<(div|table|span|p|h[1-6]|ul|ol|li|br|img|a|strong|em|b|i|u|font)[\s>]', html_content, re.IGNORECASE) and '</' not in html_content:
         # Normalize bullet characters for markdown compatibility
         html_content = html_content.replace('•', '*')
         has_bullet_lines = any(line.strip().startswith('* ') for line in html_content.split('\n'))
@@ -399,10 +410,19 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                         pixel_html = f'<img src="{pixel_url}" width="1" height="1" style="display:none" />'
                         html_content = html_content + pixel_html
 
-                # Strip ALL inline font-size from html_content so wrapper font-size cascades uniformly
-                # This prevents any <span style="font-size:12px"> in the saved draft from overriding the wrapper
+                # Strip inline font-size from html_content so the wrapper font-size
+                # cascades uniformly — this prevents any <span style="font-size:12px">
+                # in the saved draft from overriding the wrapper. Tables are EXEMPT:
+                # their cell font-sizes (e.g. a 9pt header row) are part of the design
+                # and would otherwise all jump to the wrapper size and look wrong.
                 import re as _fs_re
-                html_content = _fs_re.sub(r'font-size\s*:\s*[^;]+;?\s*', '', html_content)
+                def _strip_fontsize_outside_tables(html: str) -> str:
+                    _parts = re.split(r'(<table[^>]*>.*?</table>)', html, flags=re.DOTALL | re.IGNORECASE)
+                    for _i, _part in enumerate(_parts):
+                        if not _part.lower().startswith('<table'):
+                            _parts[_i] = _fs_re.sub(r'font-size\s*:\s*[^;]+;?\s*', '', _part)
+                    return ''.join(_parts)
+                html_content = _strip_fontsize_outside_tables(html_content)
 
                 # Wrap in clean email template for professional appearance in Gmail
                 email_font = get_user_email_font(user_id)

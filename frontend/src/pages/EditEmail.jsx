@@ -101,10 +101,16 @@ const convertHtmlMarkdownRemnants = (html) => {
     })
     .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>')
     .replace(/^\s*(--|—)\s*$/gm, '<div style="color:#475569; font-style:italic;">--</div>')
-    // Signature lines use \n breaks. Convert them to <br> — but only outside
-    // HTML tag structure (\n not followed by '<') so existing HTML bodies with
-    // newlines between block/table tags are never mangled.
-    .replace(/\n(?!<)/g, '<br>');
+    // Signature lines use \n breaks. Convert them to <br> — but only when the
+    // newline is NOT adjacent to a block-level HTML tag (<div>, <table>, <p>, …)
+    // so existing HTML bodies with newlines between block/table tags are never
+    // mangled. Newlines before inline tags (<strong>, <a>, <em>, <img>…) MUST
+    // become <br> — otherwise signature lines like "Analyst\n<a href=…>"
+    // collapse to "Analyst Website" when rendered.
+    .replace(/\n(?=[ \t]*(?:<\/?)(?:div|table|tbody|thead|tfoot|tr|td|th|p|h[1-6]|ul|ol|li|blockquote|section|article|header|footer|main|aside|nav|form|fieldset|figure|figcaption|hr|pre|address|br)[\s/>])/gi, '@@LSBLOCKNL@@')
+    .replace(/(<\/?(?:div|table|tbody|thead|tfoot|tr|td|th|p|h[1-6]|ul|ol|li|blockquote|section|article|header|footer|main|aside|nav|form|fieldset|figure|figcaption|hr|pre|address|br)[^>]*>)\n/gi, '$1@@LSBLOCKNL@@')
+    .replace(/\n/g, '<br>')
+    .replace(/@@LSBLOCKNL@@/g, '\n');
 };
 
 const EditEmail = () => {

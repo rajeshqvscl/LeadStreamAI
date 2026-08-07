@@ -124,13 +124,51 @@ def clean_signature_markdown(text):
         _rich_tags.append(m.group(0))
         return f"\u0000LSSPAN{len(_rich_tags) - 1}\u0000"
 
-    def _protect_span_open(m):
-        if re.search(r"style\s*=", m.group(0), re.IGNORECASE):
-            return _protect_rich(m)
-        return ""  # bare <span> without styling -> drop
+    _BLACKISH_COLORS = {
+        "black", "#000", "#000000",
+        "rgb(0, 0, 0)", "rgb(0,0,0)",
+        "rgba(0, 0, 0, 1)", "rgba(0,0,0,1)", "rgba(0, 0, 0, 0)", "rgba(0,0,0,0)",
+    }
 
-    cleaned = re.sub(r"<span\b[^>]*>", _protect_span_open, cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"</span\s*>", _protect_rich, cleaned, flags=re.IGNORECASE)
+    def _span_style_is_meaningless(style_val: str) -> bool:
+        """True for spans whose style has no visual effect (empty, or only a
+        black/default color). Such wrappers just clutter the stored markdown and
+        show up as raw <span> tags in the signature editor textarea."""
+        s = (style_val or "").strip().strip(";").strip()
+        if not s:
+            return True
+        props = [p.strip() for p in s.split(";") if p.strip()]
+        if not props:
+            return True
+        if len(props) == 1 and props[0].lower().startswith("color"):
+            val = props[0].split(":", 1)[1].strip().lower()
+            return val in _BLACKISH_COLORS
+        return False
+
+    # Match span PAIRS whose content has no nested <span> (flat spans, as the
+    # editor produces — one span per line). Meaningless ones (empty/black-only
+    # style) are dropped entirely with both tags; meaningful ones are protected
+    # with tokens so their styling survives. Nested spans are left for the
+    # generic tag-strip below (they stay intact because they were not protected).
+    def _handle_span_pair(m):
+        open_attrs = m.group(1)
+        inner = m.group(2)
+        style_m = re.search(r"style\s*=\s*[\"']([^\"']*)[\"']", open_attrs, re.IGNORECASE)
+        if style_m and _span_style_is_meaningless(style_m.group(1)):
+            return inner  # visually meaningless flat span -> drop both tags
+        if style_m:
+            _rich_tags.append(f"<span{open_attrs}>")
+            open_tok = f"\u0000LSSPAN{len(_rich_tags) - 1}\u0000"
+            _rich_tags.append("</span>")
+            close_tok = f"\u0000LSSPAN{len(_rich_tags) - 1}\u0000"
+            return open_tok + inner + close_tok
+        return inner  # bare <span> without styling -> drop both tags
+
+    _SPAN_PAIR = re.compile(
+        r"<span\b([^>]*)>((?:[^<]|<(?!/?span\b)[^>]*>)*?)</span\s*>",
+        re.IGNORECASE | re.DOTALL,
+    )
+    cleaned = _SPAN_PAIR.sub(_handle_span_pair, cleaned)
     # Underline (Ctrl+U) is supported by the editor and rendered by markdown_to_html — keep it.
     cleaned = re.sub(r"<u\b[^>]*>|</u\s*>", _protect_rich, cleaned, flags=re.IGNORECASE)
     # Remaining inline tags (font, s, strike, ...) -> strip

@@ -93,6 +93,32 @@ const htmlToMd = (html) => {
 
 const isHtml = (str) => /<[a-z][\s\S]*>/i.test(str);
 
+// Stored content (signatures, draft bodies) can be a MIX of HTML and raw
+// markdown — e.g. `<span style="color:...">**Thanks & Regards,**</span>\n**Ayush Heda**\n[LinkedIn](https://…)`.
+// When the raw value already contains HTML tags we can't run mdToHtml on it
+// wholesale (it would double-wrap tags), but we still need the markdown
+// remnants and the \n line breaks converted so the WYSIWYG editor shows the
+// real signature formatting instead of literal `**Name**` on one collapsed
+// line. Newlines are converted to <br> EXCEPT next to block-level tags
+// (div/table/tr/td/p/h1-6/ul/ol/li/…) so existing HTML bodies are untouched.
+const convertHtmlMarkdownRemnants = (html) => {
+  if (!html) return html;
+  return html
+    .replace(/!\[(.*?)\]\((.*?)\)/g, (m, alt, src) => `<img src="${src}" alt="${alt}" style="max-width:200px;height:auto;">`)
+    .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*\n]+)\*/g, (m, inner) => {
+      if (inner.startsWith(' ') || inner.endsWith(' ')) return m;
+      return `<em>${inner}</em>`;
+    })
+    .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>')
+    .replace(/^\s*(--|—)\s*$/gm, '<div style="color:#475569; font-style:italic;">--</div>')
+    .replace(/\n(?=[ \t]*(?:<\/?)(?:div|table|tbody|thead|tfoot|tr|td|th|p|h[1-6]|ul|ol|li|blockquote|section|article|header|footer|main|aside|nav|form|fieldset|figure|figcaption|hr|pre|address|br)[\s/>])/gi, '@@LSBLOCKNL@@')
+    .replace(/(<\/?(?:div|table|tbody|thead|tfoot|tr|td|th|p|h[1-6]|ul|ol|li|blockquote|section|article|header|footer|main|aside|nav|form|fieldset|figure|figcaption|hr|pre|address|br)[^>]*>)\n/gi, '$1@@LSBLOCKNL@@')
+    .replace(/\n/g, '<br>')
+    .replace(/@@LSBLOCKNL@@/g, '\n');
+};
+
 // ─── Constants ─────────────────────────────────────────────────────────
 
 const FONTS = [
@@ -160,7 +186,9 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
 
   const toHtml = useCallback((raw) => {
     if (!raw) return '';
-    return isHtml(raw) ? raw : mdToHtml(raw);
+    // HTML content gets markdown-remnant conversion so mixed signatures render
+    // properly; pure markdown goes through the full mdToHtml pipeline.
+    return isHtml(raw) ? convertHtmlMarkdownRemnants(raw) : mdToHtml(raw);
   }, []);
 
   const toRaw = useCallback((html) => {
