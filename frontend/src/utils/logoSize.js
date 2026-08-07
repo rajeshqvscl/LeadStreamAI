@@ -12,10 +12,7 @@
  */
 
 const FORCED_LOGO_STYLES = {
-  // .jpg is intentional: the asset is a JPEG committed to the repo (served as
-  // image/jpeg). The old .webp name returned application/octet-stream on the
-  // deployed backend, which browsers/email clients refuse to render.
-  'upload_1785476979958_9473.jpg': 'width:150px;height:150px;object-fit:contain;display:block;',
+  'upload_1786095549294_2711.webp': 'width:150px;height:150px;object-fit:contain;display:block;',
 };
 
 /** Resolve the forced inline style for a logo asset URL, else null. */

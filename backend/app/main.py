@@ -411,6 +411,16 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 from fastapi.staticfiles import StaticFiles
 
+# Ensure .webp assets are served with the correct image/webp content type.
+# Starlette's StaticFiles falls back to Python's mimetypes registry, which on
+# some systems (Windows, minimal Linux containers) does NOT know .webp — the
+# file then goes out as application/octet-stream and browsers/email clients
+# refuse to render it (exactly what broke Palak's logo). Registering the type
+# here (before the mounts below) makes every .webp upload render correctly.
+import mimetypes
+if mimetypes.guess_type("x.webp")[0] != "image/webp":
+    mimetypes.add_type("image/webp", ".webp")
+
 # Mount static directory for PDF serving
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/assets", StaticFiles(directory="assets"), name="assets")
