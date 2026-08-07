@@ -7,7 +7,7 @@ anthropic
 structlog
 gunicorn
 resend
-google-api-python-client
+google-api-python-client>=2.120
 google-auth-oauthlib
 google-auth
 google-cloud-pubsub

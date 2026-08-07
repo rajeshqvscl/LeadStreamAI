@@ -116,8 +116,8 @@ const GmailDrafts = () => {
       await api.post(`/api/gmail/send-draft/${draftId}`);
       showNotification('success', 'Email sent successfully via Gmail');
       fetchGmailDrafts(true);
-    } catch (_err) {
-      showNotification('error', 'Failed to send email');
+    } catch (err) {
+      showNotification('error', 'Failed to send email: ' + (err?.response?.data?.detail || err?.message || 'Unknown error'));
     } finally {
       setIsProcessing(false);
     }

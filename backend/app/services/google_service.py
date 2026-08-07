@@ -307,8 +307,13 @@ def list_gmail_drafts(user_id: int):
         full_drafts = []
         for d in drafts_list:
             try:
-                # Use metadata format to avoid scope restrictions for the list view
-                draft_obj = service.users().drafts().get(userId='me', id=d['id'], format='metadata', metadataHeaders=['To', 'Subject', 'Date']).execute()
+                # Use metadata format to avoid scope restrictions for the list view.
+                # NOTE: drafts().get() does NOT support the metadataHeaders parameter
+                # (only messages().get() does) — passing it raises TypeError with newer
+                # google-api-python-client versions, which silently emptied the whole
+                # GmailDrafts list for every user. metadata format returns the headers
+                # anyway, so no explicit metadataHeaders list is needed here.
+                draft_obj = service.users().drafts().get(userId='me', id=d['id'], format='metadata').execute()
                 msg = draft_obj.get('message', {})
                 headers = msg.get('payload', {}).get('headers', [])
                 
@@ -326,7 +331,7 @@ def list_gmail_drafts(user_id: int):
                     'body': msg.get('snippet', '')
                 })
             except Exception as inner_e:
-                print(f"Error fetching detail for draft {d['id']}: {inner_e}")
+                print(f"Error fetching detail for draft {d['id']} (user {user_id}): {inner_e}")
                 continue
         
         _drafts_cache[user_id] = {'data': full_drafts, 'ts': now}
