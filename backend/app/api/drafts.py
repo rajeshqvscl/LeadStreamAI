@@ -13,7 +13,7 @@ from app.models.draft import insert_draft
 from app.database import get_db_connection
 from app.utils.signature_clean import clean_signature_markdown
 from app.services.llm_services import EmailGenerator
-from app.services.email_service import get_user_email_font, get_user_email_font_size
+from app.services.email_service import get_user_email_font, get_user_email_font_size, clean_display_filename
 from app.services.vision_service import analyze_template_screenshot
 import psycopg2.extras
 import logging
@@ -983,19 +983,22 @@ def _extract_body_attachments(body: str, user_id: Optional[int] = None) -> tuple
             import base64
             with open(filepath, "rb") as f:
                 content_bytes = f.read()
+            # Recipient-facing name — internal sig_<uid>_ prefix hidden.
+            display_name = clean_display_filename(filename)
             attachments.append({
                 "content": base64.b64encode(content_bytes).decode('utf-8'),
-                "filename": filename
+                "filename": display_name
             })
             logger.info(f"Body attachment found and loaded: {filename}")
-            # Upload to Google Drive if user_id is provided
+            # Upload to Google Drive if user_id is provided (Drive file title also
+            # uses the clean name so recipients never see the sig_<uid>_ prefix).
             if user_id is not None:
                 try:
                     from app.services.google_service import upload_to_drive
-                    drive_link = upload_to_drive(user_id, filename, content_bytes)
+                    drive_link = upload_to_drive(user_id, display_name, content_bytes)
                     if drive_link:
                         url_replacements[url] = drive_link
-                        logger.info(f"Uploaded to Drive: {filename} -> {drive_link}")
+                        logger.info(f"Uploaded to Drive: {display_name} -> {drive_link}")
                 except Exception as e:
                     logger.warning(f"Drive upload failed for {filename}: {e}")
     return attachments, url_replacements
@@ -1675,7 +1678,12 @@ def list_available_pdfs(user_id: Optional[str] = Header(None, alias="X-User-Id")
                 continue
             ext_ok = any(f.lower().endswith(ext) for ext in ['.pdf', '.docx', '.doc', '.xlsx', '.pptx'])
             if ext_ok:
-                files.append({"filename": f, "path": f"/assets/{f}"})
+                files.append({
+                    "filename": f,
+                    # Recipient/UI-facing name — internal sig_<uid>_ prefix hidden.
+                    "display_name": clean_display_filename(f),
+                    "path": f"/assets/{f}",
+                })
         return files
     except Exception as e:
         logger.error(f"Error listing assets: {e}")

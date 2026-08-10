@@ -17,6 +17,25 @@ load_dotenv(dotenv_path=env_path, override=True)
 logger.info(f"Module initialized with env_path: {env_path}")
 
 
+def clean_display_filename(filename: str) -> str:
+    """Strip the internal `sig_<user_id>_` (and legacy `sig_att_`) prefix from
+    signature attachment filenames so recipients and draft UIs see the real
+    document name (e.g. `QVSCL_Company_Profile.pdf`) instead of
+    `sig_5_QVSCL_Company_Profile..pdf`. DB values are never touched."""
+    if not filename:
+        return filename
+    base = os.path.basename(str(filename))
+    # Current upload format: sig_<userid>_<original name>
+    m = re.match(r'^sig_\d+_(.+)$', base, re.IGNORECASE)
+    if m:
+        return m.group(1)
+    # Legacy format: sig_att_<original name>
+    m = re.match(r'^sig_att_(.+)$', base, re.IGNORECASE)
+    if m:
+        return m.group(1)
+    return base
+
+
 def _get_signature_attachments(user_id: Optional[int]) -> list:
     """Fetch the current user's default signature attachment_file list and
     return file dicts ready for MIME inclusion."""
@@ -58,7 +77,8 @@ def _get_signature_attachments(user_id: Optional[int]) -> list:
                     content_bytes = f.read()
                 result.append({
                     "content": base64.b64encode(content_bytes).decode('utf-8'),
-                    "filename": fn
+                    # Recipient-facing name — internal sig_<uid>_ prefix hidden.
+                    "filename": clean_display_filename(fn)
                 })
                 logger.info(f"Loaded signature attachment: {fn}")
             else:
@@ -113,15 +133,40 @@ def get_user_email_font_size(user_id) -> str:
 
 
 def strip_old_unsubscribe_links(html_content: str) -> str:
-    """Remove legacy inject_signature unsubscribe links from content before the footer.
-    Never touches the footer's own link (which is after 'You're receiving this because')."""
+    """Remove legacy unsubscribe footers/sentences and leftover
+    'Click here to unsubscribe' links from content. The fresh footer is
+    appended by the caller afterwards, so the final email has exactly one."""
     import re as _us
-    _footer_text = "You're receiving this because you interacted with LeadStream"
-    if _footer_text in html_content:
-        _before, _after = html_content.split(_footer_text, 1)
-        _before = _us.sub(r'<a\s[^>]*>Click here to unsubscribe</a>', '', _before)
-        return _before + _footer_text + _after
-    return _us.sub(r'<a\s[^>]*>Click here to unsubscribe</a>', '', html_content)
+    # Old footer sentence that may linger in previously-saved drafts.
+    html_content = html_content.replace(
+        "You're receiving this because you interacted with LeadStream.", ""
+    )
+    # Remove the whole legacy footer block (hr + sentence paragraph) if present.
+    # Both the hr margin and the paragraph font-size anchor the match to the
+    # footer's exact styles, so body content is never touched.
+    html_content = _us.sub(
+        r'<hr\s[^>]*margin:\s*20px\s+0\s+10px\s+0[^>]*>\s*'
+        r'<p\s[^>]*font-size:\s*12px[^>]*>.*?</p>',
+        '', html_content, flags=_us.DOTALL | _us.IGNORECASE
+    )
+    # Remove any leftover unsubscribe links — the fresh footer is appended after.
+    html_content = _us.sub(
+        r'<a\s[^>]*>Click here to unsubscribe</a>', '', html_content,
+        flags=_us.IGNORECASE
+    )
+    # Legacy markdown-form links (e.g. [Click here to unsubscribe](old-url)) that
+    # survive conversion when the body is already rich HTML and the markdown
+    # branch is skipped. Removing them keeps exactly one footer in the final mail.
+    html_content = _us.sub(
+        r'\[Click here to unsubscribe\]\([^)]*\)', '', html_content,
+        flags=_us.IGNORECASE
+    )
+    # Drop now-empty footer-style paragraphs left behind (scoped to the footer's
+    # font-size so legitimate body paragraphs are never removed).
+    return _us.sub(
+        r'<p\s[^>]*font-size:\s*12px[^>]*>\s*</p>', '', html_content,
+        flags=_us.IGNORECASE
+    )
 
 
 def build_unsubscribe_footer(lead_id: int) -> str:
@@ -150,7 +195,6 @@ def build_unsubscribe_footer(lead_id: int) -> str:
     return f"""
 <hr style="border:none;border-top:1px solid #e0e0e0;margin:20px 0 10px 0">
 <p style="font-size:12px;color:#888;margin:0;line-height:1.5">
-You're receiving this because you interacted with LeadStream.
 <a href="{_uurl}" style="color:#888;text-decoration:underline">Click here to unsubscribe</a>
 </p>"""
 
@@ -266,9 +310,8 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     # 3. Strip any old unsubscribe links from legacy signature area (before the footer)
     html_content = strip_old_unsubscribe_links(html_content)
 
-    # 4. Append unsubscribe footer (dedup: skip if already present from draft)
-    if "You're receiving this because you interacted with LeadStream" not in html_content:
-        html_content += build_unsubscribe_footer(lead_id)
+    # 4. Append unsubscribe footer (strip above removed old ones, so append fresh)
+    html_content += build_unsubscribe_footer(lead_id)
 
     # 2. Attempt Gmail API Dispatch (Gmail is the only dispatch method now)
     if user_id:

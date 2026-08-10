@@ -680,7 +680,7 @@ const Signatures = () => {
                                 />
                                 <Paperclip className={`w-3.5 h-3.5 shrink-0 ${isChecked ? 'text-purple-400' : 'text-slate-500'}`} />
                                 <span className={`flex-1 text-[12px] truncate ${isChecked ? 'text-purple-200 font-medium' : 'text-slate-400'}`}>
-                                  {pdf.filename}
+                                  {pdf.display_name || pdf.filename}
                                 </span>
                                 {/* Delete button (hidden by default, shows on row hover) */}
                                 <button
