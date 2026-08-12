@@ -13,6 +13,11 @@ from app.models.lead import add_activity_log
 
 logger = logging.getLogger(__name__)
 
+# Max auto follow-ups sent per user per scheduler cycle. Bounds the scheduler
+# lock hold time (each send has a 5s cool-down) so reply polling stays fresh
+# even when a user has a huge backlog. Remaining leads roll into the next cycle.
+MAX_AUTO_SENDS_PER_CYCLE = 30
+
 def is_generic_followup(body: Optional[str]) -> bool:
     """Detects legacy, standard, or HTML-wrapped default placeholder follow-ups to allow dynamic healing."""
     if not body:
@@ -407,7 +412,13 @@ def process_outreach_sequences():
             FROM leads_raw l
             JOIN users u ON l.user_id = u.id
             WHERE l.followup_status = 'ACTIVE'
-            AND l.email_status IN ('SENT', 'OPENED', 'CLICKED', 'REPLIED')
+            -- Only non-replied leads are eligible: the status whitelist excludes
+            -- REPLIED/CLOSED, and any other reply signal (is_responded flag, a
+            -- reply timestamp, or a recorded reply_intent) also blocks follow-ups
+            -- even when the intent was never classified.
+            AND l.email_status IN ('SENT', 'OPENED', 'CLICKED')
+            AND COALESCE(l.is_responded, FALSE) = FALSE
+            AND l.replied_at IS NULL
             AND COALESCE(l.reply_intent, '') NOT IN ('INTERESTED', 'MEETING_REQUESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED', 'NEEDS_MORE_INFO')
             AND l.followup_stage < 3
             AND (l.email_opt_in IS NULL OR l.email_opt_in = TRUE)
@@ -457,6 +468,10 @@ def process_outreach_sequences():
 
                 if sent_count >= remaining_allowance:
                     logger.info(f"Daily quota reached for user {uid} during sequence run.")
+                    break
+
+                if sent_count >= MAX_AUTO_SENDS_PER_CYCLE:
+                    logger.info(f"Per-cycle cap ({MAX_AUTO_SENDS_PER_CYCLE}) reached for user {uid} — remaining leads picked up next cycle.")
                     break
 
                 try:
@@ -525,7 +540,7 @@ def process_outreach_sequences():
                     try:
                         verify_cur = lead_conn.cursor()
                         verify_cur.execute("""
-                            SELECT l.followup_stage, l.followup_status, l.reply_intent, l.email_status, l.is_unsubscribed, l.email_opt_in, u.auto_followup
+                            SELECT l.followup_stage, l.followup_status, l.reply_intent, l.email_status, l.is_unsubscribed, l.email_opt_in, u.auto_followup, l.is_responded, l.replied_at
                             FROM leads_raw l
                             JOIN users u ON l.user_id = u.id
                             WHERE l.id = %s
@@ -539,6 +554,8 @@ def process_outreach_sequences():
                             current_reply_intent = verify_row['reply_intent'] if isinstance(verify_row, dict) else verify_row[2]
                             current_email_status = verify_row['email_status'] if isinstance(verify_row, dict) else verify_row[3]
                             current_auto = verify_row['auto_followup'] if isinstance(verify_row, dict) else verify_row[6]
+                            current_is_responded = verify_row['is_responded'] if isinstance(verify_row, dict) else verify_row[7]
+                            current_replied_at = verify_row['replied_at'] if isinstance(verify_row, dict) else verify_row[8]
                             
                             if current_stage is not None and current_stage != stage:
                                 logger.info(f"Lead {lead_id} stage changed from {stage} to {current_stage} — skipping")
@@ -546,8 +563,10 @@ def process_outreach_sequences():
                             if current_status != 'ACTIVE':
                                 logger.info(f"Lead {lead_id} followup_status is '{current_status}' — skipping")
                                 continue
-                            if current_reply_intent in ('INTERESTED', 'MEETING_REQUESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED', 'NEEDS_MORE_INFO'):
-                                logger.info(f"Lead {lead_id} reply_intent is '{current_reply_intent}' — skipping")
+                            # Hard reply guard: any reply signal (even unclassified intent)
+                            # must stop the sequence — a replied lead never gets another email.
+                            if current_is_responded or current_replied_at is not None or current_email_status in ('REPLIED', 'CLOSED') or current_reply_intent:
+                                logger.info(f"Lead {lead_id} has a reply signal (is_responded={current_is_responded}, replied_at={current_replied_at}, email_status={current_email_status}, reply_intent={current_reply_intent or 'empty'}) — skipping")
                                 continue
                             if current_email_status in ('BOUNCED',):
                                 logger.info(f"Lead {lead_id} email_status is '{current_email_status}' — skipping")
@@ -578,9 +597,12 @@ def process_outreach_sequences():
                                 ).execute()
                                 heal_msgs = heal_results.get('messages', [])
                                 if heal_msgs:
+                                    # messages.list returns newest-first, so [0] is
+                                    # the MOST RECENT sent email — the follow-up must
+                                    # thread with the latest outreach, not the oldest.
                                     heal_msg = heal_service.users().messages().get(
                                         userId='me',
-                                        id=heal_msgs[-1]['id'],
+                                        id=heal_msgs[0]['id'],
                                         format='metadata',
                                         metadataHeaders=['Message-ID', 'Message-Id', 'message-id', 'Subject']
                                     ).execute()
@@ -683,6 +705,13 @@ def process_outreach_sequences():
                     except Exception as stop_err:
                         logger.warning(f"Failed to stop old drafts for lead {lead_id}: {stop_err}")
 
+                    # Capture the pre-claim outreach state so a failed send can be
+                    # fully rolled back (the claim touches last_outreach_at AND
+                    # last_outreach_subject — restoring only the stage previously
+                    # reset the 2/5/8-day timer even though nothing was sent).
+                    orig_last_outreach_at = lead.get('last_outreach_at')
+                    orig_last_subject = lead.get('last_outreach_subject')
+
                     # Atomically claim this stage BEFORE sending.
                     # Claiming first prevents the race condition where two workers
                     # both send the email but only one's claim succeeds (duplicate send).
@@ -728,9 +757,11 @@ def process_outreach_sequences():
                                 UPDATE leads_raw
                                 SET followup_stage = %s,
                                     followup_status = 'ACTIVE',
+                                    last_outreach_at = %s,
+                                    last_outreach_subject = %s,
                                     updated_at = NOW()
                                 WHERE id = %s AND followup_stage = %s
-                            """, (stage, lead_id, next_stage))
+                            """, (stage, orig_last_outreach_at, orig_last_subject, lead_id, next_stage))
                             lead_conn.commit()
                             rb_cur.close()
                         except Exception as rb_err:

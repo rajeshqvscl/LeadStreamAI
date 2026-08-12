@@ -1038,8 +1038,11 @@ def update_system_settings(req: Dict[str, Any], user_id: Optional[str] = Header(
         
         auto_followup = req.get("auto_followup", False)
         daily_limit = req.get("outreach_daily_limit")
+        # 0/None means "unlimited" — matches the GET default (999999) so the
+        # value shown on the Followups page matches what check_daily_email_limit
+        # actually enforces.
         if daily_limit is None or daily_limit == 0:
-            daily_limit = 100
+            daily_limit = 999999
         
         cur.execute("""
             UPDATE users 

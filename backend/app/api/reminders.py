@@ -150,13 +150,15 @@ def get_urgent_actions(user_id: Optional[str] = Header(None, alias="X-User-Id"))
 
         params = uid_val if uid_val else ()
 
-        # Pending follow-ups — leads with active/idle/scheduled followup, not responded
+        # Pending follow-ups — leads with active/scheduled followup, not responded.
+        # IDLE is excluded: IDLE means no sequence is running, so the engine will
+        # never follow those up and showing them here is misleading.
         cur.execute(f"""
             SELECT id, COALESCE(first_name, '') || ' ' || COALESCE(last_name, '') AS name,
                    company_name, followup_stage, followup_status,
                    last_outreach_at, sector
             FROM leads_raw
-            WHERE followup_status IN ('ACTIVE', 'IDLE', 'SCHEDULED')
+            WHERE followup_status IN ('ACTIVE', 'SCHEDULED')
               AND COALESCE(is_responded, FALSE) = FALSE
               {uid_cond}
             ORDER BY followup_stage DESC, last_outreach_at ASC NULLS FIRST

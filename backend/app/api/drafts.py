@@ -907,13 +907,27 @@ def normalize_user_id(user_id: Optional[str]) -> str:
 
 
 def check_daily_email_limit(user_id: Optional[str], batch_size: int = 1) -> bool:
-    """Returns True if the user has not exceeded their daily limit of 2000 sent emails."""
+    """Returns True if the user has not exceeded their daily outreach limit.
+
+    The limit comes from users.outreach_daily_limit (set on the Followups page
+    Auto-Pilot toggle); falls back to 999999 (effectively unlimited — matches
+    the admin settings GET default) when unset or for admin/unknown users.
+    """
     uid = normalize_user_id(user_id)
     is_admin = (str(user_id or '').lower() == 'admin')
     
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        # Resolve the user's configured limit (default 999999 = no restriction).
+        daily_limit = 999999
+        if not is_admin and uid:
+            cur.execute("SELECT outreach_daily_limit FROM users WHERE id = %s", (uid,))
+            limit_row = cur.fetchone()
+            stored = limit_row[0] if limit_row else None
+            if stored:
+                daily_limit = int(stored)
+
         if is_admin:
             cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
         elif uid:
@@ -922,13 +936,42 @@ def check_daily_email_limit(user_id: Optional[str], batch_size: int = 1) -> bool
             cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id IS NULL AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
         
         sent_today = cur.fetchone()[0] or 0
-        return (sent_today + batch_size) <= 2000
+        return (sent_today + batch_size) <= daily_limit
     except Exception as e:
         logger.error(f"Error checking email limit: {e}")
         return True # Default to True to avoid blocking during transient DB errors
     finally:
         cur.close()
         conn.close()
+
+def _mark_send_failed(cur, lead_id: int, err_msg: str, actor: str):
+    """Mark a lead as FAILED after a failed send attempt.
+
+    The failure reason is APPENDED to `remarks` (never overwrites existing
+    user notes) and an EMAIL_SEND_FAILED activity entry is logged. Never
+    raises — failure marking must not break the batch loop.
+    """
+    try:
+        from app.models.lead import add_activity_log
+        err = (err_msg or "Unknown send error")[:500]
+        marker = f"[Send failed: {err}]"
+        cur.execute(
+            """
+            UPDATE leads_raw
+            SET email_status = 'FAILED',
+                remarks = CASE
+                    WHEN remarks IS NULL OR remarks = '' THEN %s
+                    ELSE remarks || E'\n' || %s
+                END,
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (marker, marker, lead_id)
+        )
+        add_activity_log(lead_id, "EMAIL_SEND_FAILED", marker, actor)
+    except Exception as mark_err:
+        logger.error(f"Failed to mark lead {lead_id} as FAILED: {mark_err}")
+
 
 def _extract_body_attachments(body: str, user_id: Optional[int] = None) -> tuple:
     """Parse body for links pointing at uploaded files in /assets/ (both markdown and HTML forms).
@@ -3322,7 +3365,7 @@ def get_bulk_progress(batch_id: str):
 
 @router.get("/pending-drafts")
 @router.get("/emails")
-def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Optional[str] = None, geo: Optional[str] = None, company: Optional[str] = None, name: Optional[str] = None, per_page: int = 60, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Optional[str] = None, geo: Optional[str] = None, company: Optional[str] = None, name: Optional[str] = None, per_page: int = 60, ids_only: Optional[str] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     try:
         # Resolve user — non-admin users only see their own drafts
         resolved_uid = None
@@ -3347,9 +3390,11 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
                 except Exception:
                     pass
 
-        # Try Redis cache first
+        # Try Redis cache first (ids_only requests bypass the cache — their key
+        # would collide with the full payload cached under the same params).
+        _ids_only_flag = str(ids_only or '').strip().lower() in ('1', 'true', 'yes', 'on')
         cache_key = None
-        if redis_available and redis_client and not any([region, geo, company, name]):
+        if redis_available and redis_client and not _ids_only_flag and not any([region, geo, company, name]):
             cache_key = f"pending_drafts:{resolved_uid or 'unassigned'}:{status or 'all'}:{page}:{per_page}"
             try:
                 cached = redis_client.get(cache_key)
@@ -3399,11 +3444,25 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
             where_clause += " AND (first_name ILIKE %s OR last_name ILIKE %s)"
             params.extend([f"%{name}%", f"%{name}%"])
 
+        # ids_only=true → return ALL matching lead IDs (no pagination, no draft
+        # content). Powers the UI's "Select all N drafts" across every page, so
+        # the 60-per-page view can no longer silently skip emails on page 2+.
+        # Already-dispatched statuses (SENT/REPLIED/CLOSED/ARCHIVED) are excluded
+        # so "Select all" never re-selects emails that have already been sent.
+        if _ids_only_flag:
+            _ids_where = where_clause + " AND email_status NOT IN ('SENT', 'REPLIED', 'CLOSED', 'ARCHIVED')"
+            cur.execute(f"SELECT id FROM leads_raw {_ids_where}", tuple(params))
+            id_rows = cur.fetchall()
+            cur.close()
+            conn.close()
+            return {"ids": [r['id'] for r in id_rows], "total": len(id_rows)}
+
         query = f"""
             SELECT lr.id, lr.first_name, lr.last_name, lr.email, lr.email_draft, lr.email_status,
                    lr.company_name, lr.family_office_name, lr.persona, lr.fit_score, lr.updated_at,
                    lr.email_approved_by, lr.scheduled_at, lr.user_id,
                    lr.draft_template_used,
+                   lr.remarks,
                    u.full_name as team_member_name, u.username as team_member_username
             FROM leads_raw lr
             LEFT JOIN users u ON lr.user_id = u.id
@@ -3490,7 +3549,8 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
                 "performance": {"opens": 0, "clicks": 0},
                 "verifier": r.get("email_approved_by") or ("admin" if r["email_status"] in ["APPROVED", "SENT"] else None),
                 "updated_at": r.get("updated_at", "").isoformat() if r.get("updated_at") and hasattr(r.get("updated_at"), 'isoformat') else str(r.get("updated_at")) if r.get("updated_at") else "",
-                "scheduled_at": r.get("scheduled_at").isoformat() + "Z" if r.get("scheduled_at") and hasattr(r.get("scheduled_at"), 'isoformat') else str(r.get("scheduled_at")) if r.get("scheduled_at") else ""
+                "scheduled_at": r.get("scheduled_at").isoformat() + "Z" if r.get("scheduled_at") and hasattr(r.get("scheduled_at"), 'isoformat') else str(r.get("scheduled_at")) if r.get("scheduled_at") else "",
+                "remarks": r.get("remarks") or ""
             })
 
         result = {
@@ -3989,8 +4049,20 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     from app.api.drafts import get_sender_profile
     profile = get_sender_profile(user_id)
 
-    # 2. Get all approved leads for THIS user
-    where_clause = "WHERE email_status = 'APPROVED'"
+    # 2. Get all approved + review-queue (PENDING_APPROVAL) leads for THIS user.
+    #    PENDING_APPROVAL drafts sit in the review queue waiting for dispatch —
+    #    "Send All" should pick them up too (previously they were silently skipped).
+    where_clause = "WHERE email_status IN ('APPROVED', 'PENDING_APPROVAL')"
+    # Safety guards (same rules as the follow-up engine + manual approve): never
+    # dispatch to leads that have replied or unsubscribed/opted out.
+    where_clause += """
+        AND COALESCE(is_responded, FALSE) = FALSE
+        AND replied_at IS NULL
+        AND COALESCE(reply_intent, '') = ''
+        AND (email_opt_in IS NULL OR email_opt_in = TRUE)
+        AND (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)
+        AND email NOT IN (SELECT email FROM unsubscribe_list)
+    """
     params = []
     if user_id and user_id.lower() != "admin":
         where_clause += " AND user_id = %s"
@@ -4000,13 +4072,13 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     else:
         where_clause += " AND user_id IS NULL"
     
-    cur.execute(f"SELECT id, email, email_draft, cc_email, draft_template_used FROM leads_raw {where_clause}", params)
+    cur.execute(f"SELECT id, email, email_draft, cc_email, draft_template_used, gmail_draft_id FROM leads_raw {where_clause}", params)
     leads_to_send = cur.fetchall()
     
     if leads_to_send and not check_daily_email_limit(user_id, len(leads_to_send)):
         cur.close()
         conn.close()
-        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
+        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily outreach limit. Please wait for the daily reset.")
     
     sent_count = 0
     for lead in leads_to_send:
@@ -4066,16 +4138,33 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
                         first_outreach_at = COALESCE(first_outreach_at, NOW()),
                         gmail_thread_id = %s,
                         gmail_message_id = %s,
+                        gmail_draft_id = NULL,
+                        email_approved_by = %s,
                         followup_status = 'ACTIVE',
                         followup_stage = 0,
                         is_responded = FALSE,
                         replied_at = NULL
                     WHERE id = %s
-                """, (subject, subject, new_thread_id, new_rfc_message_id, lead['id']))
-                add_activity_log(lead['id'], "EMAIL_SENT", f"Email dispatched via Resend from {sender_email}", "system")
+                """, (subject, subject, new_thread_id, new_rfc_message_id, sender_name, lead['id']))
+                add_activity_log(lead['id'], "EMAIL_SENT", f"Email dispatched via Gmail API from {sender_email}", "system")
                 sent_count += 1
+
+                # Delete the real Gmail draft (if any) after successful dispatch —
+                # PENDING_APPROVAL drafts carry a gmail_draft_id.
+                if lead.get('gmail_draft_id'):
+                    try:
+                        from app.services.google_service import delete_gmail_draft
+                        delete_gmail_draft(int(uid_val), lead['gmail_draft_id'])
+                        logger.info(f"🗑️ Deleted Gmail draft {lead['gmail_draft_id']} for Lead {lead['id']} after batch send")
+                    except Exception as ge:
+                        logger.warning(f"⚠️ Failed to delete Gmail draft after batch send (non-blocking): {ge}")
+            else:
+                # Send failed (success=False) — mark the lead FAILED so it does not
+                # silently remain PENDING_APPROVAL in the review queue.
+                _mark_send_failed(cur, lead['id'], error_msg, sender_name)
         except Exception as e:
             logger.error(f"Batch dispatch error for lead {lead['id']}: {str(e)}")
+            _mark_send_failed(cur, lead['id'], str(e), sender_name)
 
     conn.commit()
     cur.close()
@@ -4114,9 +4203,21 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
     from app.api.drafts import get_sender_profile
     profile = get_sender_profile(user_id)
 
-    # 2. Fetch the requested leads
+    # 2. Fetch the requested leads (skipping any that have replied or unsubscribed —
+    #    same safety rules as the follow-up engine and manual approve path)
     cur.execute(
-        "SELECT id, email, email_draft, gmail_draft_id, cc_email, draft_template_used, user_id FROM leads_raw WHERE id = ANY(%s)",
+        """
+        SELECT id, email, email_draft, gmail_draft_id, cc_email, draft_template_used, user_id
+        FROM leads_raw
+        WHERE id = ANY(%s)
+          AND COALESCE(is_responded, FALSE) = FALSE
+          AND replied_at IS NULL
+          AND COALESCE(reply_intent, '') = ''
+          AND email_status NOT IN ('REPLIED', 'CLOSED')
+          AND (email_opt_in IS NULL OR email_opt_in = TRUE)
+          AND (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)
+          AND email NOT IN (SELECT email FROM unsubscribe_list)
+        """,
         (req.lead_ids,)
     )
     leads_to_send = cur.fetchall()
@@ -4124,7 +4225,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
     if leads_to_send and not check_daily_email_limit(user_id, len(leads_to_send)):
         cur.close()
         conn.close()
-        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
+        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily outreach limit. Please wait for the daily reset.")
 
     sent_count = 0
     failed_count = 0
@@ -4202,10 +4303,15 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
             else:
                 failed_count += 1
                 results.append({"id": lead['id'], "email": lead['email'], "status": "failed", "error": error_msg})
+                # Mark the lead as FAILED so it stops lingering in the review
+                # queue silently — the error reason goes into `remarks` and the
+                # email status changes from PENDING_APPROVAL to FAILED.
+                _mark_send_failed(cur, lead['id'], error_msg, sender_name)
         except Exception as e:
             logger.error(f"Bulk send error for lead {lead['id']}: {str(e)}")
             failed_count += 1
             results.append({"id": lead['id'], "email": lead['email'], "status": "failed", "error": str(e)})
+            _mark_send_failed(cur, lead['id'], str(e), sender_name)
 
     conn.commit()
     cur.close()
@@ -4414,7 +4520,7 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
             
         if not check_daily_email_limit(user_id, len(req.lead_ids)):        cur.close()
         conn.close()
-        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
+        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily outreach limit. Please wait for the daily reset.")
     
         # 1. Fetch User Data
         uid = normalize_user_id(user_id)
@@ -4507,12 +4613,19 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                     """, (email_content, subject, subject, new_thread_id, new_rfc_message_id, lead['id']))
                     add_activity_log(lead['id'], "EMAIL_SENT", f"Bulk domain email dispatched via Gmail API from {sender_email}", "system")
                     sent_count += 1
+                else:
+                    # Send failed — mark FAILED so the lead doesn't stay silently
+                    # in the review queue with no trace of what went wrong.
+                    _mark_send_failed(cur, lead['id'], error_msg, sender_name)
             except Exception as e:
                 print(f"Error sending bulk lead {lead['id']}: {e}")
+                _mark_send_failed(cur, lead['id'], str(e), sender_name)
 
         conn.commit()
         cur.close()
         conn.close()
+
+        invalidate_pending_drafts_cache(user_id)
         
         return {
             "message": f"Successfully sent {sent_count} emails via Resend.",

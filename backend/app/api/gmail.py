@@ -309,7 +309,11 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         from app.services.llm_services import EmailGenerator
         llm = EmailGenerator()
         ai_data = llm.classify_reply(body)
-        intent = ai_data.get("intent", "INTERESTED")
+        # intent is None when classification failed (LLM timeout / parse error).
+        # determine_followup_status maps None -> ACTIVE so the sequence stays
+        # alive for manual review instead of being silently stopped. Never
+        # default to INTERESTED on failure.
+        intent = ai_data.get("intent")
 
         # ── HARD DECLINE-PHRASE OVERRIDE ──
         # Deterministic safety net: if the reply body contains any known
@@ -460,12 +464,12 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         # Centralized business logic: map intent → followup_status
         new_followup_status = determine_followup_status(intent)
 
-        # Reset last_outreach_at for PENDING (ACTIVE) replies so the follow-up
-        # interval restarts from the reply date. Harmless for STOPPED/MEETING_REQUIRED
-        # since the scheduler won't pick those up.
-        reset_timer = "last_outreach_at = NOW()," if new_followup_status == 'ACTIVE' else ""
+        # NOTE: last_outreach_at is intentionally NOT reset here. A replied lead
+        # is always is_responded=TRUE, so the follow-up engine never sends to it
+        # again regardless of followup_status — resetting the timer would only
+        # mislabel the reply time as the "last outreach" in dashboards/timing.
 
-        cur.execute(f"""
+        cur.execute("""
             UPDATE leads_raw 
             SET is_responded = TRUE,
                 replied_at = COALESCE(replied_at, NOW()),
@@ -482,7 +486,6 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 remarks = %s,
                 rejection_reason = %s,
                 followup_status = %s,
-                {reset_timer}
                 updated_at = NOW()
             WHERE LOWER(email) = LOWER(%s) AND user_id = %s
             RETURNING id, first_name, last_name, user_id
@@ -501,7 +504,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             # Audit: log the reply so the daily 10:00 / 16:00 IST report can list it
             try:
                 from app.models.lead import add_activity_log
-                add_activity_log(lead_id, "REPLY_DETECTED", f"Reply detected from {sender_email} — intent: {intent}", "system", user_id)
+                add_activity_log(lead_id, "REPLY_DETECTED", f"Reply detected from {sender_email} — intent: {intent or 'UNKNOWN'}", "system", user_id)
             except Exception as reply_log_err:
                 logger.warning(f"Reply detection log failed: {reply_log_err}")
 

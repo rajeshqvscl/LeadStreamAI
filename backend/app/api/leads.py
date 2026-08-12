@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Any, Dict
 import json
+import re
 import secrets
 import psycopg2
 import psycopg2.extras
@@ -337,6 +338,18 @@ def get_leads(
     return result
 
 
+# The engine's exact follow-up interval rules (CLIENT 2/4-day, else 2/5/8-day).
+# Shared by the is_due flag, the `due` filter, and the legacy DUE status branch so
+# the three can never drift apart (this codebase already got burned by duplicated
+# hardcoded rules going stale — see the metrics template-list fix).
+_DUE_INTERVAL_SQL = (
+    "(COALESCE(lr.followup_stage, 0) = 0 AND lr.last_outreach_at <= NOW() - INTERVAL '2 days')"
+    " OR (lr.followup_stage = 1 AND LOWER(COALESCE(lr.lead_type, '')) = 'client' AND lr.last_outreach_at <= NOW() - INTERVAL '4 days')"
+    " OR (lr.followup_stage = 1 AND LOWER(COALESCE(lr.lead_type, '')) != 'client' AND lr.last_outreach_at <= NOW() - INTERVAL '5 days')"
+    " OR (lr.followup_stage = 2 AND LOWER(COALESCE(lr.lead_type, '')) != 'client' AND lr.last_outreach_at <= NOW() - INTERVAL '8 days')"
+)
+
+
 @router.get("/leads/followups")
 def list_followups(
     page: Any = 1, 
@@ -345,6 +358,8 @@ def list_followups(
     stage: Any = None, 
     search: Any = None,
     status: Any = 'DUE',
+    date: Any = None,
+    due: Any = None,
     user_id: Any = Header(None, alias="X-User-Id"),
     _t: Any = None
 ):
@@ -361,23 +376,25 @@ def list_followups(
         elif status_val == 'REPLIED':
             base_query = " FROM leads_raw lr WHERE COALESCE(is_responded, FALSE) = TRUE "
         elif status_val == 'IN_PROGRESS':
-            base_query = " FROM leads_raw lr WHERE followup_status IN ('ACTIVE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED') AND COALESCE(followup_stage, 0) > 0 AND COALESCE(is_responded, FALSE) = FALSE AND last_outreach_at IS NOT NULL "
+            # Stage-0 leads (initial email sent, waiting on the 2/5/8-day timer)
+            # are ACTIVE too — they must be visible here, not just in DUE.
+            base_query = " FROM leads_raw lr WHERE followup_status IN ('ACTIVE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED') AND COALESCE(is_responded, FALSE) = FALSE AND last_outreach_at IS NOT NULL "
         elif status_val == 'STOPPED':
             base_query = " FROM leads_raw lr WHERE followup_status = 'STOPPED' AND COALESCE(followup_stage, 0) > 0 "
         elif status_val == 'COMPLETED':
             base_query = " FROM leads_raw lr WHERE (followup_status = 'COMPLETED' OR (COALESCE(followup_stage, 0) >= 3 AND followup_status != 'STOPPED')) AND COALESCE(is_responded, FALSE) = FALSE "
         else: # DUE
-            base_query = """
+            # Mirrors the engine (followup_service._get_lead_type_config):
+            # CLIENT sequences use 2/4-day intervals and cap at stage 2;
+            # everything else (INVESTOR etc.) uses 2/5/8 and caps at stage 3.
+            # IDLE leads are excluded — the engine never acts on IDLE sequences.
+            base_query = f"""
                 FROM leads_raw lr
-                WHERE (followup_status IN ('ACTIVE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED', 'IDLE') OR email_status IN ('SENT', 'OPENED', 'CLICKED', 'SCHEDULED'))
+                WHERE (followup_status IN ('ACTIVE', 'PENDING_APPROVAL', 'APPROVED') OR email_status IN ('SENT', 'OPENED', 'CLICKED', 'SCHEDULED'))
                 AND COALESCE(is_responded, FALSE) = FALSE
                 AND last_outreach_at IS NOT NULL
                 AND followup_status != 'STOPPED'
-                AND (
-                    (COALESCE(followup_stage, 0) = 0 AND last_outreach_at <= NOW() - INTERVAL '2 days') OR
-                    (followup_stage = 1 AND last_outreach_at <= NOW() - INTERVAL '5 days') OR
-                    (followup_stage = 2 AND last_outreach_at <= NOW() - INTERVAL '8 days')
-                )
+                AND ({_DUE_INTERVAL_SQL})
             """
         
         params = []
@@ -458,7 +475,55 @@ def list_followups(
             s = f"%{search}%"
             params.extend([s, s, s, s])
 
-        # 4. Stage Filter
+        # 3.5. Due-only filter — restricts the current view to leads whose followup
+        # interval has already passed (same rules as the is_due flag). Applied
+        # BEFORE the breakdowns so the date strip and stage counts both reflect it.
+        if due:
+            due_str = str(due).strip().lower()
+            if due_str in ('1', 'true', 'yes', 'on'):
+                base_query += " AND (" + _DUE_INTERVAL_SQL + ")"
+
+        # 3.6. Per-date × per-stage breakdown of outgoing follow-ups — powers the
+        # "Outgoing By Date" strip on the page. Computed BEFORE the date filter so
+        # every date stays visible at once, no matter which date is selected.
+        date_stage_counts = {}
+        try:
+            count_date_query = (
+                f"SELECT last_outreach_at::date AS d, COALESCE(followup_stage, 0) AS stage, COUNT(*) AS n "
+                f"{base_query} GROUP BY 1, 2 ORDER BY 1 DESC"
+            )
+            cur.execute(count_date_query, tuple(params))
+            for r in cur.fetchall():
+                d_key = r['d'].isoformat() if hasattr(r['d'], 'isoformat') else str(r['d'])
+                date_stage_counts.setdefault(d_key, {})[str(r['stage'])] = r['n']
+        except Exception as date_err:
+            logger.error(f"Error computing followup date-stage counts: {date_err}")
+
+        # 3.7. Date Filter — only leads whose most recent outreach happened on the
+        # given calendar day (YYYY-MM-DD). Composes with status/type/search, and the
+        # stage_counts below then provide the per-stage breakdown for that date.
+        if date:
+            date_str = str(date).strip()
+            if date_str and re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_str):
+                base_query += " AND last_outreach_at::date = %s"
+                params.append(date_str)
+
+        # 4. Per-stage counts for the current filters (status/type/search), computed
+        # BEFORE the stage filter is applied so each stage button shows how many leads
+        # it matches. Keyed by raw followup_stage so Stage-0 leads are included.
+        stage_counts = {}
+        try:
+            count_stage_query = (
+                f"SELECT COALESCE(followup_stage, 0) AS stage, COUNT(*) AS n "
+                f"{base_query} GROUP BY COALESCE(followup_stage, 0) ORDER BY 1"
+            )
+            cur.execute(count_stage_query, tuple(params))
+            for r in cur.fetchall():
+                stage_counts[str(r['stage'])] = r['n']
+        except Exception as count_err:
+            logger.error(f"Error computing followup stage counts: {count_err}")
+
+        # 5. Stage Filter
         if stage is not None and str(stage).strip() != "":
             try:
                 stage_val = int(stage)
@@ -470,7 +535,7 @@ def list_followups(
                     params.append(stage_val)
             except Exception:
                 pass
-        
+
         # Count total
         cur.execute(f"SELECT COUNT(*) {base_query}", tuple(params))
         total = cur.fetchone()[0]
@@ -481,6 +546,11 @@ def list_followups(
             per_page_val = int(per_page) if per_page is not None else 100
         except Exception:
             page_val, per_page_val = 1, 100
+
+        # Sort: in the merged Pipeline view (IN_PROGRESS), due leads float to the top.
+        order_by = "COALESCE(lr.scheduled_at, lr.last_outreach_at) DESC NULLS LAST"
+        if status_val == 'IN_PROGRESS':
+            order_by = "is_due DESC, " + order_by
 
         # Fetch paginated results with first outreach and last activity in subqueries
         query = f"""
@@ -495,9 +565,12 @@ def list_followups(
                    lr.first_outreach_at, lr.first_outreach_subject,
                    lr.email_draft, lr.email_approved_by, lr.cc_email,
                    (SELECT created_at FROM activity_log WHERE lead_id = lr.id AND action = 'EMAIL_SENT' ORDER BY created_at ASC LIMIT 1) as first_outreach_fallback,
-                   (SELECT action || '||' || COALESCE(details, '') FROM activity_log WHERE lead_id = lr.id ORDER BY created_at DESC LIMIT 1) as last_action_raw
+                   (SELECT action || '||' || COALESCE(details, '') FROM activity_log WHERE lead_id = lr.id ORDER BY created_at DESC LIMIT 1) as last_action_raw,
+                   -- Due flag mirrors the engine's exact interval rules (shared _DUE_INTERVAL_SQL).
+                   -- Powers the merged Pipeline view: due leads are badged and float to the top.
+                   CASE WHEN ({_DUE_INTERVAL_SQL}) THEN TRUE ELSE FALSE END AS is_due
             {base_query}
-            ORDER BY COALESCE(lr.scheduled_at, lr.last_outreach_at) DESC NULLS LAST
+            ORDER BY {order_by}
             LIMIT %s OFFSET %s
         """
         cur.execute(query, tuple(params + [per_page_val, (page_val - 1) * per_page_val]))
@@ -526,13 +599,16 @@ def list_followups(
             else:
                 lead_dict['last_milestone'] = 'Initial Outreach'
                 lead_dict['last_action_type'] = 'Outreach'
-            lead_dict['max_followup_stage'] = 3
+            # Mirror the engine's lead-type config: CLIENT sequences cap at 2
+            # stages, everything else at 3 (followup_service._get_lead_type_config).
+            _lead_lt = str(lead_dict.get('lead_type') or '').upper()
+            lead_dict['max_followup_stage'] = 2 if _lead_lt == 'CLIENT' else 3
             # Force INVESTOR lead_type for investor-users so frontend labels stages correctly (Day 7/14/30 not Day 2/4)
             if is_yashika or is_kajal:
                 lead_dict['lead_type'] = 'Investor'
             results.append(lead_dict)
             
-        return {"leads": results, "total": total}
+        return {"leads": results, "total": total, "stage_counts": stage_counts, "date_stage_counts": date_stage_counts}
     except Exception as e:
         logger.error(f"Error fetching follow-ups: {e}")
         return {"error": str(e)}
@@ -867,7 +943,7 @@ def save_followup_draft(lead_id: int, req: ApproveFollowupRequest, user_id: Opti
 def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Approves and sends a pending follow-up draft. Supports optional custom body."""
     if not check_daily_email_limit(user_id, 1):
-        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this follow-up would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
+        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this follow-up would exceed your daily outreach limit. Please wait for the daily reset.")
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -888,6 +964,30 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
         # Skip if lead bounced
         if (lead.get('email_status') or '').upper() == 'BOUNCED':
             raise HTTPException(status_code=400, detail="Cannot send follow-up to a bounced lead.")
+
+        # ── HARD REPLY GUARD (same as the auto engine) ──
+        # A replied lead never gets another email — even via manual approval.
+        # Covers is_responded, replied_at, any reply_intent, and REPLIED/CLOSED
+        # status, so unclassified replies can't be followed up by accident.
+        if (
+            lead.get('is_responded')
+            or lead.get('replied_at') is not None
+            or (lead.get('reply_intent') or '')
+            or (lead.get('email_status') or '').upper() in ('REPLIED', 'CLOSED')
+        ):
+            raise HTTPException(status_code=400, detail="Cannot send follow-up — this lead has already replied and follow-ups are stopped.")
+
+        # ── UNSUBSCRIBE GUARD ──
+        # Never email leads who opted out, unsubscribed, or are on the global
+        # unsubscribe list (matches the auto engine's eligibility filters).
+        if lead.get('is_unsubscribed') or lead.get('email_opt_in') is False:
+            raise HTTPException(status_code=400, detail="Cannot send follow-up — this lead has unsubscribed.")
+        unsub_cur = conn.cursor()
+        unsub_cur.execute("SELECT 1 FROM unsubscribe_list WHERE LOWER(email) = LOWER(%s)", (lead['email'],))
+        _is_unsub = unsub_cur.fetchone() is not None
+        unsub_cur.close()
+        if _is_unsub:
+            raise HTTPException(status_code=400, detail="Cannot send follow-up — this lead has unsubscribed.")
 
         from app.api.drafts import get_sender_profile, markdown_to_html, get_followup_signature_markdown
         profile = get_sender_profile(user_id)
@@ -1000,7 +1100,7 @@ def bulk_approve_followups(req: BulkApproveFollowupsRequest, user_id: Optional[s
 
     batch_size = len(req.lead_ids)
     if not check_daily_email_limit(user_id, batch_size):
-        raise HTTPException(status_code=400, detail=f"Daily limit exceeded — sending {batch_size} emails would exceed your 2000 daily quota.")
+        raise HTTPException(status_code=400, detail=f"Daily limit exceeded — sending {batch_size} emails would exceed your daily outreach quota.")
 
     results = {"success": [], "failed": []}
 

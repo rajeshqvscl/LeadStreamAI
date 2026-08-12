@@ -97,13 +97,27 @@ def normalize_user_id(user_id: Optional[str]) -> Optional[str]:
 
 
 def check_daily_email_limit(user_id: Optional[str], batch_size: int = 1) -> bool:
-    """Returns True if the user has not exceeded their daily limit of 2000 sent emails."""
+    """Returns True if the user has not exceeded their daily outreach limit.
+
+    The limit comes from users.outreach_daily_limit (set on the Followups page
+    Auto-Pilot toggle); falls back to 999999 (effectively unlimited — matches
+    the admin settings GET default) when unset or for admin/unknown users.
+    """
     uid = normalize_user_id(user_id)
     is_admin = (str(user_id or '').lower() == 'admin')
     
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        # Resolve the user's configured limit (default 999999 = no restriction).
+        daily_limit = 999999
+        if not is_admin and uid:
+            cur.execute("SELECT outreach_daily_limit FROM users WHERE id = %s", (uid,))
+            limit_row = cur.fetchone()
+            stored = limit_row[0] if limit_row else None
+            if stored:
+                daily_limit = int(stored)
+
         if is_admin:
             cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
         elif uid:
@@ -112,7 +126,7 @@ def check_daily_email_limit(user_id: Optional[str], batch_size: int = 1) -> bool
             cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id IS NULL AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
         
         sent_today = cur.fetchone()[0] or 0
-        return (sent_today + batch_size) <= 2000
+        return (sent_today + batch_size) <= daily_limit
     except Exception as e:
         logger.error(f"Error checking email limit: {e}")
         return True

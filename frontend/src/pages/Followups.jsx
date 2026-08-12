@@ -38,9 +38,13 @@ const Followups = () => {
   const [userTeam, setUserTeam] = useState('');
   const [stageFilter, setStageFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('IN_PROGRESS');
+  const [dateFilter, setDateFilter] = useState('');
+  const [dueOnly, setDueOnly] = useState(false);
+  const [dateStageCounts, setDateStageCounts] = useState({});
   const [selectedIds, setSelectedIds] = useState([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [stageCounts, setStageCounts] = useState({});
   const [isEditing, setIsEditing] = useState(false);
   const [editedDraft, setEditedDraft] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -96,12 +100,16 @@ const Followups = () => {
 
     try {
       setIsLoading(true);
+      // DUE + IN_PROGRESS are merged into one Pipeline view: 'Due now' sends
+      // due=1 so the backend restricts to due leads INSIDE the pipeline.
       const params = {
         page: pageNum,
         per_page: perPage,
         search: debouncedSearch || undefined,
         type: typeFilter === 'All' ? undefined : typeFilter,
-        status: statusFilter === 'DUE' ? undefined : statusFilter,
+        status: statusFilter,
+        due: statusFilter === 'IN_PROGRESS' && dueOnly ? '1' : undefined,
+        date: dateFilter || undefined,
       };
 
       if (stageFilter !== 'All') {
@@ -121,6 +129,8 @@ const Followups = () => {
       const res = await api.get('/api/leads/followups', { params, signal: controller.signal });
       setFollowups(res.data.leads || []);
       setTotal(res.data.total || 0);
+      setStageCounts(res.data.stage_counts || {});
+      setDateStageCounts(res.data.date_stage_counts || {});
       setSelectedIds([]);
     } catch (err) {
       if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED') {
@@ -129,13 +139,13 @@ const Followups = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [debouncedSearch, typeFilter, stageFilter, statusFilter, perPage, showNotification]);
+  }, [debouncedSearch, typeFilter, stageFilter, statusFilter, dateFilter, dueOnly, perPage, showNotification]);
 
   // Reset to page 1 and fetch when filters change
   useEffect(() => {
     setPage(1);
     fetchFollowups(1);
-  }, [debouncedSearch, typeFilter, stageFilter, statusFilter, fetchFollowups]);
+  }, [debouncedSearch, typeFilter, stageFilter, statusFilter, dateFilter, dueOnly, fetchFollowups]);
 
   // Fetch when page changes (but not on initial page=1, handled by filter effect)
   useEffect(() => {
@@ -264,6 +274,14 @@ const Followups = () => {
     if (!d) return 'Never';
     return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', ...options });
   }, [parseUtcDate]);
+
+  // Format a YYYY-MM-DD date filter value. Default "11 Aug"; pass { year: 'numeric' } for "11 Aug 2026".
+  const formatDateFilter = useCallback((d, opts = {}) => {
+    if (!d) return '';
+    const dt = new Date(`${d}T00:00:00Z`);
+    if (isNaN(dt.getTime())) return d;
+    return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', ...opts });
+  }, []);
 
   const totalPages = Math.ceil(total / perPage);
 
@@ -402,19 +420,98 @@ const Followups = () => {
             {STATUS_OPTIONS.map(s => (
               <button
                 key={s}
-                onClick={() => { setStatusFilter(s === 'IN PROGRESS' ? 'IN_PROGRESS' : s); setStageFilter('All'); }}
+                onClick={() => { setStatusFilter(s); setStageFilter('All'); setDueOnly(false); }}
                 className={`px-4 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
-                  statusFilter === (s === 'IN PROGRESS' ? 'IN_PROGRESS' : s)
-                    ? s === 'IN PROGRESS' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  statusFilter === s && !(s === 'IN_PROGRESS' && dueOnly)
+                    ? s === 'IN_PROGRESS' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
                     : s === 'STOPPED' ? 'bg-red-500/20 text-red-300 border-red-500/40'
                     : s === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                     : 'bg-blue-500/20 text-blue-300 border-blue-500/40'
                     : 'bg-white/[0.03] text-slate-500 border-white/[0.05] hover:border-white/20'
                 }`}
               >
-                {s}
+                {s === 'IN_PROGRESS' ? 'Pipeline' : s}
               </button>
             ))}
+            {statusFilter === 'IN_PROGRESS' && (
+              <>
+                <div className="w-px h-6 bg-white/10" />
+                <button
+                  onClick={() => setDueOnly(false)}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                    !dueOnly
+                      ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                      : 'bg-white/[0.03] text-slate-500 border-white/[0.05] hover:border-white/20'
+                  }`}
+                >
+                  All
+                </button>
+                <button
+                  onClick={() => setDueOnly(true)}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                    dueOnly
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : 'bg-white/[0.03] text-slate-500 border-white/[0.05] hover:border-white/20'
+                  }`}
+                >
+                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> Due now</span>
+                </button>
+              </>
+            )}
+          </div>
+
+          <div className="w-px h-6 bg-white/10" />
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-slate-500" />
+              <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">Outgoing By Date</span>
+            </div>
+            <div className="flex gap-2 flex-wrap items-center">
+              <button
+                onClick={() => { setDateFilter(''); setStageFilter('All'); }}
+                className={`px-4 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                  !dateFilter
+                    ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                    : 'bg-white/[0.03] text-slate-500 border-white/[0.05] hover:border-white/20'
+                }`}
+              >
+                All
+              </button>
+              {Object.entries(dateStageCounts).map(([d, stages]) => {
+                const total = Object.values(stages).reduce((sum, n) => sum + n, 0);
+                const breakdown = Object.entries(stages)
+                  .sort(([a], [b]) => Number(a) - Number(b))
+                  .map(([s, n]) => `S${s}: ${n}`)
+                  .join('  ');
+                // Relative badge (e.g. "2d") — local calendar day diff from today.
+                const [dy, dm, dd2] = d.split('-').map(Number);
+                const dateObj = new Date(dy, dm - 1, dd2);
+                const todayStart = new Date();
+                todayStart.setHours(0, 0, 0, 0);
+                const daysAgo = Math.round((todayStart - dateObj) / 86400000);
+                return (
+                  <button
+                    key={d}
+                    onClick={() => { setDateFilter(d); setStageFilter('All'); }}
+                    title={`${formatDateFilter(d, { year: 'numeric' })} — ${breakdown}`}
+                    className={`px-4 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                      dateFilter === d
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                        : 'bg-white/[0.03] text-slate-500 border-white/[0.05] hover:border-white/20'
+                    }`}
+                  >
+                    {formatDateFilter(d)}
+                    {daysAgo >= 0 && daysAgo <= 7 && (
+                      <span className="ml-1.5 text-[9px] font-black px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                        {daysAgo === 0 ? 'Today' : `${daysAgo}d`}
+                      </span>
+                    )}
+                    <span className="ml-1.5 text-[9px] font-bold opacity-70">· {total}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="w-px h-6 bg-white/10" />
@@ -434,19 +531,27 @@ const Followups = () => {
             >
               All
             </button>
-            {(statusFilter === 'IN_PROGRESS' ? [1,2,3].map(s => ({ label: `Stage ${s}`, stage: s })) : getStageConfigs(typeFilter)).map(s => (
-              <button
-                key={s.label}
-                onClick={() => setStageFilter(s.label)}
-                className={`px-4 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
-                  stageFilter === s.label
-                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                    : 'bg-white/[0.03] text-slate-500 border-white/[0.05] hover:border-white/20'
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
+            {(statusFilter === 'IN_PROGRESS' ? [0,1,2,3].map(s => ({ label: `Stage ${s}`, stage: s })) : getStageConfigs(typeFilter)).map(s => {
+              // SENT filters by followup_stage = button stage + 1 (backend offset), so counts must match
+              const countKey = statusFilter === 'SENT' ? s.stage + 1 : s.stage;
+              const stageCount = stageCounts[countKey];
+              return (
+                <button
+                  key={s.label}
+                  onClick={() => setStageFilter(s.label)}
+                  className={`px-4 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                    stageFilter === s.label
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                      : 'bg-white/[0.03] text-slate-500 border-white/[0.05] hover:border-white/20'
+                  }`}
+                >
+                  {s.label}
+                  {stageCount !== undefined && (
+                    <span className="ml-1.5 text-[9px] font-bold opacity-60">{stageCount}</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
           {isLoading && (
             <div className="flex items-center gap-2 ml-auto">
@@ -478,6 +583,16 @@ const Followups = () => {
               {selectedIds.length === followups.length && followups.length > 0 ? <CheckSquare className="w-4 h-4 text-indigo-400" /> : <Square className="w-4 h-4" />}
               {selectedIds.length === followups.length && followups.length > 0 ? 'Deselect All' : 'Select All'}
             </button>
+            {statusFilter === 'IN_PROGRESS' && (
+              <button
+                onClick={() => setSelectedIds(followups.filter(f => f.is_due).map(f => f.id))}
+                title="Select all follow-ups on this page that are due now"
+                className="flex items-center gap-2 text-[11px] font-black text-amber-400 uppercase tracking-widest hover:text-amber-300 transition-colors cursor-pointer"
+              >
+                <Clock className="w-4 h-4" />
+                Select due ({followups.filter(f => f.is_due).length})
+              </button>
+            )}
             <span className="text-slate-700">|</span>
             <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
               {total} total results
@@ -544,6 +659,11 @@ const Followups = () => {
                           <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-md border ${isCompleted ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : getStageColor(lead.followup_stage)}`}>
                             {stageLabel}
                           </span>
+                          {statusFilter === 'IN_PROGRESS' && !dueOnly && lead.is_due && (
+                            <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-md border bg-amber-500/15 text-amber-400 border-amber-500/30">
+                              Due now
+                            </span>
+                          )}
                           {statusFilter === 'IN_PROGRESS' && (
                             <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border ${isCompleted ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}`}>
                               {lead.followup_stage}x sent
@@ -591,8 +711,8 @@ const Followups = () => {
                     <div className="flex items-center gap-3">
                       <div className="flex flex-col items-end gap-1">
                         <div className="flex items-center gap-1">
-                          {[...Array(maxStage)].map((_, i) => {
-                            const s = i + 1;
+                          {[...Array(maxStage + 1)].map((_, i) => {
+                            const s = i;
                             const isStageComplete = isCompleted || lead.followup_stage >= s;
                             return (
                               <div key={s} className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black border transition-all ${isStageComplete ? 'bg-emerald-500/30 border-emerald-500/60 text-emerald-300' : lead.followup_stage >= s ? 'bg-indigo-500/30 border-indigo-500/60 text-indigo-300' : 'bg-white/5 border-white/10 text-slate-600'}`}>

@@ -120,16 +120,28 @@ def get_metrics(
             resolved_name = row['full_name'] or row['username']
             _un = str(row.get('username') or '').lower()
             _fn = str(row.get('full_name') or '').lower()
-            if 'palak' in _un or 'palak' in _fn:
-                _investor_user_templates = ['palak_mam_corporate_advisory', 'palak_mam_mna_fundraising', 'palak_mam_draft_1']
-            elif 'yashika' in _un or 'yashika' in _fn:
-                _investor_user_templates = ['yashika_draft_ai_tech', 'yashika_draft_agritech']
-            elif 'kajal' in _un or 'kajal' in _fn:
-                _investor_user_templates = ['kajal_mam_jv', 'kajal_mam_hyphen', 'kajal_mam_health_ecosystem', 'kajal_mam_agritech', 'kajal_mam_qvscl_intro']
+            # Template-scoped users (Palak / Yashika / Kajal): derive the template
+            # list dynamically from their own leads instead of hardcoded lists.
+            # Hardcoded lists went stale (e.g. kajal_mam_Fambo, 'M&A.') and silently
+            # dropped those users' PENDING leads from reports.
+            _template_scoped = any(kw in (_un + ' ' + _fn) for kw in ('palak', 'yashika', 'kajal'))
+            if _template_scoped:
+                cur.execute(
+                    "SELECT DISTINCT draft_template_used FROM leads_raw "
+                    "WHERE user_id = %s AND draft_template_used IS NOT NULL AND draft_template_used != ''",
+                    (resolved_id,),
+                )
+                _investor_user_templates = [r['draft_template_used'] for r in cur.fetchall()]
         if resolved_id is not None:
             where_parts.append("user_id = %s")
             params.append(resolved_id)
-            if _investor_user_templates:
+            if _template_scoped:
+                # Template-scoped users: only their own templates count as "theirs";
+                # pending leads with unknown/NULL templates stay excluded. If the
+                # derived list is somehow empty, use a sentinel so the IN clause
+                # matches nothing (same as the old hardcoded behaviour).
+                if not _investor_user_templates:
+                    _investor_user_templates = ['__no_templates__']
                 tmpl_qs = ','.join(['%s'] * len(_investor_user_templates))
                 where_parts.append(f"(draft_template_used IN ({tmpl_qs}) OR email_status NOT IN ('PENDING', 'PENDING_APPROVAL'))")
                 params.extend(_investor_user_templates)
@@ -160,9 +172,11 @@ def get_metrics(
     reverted = cur.fetchone()['count'] or 0
 
     # Unsourced reply flags — is_responded=TRUE but no reply event evidence
-    # (replied_at IS NULL). These cannot be dated, so they are excluded from the
-    # monthly reply count and reported separately for transparency.
-    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw WHERE {where_base} AND is_responded = TRUE AND replied_at IS NULL", tuple(params))
+    # (replied_at IS NULL). These cannot be dated by reply time, so they are
+    # excluded from the monthly reply count and reported separately. They ARE
+    # date-filtered on updated_at so the card matches the selected period
+    # instead of always showing an all-time number.
+    cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause} AND is_responded = TRUE AND replied_at IS NULL", full_params)
     unsourced_replied = cur.fetchone()['count'] or 0
 
     # Total leads (with range)
@@ -469,7 +483,11 @@ def get_metrics(
         "reverted": reverted,
         "unsourced_replied": unsourced_replied,
         "total_leads": leads_count,
-        "sent": period_email_sent if date_from or date_to else sent,
+        # sent is ALWAYS the leads_raw status-based count (same cohort as
+        # bounces / drafts / total_leads) so all cards use one consistent source
+        # and bounce_rate can never exceed 100%. period_email_sent (activity_log)
+        # is still returned separately for API compatibility.
+        "sent": sent,
         "delivered": delivered,
         "unique_opens": unique_opens,
         "unique_clicks": unique_clicks,

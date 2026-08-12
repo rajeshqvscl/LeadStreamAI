@@ -343,14 +343,19 @@ Looking forward to your response.
           }}
         """
         result_text = self._call_llm(prompt, max_tokens=512)
-        if not result_text: return {"intent": "NOT_INTERESTED"}
+        if not result_text:
+            # LLM failure (timeout/empty) → UNKNOWN intent. The reply workflow
+            # maps unknown intents to ACTIVE so the sequence is KEPT for manual
+            # review instead of being silently killed by a transient LLM outage.
+            return {"intent": None}
 
         import re
         json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
         if json_match:
             try: return json.loads(json_match.group(0))
             except Exception: pass
-        return {"intent": "NOT_INTERESTED"}
+        # JSON parse failure → same safe UNKNOWN fallback (see above).
+        return {"intent": None}
 
 
 

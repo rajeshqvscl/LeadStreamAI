@@ -168,6 +168,9 @@ const MisReportPage = () => {
   }
 
   const { report = [], reverted, unsourced_replied = 0, _today_sent, _today_followups, _daily_limit, total_registry, bounces, drafts_generated } = data;
+  // Follow-ups: use the PERIOD count (matches the selected month) when the API
+  // returned one, falling back to the all-time total for backwards compatibility.
+  const followupsShown = data.period_followups !== undefined ? data.period_followups : (data.total_followups || 0);
   const personaData = data.persona_breakdown ? Object.entries(data.persona_breakdown).map(([k, v]) => ({ name: k, value: v })) : [];
   const sectorCounts = {};
   report.forEach(r => {
@@ -297,9 +300,10 @@ const MisReportPage = () => {
             </div>
 
             {/* Rates strip */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, marginBottom: 10 }}>
               {[
                 ['Open Rate', `${data.open_rate || 0}%`],
+                ['Click Rate', `${data.click_rate || 0}%`],
                 ['Engagement Rate', `${data.engagement_rate || 0}%`],
                 ['Bounce Rate', `${data.bounce_rate || 0}%`],
                 ['Conversion Rate', `${data.conversion_rate || 0}%`],
@@ -361,7 +365,7 @@ const MisReportPage = () => {
           <div className="grid gap-4 mb-6 no-break" style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px'}}>
             <div className="kpi-card"><div className="kpi-value">{reverted}</div><div className="kpi-label">Replied Leads</div></div>
             <div className="kpi-card"><div className="kpi-value">{data.sent || 0}</div><div className="kpi-label">Emails Sent</div></div>
-            <div className="kpi-card"><div className="kpi-value">{data.total_followups || 0}</div><div className="kpi-label">Follow-ups</div></div>
+            <div className="kpi-card"><div className="kpi-value">{followupsShown}</div><div className="kpi-label">Follow-ups</div></div>
             <div className="kpi-card"><div className="kpi-value">{drafts_generated}</div><div className="kpi-label">Drafts Pending</div></div>
             <div className="kpi-card"><div className="kpi-value">{bounces}</div><div className="kpi-label">Bounced</div></div>
           </div>
@@ -372,7 +376,7 @@ const MisReportPage = () => {
               <li><strong>{reverted}</strong> leads have responded to outreach — representing the active engagement pipeline.</li>
               <li><strong>{drafts_generated}</strong> drafts are pending in the review queue awaiting approval.</li>
               <li><strong>{data.sent || 0}</strong> emails dispatched during the reporting period.</li>
-              <li><strong>{data.total_followups || 0}</strong> follow-up sequences triggered.</li>
+              <li><strong>{followupsShown}</strong> follow-up sequences triggered.</li>
               <li><strong>{total_registry}</strong> companies registered in the CRM database.</li>
               <li><strong>{bounces}</strong> emails bounced due to invalid or unreachable addresses.</li>
             </ul>
@@ -638,6 +642,7 @@ const MisReportPage = () => {
               <thead><tr><th>Metric</th><th style={{textAlign: 'right'}}>Value</th></tr></thead>
               <tbody>
                 <tr><td><span className="font-semibold text-gray-800">Open Rate</span></td><td style={{textAlign: 'right'}}>{data.open_rate || 0}%</td></tr>
+                <tr><td><span className="font-semibold text-gray-800">Click Rate</span></td><td style={{textAlign: 'right'}}>{data.click_rate || 0}%</td></tr>
                 <tr><td><span className="font-semibold text-gray-800">Engagement Rate</span></td><td style={{textAlign: 'right'}}>{data.engagement_rate || 0}%</td></tr>
                 <tr><td><span className="font-semibold text-gray-800">Bounce Rate</span></td><td style={{textAlign: 'right'}}>{data.bounce_rate || 0}%</td></tr>
                 <tr><td><span className="font-semibold text-gray-800">Conversion Rate</span></td><td style={{textAlign: 'right'}}>{data.conversion_rate || 0}%</td></tr>

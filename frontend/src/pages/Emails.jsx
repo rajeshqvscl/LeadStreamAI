@@ -377,11 +377,47 @@ const Emails = () => {
     );
   };
 
-  const toggleSelectAll = () => {
-    if (selectedIds.length === emails.length) {
+  const MAX_SELECT_LIMIT = 90;
+
+  const toggleSelectAll = async () => {
+    // If everything currently visible is selected, clear the selection.
+    if (emails.length > 0 && emails.every(e => selectedIds.includes(e.id))) {
       setSelectedIds([]);
-    } else {
-      setSelectedIds(emails.map(e => e.id));
+      return;
+    }
+    try {
+      // Fetch ALL matching lead IDs across every page (ids_only=true) so drafts
+      // on page 2+ are no longer silently skipped by the 60-per-page view.
+      const res = await api.get('/api/emails', {
+        params: {
+          page: 1,
+          per_page: 60,
+          ids_only: true,
+          status: filterStatus,
+          region: filterRegion,
+          geo: filterGeo,
+          company: filterCompany,
+          name: filterName,
+        },
+      });
+      const allIds = res.data?.ids || [];
+      const total = res.data?.total || allIds.length;
+      if (allIds.length === 0) return;
+
+      // Safety cap: never select more than MAX_SELECT_LIMIT drafts at once —
+      // prevents rate-limit / browser-timeout blowups on huge queues.
+      const cappedIds = allIds.slice(0, MAX_SELECT_LIMIT);
+      if (total > emails.length && !window.confirm(
+        total > MAX_SELECT_LIMIT
+          ? `There are ${total} drafts — selecting the first ${MAX_SELECT_LIMIT} only. Continue?`
+          : `Select all ${total} drafts across all pages? (${emails.length} visible on this page)`
+      )) {
+        return;
+      }
+      setSelectedIds(cappedIds);
+      showNotification('success', `Selected ${cappedIds.length} draft${cappedIds.length > 1 ? 's' : ''}${total > MAX_SELECT_LIMIT ? ` (limit ${MAX_SELECT_LIMIT})` : ''}`);
+    } catch {
+      showNotification('error', 'Failed to select all drafts');
     }
   };
 
@@ -522,7 +558,7 @@ const Emails = () => {
                   <input
                     type="checkbox"
                     className="w-4 h-4 rounded border-white/10 bg-transparent text-blue-500 focus:ring-offset-0 focus:ring-0 cursor-pointer"
-                    checked={selectedIds.length === emails.length && emails.length > 0}
+                    checked={emails.length > 0 && emails.every(e => selectedIds.includes(e.id))}
                     onChange={toggleSelectAll}
                   />
                 </th>
@@ -581,7 +617,14 @@ const Emails = () => {
                       </div>
                     )}
                     {email.status === 'FAILED' && (
-                      <span className="text-[8px] font-black uppercase tracking-[1px] text-red-500">FAILED</span>
+                      <div className="flex flex-col gap-1 items-start">
+                        <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-[1px] border border-red-500 text-red-500">FAILED</span>
+                        {email.remarks && (
+                          <span className="text-[9px] text-red-400/80 font-bold max-w-[200px] truncate" title={String(email.remarks)}>
+                            {String(email.remarks).replace(/^\[Send failed: /, '').replace(/]$/, '')}
+                          </span>
+                        )}
+                      </div>
                     )}
                     {email.status === 'ARCHIVED' && (
                       <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-[1px] border border-[#3b82f6] text-[#3b82f6]">ARCHIVED</span>

@@ -19,7 +19,9 @@ export const FOLLOWUP_CONFIG = {
 
 export const LEAD_TYPES = ['All', 'Investor', 'Client'];
 
-export const STATUS_OPTIONS = ['DUE', 'SENT', 'REPLIED', 'IN_PROGRESS', 'STOPPED', 'COMPLETED'];
+// DUE was merged into the Pipeline (IN_PROGRESS) view — the page shows an
+// 'All' / 'Due now' sub-filter inside Pipeline and badges due leads.
+export const STATUS_OPTIONS = ['IN_PROGRESS', 'SENT', 'REPLIED', 'STOPPED', 'COMPLETED'];
 
 const INVESTOR_KEYWORDS = [
   'VENTURE', 'CAPITAL', 'EQUITY', 'INVEST', 'PARTNER', 'ASSET',

@@ -133,7 +133,8 @@ const Metrics = () => {
     { label: 'Replies', value: data.reverted },
     { label: 'Emails Sent', value: data.sent },
     { label: 'Follow-ups', value: (dateFrom || dateTo) ? data.period_followups : data.total_followups },
-    { label: 'Drafts', value: data.drafts_generated },
+    { label: 'Open Rate', value: `${data.open_rate || 0}%` },
+    { label: 'Click Rate', value: `${data.click_rate || 0}%` },
     { label: 'Registry', value: data.total_registry },
     { label: 'Bounces', value: data.bounces },
   ] : [];
@@ -456,7 +457,7 @@ const Metrics = () => {
         </div>
 
         {/* Stats Strip */}
-        <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-6">
+        <div className="grid grid-cols-3 md:grid-cols-7 gap-3 mb-6">
           {stats.map((s, i) => (
             <div key={i} className="bg-[#111521] border border-white/5 rounded-xl p-4">
               <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{s.label}</div>
