@@ -20,14 +20,18 @@ def _period_clause(val):
         return "AND updated_at >= NOW() - INTERVAL '30 days'"
     return ""
 
-def _period_clause_report(val):
+def _period_clause_activity(val):
+    """Period clause on activity_log.created_at (same rules as _period_clause,
+    which targets leads_raw.updated_at). Sends are bucketed by the ACTUAL send
+    time — leads_raw.updated_at gets overwritten by every follow-up/reply/edit,
+    so it silently mis-attributes emails across days in reports."""
     v = (val or '').strip().lower()
     if v == 'daily':
-        return "AND l.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date AND l.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < ((NOW() AT TIME ZONE 'Asia/Kolkata')::date + INTERVAL '1 day')"
+        return "AND created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date AND created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < ((NOW() AT TIME ZONE 'Asia/Kolkata')::date + INTERVAL '1 day')"
     elif v == 'weekly':
-        return "AND l.updated_at >= NOW() - INTERVAL '7 days'"
+        return "AND created_at >= NOW() - INTERVAL '7 days'"
     elif v == 'monthly':
-        return "AND l.updated_at >= NOW() - INTERVAL '30 days'"
+        return "AND created_at >= NOW() - INTERVAL '30 days'"
     return ""
 
 def _date_clause(date_from, date_to):
@@ -38,12 +42,21 @@ def _date_clause(date_from, date_to):
         clauses.append(f"AND updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < (%s::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata'")
     return " ".join(clauses)
 
-def _date_clause_report(date_from, date_to):
+# Activity-log clauses qualified with `al.` — the report list joins activity_log
+# to leads_raw (which ALSO has created_at/updated_at columns), so bare column
+# names would be ambiguous.
+def _period_clause_activity_qualified(val):
+    """Same as _period_clause_activity but with `al.` prefix — the report list
+    joins leads_raw (which ALSO has created_at), so bare columns are ambiguous.
+    Derived from the bare version so the two can never drift apart."""
+    return _period_clause_activity(val).replace("created_at", "al.created_at")
+
+def _date_clause_activity_qualified(date_from, date_to):
     clauses = []
     if date_from:
-        clauses.append(f"AND l.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= %s::date AT TIME ZONE 'Asia/Kolkata'")
+        clauses.append("AND al.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= %s::date AT TIME ZONE 'Asia/Kolkata'")
     if date_to:
-        clauses.append(f"AND l.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < (%s::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata'")
+        clauses.append("AND al.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < (%s::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata'")
     return " ".join(clauses)
 
 # Replied-lead time clauses use replied_at (the actual reply-received timestamp),
@@ -206,46 +219,48 @@ def get_metrics(
 
     daily_limit = 2000
 
-    # Period-based sent/followups (from activity_log with date filter)
-    if date_from or date_to:
-        al_date_parts = []
-        al_date_params = []
-        if user_id and user_id != 'all' and resolved_name:
-            al_date_parts.append("performed_by = %s")
-            al_date_params.append(resolved_name)
-        al_date_parts.append("1=1")
-        al_date_base = " AND ".join(al_date_parts)
-        al_date_filter = ""
-        if date_from:
-            al_date_filter += " AND created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= %s::date AT TIME ZONE 'Asia/Kolkata'"
-            al_date_params.append(date_from)
-        if date_to:
-            al_date_filter += " AND created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < (%s::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata'"
-            al_date_params.append(date_to)
-        al_params = tuple(al_date_params)
-        cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE action = 'EMAIL_SENT' AND {al_date_base} {al_date_filter}", al_params)
-        period_email_sent = cur.fetchone()['count'] or 0
-        # Follow-ups: use user_id column for per-user filter
-        fup_date_parts = []
-        fup_date_params = []
-        if user_id and user_id != 'all' and resolved_id:
-            fup_date_parts.append("user_id = %s")
-            fup_date_params.append(resolved_id)
-        fup_date_parts.append("1=1")
-        fup_date_base = " AND ".join(fup_date_parts)
-        fup_date_filter = ""
-        if date_from:
-            fup_date_filter += " AND created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= %s::date AT TIME ZONE 'Asia/Kolkata'"
-            fup_date_params.append(date_from)
-        if date_to:
-            fup_date_filter += " AND created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < (%s::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata'"
-            fup_date_params.append(date_to)
-        fup_params = tuple(fup_date_params)
-        cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE action IN ('AUTO_FOLLOWUP_SENT', 'FOLLOWUP_APPROVED') AND {fup_date_base} {fup_date_filter}", fup_params)
-        period_followups = cur.fetchone()['count'] or 0
-    else:
-        period_email_sent = 0
-        period_followups = 0
+    # Period-based sent/followups — ALWAYS computed from activity_log (the only
+    # reliable source for when emails were actually dispatched). leads_raw's
+    # updated_at is overwritten by every follow-up/reply/edit, so date-bucketing
+    # on it silently drops or mis-attributes sends (e.g. Kajal's 46 on Aug 10
+    # showed as 1 in leads_raw but 46 in activity_log).
+    al_date_parts = []
+    al_date_params = []
+    if user_id and user_id != 'all' and resolved_name:
+        al_date_parts.append("performed_by = %s")
+        al_date_params.append(resolved_name)
+    al_date_parts.append("1=1")
+    al_date_base = " AND ".join(al_date_parts)
+    # Period clause on activity_log.created_at (not leads_raw.updated_at)
+    al_period = _period_clause_activity(period)
+    al_date_filter = al_period
+    if date_from:
+        al_date_filter += " AND created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= %s::date AT TIME ZONE 'Asia/Kolkata'"
+        al_date_params.append(date_from)
+    if date_to:
+        al_date_filter += " AND created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < (%s::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata'"
+        al_date_params.append(date_to)
+    al_params = tuple(al_date_params)
+    cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE action = 'EMAIL_SENT' AND {al_date_base} {al_date_filter}", al_params)
+    period_email_sent = cur.fetchone()['count'] or 0
+    # Follow-ups: use user_id column for per-user filter (same period/date scope)
+    fup_date_parts = []
+    fup_date_params = []
+    if user_id and user_id != 'all' and resolved_id:
+        fup_date_parts.append("user_id = %s")
+        fup_date_params.append(resolved_id)
+    fup_date_parts.append("1=1")
+    fup_date_base = " AND ".join(fup_date_parts)
+    fup_date_filter = al_period
+    if date_from:
+        fup_date_filter += " AND created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= %s::date AT TIME ZONE 'Asia/Kolkata'"
+        fup_date_params.append(date_from)
+    if date_to:
+        fup_date_filter += " AND created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < (%s::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata'"
+        fup_date_params.append(date_to)
+    fup_params = tuple(fup_date_params)
+    cur.execute(f"SELECT COUNT(*) as count FROM activity_log WHERE action IN ('AUTO_FOLLOWUP_SENT', 'FOLLOWUP_APPROVED') AND {fup_date_base} {fup_date_filter}", fup_params)
+    period_followups = cur.fetchone()['count'] or 0
 
     # Total follow-ups (all time)
     if user_id and user_id != 'all' and resolved_id:
@@ -341,13 +356,16 @@ def get_metrics(
     country_rows = cur.fetchall()
     country_breakdown = { r['country']: r['count'] for r in country_rows }
 
-    # Per-lead report data
-    rng_report = _period_clause_report(period)
-    dte_report = _date_clause_report(date_from, date_to)
+    # Per-lead report data — built from activity_log EMAIL_SENT events so the
+    # list EXACTLY matches the period_email_sent count. (leads_raw.updated_at is
+    # overwritten by every follow-up/reply/edit, so filtering the list on it
+    # silently dropped sends — Kajal's 46 sends on Aug 10 showed only 7 rows.)
+    rpt_period = _period_clause_activity_qualified(period)
+    rpt_date = _date_clause_activity_qualified(date_from, date_to)
     report_params = []
     report_where = []
 
-    # Optional status filter (e.g. status=BOUNCED)
+    # Optional status filter (e.g. status=BOUNCED) — applied to the joined lead
     if status:
         status_val = status.strip().upper()
         if status_val == 'ACTIVE':
@@ -358,22 +376,15 @@ def get_metrics(
 
     # Detect Palak for 2-followup display
     _palak_user = 'palak' in (resolved_name or '').lower()
-    _investor_user_templates = _investor_user_templates  # already set during user lookup above
 
-    if user_id and user_id != 'all':
-        if resolved_id is not None:
-            report_where.append("l.user_id = %s")
-            report_params.append(resolved_id)
-            # For template-based users, only include leads with their known templates or sent emails
-            if _investor_user_templates:
-                tmpl_placeholders = ','.join(['%s'] * len(_investor_user_templates))
-                report_where.append(f"(l.draft_template_used IN ({tmpl_placeholders}) OR l.email_status NOT IN ('PENDING', 'PENDING_APPROVAL'))")
-                report_params.extend(_investor_user_templates)
-        else:
-            report_where.append("1=0")
+    # Same per-user scoping as period_email_sent (performed_by) so the list and
+    # the count can never diverge. Admin/global scope → all sends.
+    if user_id and user_id != 'all' and resolved_name:
+        report_where.append("al.performed_by = %s")
+        report_params.append(resolved_name)
     report_where.append("1=1")
     report_base = " AND ".join(report_where)
-    report_filter = f"WHERE {report_base} {rng_report} {dte_report}".strip()
+    report_filter = f"WHERE al.action = 'EMAIL_SENT' AND {report_base} {rpt_period} {rpt_date}".strip()
     report_params_t = tuple(report_params)
     if date_from:
         report_params_t = report_params_t + (date_from,)
@@ -386,11 +397,13 @@ def get_metrics(
                COALESCE(l.lead_type, 'CLIENT') as lead_type,
                l.email_status, l.followup_status, l.followup_stage,
                l.is_responded, l.is_unsubscribed, l.reply_intent, l.check_size,
-               l.updated_at, l.replied_at, l.first_outreach_subject, l.draft_template_used,
-               (SELECT al.details FROM activity_log al WHERE al.lead_id = l.id AND al.action = 'BOUNCED' ORDER BY al.created_at DESC LIMIT 1) as bounce_reason
-        FROM leads_raw l
+               l.replied_at, l.first_outreach_subject, l.draft_template_used,
+               al.created_at AS sent_at,
+               (SELECT ab.details FROM activity_log ab WHERE ab.lead_id = l.id AND ab.action = 'BOUNCED' ORDER BY ab.created_at DESC LIMIT 1) as bounce_reason
+        FROM activity_log al
+        JOIN leads_raw l ON al.lead_id = l.id
         {report_filter}
-        ORDER BY l.updated_at DESC
+        ORDER BY al.created_at DESC
     """, report_params_t)
     report_rows = cur.fetchall()
 
@@ -429,7 +442,7 @@ def get_metrics(
         else:
             followup_display = 'Not started'
 
-        updated = r['updated_at']
+        updated = r['sent_at']
         if updated:
             updated = updated.isoformat() if hasattr(updated, 'isoformat') else str(updated)
 

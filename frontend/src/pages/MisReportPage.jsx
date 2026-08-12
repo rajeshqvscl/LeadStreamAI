@@ -171,6 +171,10 @@ const MisReportPage = () => {
   // Follow-ups: use the PERIOD count (matches the selected month) when the API
   // returned one, falling back to the all-time total for backwards compatibility.
   const followupsShown = data.period_followups !== undefined ? data.period_followups : (data.total_followups || 0);
+  // Emails Sent: use the activity_log-based period count (accurate send
+  // timestamps) — leads_raw.updated_at gets overwritten by follow-ups/replies,
+  // which silently mis-attributes sends across days in the monthly report.
+  const emailsSentShown = data.period_email_sent !== undefined ? data.period_email_sent : (data.sent || 0);
   const personaData = data.persona_breakdown ? Object.entries(data.persona_breakdown).map(([k, v]) => ({ name: k, value: v })) : [];
   const sectorCounts = {};
   report.forEach(r => {
@@ -287,7 +291,7 @@ const MisReportPage = () => {
               {[
                 ['Total Leads', data.total_leads || 0],
                 ['Drafts Pending', drafts_generated],
-                ['Emails Sent', data.sent || 0],
+                ['Emails Sent', emailsSentShown],
                 ['Replied (verified)', reverted],
                 ['Replies (unsourced)', unsourced_replied],
                 ['Bounced', bounces],
@@ -364,7 +368,7 @@ const MisReportPage = () => {
 
           <div className="grid gap-4 mb-6 no-break" style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px'}}>
             <div className="kpi-card"><div className="kpi-value">{reverted}</div><div className="kpi-label">Replied Leads</div></div>
-            <div className="kpi-card"><div className="kpi-value">{data.sent || 0}</div><div className="kpi-label">Emails Sent</div></div>
+            <div className="kpi-card"><div className="kpi-value">{emailsSentShown}</div><div className="kpi-label">Emails Sent</div></div>
             <div className="kpi-card"><div className="kpi-value">{followupsShown}</div><div className="kpi-label">Follow-ups</div></div>
             <div className="kpi-card"><div className="kpi-value">{drafts_generated}</div><div className="kpi-label">Drafts Pending</div></div>
             <div className="kpi-card"><div className="kpi-value">{bounces}</div><div className="kpi-label">Bounced</div></div>
@@ -375,7 +379,7 @@ const MisReportPage = () => {
             <ul className="text-sm text-gray-600 space-y-2" style={{listStyle: 'disc', paddingLeft: '20px'}}>
               <li><strong>{reverted}</strong> leads have responded to outreach — representing the active engagement pipeline.</li>
               <li><strong>{drafts_generated}</strong> drafts are pending in the review queue awaiting approval.</li>
-              <li><strong>{data.sent || 0}</strong> emails dispatched during the reporting period.</li>
+              <li><strong>{emailsSentShown}</strong> emails dispatched during the reporting period.</li>
               <li><strong>{followupsShown}</strong> follow-up sequences triggered.</li>
               <li><strong>{total_registry}</strong> companies registered in the CRM database.</li>
               <li><strong>{bounces}</strong> emails bounced due to invalid or unreachable addresses.</li>
@@ -437,7 +441,7 @@ const MisReportPage = () => {
                       { label: 'Total Replied', value: reverted },
                       { label: 'Interested', value: data.unique_engaged || 0 },
                       { label: 'Drafts Generated', value: drafts_generated },
-                      { label: 'Emails Sent', value: data.sent || 0 },
+                      { label: 'Emails Sent', value: emailsSentShown },
                       { label: 'Bounced', value: bounces },
                     ].filter(s => s.value > 0).map((s, i) => (
                       <tr key={i}><td><span className="font-semibold text-gray-800">{s.label}</span></td><td style={{textAlign: 'right'}}>{s.value}</td></tr>
@@ -450,7 +454,7 @@ const MisReportPage = () => {
                   { label: 'Total Replied', value: reverted },
                   { label: 'Interested', value: data.unique_engaged || 0 },
                   { label: 'Drafts Generated', value: drafts_generated },
-                  { label: 'Emails Sent', value: data.sent || 0 },
+                  { label: 'Emails Sent', value: emailsSentShown },
                   { label: 'Bounced', value: bounces },
                 ].filter(s => s.value > 0);
                 return funnel.length > 0 ? (
@@ -668,8 +672,8 @@ const MisReportPage = () => {
             <div className="no-break border border-emerald-100 rounded-lg p-5 bg-emerald-50/50">
               <h3 className="text-sm font-bold text-emerald-800 mb-2" style={{fontSize: '13px'}}>Outreach Performance</h3>
               <p className="text-sm text-gray-600 leading-relaxed">
-                {data.sent > 0
-                  ? `${data.sent} emails dispatched in the reporting period. ${bounces > 0 ? `${bounces} bounced — review email list hygiene.` : 'No bounces recorded — list quality is good.'}`
+                {emailsSentShown > 0
+                  ? `${emailsSentShown} emails dispatched in the reporting period. ${bounces > 0 ? `${bounces} bounced — review email list hygiene.` : 'No bounces recorded — list quality is good.'}`
                   : 'No emails sent this period. Check auto-pilot settings and daily limit configuration.'}
               </p>
             </div>

@@ -131,7 +131,9 @@ const Metrics = () => {
 
   const stats = data ? [
     { label: 'Replies', value: data.reverted },
-    { label: 'Emails Sent', value: data.sent },
+    // Emails Sent: use the activity_log-based period count (accurate send
+    // timestamps) — leads_raw.updated_at is overwritten by follow-ups/replies.
+    { label: 'Emails Sent', value: data.period_email_sent !== undefined ? data.period_email_sent : data.sent },
     { label: 'Follow-ups', value: (dateFrom || dateTo) ? data.period_followups : data.total_followups },
     { label: 'Open Rate', value: `${data.open_rate || 0}%` },
     { label: 'Click Rate', value: `${data.click_rate || 0}%` },
@@ -160,6 +162,9 @@ const Metrics = () => {
 
   const pipelineData = data ? [
     { name: 'Total', value: data.total_leads },
+    // NOTE: pipeline uses leads_raw-based `sent` to stay consistent with
+    // Delivered/Opened/Bounced (same cohort) — only the top stats card shows
+    // the accurate activity_log-based period_email_sent count.
     { name: 'Sent', value: data.sent },
     { name: 'Delivered', value: data.delivered },
     { name: 'Opened', value: data.unique_opens },
