@@ -135,14 +135,17 @@ const Metrics = () => {
     // timestamps) — leads_raw.updated_at is overwritten by follow-ups/replies.
     { label: 'Emails Sent', value: data.period_email_sent !== undefined ? data.period_email_sent : data.sent },
     { label: 'Follow-ups', value: (dateFrom || dateTo) ? data.period_followups : data.total_followups },
-    { label: 'Open Rate', value: `${data.open_rate || 0}%` },
-    { label: 'Click Rate', value: `${data.click_rate || 0}%` },
+    // Open/Click rates: period-scoped (activity_log send range) so % + counts
+    // stay consistent with the Emails Sent card.
+    { label: 'Open Rate', value: `${data.period_open_rate !== undefined ? data.period_open_rate : (data.open_rate || 0)}%`, sub: `${data.period_opens !== undefined ? data.period_opens : 0} opened` },
+    { label: 'Click Rate', value: `${data.period_click_rate !== undefined ? data.period_click_rate : (data.click_rate || 0)}%`, sub: `${data.period_clicks !== undefined ? data.period_clicks : 0} clicked` },
     { label: 'Registry', value: data.total_registry },
     { label: 'Bounces', value: data.bounces },
   ] : [];
 
   const engagementMetrics = data ? [
-    { label: 'Open Rate', value: `${data.open_rate}%` },
+    { label: 'Open Rate', value: `${data.period_open_rate !== undefined ? data.period_open_rate : (data.open_rate || 0)}%`, sub: `${data.period_opens !== undefined ? data.period_opens : 0} opened` },
+    { label: 'Click Rate', value: `${data.period_click_rate !== undefined ? data.period_click_rate : (data.click_rate || 0)}%`, sub: `${data.period_clicks !== undefined ? data.period_clicks : 0} clicked` },
     { label: 'Engagement Rate', value: `${data.engagement_rate}%` },
     { label: 'Bounce Rate', value: `${data.bounce_rate}%` },
     { label: 'Conversion Rate', value: `${data.conversion_rate}%` },
@@ -328,11 +331,12 @@ const Metrics = () => {
     }
     return (
       <div className="space-y-6">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {engagementMetrics.map((m, i) => (
             <div key={i} className="bg-[#111521] border border-white/5 rounded-xl p-4 text-center">
               <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{m.label}</div>
               <div className="text-2xl font-black text-white">{m.value}</div>
+              {m.sub ? <div className="text-[10px] font-semibold text-slate-500 mt-0.5">{m.sub}</div> : null}
             </div>
           ))}
         </div>
@@ -467,6 +471,7 @@ const Metrics = () => {
             <div key={i} className="bg-[#111521] border border-white/5 rounded-xl p-4">
               <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{s.label}</div>
               <div className="text-xl font-black text-white">{s.value}</div>
+              {s.sub ? <div className="text-[10px] font-semibold text-slate-500 mt-0.5">{s.sub}</div> : null}
             </div>
           ))}
         </div>

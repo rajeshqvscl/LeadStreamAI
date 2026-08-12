@@ -309,6 +309,36 @@ def get_metrics(
     engagement_rate = (unique_engaged / delivered * 100) if delivered > 0 else 0.0
     conversion_rate = (unique_engaged / leads_count * 100) if leads_count > 0 else 0.0
 
+    # ── PERIOD-SCOPED OPEN/CLICK RATES ──
+    # These use the SAME activity-log scope as period_email_sent (performed_by +
+    # created_at range), so the denominator matches the Emails Sent card exactly
+    # and the numbers tell one story (e.g. 197 sent -> 14 opened -> 7.1%).
+    # The cohort-based open_rate/click_rate above are kept for API compatibility.
+    cur.execute(
+        f"""SELECT COUNT(DISTINCT alo.lead_id)
+            FROM activity_log alo
+            WHERE alo.action = 'OPENED'
+              AND alo.lead_id IN (
+                  SELECT DISTINCT al.lead_id FROM activity_log al
+                  WHERE al.action = 'EMAIL_SENT' AND {al_date_base} {al_date_filter}
+              )""",
+        al_params,
+    )
+    period_opens = cur.fetchone()['count'] or 0
+    cur.execute(
+        f"""SELECT COUNT(DISTINCT alo.lead_id)
+            FROM activity_log alo
+            WHERE alo.action = 'CLICKED'
+              AND alo.lead_id IN (
+                  SELECT DISTINCT al.lead_id FROM activity_log al
+                  WHERE al.action = 'EMAIL_SENT' AND {al_date_base} {al_date_filter}
+              )""",
+        al_params,
+    )
+    period_clicks = cur.fetchone()['count'] or 0
+    period_open_rate = (period_opens / period_email_sent * 100) if period_email_sent > 0 else 0.0
+    period_click_rate = (period_clicks / period_email_sent * 100) if period_email_sent > 0 else 0.0
+
     # Persona breakdown
     if user_id and user_id != 'all' and resolved_name:
         uname = (resolved_name or '').lower()
@@ -509,6 +539,10 @@ def get_metrics(
 
         "open_rate": round(open_rate, 2),
         "click_rate": round(click_rate, 2),
+        "period_opens": period_opens,
+        "period_clicks": period_clicks,
+        "period_open_rate": round(period_open_rate, 2),
+        "period_click_rate": round(period_click_rate, 2),
         "bounce_rate": round(bounce_rate, 2),
         "engagement_rate": round(engagement_rate, 2),
         "conversion_rate": round(conversion_rate, 2),

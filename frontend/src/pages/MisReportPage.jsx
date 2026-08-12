@@ -306,15 +306,18 @@ const MisReportPage = () => {
             {/* Rates strip */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, marginBottom: 10 }}>
               {[
-                ['Open Rate', `${data.open_rate || 0}%`],
-                ['Click Rate', `${data.click_rate || 0}%`],
-                ['Engagement Rate', `${data.engagement_rate || 0}%`],
-                ['Bounce Rate', `${data.bounce_rate || 0}%`],
-                ['Conversion Rate', `${data.conversion_rate || 0}%`],
-              ].map(([l, v]) => (
+                ['Open Rate', `${data.period_open_rate !== undefined ? data.period_open_rate : (data.open_rate || 0)}%`, `${data.period_opens !== undefined ? data.period_opens : 0} opened`],
+                ['Click Rate', `${data.period_click_rate !== undefined ? data.period_click_rate : (data.click_rate || 0)}%`, `${data.period_clicks !== undefined ? data.period_clicks : 0} clicked`],
+                ['Engagement Rate', `${data.engagement_rate || 0}%`, ''],
+                ['Bounce Rate', `${data.bounce_rate || 0}%`, ''],
+                ['Conversion Rate', `${data.conversion_rate || 0}%`, ''],
+              ].map(([l, v, sub]) => (
                 <div key={l} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '8px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f9fafb' }}>
                   <span style={{ fontSize: 8.5, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5 }}>{l}</span>
-                  <span style={{ fontSize: 14, fontWeight: 800, color: '#4338ca' }}>{v}</span>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: '#4338ca' }}>{v}</div>
+                    {sub ? <div style={{ fontSize: 8, fontWeight: 600, color: '#9ca3af' }}>{sub}</div> : null}
+                  </div>
                 </div>
               ))}
             </div>
@@ -645,8 +648,8 @@ const MisReportPage = () => {
             <table className="report-table">
               <thead><tr><th>Metric</th><th style={{textAlign: 'right'}}>Value</th></tr></thead>
               <tbody>
-                <tr><td><span className="font-semibold text-gray-800">Open Rate</span></td><td style={{textAlign: 'right'}}>{data.open_rate || 0}%</td></tr>
-                <tr><td><span className="font-semibold text-gray-800">Click Rate</span></td><td style={{textAlign: 'right'}}>{data.click_rate || 0}%</td></tr>
+                <tr><td><span className="font-semibold text-gray-800">Open Rate</span></td><td style={{textAlign: 'right'}}>{data.period_open_rate !== undefined ? data.period_open_rate : (data.open_rate || 0)}% ({data.period_opens !== undefined ? data.period_opens : 0} opened)</td></tr>
+                <tr><td><span className="font-semibold text-gray-800">Click Rate</span></td><td style={{textAlign: 'right'}}>{data.period_click_rate !== undefined ? data.period_click_rate : (data.click_rate || 0)}% ({data.period_clicks !== undefined ? data.period_clicks : 0} clicked)</td></tr>
                 <tr><td><span className="font-semibold text-gray-800">Engagement Rate</span></td><td style={{textAlign: 'right'}}>{data.engagement_rate || 0}%</td></tr>
                 <tr><td><span className="font-semibold text-gray-800">Bounce Rate</span></td><td style={{textAlign: 'right'}}>{data.bounce_rate || 0}%</td></tr>
                 <tr><td><span className="font-semibold text-gray-800">Conversion Rate</span></td><td style={{textAlign: 'right'}}>{data.conversion_rate || 0}%</td></tr>
