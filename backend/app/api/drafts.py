@@ -4203,20 +4203,20 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
     from app.api.drafts import get_sender_profile
     profile = get_sender_profile(user_id)
 
-    # 2. Fetch the requested leads (skipping any that have replied or unsubscribed —
-    #    same safety rules as the follow-up engine and manual approve path)
+    # 2. Fetch the requested leads.
+    #    Only leads explicitly queued for dispatch (PENDING_APPROVAL / APPROVED)
+    #    are sendable via this endpoint — the UI only offers "Send" for those
+    #    statuses. Reply/unsubscribe flags are deliberately NOT checked here: an
+    #    admin who sets a draft to PENDING_APPROVAL wants it dispatched even if
+    #    the lead previously replied/unsubscribed (they can inspect per-lead
+    #    before selecting). Final delivery safety is still enforced by
+    #    send_email()'s own unsubscribe guard.
     cur.execute(
         """
         SELECT id, email, email_draft, gmail_draft_id, cc_email, draft_template_used, user_id
         FROM leads_raw
         WHERE id = ANY(%s)
-          AND COALESCE(is_responded, FALSE) = FALSE
-          AND replied_at IS NULL
-          AND COALESCE(reply_intent, '') = ''
-          AND email_status NOT IN ('REPLIED', 'CLOSED')
-          AND (email_opt_in IS NULL OR email_opt_in = TRUE)
-          AND (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)
-          AND email NOT IN (SELECT email FROM unsubscribe_list)
+          AND email_status IN ('PENDING_APPROVAL', 'APPROVED')
         """,
         (req.lead_ids,)
     )
