@@ -645,18 +645,27 @@ def process_outreach_sequences():
                         logger.info(f"Lead {lead_id} has no Gmail thread — never sent from this platform, skipping")
                         continue
 
-                    # Final duplicate guard: check activity_log for existing follow-up at this stage
-                    # Skip only if stage was NOT reset (i.e. followup_stage matches expected stage)
+                    # Final duplicate guard: check activity_log for existing follow-up at this stage.
+                    # ONLY entries from the CURRENT campaign count — a lead re-emailed for a fresh
+                    # outreach (stage reset to 0) must NOT be blocked by follow-ups sent in a
+                    # previous campaign (e.g. a June 'Stage 1' entry silently killing an August lead).
+                    # Anchor = the campaign's EMAIL_SENT event: entries older than the newest
+                    # EMAIL_SENT belong to an earlier campaign and are ignored.
                     try:
                         dup_cur = lead_conn.cursor()
                         dup_cur.execute(
-                            "SELECT COUNT(*) FROM activity_log WHERE lead_id = %s AND action = 'AUTO_FOLLOWUP_SENT' AND details LIKE %s",
-                            (lead_id, f"Stage {next_stage}%")
+                            """
+                            SELECT COUNT(*) FROM activity_log
+                            WHERE lead_id = %s AND action = 'AUTO_FOLLOWUP_SENT' AND details LIKE %s
+                              AND created_at >= (SELECT MAX(created_at) FROM activity_log
+                                                 WHERE lead_id = %s AND action = 'EMAIL_SENT')
+                            """,
+                            (lead_id, f"Stage {next_stage}%", lead_id)
                         )
                         dup_count = list(dup_cur.fetchone().values())[0]
                         dup_cur.close()
                         if dup_count > 0:
-                            logger.info(f"Lead {lead_id}: Stage {next_stage} already sent ({dup_count}x in log) — skipping duplicate")
+                            logger.info(f"Lead {lead_id}: Stage {next_stage} already sent in current campaign ({dup_count}x in log) — skipping duplicate")
                             continue
                     except Exception as dup_err:
                         logger.warning(f"Duplicate check failed for lead {lead_id}: {dup_err}")

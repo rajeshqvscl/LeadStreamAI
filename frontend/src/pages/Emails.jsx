@@ -148,37 +148,43 @@ const Emails = () => {
     setBulkSendProgress({ sent: 0, failed: 0, total: idsToSend.length, current: 'Starting...' });
     setSelectedIds([]);
 
+    // Chunk into batches of 8 to stay under Render's 30s HTTP timeout.
+    // Each email takes ~3s (2s backend delay + ~1s Gmail API),
+    // so 8 × 3s = 24s — safely under 30s.
+    // Chunks are sent SEQUENTIALLY (not parallel) to avoid Gmail rate
+    // limits, OAuth token races, and DB connection pool exhaustion.
+    const CHUNK_SIZE = 8;
     let sentCount = 0;
     let failedCount = 0;
-    const BATCH_SIZE = 3;
 
-    for (let i = 0; i < idsToSend.length; i += BATCH_SIZE) {
-      if (stopBulkSendRef.current) {
-        setBulkSendProgress(prev => ({ ...prev, current: `⏹ Stopped — ${sentCount} sent, ${idsToSend.length - i} skipped` }));
-        break;
-      }
-
-      const batch = idsToSend.slice(i, i + BATCH_SIZE);
-      setBulkSendProgress(prev => ({ ...prev, current: `Sending batch ${Math.floor(i / BATCH_SIZE) + 1} (${i + 1}-${Math.min(i + BATCH_SIZE, idsToSend.length)} of ${idsToSend.length})...` }));
-
-      const results = await Promise.allSettled(
-        batch.map(id => api.post('/api/send-selected-batch', { lead_ids: [id] }))
-      );
-
-      for (const r of results) {
-        if (r.status === 'fulfilled' && r.value?.data?.sent_count > 0) {
-          sentCount++;
-        } else {
-          failedCount++;
+    try {
+      for (let i = 0; i < idsToSend.length; i += CHUNK_SIZE) {
+        if (stopBulkSendRef.current) {
+          setBulkSendProgress(prev => ({ ...prev, current: `⏹ Stopped — ${sentCount} sent, ${idsToSend.length - i} skipped` }));
+          break;
         }
+
+        const chunk = idsToSend.slice(i, i + CHUNK_SIZE);
+        const chunkNum = Math.floor(i / CHUNK_SIZE) + 1;
+        const totalChunks = Math.ceil(idsToSend.length / CHUNK_SIZE);
+        setBulkSendProgress(prev => ({ ...prev, current: `Sending chunk ${chunkNum}/${totalChunks} (${i + 1}-${Math.min(i + CHUNK_SIZE, idsToSend.length)} of ${idsToSend.length})...` }));
+
+        const res = await api.post('/api/send-selected-batch', { lead_ids: chunk }, {
+          timeout: 30000
+        });
+        sentCount += res.data?.sent_count || 0;
+        failedCount += res.data?.failed_count || 0;
+        setBulkSendProgress(prev => ({ ...prev, sent: sentCount, failed: failedCount }));
       }
-      setBulkSendProgress(prev => ({ ...prev, sent: sentCount, failed: failedCount }));
+
+      const wasStopped = stopBulkSendRef.current;
+      setBulkSendProgress(prev => ({ ...prev, current: wasStopped ? `⏹ Stopped — ${sentCount} sent, ${failedCount} failed` : `✓ Done — ${sentCount} sent, ${failedCount} failed` }));
+      showNotification(sentCount > 0 ? 'success' : 'error', wasStopped ? `Stopped: ${sentCount} sent, ${failedCount} failed` : `Sent ${sentCount} of ${idsToSend.length} emails`);
+    } catch (err) {
+      setBulkSendProgress(prev => ({ ...prev, current: `❌ Error — ${err?.response?.data?.detail || err.message}` }));
+      showNotification('error', err?.response?.data?.detail || 'Bulk send failed');
     }
 
-    const wasStopped = stopBulkSendRef.current;
-    setBulkSendProgress(prev => ({ ...prev, current: wasStopped ? `⏹ Stopped — ${sentCount} sent, ${failedCount} failed` : `✓ Done — ${sentCount} sent, ${failedCount} failed` }));
-    showNotification(sentCount > 0 ? 'success' : 'error', wasStopped ? `Stopped: ${sentCount} sent, ${failedCount} failed` : `Sent ${sentCount} of ${idsToSend.length} emails`);
-    
     setTimeout(() => {
       setIsBulkSending(false);
       setBulkSendProgress({ sent: 0, failed: 0, total: 0, current: '' });

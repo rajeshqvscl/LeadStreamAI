@@ -18,6 +18,7 @@ from app.services.vision_service import analyze_template_screenshot
 import psycopg2.extras
 import logging
 import json
+import time
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -2195,7 +2196,19 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
             cur.close()
             return {"error": "Lead not found"}
         lead = normalize_lead(lead)
-        
+
+        # Unsubscribe guard: skip draft generation for unsubscribed / opted-out leads
+        if lead.get('is_unsubscribed') or lead.get('email_opt_in') is False:
+            cur.close()
+            return {"error": "Lead has unsubscribed — draft skipped", "skipped": True, "reason": "unsubscribed"}
+
+        lead_email_lower = (lead.get('email') or '').strip().lower()
+        if lead_email_lower:
+            cur.execute("SELECT 1 FROM unsubscribe_list WHERE LOWER(email) = %s", (lead_email_lower,))
+            if cur.fetchone():
+                cur.close()
+                return {"error": "Email is unsubscribed globally — draft skipped", "skipped": True, "reason": "unsubscribed"}
+
         profile = get_sender_profile(user_id)
         generator = EmailGenerator()
         is_yashika = False
@@ -3092,6 +3105,24 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
             return {"error": "Lead not found"}
         lead = normalize_lead(lead)
 
+        # Unsubscribe guard: skip draft generation for unsubscribed / opted-out leads
+        # (mirrors send_email()'s guard so these leads never enter the review queue
+        #  and never show up as send failures in the "select → send" flow)
+        if lead.get('is_unsubscribed') or lead.get('email_opt_in') is False:
+            cur.close()
+            conn.close()
+            logger.info(f"⛔ Skipping draft for lead {lead_id} — lead is unsubscribed")
+            return {"error": "Lead has unsubscribed — draft skipped", "skipped": True, "reason": "unsubscribed"}
+
+        lead_email_lower = (lead.get('email') or '').strip().lower()
+        if lead_email_lower:
+            cur.execute("SELECT 1 FROM unsubscribe_list WHERE LOWER(email) = %s", (lead_email_lower,))
+            if cur.fetchone():
+                cur.close()
+                conn.close()
+                logger.info(f"⛔ Skipping draft for lead {lead_id} ({lead_email_lower}) — email in global unsubscribe list")
+                return {"error": "Email is unsubscribed globally — draft skipped", "skipped": True, "reason": "unsubscribed"}
+
         # Fetch template
         cur.execute("SELECT content, subject, cc, description FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE", (template_name,))
         tpl_row = cur.fetchone()
@@ -3407,7 +3438,15 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
         # Base condition
-        where_clause = "WHERE email_draft IS NOT NULL"
+        # Unsubscribe guard: never show drafts for leads that opted out / were
+        # suppressed — they can never be sent, so showing them in the review
+        # queue only leads to confusing send failures ("select 12 → 9 sent, 3 left").
+        where_clause = """
+            WHERE email_draft IS NOT NULL
+              AND (email_opt_in IS NULL OR email_opt_in = TRUE)
+              AND (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)
+              AND email NOT IN (SELECT email FROM unsubscribe_list)
+        """
         params = []
         
         # User isolation: non-admin → only their drafts; admin → all; unset → unassigned only
@@ -4231,7 +4270,13 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
     failed_count = 0
     results = []
 
-    for lead in leads_to_send:
+    for idx, lead in enumerate(leads_to_send):
+        # Inter-send delay: Gmail API per-user rate limit = 250 quota units/sec,
+        # send costs ~100 units → max ~2-3 sends/sec safe.  2s gap gives
+        # comfortable headroom and prevents token-refresh races + DB pool
+        # pressure when multiple users batch simultaneously.
+        if idx > 0:
+            time.sleep(2)
         try:
             # Resolve sender identity for this specific lead — use lead owner's Gmail if available
             lead_uid = uid
