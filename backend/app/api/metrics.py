@@ -273,6 +273,29 @@ def get_metrics(
     cur.execute(f"SELECT COUNT(*) FROM leads_raw {where_clause} AND email_status = 'BOUNCED'", full_params)
     bounce_count = cur.fetchone()['count'] or 0
 
+    # Unsubscribes — leads in scope whose email is on the global
+    # unsubscribe_list. Date-filtered on the ACTUAL unsubscribe event
+    # (u.unsubscribed_at, same IST rules as the other period clauses) so the
+    # card tracks when people opted out, not when the lead was ingested.
+    # Scoped exactly like every other card (user_id / template scope for
+    # Palak-Yashika-Kajal, global for admin), so each user's report shows
+    # their own unsubscribe count.
+    unsub_rng = _period_clause_activity(period).replace("created_at", "u.unsubscribed_at")
+    unsub_dte = _date_clause_activity_qualified(date_from, date_to).replace("al.created_at", "u.unsubscribed_at")
+    unsub_params = tuple(params)
+    if date_from:
+        unsub_params = unsub_params + (date_from,)
+    if date_to:
+        unsub_params = unsub_params + (date_to,)
+    cur.execute(
+        f"""SELECT COUNT(*) as count FROM unsubscribe_list u
+            WHERE u.email IN (SELECT email FROM leads_raw WHERE {where_base})
+            {unsub_rng} {unsub_dte}""",
+        unsub_params,
+    )
+    total_unsubs = cur.fetchone()['count'] or 0
+    unsub_rate = (total_unsubs / period_email_sent * 100) if period_email_sent > 0 else 0.0
+
     # Sent (all dispatched outreach statuses — CLOSED is a reply outcome, still sent)
     cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {where_clause} AND email_status IN {_SENT_STATUS_SQL}", full_params)
     sent = cur.fetchone()['count'] or 0
@@ -444,7 +467,7 @@ def get_metrics(
         reply_intent = (r['reply_intent'] or '').upper()
 
         if r.get('is_unsubscribed') or reply_intent == 'NOT_INTERESTED':
-            action = 'Rejected'
+            action = 'Unsubscribed'
         elif status == 'BOUNCED':
             action = 'Bounced'
         elif status in ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED') or r.get('is_responded'):
@@ -536,6 +559,8 @@ def get_metrics(
         "unique_clicks": unique_clicks,
         "unique_engaged": unique_engaged,
         "bounces": bounce_count,
+        "total_unsubs": total_unsubs,
+        "unsub_rate": round(unsub_rate, 2),
 
         "open_rate": round(open_rate, 2),
         "click_rate": round(click_rate, 2),

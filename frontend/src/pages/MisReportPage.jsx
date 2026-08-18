@@ -579,10 +579,10 @@ const MisReportPage = () => {
                   <td>{lead.company || '—'}</td>
                   <td>{lead.sector}</td>
                   <td><span className="badge" style={{
-                    backgroundColor: lead.action === 'Rejected' ? '#fef2f2' : lead.action === 'Bounced' ? '#fff7ed' : lead.action === 'Clicked' ? '#ecfdf5' : lead.action === 'Opened' ? '#eff6ff' : lead.action === 'Replied' ? '#f5f3ff' : '#f9fafb',
-                    color: lead.action === 'Rejected' ? '#dc2626' : lead.action === 'Bounced' ? '#ea580c' : lead.action === 'Clicked' ? '#059669' : lead.action === 'Opened' ? '#2563eb' : lead.action === 'Replied' ? '#7c3aed' : '#6b7280',
+                    backgroundColor: lead.action === 'Unsubscribed' ? '#fef2f2' : lead.action === 'Bounced' ? '#fff7ed' : lead.action === 'Clicked' ? '#ecfdf5' : lead.action === 'Opened' ? '#eff6ff' : lead.action === 'Replied' ? '#f5f3ff' : '#f9fafb',
+                    color: lead.action === 'Unsubscribed' ? '#dc2626' : lead.action === 'Bounced' ? '#ea580c' : lead.action === 'Clicked' ? '#059669' : lead.action === 'Opened' ? '#2563eb' : lead.action === 'Replied' ? '#7c3aed' : '#6b7280',
                     border: `1px solid ${
-                      lead.action === 'Rejected' ? '#fecaca' : lead.action === 'Bounced' ? '#fed7aa' : lead.action === 'Clicked' ? '#a7f3d0' : lead.action === 'Opened' ? '#bfdbfe' : lead.action === 'Replied' ? '#ddd6fe' : '#e5e7eb'
+                      lead.action === 'Unsubscribed' ? '#fecaca' : lead.action === 'Bounced' ? '#fed7aa' : lead.action === 'Clicked' ? '#a7f3d0' : lead.action === 'Opened' ? '#bfdbfe' : lead.action === 'Replied' ? '#ddd6fe' : '#e5e7eb'
                     }`
                   }}>{lead.action}</span></td>
                   <td>{lead.followup}</td>

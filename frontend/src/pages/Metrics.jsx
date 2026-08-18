@@ -2,11 +2,13 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Search, RefreshCw, Mail, MousePointerClick, Eye, XCircle, Clock, AlertTriangle, ChevronDown, ChevronUp, BarChart3, PieChart as PieChartIcon, TrendingUp, Download, FileText } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
 import { useNavigate } from 'react-router-dom';
+import * as XLSX from 'xlsx';
 import api from '../services/api';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 
 const ACTION_STYLES = {
+  'Unsubscribed': { icon: XCircle, color: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/20' },
   'Rejected': { icon: XCircle, color: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/20' },
   'Bounced': { icon: AlertTriangle, color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
   'Clicked': { icon: MousePointerClick, color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' },
@@ -141,6 +143,7 @@ const Metrics = () => {
     { label: 'Click Rate', value: `${data.period_click_rate !== undefined ? data.period_click_rate : (data.click_rate || 0)}%`, sub: `${data.period_clicks !== undefined ? data.period_clicks : 0} clicked` },
     { label: 'Registry', value: data.total_registry },
     { label: 'Bounces', value: data.bounces },
+    { label: 'Unsubscribes', value: data.total_unsubs !== undefined ? data.total_unsubs : 0, sub: `${data.unsub_rate !== undefined ? data.unsub_rate : 0}% of sent` },
   ] : [];
 
   const engagementMetrics = data ? [
@@ -148,6 +151,7 @@ const Metrics = () => {
     { label: 'Click Rate', value: `${data.period_click_rate !== undefined ? data.period_click_rate : (data.click_rate || 0)}%`, sub: `${data.period_clicks !== undefined ? data.period_clicks : 0} clicked` },
     { label: 'Engagement Rate', value: `${data.engagement_rate}%` },
     { label: 'Bounce Rate', value: `${data.bounce_rate}%` },
+    { label: 'Unsubscribe Rate', value: `${data.unsub_rate !== undefined ? data.unsub_rate : 0}%`, sub: `${data.total_unsubs !== undefined ? data.total_unsubs : 0} unsubscribed` },
     { label: 'Conversion Rate', value: `${data.conversion_rate}%` },
   ] : [];
 
@@ -210,6 +214,26 @@ const Metrics = () => {
     a.href = URL.createObjectURL(blob);
     a.download = `bounced_leads_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
+  };
+
+  const exportUnsubscribedExcel = () => {
+    if (!data?.report?.length) return;
+    const unsubscribed = data.report.filter(r => r.action === 'Unsubscribed');
+    if (!unsubscribed.length) {
+      alert('No unsubscribed leads found for the selected period.');
+      return;
+    }
+    const exportData = unsubscribed.map(r => ({
+      Name: r.name || '',
+      Email: r.email || '',
+      Company: r.company || '',
+      Sector: r.sector || '',
+      Date: r.date ? new Date(r.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Unsubscribed");
+    XLSX.writeFile(wb, `unsubscribed_leads_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   const renderTableView = () => (
@@ -450,6 +474,9 @@ const Metrics = () => {
             <p className="text-[11px] text-slate-500 font-bold uppercase tracking-[2px] mt-1">Lead engagement report</p>
           </div>
           <div className="flex items-center gap-3">
+            <button onClick={exportUnsubscribedExcel} className="flex items-center gap-2 px-4 py-2.5 bg-rose-600/10 hover:bg-rose-600/20 text-rose-400 border border-rose-500/20 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all">
+              <XCircle className="w-3.5 h-3.5" /> Export Unsubscribed
+            </button>
             <button onClick={exportCSV} className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border border-emerald-500/20 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all">
               <Download className="w-3.5 h-3.5" /> Export CSV
             </button>
@@ -466,7 +493,7 @@ const Metrics = () => {
         </div>
 
         {/* Stats Strip */}
-        <div className="grid grid-cols-3 md:grid-cols-7 gap-3 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
           {stats.map((s, i) => (
             <div key={i} className="bg-[#111521] border border-white/5 rounded-xl p-4">
               <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{s.label}</div>
