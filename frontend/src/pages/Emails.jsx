@@ -148,12 +148,14 @@ const Emails = () => {
     setBulkSendProgress({ sent: 0, failed: 0, total: idsToSend.length, current: 'Starting...' });
     setSelectedIds([]);
 
-    // Chunk into batches of 8 to stay under Render's 30s HTTP timeout.
-    // Each email takes ~3s (2s backend delay + ~1s Gmail API),
-    // so 8 × 3s = 24s — safely under 30s.
+    // Chunk into batches of 15 to stay well under Render's 120s HTTP timeout.
+    // Each email takes ~2.5s (2s backend delay + ~0.5s Gmail API),
+    // so 15 × 2.5s = 37.5s — safely under 120s with room for slow Gmail responses.
     // Chunks are sent SEQUENTIALLY (not parallel) to avoid Gmail rate
     // limits, OAuth token races, and DB connection pool exhaustion.
-    const CHUNK_SIZE = 8;
+    // After each chunk completes, the loop automatically picks up the next
+    // chunk — no manual intervention needed.
+    const CHUNK_SIZE = 15;
     let sentCount = 0;
     let failedCount = 0;
 
@@ -170,7 +172,7 @@ const Emails = () => {
         setBulkSendProgress(prev => ({ ...prev, current: `Sending chunk ${chunkNum}/${totalChunks} (${i + 1}-${Math.min(i + CHUNK_SIZE, idsToSend.length)} of ${idsToSend.length})...` }));
 
         const res = await api.post('/api/send-selected-batch', { lead_ids: chunk }, {
-          timeout: 30000
+          timeout: 120000
         });
         sentCount += res.data?.sent_count || 0;
         failedCount += res.data?.failed_count || 0;

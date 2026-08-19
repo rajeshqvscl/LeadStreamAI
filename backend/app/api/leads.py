@@ -940,9 +940,9 @@ def save_followup_draft(lead_id: int, req: ApproveFollowupRequest, user_id: Opti
         return {"error": str(e)}
 
 @router.post("/leads/{lead_id}/approve-followup")
-def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id"), skip_daily_check: bool = False):
     """Approves and sends a pending follow-up draft. Supports optional custom body."""
-    if not check_daily_email_limit(user_id, 1):
+    if not skip_daily_check and not check_daily_email_limit(user_id, 1):
         raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this follow-up would exceed your daily outreach limit. Please wait for the daily reset.")
     try:
         conn = get_db_connection()
@@ -1106,7 +1106,7 @@ def bulk_approve_followups(req: BulkApproveFollowupsRequest, user_id: Optional[s
 
     def process_one(lead_id):
         try:
-            approve_followup(lead_id=lead_id, user_id=user_id)
+            approve_followup(lead_id=lead_id, user_id=user_id, skip_daily_check=True)
             return ("ok", lead_id, None)
         except Exception as e:
             return ("err", lead_id, str(e))

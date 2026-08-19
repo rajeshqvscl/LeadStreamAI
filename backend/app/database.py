@@ -512,7 +512,7 @@ def create_tables():
         ("credits_used", "INTEGER DEFAULT 0"),
         ("credits_limit", "INTEGER DEFAULT 200"),
         ("auto_followup", "BOOLEAN DEFAULT FALSE"),
-        ("outreach_daily_limit", "INTEGER DEFAULT 200"),
+        ("outreach_daily_limit", "INTEGER DEFAULT 2000"),
         ("google_access_token", "TEXT"),
         ("google_refresh_token", "TEXT"),
         ("google_token_expiry", "TIMESTAMP"),

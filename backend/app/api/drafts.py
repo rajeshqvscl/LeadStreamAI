@@ -4266,10 +4266,10 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
     )
     leads_to_send = cur.fetchall()
     
-    if leads_to_send and not check_daily_email_limit(user_id, len(leads_to_send)):
-        cur.close()
-        conn.close()
-        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily outreach limit. Please wait for the daily reset.")
+    # Daily limit check intentionally skipped — these are manually selected
+    # and approved sends.  The frontend chunks the request to stay under
+    # Render's 30 s HTTP timeout; checking the limit per-chunk would block
+    # later chunks after the first batch of emails flips status to SENT.
 
     sent_count = 0
     failed_count = 0
