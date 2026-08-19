@@ -1042,6 +1042,13 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
         cur.execute("UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = %s AND user_id = %s", (row_id, uid))
         conn.commit()
 
+        # Invalidate Redis cache so review queue shows the new draft
+        try:
+            from app.api.drafts import invalidate_pending_drafts_cache
+            invalidate_pending_drafts_cache(str(uid) if uid else None)
+        except Exception:
+            pass
+
         # Log activity
         try:
             from app.models.lead import add_activity_log

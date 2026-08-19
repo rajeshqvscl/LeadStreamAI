@@ -3443,9 +3443,9 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         # queue only leads to confusing send failures ("select 12 → 9 sent, 3 left").
         where_clause = """
             WHERE email_draft IS NOT NULL
-              AND (email_opt_in IS NULL OR email_opt_in = TRUE)
-              AND (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)
-              AND email NOT IN (SELECT email FROM unsubscribe_list)
+              AND (lr.email_opt_in IS NULL OR lr.email_opt_in = TRUE)
+              AND (lr.is_unsubscribed IS NULL OR lr.is_unsubscribed = FALSE)
+              AND lr.email NOT IN (SELECT email FROM unsubscribe_list)
         """
         params = []
         
@@ -3489,8 +3489,8 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         # Already-dispatched statuses (SENT/REPLIED/CLOSED/ARCHIVED) are excluded
         # so "Select all" never re-selects emails that have already been sent.
         if _ids_only_flag:
-            _ids_where = where_clause + " AND email_status NOT IN ('SENT', 'REPLIED', 'CLOSED', 'ARCHIVED')"
-            cur.execute(f"SELECT id FROM leads_raw {_ids_where}", tuple(params))
+            _ids_where = where_clause + " AND lr.email_status NOT IN ('SENT', 'REPLIED', 'CLOSED', 'ARCHIVED')"
+            cur.execute(f"SELECT lr.id FROM leads_raw lr {_ids_where}", tuple(params))
             id_rows = cur.fetchall()
             cur.close()
             conn.close()
@@ -3514,7 +3514,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         rows = cur.fetchall()
         
         # count total
-        count_query = f"SELECT COUNT(*) FROM leads_raw {where_clause}"
+        count_query = f"SELECT COUNT(*) FROM leads_raw lr {where_clause}"
         cur.execute(count_query, tuple(params[:-2])) # exclude limit/offset
         total = cur.fetchone()[0]
         
@@ -3539,6 +3539,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         # Pre-fetch sender profile once to avoid N+1 database queries
         profile = get_sender_profile(user_id)
         for r in rows:
+          try:
             draft_content = r["email_draft"] or ""
             template_name = r.get('draft_template_used')
             # Apply healing with pre-fetched profile
@@ -3571,6 +3572,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
             team_member_name = r.get("team_member_name") or r.get("team_member_username")
             lead_display_name = f"{r['first_name'] or ''} {r['last_name'] or ''}".strip()
 
+            body_replaced = body.replace("[[BACKEND_URL]]", backend_url)
             drafts.append({
                 "id": r["id"],
                 "lead_id": r["id"],
@@ -3580,8 +3582,8 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
                 "persona": r["persona"],
                 "fit_score": r.get("fit_score", 0),
                 "subject": subject,
-                "body": body.replace("[[BACKEND_URL]]", backend_url),
-                "html_body": markdown_to_html(body.replace("[[BACKEND_URL]]", backend_url), font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id)),
+                "body": body_replaced,
+                "html_body": markdown_to_html(body_replaced, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id)),
                 "attachments": [],
                 "draft_template_used": r.get("draft_template_used") or "",
                 "status": r["email_status"] or "PENDING_APPROVAL",
@@ -3591,6 +3593,9 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
                 "scheduled_at": r.get("scheduled_at").isoformat() + "Z" if r.get("scheduled_at") and hasattr(r.get("scheduled_at"), 'isoformat') else str(r.get("scheduled_at")) if r.get("scheduled_at") else "",
                 "remarks": r.get("remarks") or ""
             })
+          except Exception as draft_err:
+            logger.warning(f"Skipping corrupt draft for lead {r.get('id')}: {draft_err}")
+            continue
 
         result = {
             "drafts": drafts,
@@ -4374,6 +4379,8 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
 
 @router.post("/generate-bulk-domain-drafts")
 def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    conn = None
+    cur = None
     try:
         # Resolve User ID
         uid = normalize_user_id(user_id)
@@ -4537,6 +4544,9 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
         cur.close()
         conn.close()
 
+        # Invalidate Redis cache so review queue shows the new drafts
+        invalidate_pending_drafts_cache(str(uid) if uid else None)
+
         # Log bulk activity
         try:
             from app.models.lead import add_activity_log
@@ -4552,6 +4562,14 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
     except Exception as e:
         traceback.print_exc()
         return {"error": str(e)}
+    finally:
+        try:
+            if cur:
+                cur.close()
+            if conn:
+                conn.close()
+        except Exception:
+            pass
 
 @router.post("/send-bulk-domain-emails")
 def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
