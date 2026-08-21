@@ -282,6 +282,16 @@ const Followups = () => {
     if (isNaN(dt.getTime())) return d;
     return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', ...opts });
   }, []);
+  
+  // Helper to calculate days ago using UTC dates to avoid DST issues
+  const getDaysAgo = useCallback((dateStr) => {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dateObj = new Date(Date.UTC(y, m - 1, d));
+    const today = new Date();
+    const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    const diffMs = todayUTC - dateObj;
+    return Math.floor(diffMs / 86400000);
+  }, []);
 
   const totalPages = Math.ceil(total / perPage);
 
@@ -484,12 +494,8 @@ const Followups = () => {
                   .sort(([a], [b]) => Number(a) - Number(b))
                   .map(([s, n]) => `S${s}: ${n}`)
                   .join('  ');
-                // Relative badge (e.g. "2d") — local calendar day diff from today.
-                const [dy, dm, dd2] = d.split('-').map(Number);
-                const dateObj = new Date(dy, dm - 1, dd2);
-                const todayStart = new Date();
-                todayStart.setHours(0, 0, 0, 0);
-                const daysAgo = Math.round((todayStart - dateObj) / 86400000);
+                // Relative badge (e.g. "2d") — using UTC dates to avoid DST issues.
+                const daysAgo = getDaysAgo(d);
                 return (
                   <button
                     key={d}

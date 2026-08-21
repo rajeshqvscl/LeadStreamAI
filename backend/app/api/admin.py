@@ -9,16 +9,10 @@ from app.database import get_db_connection
 import psycopg2
 import psycopg2.extras
 import logging
+from app.utils.auth_helpers import normalize_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-def normalize_user_id(user_id: Optional[str]) -> str:
-    if not user_id or user_id.strip() == "" or user_id.lower() == "admin":
-        return "1"
-    if user_id.isdigit():
-        return user_id
-    return "1"
 
 @router.get("/admin/stats")
 async def get_admin_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):

@@ -9,27 +9,12 @@ import json
 import psycopg2
 import psycopg2.extras
 from app.database import get_db_connection
+from app.utils.auth_helpers import normalize_user_id
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
-
-
-def normalize_user_id(user_id: Optional[str]) -> Optional[str]:
-    """Resolve the X-User-Id header to a usable user id string.
-
-    The auth middleware already injects the verified numeric user id on every
-    request; this is a defensive helper for legacy direct calls.
-    """
-    if not user_id:
-        return None
-    s = str(user_id).strip()
-    if s.lower() == "admin":
-        return "admin"
-    if s.isdigit():
-        return s
-    return None
 
 
 def _is_admin(user_id: Optional[str], uid: Optional[str]) -> bool:

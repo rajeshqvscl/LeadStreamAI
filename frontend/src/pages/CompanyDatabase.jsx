@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Search, Upload, Download, Trash2, Loader2, Sparkles,
   Table, FileSpreadsheet, Plus, CheckCircle2, AlertCircle, X, Send, Mail, Pencil, PanelRightClose, Save, Layout, Tag, Building2, Filter, ChevronDown, User, Globe, Calendar, Eye, EyeOff
@@ -44,6 +44,9 @@ const CompanyDatabase = () => {
 
   // Sort State
   const [sortConfig, setSortConfig] = useState({ key: null, direction: null }); // null | 'asc' | 'desc'
+
+  // Debounce timer for cell updates
+  const cellUpdateDebounceRef = useRef(null);
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
@@ -128,6 +131,15 @@ const CompanyDatabase = () => {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (cellUpdateDebounceRef.current) {
+        clearTimeout(cellUpdateDebounceRef.current);
+      }
+    };
+  }, []);
+
   // Handle manual page changes
   const handlePageChange = (newPage) => {
     if (newPage < 1 || newPage > totalPages) return;
@@ -138,8 +150,8 @@ const CompanyDatabase = () => {
   // However, we can keep a separate mount effect if needed, but it might double-fetch.
   // The debounced effect will handle the first load.
 
-  // Cell Update Logic
-  const handleCellUpdate = async (rowId, field, newValue) => {
+  // Cell Update Logic - debounced to prevent excessive API calls
+  const handleCellUpdate = (rowId, field, newValue) => {
     const updatedRow = companies.find(c => c.id === rowId);
     if (!updatedRow || updatedRow[field] === newValue) return;
 
@@ -147,12 +159,20 @@ const CompanyDatabase = () => {
     delete newRowData.id; // Strip ID for the JSON model
     newRowData[field] = newValue;
 
-    try {
-      await api.patch(`/api/companies/${rowId}`, newRowData);
-      setCompanies(prev => prev.map(c => c.id === rowId ? { ...c, [field]: newValue } : c));
-    } catch (_err) {
-      showNotification('error', 'Storage Fault: Cell modification failed to persist.');
+    // Clear existing debounce timer
+    if (cellUpdateDebounceRef.current) {
+      clearTimeout(cellUpdateDebounceRef.current);
     }
+
+    // Debounce the API call by 500ms
+    cellUpdateDebounceRef.current = setTimeout(async () => {
+      try {
+        await api.patch(`/api/companies/${rowId}`, newRowData);
+        setCompanies(prev => prev.map(c => c.id === rowId ? { ...c, [field]: newValue } : c));
+      } catch (_err) {
+        showNotification('error', 'Storage Fault: Cell modification failed to persist.');
+      }
+    }, 500);
   };
 
   // Import Spreadsheet Logic

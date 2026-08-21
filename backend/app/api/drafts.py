@@ -78,16 +78,28 @@ def _forced_logo_style(src: str) -> Optional[str]:
     return _LOGO_FORCED_STYLES.get(fname)
 
 
-def invalidate_pending_drafts_cache(user_id: str = "*"):
-    if redis_available and redis_client:
-        try:
-            pattern = f"pending_drafts:{user_id}:*"
-            keys = redis_client.keys(pattern)
+def _redis_delete_pattern(pattern: str):
+    """Delete Redis keys matching pattern using SCAN (non-blocking)."""
+    if not (redis_available and redis_client):
+        return
+    try:
+        cursor = 0
+        deleted = 0
+        while True:
+            cursor, keys = redis_client.scan(cursor=cursor, match=pattern, count=100)
             if keys:
                 redis_client.delete(*keys)
-                logger.info(f"SUCCESS: Invalidated cache keys for pattern: {pattern}")
-        except Exception as ie:
-            logger.error(f"Failed to invalidate pending drafts cache: {ie}")
+                deleted += len(keys)
+            if cursor == 0:
+                break
+        if deleted:
+            logger.info(f"SUCCESS: Invalidated {deleted} cache keys for pattern: {pattern}")
+    except Exception as ie:
+        logger.error(f"Failed to invalidate cache for pattern {pattern}: {ie}")
+
+
+def invalidate_pending_drafts_cache(user_id: str = "*"):
+    _redis_delete_pattern(f"pending_drafts:{user_id}:*")
 
 # Guaranteed self-healing database update at module load/hot-reload time
 try:
@@ -875,75 +887,7 @@ Looking forward to hearing from you!"""
 except Exception as db_err:
     logger.error(f"⚠️ Startup template creation failed: {db_err}")
 
-def normalize_user_id(user_id: Optional[str]) -> str:
-    """Normalizes the user ID from the header to a valid numeric database ID string.
-    Handles 'admin' or string usernames by resolving them to their numeric database ID.
-    """
-    if not user_id or user_id.strip() == "":
-        return "1"
-    
-    u_str = str(user_id).strip()
-    if u_str.lower() == "admin":
-        return "1"
-    
-    if u_str.isdigit():
-        return u_str
-        
-    # If not digits, it's likely a username (e.g. "test"). Resolve to numeric ID.
-    try:
-        from app.database import get_db_connection
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM users WHERE LOWER(username) = LOWER(%s) OR LOWER(email) = LOWER(%s) LIMIT 1", (u_str, u_str))
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        if row:
-            return str(row[0])
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"Error resolving user_id for '{u_str}': {e}")
-        
-    return "1" # Fallback to admin/system if resolution fails
-
-
-def check_daily_email_limit(user_id: Optional[str], batch_size: int = 1) -> bool:
-    """Returns True if the user has not exceeded their daily outreach limit.
-
-    The limit comes from users.outreach_daily_limit (set on the Followups page
-    Auto-Pilot toggle); falls back to 999999 (effectively unlimited — matches
-    the admin settings GET default) when unset or for admin/unknown users.
-    """
-    uid = normalize_user_id(user_id)
-    is_admin = (str(user_id or '').lower() == 'admin')
-    
-    conn = get_db_connection()
-    cur = conn.cursor()
-    try:
-        # Resolve the user's configured limit (default 999999 = no restriction).
-        daily_limit = 999999
-        if not is_admin and uid:
-            cur.execute("SELECT outreach_daily_limit FROM users WHERE id = %s", (uid,))
-            limit_row = cur.fetchone()
-            stored = limit_row[0] if limit_row else None
-            if stored:
-                daily_limit = int(stored)
-
-        if is_admin:
-            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
-        elif uid:
-            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id = %s AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'", (uid,))
-        else:
-            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id IS NULL AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
-        
-        sent_today = cur.fetchone()[0] or 0
-        return (sent_today + batch_size) <= daily_limit
-    except Exception as e:
-        logger.error(f"Error checking email limit: {e}")
-        return True # Default to True to avoid blocking during transient DB errors
-    finally:
-        cur.close()
-        conn.close()
+from app.utils.auth_helpers import normalize_user_id, check_daily_email_limit, get_daily_email_limit
 
 def _mark_send_failed(cur, lead_id: int, err_msg: str, actor: str):
     """Mark a lead as FAILED after a failed send attempt.
@@ -3488,33 +3432,57 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         # the 60-per-page view can no longer silently skip emails on page 2+.
         # Already-dispatched statuses (SENT/REPLIED/CLOSED/ARCHIVED) are excluded
         # so "Select all" never re-selects emails that have already been sent.
+        # Deduplicate by email: keep only the most recent draft per email
         if _ids_only_flag:
             _ids_where = where_clause + " AND lr.email_status NOT IN ('SENT', 'REPLIED', 'CLOSED', 'ARCHIVED')"
-            cur.execute(f"SELECT lr.id FROM leads_raw lr {_ids_where}", tuple(params))
+            cur.execute(f"""
+                SELECT DISTINCT ON (LOWER(lr.email)) lr.id
+                FROM leads_raw lr
+                {_ids_where}
+                ORDER BY LOWER(lr.email), COALESCE(lr.updated_at, lr.created_at) DESC
+            """, tuple(params))
             id_rows = cur.fetchall()
             cur.close()
             conn.close()
             return {"ids": [r['id'] for r in id_rows], "total": len(id_rows)}
 
+        # Deduplicate by email: keep only the most recent draft per email
+        # Use a CTE with ROW_NUMBER() to deduplicate, then paginate
         query = f"""
-            SELECT lr.id, lr.first_name, lr.last_name, lr.email, lr.email_draft, lr.email_status,
-                   lr.company_name, lr.family_office_name, lr.persona, lr.fit_score, lr.updated_at,
-                   lr.email_approved_by, lr.scheduled_at, lr.user_id,
-                   lr.draft_template_used,
-                   lr.remarks,
-                   u.full_name as team_member_name, u.username as team_member_username
-            FROM leads_raw lr
-            LEFT JOIN users u ON lr.user_id = u.id
-            {where_clause}
-            ORDER BY COALESCE(lr.updated_at, lr.created_at) DESC LIMIT %s OFFSET %s
+            WITH ranked AS (
+                SELECT lr.id, lr.first_name, lr.last_name, lr.email, lr.email_draft, lr.email_status,
+                       lr.company_name, lr.family_office_name, lr.persona, lr.fit_score, lr.updated_at,
+                       lr.created_at,
+                       lr.email_approved_by, lr.scheduled_at, lr.user_id,
+                       lr.draft_template_used,
+                       lr.remarks,
+                       u.full_name as team_member_name, u.username as team_member_username,
+                       ROW_NUMBER() OVER (PARTITION BY LOWER(lr.email) ORDER BY COALESCE(lr.updated_at, lr.created_at) DESC) as rn
+                FROM leads_raw lr
+                LEFT JOIN users u ON lr.user_id = u.id
+                {where_clause}
+            )
+            SELECT id, first_name, last_name, email, email_draft, email_status,
+                   company_name, family_office_name, persona, fit_score, updated_at,
+                   created_at,
+                   email_approved_by, scheduled_at, user_id,
+                   draft_template_used,
+                   remarks,
+                   team_member_name, team_member_username
+            FROM ranked
+            WHERE rn = 1
+            ORDER BY COALESCE(updated_at, created_at) DESC
+            LIMIT %s OFFSET %s
         """
         params.extend([per_page, (page - 1) * per_page])
 
         cur.execute(query, tuple(params))
         rows = cur.fetchall()
         
-        # count total
-        count_query = f"SELECT COUNT(*) FROM leads_raw lr {where_clause}"
+        # count total unique emails (after deduplication)
+        count_query = f"""
+            SELECT COUNT(DISTINCT LOWER(lr.email)) FROM leads_raw lr {where_clause}
+        """
         cur.execute(count_query, tuple(params[:-2])) # exclude limit/offset
         total = cur.fetchone()[0]
         
@@ -3707,7 +3675,8 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[s
 def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     try:
         if not check_daily_email_limit(user_id, 1):
-            raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this email would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
+            limit = get_daily_email_limit(user_id)
+            raise HTTPException(status_code=400, detail=f"Daily Limit Exceeded: Sending this email would exceed your daily limit of {limit} emails. Please wait for the daily reset.")
         from app.services.email_service import send_email
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -4122,7 +4091,8 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     if leads_to_send and not check_daily_email_limit(user_id, len(leads_to_send)):
         cur.close()
         conn.close()
-        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily outreach limit. Please wait for the daily reset.")
+        limit = get_daily_email_limit(user_id)
+        raise HTTPException(status_code=400, detail=f"Daily Limit Exceeded: Sending this batch would exceed your daily limit of {limit} emails. Please wait for the daily reset.")
     
     sent_count = 0
     for lead in leads_to_send:
@@ -4266,10 +4236,11 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
     )
     leads_to_send = cur.fetchall()
     
-    # Daily limit check intentionally skipped — these are manually selected
-    # and approved sends.  The frontend chunks the request to stay under
-    # Render's 30 s HTTP timeout; checking the limit per-chunk would block
-    # later chunks after the first batch of emails flips status to SENT.
+    if leads_to_send and not check_daily_email_limit(user_id, len(leads_to_send)):
+        cur.close()
+        conn.close()
+        limit = get_daily_email_limit(user_id)
+        raise HTTPException(status_code=400, detail=f"Daily Limit Exceeded: Sending this batch would exceed your daily limit of {limit} emails. Please wait for the daily reset.")
 
     sent_count = 0
     failed_count = 0

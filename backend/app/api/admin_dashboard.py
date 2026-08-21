@@ -8,6 +8,7 @@ import json
 import os
 import datetime
 from pydantic import BaseModel
+from app.utils.auth_helpers import normalize_user_id
 
 class DateTimeEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -226,35 +227,6 @@ def bulk_approve_leads(req: BulkApproveRequest, user_id: Optional[str] = Header(
     finally:
         if 'conn' in locals():
             conn.close()
-
-def normalize_user_id(uid):
-    if not uid or str(uid).strip() == "":
-        return None
-    if str(uid).lower() == "admin":
-        return 1
-    if str(uid).isdigit():
-        return int(uid)
-        
-    # Resolve username or email or full_name to integer ID
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT id FROM users 
-            WHERE LOWER(username) = LOWER(%s) 
-            OR LOWER(email) = LOWER(%s)
-            OR LOWER(full_name) = LOWER(%s)
-            LIMIT 1
-        """, (str(uid), str(uid), str(uid)))
-        res = cur.fetchone()
-        cur.close()
-        conn.close()
-        if res:
-            return res[0]
-    except Exception as e:
-        logger.error(f"Error resolving user identity {uid} in admin_dashboard: {e}")
-        
-    return None
 
 @router.get("/leads/all")
 def get_all_leads_admin(

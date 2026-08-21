@@ -8,6 +8,7 @@ from app.database import get_db_connection
 import psycopg2
 import psycopg2.extras
 from datetime import datetime
+from app.utils.auth_helpers import normalize_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -174,14 +175,6 @@ def hard_delete_user(user_id: int):
     cur.close()
     conn.close()
     return {"message": "User record permanently deleted"}
-
-def normalize_user_id(user_id: Optional[str]) -> str:
-    """Normalizes the user ID from the header to a valid database ID."""
-    if not user_id or user_id.strip() == "" or user_id.lower() == "admin":
-        return "1"
-    if user_id.isdigit():
-        return user_id
-    return "1"
 
 @router.get("/users/productivity")
 def get_user_productivity(user_id: Optional[str] = Header(None, alias="X-User-Id")):

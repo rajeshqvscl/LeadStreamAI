@@ -13,6 +13,7 @@ from app.services.google_service import (
 from app.services.llm_services import EmailGenerator
 from app.services.email_service import send_email
 from app.api.drafts import markdown_to_html
+from app.utils.auth_helpers import normalize_user_id
 import datetime
 import urllib3
 import logging
@@ -49,47 +50,28 @@ except Exception as re_err:
     redis_client = None
     redis_available = False
 
-def invalidate_inbound_deals_cache(user_id: str):
-    if redis_available and redis_client:
-        try:
-            pattern = f"inbound_deals:{user_id}:*"
-            keys = redis_client.keys(pattern)
+def _redis_delete_pattern(pattern: str):
+    """Delete Redis keys matching pattern using SCAN (non-blocking)."""
+    if not (redis_available and redis_client):
+        return
+    try:
+        cursor = 0
+        deleted = 0
+        while True:
+            cursor, keys = redis_client.scan(cursor=cursor, match=pattern, count=100)
             if keys:
                 redis_client.delete(*keys)
-                logger.info(f"SUCCESS: Invalidated cache keys for pattern: {pattern}")
-        except Exception as ie:
-            logger.error(f"Failed to invalidate Redis cache: {ie}")
+                deleted += len(keys)
+            if cursor == 0:
+                break
+        if deleted:
+            logger.info(f"SUCCESS: Invalidated {deleted} cache keys for pattern: {pattern}")
+    except Exception as ie:
+        logger.error(f"Failed to invalidate cache for pattern {pattern}: {ie}")
 
-def normalize_user_id(user_id: Optional[str]) -> str:
-    """Normalizes the user ID from the header to a valid database ID."""
-    if not user_id or user_id.strip() == "" or user_id.lower() == "admin":
-        return "1"
-    
-    # If it's already a numeric ID, return it
-    if user_id.isdigit():
-        return user_id
-        
-    # If it's a username, email, or full name (like 'sravanthi'), resolve it to an ID
-    try:
-        from app.database import get_db_connection
-        conn = get_db_connection()
-        cur = conn.cursor()
-        # Check username OR email OR full_name
-        cur.execute("""
-            SELECT id FROM users 
-            WHERE LOWER(username) = LOWER(%s) 
-            OR LOWER(email) = LOWER(%s)
-            OR LOWER(full_name) = LOWER(%s)
-        """, (user_id, user_id, user_id))
-        res = cur.fetchone()
-        cur.close()
-        conn.close()
-        if res:
-            return str(res[0])
-    except Exception as e:
-        print(f"Error resolving user identity {user_id}: {e}")
-        
-    return "1"
+
+def invalidate_inbound_deals_cache(user_id: str):
+    _redis_delete_pattern(f"inbound_deals:{user_id}:*")
 
 class AIRefineRequest(BaseModel):
     content: str

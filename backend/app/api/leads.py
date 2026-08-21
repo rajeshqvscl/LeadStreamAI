@@ -10,7 +10,7 @@ import psycopg2.extras
 from app.database import get_db_connection
 from app.models.lead import get_lead_by_id, update_lead, get_activity_log, add_activity_log
 from app.api.drafts import get_sender_profile, inject_signature
-from app.api.companies import check_daily_email_limit
+from app.utils.auth_helpers import check_daily_email_limit, get_daily_email_limit, normalize_user_id
 
 import logging
 
@@ -37,16 +37,28 @@ except Exception as re_err:
     redis_client = None
     redis_available = False
 
-def invalidate_leads_cache(user_id: str = "*"):
-    if redis_available and redis_client:
-        try:
-            pattern = f"leads:{user_id}:*"
-            keys = redis_client.keys(pattern)
+def _redis_delete_pattern(pattern: str):
+    """Delete Redis keys matching pattern using SCAN (non-blocking)."""
+    if not (redis_available and redis_client):
+        return
+    try:
+        cursor = 0
+        deleted = 0
+        while True:
+            cursor, keys = redis_client.scan(cursor=cursor, match=pattern, count=100)
             if keys:
                 redis_client.delete(*keys)
-                logger.info(f"SUCCESS: Invalidated cache keys for pattern: {pattern}")
-        except Exception as ie:
-            logger.error(f"Failed to invalidate leads cache: {ie}")
+                deleted += len(keys)
+            if cursor == 0:
+                break
+        if deleted:
+            logger.info(f"SUCCESS: Invalidated {deleted} cache keys for pattern: {pattern}")
+    except Exception as ie:
+        logger.error(f"Failed to invalidate cache for pattern {pattern}: {ie}")
+
+
+def invalidate_leads_cache(user_id: str = "*"):
+    _redis_delete_pattern(f"leads:{user_id}:*")
 
 router = APIRouter()
 
@@ -943,7 +955,8 @@ def save_followup_draft(lead_id: int, req: ApproveFollowupRequest, user_id: Opti
 def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id"), skip_daily_check: bool = False):
     """Approves and sends a pending follow-up draft. Supports optional custom body."""
     if not skip_daily_check and not check_daily_email_limit(user_id, 1):
-        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this follow-up would exceed your daily outreach limit. Please wait for the daily reset.")
+        limit = get_daily_email_limit(user_id)
+        raise HTTPException(status_code=400, detail=f"Daily Limit Exceeded: Sending this follow-up would exceed your daily limit of {limit} emails. Please wait for the daily reset.")
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -1096,7 +1109,7 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
 def bulk_approve_followups(req: BulkApproveFollowupsRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Approves and sends follow-up emails for multiple leads in a batch using parallel workers."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    from app.api.companies import check_daily_email_limit
+    from app.utils.auth_helpers import check_daily_email_limit, get_daily_email_limit
 
     batch_size = len(req.lead_ids)
     if not check_daily_email_limit(user_id, batch_size):
@@ -1166,36 +1179,6 @@ def get_user_name(user_id):
         return u['username'] if u else "unknown"
     except Exception:
         return "user"
-
-def normalize_user_id(user_id):
-    """Normalizes the user ID from the header to a valid database ID."""
-    if not user_id or user_id.strip() == "" or str(user_id).lower() == "admin":
-        return None
-    
-    # If it's already a numeric ID, return it
-    if str(user_id).isdigit():
-        return int(user_id)
-        
-    # If it's a username, email, or full name (like 'sravanthi'), resolve it to an ID
-    try:
-        from app.database import get_db_connection
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT id FROM users 
-            WHERE LOWER(username) = LOWER(%s) 
-            OR LOWER(email) = LOWER(%s)
-            OR LOWER(full_name) = LOWER(%s)
-        """, (user_id, user_id, user_id))
-        res = cur.fetchone()
-        cur.close()
-        conn.close()
-        if res:
-            return res['id'] if isinstance(res, dict) else res[0]
-    except Exception as e:
-        logger.error(f"Error resolving user identity {user_id}: {e}")
-        
-    return None
 
 @router.get("/leads/{lead_id}/activity")
 def get_lead_activity(lead_id: int):

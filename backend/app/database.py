@@ -576,6 +576,47 @@ def create_tables():
     );
     """)
 
+    # Add unique index on (user_id, email) for upsert support
+    # Email is extracted from row_data JSONB (normalized to "Email" key)
+    try:
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS company_registry_user_email_unique
+            ON company_registry (user_id, (row_data->>'Email'));
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
+    # Also add index on email for fast lookups
+    try:
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_company_registry_email
+            ON company_registry ((row_data->>'Email'));
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
+    # Add foreign key from company_registry.user_id to users.id
+    try:
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'company_registry_user_id_fkey'
+                    AND conrelid = 'company_registry'::regclass
+                ) THEN
+                    ALTER TABLE company_registry
+                    ADD CONSTRAINT company_registry_user_id_fkey
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+                END IF;
+            END$$;
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
     # Ensure _is_generated column exists for existing tables
     try:
         cur.execute("ALTER TABLE company_registry ADD COLUMN IF NOT EXISTS _is_generated BOOLEAN DEFAULT FALSE;")

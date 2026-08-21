@@ -3,6 +3,7 @@ uvicorn
 psycopg2-binary
 python-dotenv
 requests
+httpx
 anthropic
 structlog
 gunicorn

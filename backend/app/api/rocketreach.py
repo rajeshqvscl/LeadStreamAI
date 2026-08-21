@@ -8,15 +8,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 import psycopg2.extras
 from app.database import get_db_connection
-
-def normalize_user_id(user_id):
-    if not user_id or user_id in ('admin', 'undefined', 'null', ''):
-        return '1'
-    try:
-        return str(int(user_id))
-    except (ValueError, TypeError):
-        return '1'
-
+from app.utils.auth_helpers import normalize_user_id
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 logger = logging.getLogger(__name__)

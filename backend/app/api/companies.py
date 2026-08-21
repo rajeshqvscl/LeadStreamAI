@@ -4,11 +4,11 @@ import psycopg2.extras
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import json
-import requests
 import csv
 import io
 import re
 import sys
+import httpx
 
 # Dynamically raise the CSV field size limit to the maximum possible for this platform
 # to prevent _csv.Error: field larger than field limit (131072) on large GSheets
@@ -25,6 +25,7 @@ from app.services.llm_services import EmailGenerator
 from psycopg2.extras import execute_values
 import time
 from concurrent.futures import ThreadPoolExecutor
+from app.utils.auth_helpers import normalize_user_id, check_daily_email_limit, get_daily_email_limit
 
 # --- REDIS CACHE INITIALIZATION ---
 import os
@@ -50,90 +51,32 @@ except Exception as re_err:
     redis_client = None
     redis_available = False
 
-def invalidate_companies_cache(user_id: str = "*"):
-    if redis_available and redis_client:
-        try:
-            pattern = f"companies:{user_id}:*"
-            keys = redis_client.keys(pattern)
+
+def _redis_delete_pattern(pattern: str):
+    """Delete Redis keys matching pattern using SCAN (non-blocking)."""
+    if not (redis_available and redis_client):
+        return
+    try:
+        cursor = 0
+        deleted = 0
+        while True:
+            cursor, keys = redis_client.scan(cursor=cursor, match=pattern, count=100)
             if keys:
                 redis_client.delete(*keys)
-                logger.info(f"SUCCESS: Invalidated cache keys for pattern: {pattern}")
-        except Exception as ie:
-            logger.error(f"Failed to invalidate companies cache: {ie}")
+                deleted += len(keys)
+            if cursor == 0:
+                break
+        if deleted:
+            logger.info(f"SUCCESS: Invalidated {deleted} cache keys for pattern: {pattern}")
+    except Exception as ie:
+        logger.error(f"Failed to invalidate cache for pattern {pattern}: {ie}")
+
+
+def invalidate_companies_cache(user_id: str = "*"):
+    _redis_delete_pattern(f"companies:{user_id}:*")
 
 
 router = APIRouter()
-
-def normalize_user_id(user_id: Optional[str]) -> Optional[str]:
-    """Normalizes the user ID from the header to a valid numeric database ID string.
-    Handles 'admin' or string usernames by resolving them to their numeric database ID.
-    Returns None if no valid user_id (callers handle by showing all unscoped data).
-    """
-    if not user_id or str(user_id).strip() == "":
-        return None
-    
-    u_str = str(user_id).strip()
-    if u_str.lower() == "admin":
-        return "1"
-    
-    if u_str.isdigit():
-        return u_str
-        
-    try:
-        from app.database import get_db_connection
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM users WHERE LOWER(username) = LOWER(%s) OR LOWER(email) = LOWER(%s) LIMIT 1", (u_str, u_str))
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        if row:
-            return str(row[0])
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"Error resolving user_id for '{u_str}': {e}")
-        
-    return "1" # Fallback to admin/system if resolution fails
-
-
-def check_daily_email_limit(user_id: Optional[str], batch_size: int = 1) -> bool:
-    """Returns True if the user has not exceeded their daily outreach limit.
-
-    The limit comes from users.outreach_daily_limit (set on the Followups page
-    Auto-Pilot toggle); falls back to 999999 (effectively unlimited — matches
-    the admin settings GET default) when unset or for admin/unknown users.
-    """
-    uid = normalize_user_id(user_id)
-    is_admin = (str(user_id or '').lower() == 'admin')
-    
-    conn = get_db_connection()
-    cur = conn.cursor()
-    try:
-        # Resolve the user's configured limit (default 999999 = no restriction).
-        daily_limit = 999999
-        if not is_admin and uid:
-            cur.execute("SELECT outreach_daily_limit FROM users WHERE id = %s", (uid,))
-            limit_row = cur.fetchone()
-            stored = limit_row[0] if limit_row else None
-            if stored:
-                daily_limit = int(stored)
-
-        if is_admin:
-            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
-        elif uid:
-            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id = %s AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'", (uid,))
-        else:
-            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id IS NULL AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
-        
-        sent_today = cur.fetchone()[0] or 0
-        return (sent_today + batch_size) <= daily_limit
-    except Exception as e:
-        logger.error(f"Error checking email limit: {e}")
-        return True
-    finally:
-        cur.close()
-        conn.close()
-
 @router.get("/companies")
 def list_companies(
     page: int = 1, 
@@ -286,66 +229,91 @@ def get_unique_tabs(user_id: Optional[str] = Header(None, alias="X-User-Id")):
 
 @router.post("/companies/import")
 def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Imports a batch of data, automatically enriching missing fields."""
+    """Imports a batch of data, automatically enriching missing fields. Uses upsert to preserve existing data."""
     uid = normalize_user_id(user_id)
-    conn = get_db_connection()
-    cur = conn.cursor()
     
     # --- AUTOMATION: Enrich rows before insertion ---
     processed_rows = process_and_enrich_rows(rows)
     
-    conn = None
-    cur = None
+    if not processed_rows:
+        return {"success": True, "count": 0, "message": "No valid rows to import"}
+    
+    print(f"DEBUG: import_companies started for user {uid} with {len(processed_rows)} processed rows")
+    if processed_rows:
+        print(f"DEBUG: First processed row keys: {list(processed_rows[0].keys())}")
+        print(f"DEBUG: First processed row sample: {processed_rows[0]}")
+        print(f"DEBUG: Source tab for first row: {processed_rows[0].get('_source_tab')}")
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
     try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
         # Fetch existing lead emails for this user to preserve "Generated" status
         cur.execute("SELECT email FROM leads_raw WHERE user_id = %s", (uid,))
         existing_emails = {r[0].lower() for r in cur.fetchall() if r[0]}
-        print(f"DEBUG: import_companies started for user {uid} with {len(rows)} raw rows")
-        if processed_rows:
-            print(f"DEBUG: First processed row keys: {list(processed_rows[0].keys())}")
-            print(f"DEBUG: First processed row sample: {processed_rows[0]}")
-            print(f"DEBUG: Source tab for first row: {processed_rows[0].get('_source_tab')}")
         
-        # Full Purge: delete ALL existing data for this user before inserting new data
-        # This ensures the company database always reflects exactly what was imported,
-        # preventing accumulation of old data from previous imports
-        if processed_rows:
-            print(f"DEBUG: Performing FULL Registry Purge for user {uid} before inserting {len(processed_rows)} new rows")
-            cur.execute("DELETE FROM company_registry WHERE user_id = %s", (uid,))
+        # Fetch existing company registry emails to preserve _is_generated status
+        cur.execute("SELECT row_data->>'Email' as email, _is_generated FROM company_registry WHERE user_id = %s", (uid,))
+        existing_registry = {r['email'].lower(): r['_is_generated'] for r in cur.fetchall() if r['email']}
+        
+        upsert_data = []
+        insert_count = 0
+        update_count = 0
+        match_count = 0
+        
+        for row in processed_rows:
+            # Robust email detection across all fields (case-insensitive)
+            row_email = None
+            for val in row.values():
+                if isinstance(val, str) and '@' in val and '.' in val:
+                    row_email = val.strip().lower()
+                    break
             
-            data_to_insert = []
-            match_count = 0
-            for row in processed_rows:
-                # Robust email detection across all fields (case-insensitive)
-                row_email = None
-                for val in row.values():
-                    if isinstance(val, str) and '@' in val and '.' in val:
-                        row_email = val.strip().lower()
-                        break
-                
+            # Determine _is_generated: preserve existing if present, else check against leads_raw
+            if row_email and row_email in existing_registry:
+                is_generated = existing_registry[row_email]
+            else:
                 is_generated = row_email in existing_emails if row_email else False
-                if is_generated: match_count += 1
-                data_to_insert.append((json.dumps(row), uid, is_generated))
             
-            print(f"DEBUG: Marked {match_count} as Generated out of {len(processed_rows)} rows")
-                
-            execute_values(
-                cur,
-                "INSERT INTO company_registry (row_data, user_id, _is_generated) VALUES %s",
-                data_to_insert
-            )
+            if is_generated: 
+                match_count += 1
+            
+            upsert_data.append((json.dumps(row), uid, is_generated, row_email))
+            
+            if row_email and row_email in existing_registry:
+                update_count += 1
+            else:
+                insert_count += 1
+        
+        print(f"DEBUG: Upserting {insert_count} new, {update_count} existing rows. Marked {match_count} as Generated")
+        
+        # Upsert using ON CONFLICT on the unique index (user_id, email)
+        # We need to extract email from row_data for the conflict target
+        upsert_query = """
+            INSERT INTO company_registry (row_data, user_id, _is_generated)
+            VALUES %s
+            ON CONFLICT (user_id, (row_data->>'Email')) DO UPDATE SET
+                row_data = EXCLUDED.row_data,
+                _is_generated = EXCLUDED._is_generated,
+                updated_at = NOW()
+        """
+        
+        # Prepare data without email for execute_values (email is in row_data)
+        insert_values = [(row[0], row[1], row[2]) for row in upsert_data]
+        
+        execute_values(cur, upsert_query, insert_values)
         conn.commit()
         invalidate_companies_cache(str(uid))
-        return {"success": True, "count": len(processed_rows)}
+        return {"success": True, "count": len(processed_rows), "inserted": insert_count, "updated": update_count}
     except Exception as e:
-        if conn: conn.rollback()
+        conn.rollback()
         print(f"ERROR: Import failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
     finally:
-        if cur: cur.close()
+        cur.close()
+        conn.close()
         if conn: conn.close()
 
 @router.patch("/companies/{row_id}")
@@ -441,9 +409,30 @@ def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         for idx, row in enriched_results:
             cleaned_rows[idx] = row
 
+    # Normalize email column: ensure every row has an "Email" key with the email value
+    # This enables the unique index on (user_id, row_data->>'Email') to work correctly
+    for row in cleaned_rows:
+        email_val = None
+        # Check common email column names
+        for key in ["Email", "Emails", "email", "Email Address", "Work Email", "Primary Email", "Contact Email"]:
+            if key in row and row[key]:
+                val = str(row[key]).strip()
+                if "@" in val and "." in val:
+                    email_val = val
+                    break
+        # Fallback: scan all values for email-like string
+        if not email_val:
+            for val in row.values():
+                val_str = str(val).strip()
+                if "@" in val_str and "." in val_str and " " not in val_str:
+                    email_val = val_str
+                    break
+        if email_val:
+            row["Email"] = email_val
+
     return cleaned_rows
 
-def discover_gsheet_tabs(doc_id: str) -> List[Dict[str, str]]:
+async def discover_gsheet_tabs(doc_id: str) -> List[Dict[str, str]]:
     """
     Scrapes the real GIDs (Grid IDs) from the Google Sheet HTML.
     Uses multiple regex patterns for maximum reliability.
@@ -454,7 +443,8 @@ def discover_gsheet_tabs(doc_id: str) -> List[Dict[str, str]]:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        resp = requests.get(url, headers=headers, timeout=20)
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(url, headers=headers)
         if resp.status_code != 200:
             return []
             
@@ -484,22 +474,19 @@ def discover_gsheet_tabs(doc_id: str) -> List[Dict[str, str]]:
         
         if not tabs:
             print("DEBUG: HTML GID discovery failed. Trying GViz API for tab metadata...")
-            tabs = discover_gsheet_tabs_gviz(doc_id)
+            tabs = await discover_gsheet_tabs_gviz(doc_id)
 
         if not tabs:
             print("DEBUG: GViz also failed. Falling back to XLSX sheet names.")
-            return discover_gsheet_tabs_xlsx(doc_id)
+            return await discover_gsheet_tabs_xlsx(doc_id)
             
         print(f"DEBUG: Discovered {len(tabs)} tabs with real GIDs: {[t['name'] for t in tabs]}")
         return tabs
     except Exception as e:
         print(f"Tab Discovery Error: {str(e)}")
         return []
-    except Exception as e:
-        print(f"Tab Discovery Error: {str(e)}")
-        return []
 
-def discover_gsheet_tabs_xlsx(doc_id: str) -> List[Dict[str, str]]:
+async def discover_gsheet_tabs_xlsx(doc_id: str) -> List[Dict[str, str]]:
     """Fallback method using XLSX structure."""
     try:
         import zipfile
@@ -507,7 +494,8 @@ def discover_gsheet_tabs_xlsx(doc_id: str) -> List[Dict[str, str]]:
         import io
         
         xlsx_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=xlsx"
-        resp = requests.get(xlsx_url, timeout=20)
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(xlsx_url)
         if resp.status_code != 200: return []
             
         with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
@@ -528,12 +516,13 @@ def discover_gsheet_tabs_xlsx(doc_id: str) -> List[Dict[str, str]]:
     except Exception:
         return []
 
-def discover_gsheet_tabs_gviz(doc_id: str) -> List[Dict[str, str]]:
+async def discover_gsheet_tabs_gviz(doc_id: str) -> List[Dict[str, str]]:
     """Discover tabs using the Google Visualization API which returns sheet metadata in JSON."""
     try:
         import json as json_lib
         url = f"https://docs.google.com/spreadsheets/d/{doc_id}/gviz/tq?tqx=reqId:0&tq=&_t={int(time.time())}"
-        resp = requests.get(url, timeout=20)
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(url)
         if resp.status_code != 200:
             return []
 
@@ -564,19 +553,19 @@ def discover_gsheet_tabs_gviz(doc_id: str) -> List[Dict[str, str]]:
 
 
 @router.post("/companies/gsheet-tabs")
-def get_gsheet_tabs(req: Dict[str, str]):
+async def get_gsheet_tabs(req: Dict[str, str]):
     """Fetches the list of sheet tabs/names from a public Google Sheet using HTML scraping for maximum reliability."""
     url = req.get("url", "").strip()
     if not url or "/d/" not in url:
         raise HTTPException(status_code=400, detail="Invalid Google Sheet URL.")
     doc_id = url.split("/d/")[1].split("/")[0]
-    tabs = discover_gsheet_tabs(doc_id)
+    tabs = await discover_gsheet_tabs(doc_id)
     if tabs:
         return {"tabs": tabs}
     return {"tabs": [{"name": "Sheet1", "gid": "0"}]}
 
 @router.post("/companies/import-gsheet")
-def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header(None, alias="X-User-Id")):
+async def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Syncs a public Google Sheet into the company registry. Supports specific tabs or all tabs."""
     url = req.get("url")
     sheet_name = req.get("sheet_name")  # Optional: specific tab name or "ALL_TABS"
@@ -594,7 +583,7 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
 
     # Resolve which tabs to process
     if sheet_name == "ALL_TABS":
-        tabs = discover_gsheet_tabs(doc_id)
+        tabs = await discover_gsheet_tabs(doc_id)
         # To prevent memory crashes, restrict ALL_TABS to only load "ALL DATA"
         tabs_to_process = [t for t in tabs if t['name'].strip().upper() == "ALL DATA"]
         if not tabs_to_process and tabs:
@@ -691,10 +680,11 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
                     inferred.append(None)
         return inferred
 
-    def process_single_tab(tab):
+    async def process_single_tab(tab):
         try:
             import sys
             import csv
+            import urllib.parse
             max_limit = sys.maxsize
             while True:
                 try:
@@ -704,16 +694,18 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
                     max_limit = int(max_limit / 10)
 
             gid = tab.get('gid', '0')
-            sheet_name_encoded = requests.utils.quote(tab['name'])
+            sheet_name_encoded = urllib.parse.quote(tab['name'])
             export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv&gid={gid}"
             print(f"DEBUG: Syncing tab '{tab['name']}' (GID: {gid})")
             
-            resp = requests.get(export_url, timeout=30)
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(export_url)
             csv_data = resp.text
             if resp.status_code != 200 or len(csv_data) < 10:
                 print(f"DEBUG: GID export failed or empty for '{tab['name']}'. Falling back to GViz JSON Name-based...")
                 export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/gviz/tq?sheet={sheet_name_encoded}&headers=0&_t={int(time.time())}"
-                resp = requests.get(export_url, timeout=30)
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.get(export_url)
                 if resp.status_code == 200:
                     import json, io
                     match = re.search(r'google\.visualization\.Query\.setResponse\((.*)\);', resp.text)
@@ -818,7 +810,7 @@ def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header
 
     # Run sequentially to save memory!
     for tab in tabs_to_process:
-        process_single_tab(tab)
+        await process_single_tab(tab)
 
     print(f"DEBUG: Finished processing all tabs. Total rows collected: {len(all_rows)}")
     if not all_rows:
@@ -1255,7 +1247,8 @@ def send_company_email(row_id: int, user_id: Optional[str] = Header(None, alias=
     """Generates and actually dispatches an email for a company record."""
     uid = normalize_user_id(user_id)
     if not check_daily_email_limit(user_id, 1):
-        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this email would exceed your daily limit of 2000 emails. Please wait for the daily reset.")
+        limit = get_daily_email_limit(user_id)
+        raise HTTPException(status_code=400, detail=f"Daily Limit Exceeded: Sending this email would exceed your daily limit of {limit} emails. Please wait for the daily reset.")
         
     from app.services.email_service import send_email
     from app.api.drafts import markdown_to_html

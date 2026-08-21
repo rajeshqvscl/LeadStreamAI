@@ -41,12 +41,22 @@ const Emails = () => {
   // ── Email-to-Lead mapping ref (survives page changes) ──
   const emailToLeadRef = useRef({});
   
+  // Max entries to keep in the ref to prevent memory leak
+  const MAX_REF_ENTRIES = 500;
+  
   // Update ref whenever emails change
   // Accumulate email-to-lead mappings so they survive page changes
   useEffect(() => {
     emails.forEach(e => {
       emailToLeadRef.current[e.id] = e.lead_id;
     });
+    
+    // Prevent memory leak: limit ref size by removing oldest entries
+    const keys = Object.keys(emailToLeadRef.current);
+    if (keys.length > MAX_REF_ENTRIES) {
+      const toRemove = keys.slice(0, keys.length - MAX_REF_ENTRIES);
+      toRemove.forEach(k => delete emailToLeadRef.current[k]);
+    }
   }, [emails]);
   
   // ── Signature Selection State ──
@@ -96,6 +106,13 @@ const Emails = () => {
 
   useEffect(() => {
     api.get('/api/custom-draft-templates').then(r => setCustomTemplates(r.data || [])).catch(() => {});
+  }, []);
+
+  // Cleanup ref on unmount to prevent memory leak
+  useEffect(() => {
+    return () => {
+      emailToLeadRef.current = {};
+    };
   }, []);
 
   // Fetch signatures when the template picker opens
