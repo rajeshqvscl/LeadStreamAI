@@ -3,11 +3,9 @@ import { Plus, Loader2, CheckCircle2, AlertCircle, Trash2, ChevronDown, ChevronU
 import api from '../services/api';
 import ToolbarTextarea from '../components/ToolbarTextarea';
 import { applyForcedLogoStyles } from '../utils/logoSize';
+import { getPdfJs } from '../utils/pdfWorker';
 
 import mammoth from 'mammoth';
-import * as pdfjsLib from 'pdfjs-dist';
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 const Prompts = () => {
   const [prompts, setPrompts] = useState([]);
@@ -59,6 +57,7 @@ const Prompts = () => {
         const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
         html = result.value;
       } else if (file.name.endsWith('.pdf')) {
+        const pdfjsLib = await getPdfJs();
         const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
         const pages = [];
         for (let i = 1; i <= pdf.numPages; i++) {
@@ -120,6 +119,7 @@ const Prompts = () => {
         const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
         html = result.value;
       } else if (file.name.endsWith('.pdf')) {
+        const pdfjsLib = await getPdfJs();
         const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
         const pages = [];
         for (let i = 1; i <= pdf.numPages; i++) {
@@ -197,6 +197,7 @@ const Prompts = () => {
         const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
         html = result.value;
       } else if (file.name.endsWith('.pdf')) {
+        const pdfjsLib = await getPdfJs();
         const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
         const pages = [];
         for (let i = 1; i <= pdf.numPages; i++) {

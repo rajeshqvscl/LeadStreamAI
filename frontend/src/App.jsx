@@ -1,42 +1,50 @@
-import React, {} from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
+import React, { Suspense, useSearchParams } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import AdminLogin from './pages/AdminLogin';
 import Signup from './pages/Signup';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
-
-// Dashboard Pages
-import Dashboard from './pages/Dashboard';
-import Leads from './pages/Leads';
-import LeadDetail from './pages/LeadDetail';
-import Emails from './pages/Emails';
-import EditEmail from './pages/EditEmail';
-import Prompts from './pages/Prompts';
-import Signatures from './pages/Signatures';
-import Metrics from './pages/Metrics';
-import MisReportPage from './pages/MisReportPage';
-import Users from './pages/Users';
-import FamilyOffices from './pages/FamilyOffices';
-import FamilyOfficeDetail from './pages/FamilyOfficeDetail';
-import BulkSearch from './pages/BulkSearch';
-import CompanyDatabase from './pages/CompanyDatabase';
-import History from './pages/History';
-import Followups from './pages/Followups';
-import RocketReach from './pages/RocketReach';
-import Inbox from './pages/Inbox';
-import InboundDeals from './pages/InboundDeals';
-import DealIntelligence from './pages/DealIntelligence';
-import Meetings from './pages/Meetings';
-import GmailDrafts from './pages/GmailDrafts';
-import GmailSent from './pages/GmailSent';
-import AdminDashboard from './pages/AdminDashboard';
-import AdminAuditLogs from './pages/AdminAuditLogs';
-
-// Public Pages
 import Unsubscribe from './public_pages/Unsubscribe';
 import UnsubscribeSuccess from './public_pages/UnsubscribeSuccess';
 import Resubscribe from './public_pages/Resubscribe';
+
+// Lazy-loaded pages (code-split for faster initial load)
+const Dashboard = React.lazy(() => import('./pages/Dashboard'));
+const Leads = React.lazy(() => import('./pages/Leads'));
+const LeadDetail = React.lazy(() => import('./pages/LeadDetail'));
+const Emails = React.lazy(() => import('./pages/Emails'));
+const EditEmail = React.lazy(() => import('./pages/EditEmail'));
+const Prompts = React.lazy(() => import('./pages/Prompts'));
+const Signatures = React.lazy(() => import('./pages/Signatures'));
+const Metrics = React.lazy(() => import('./pages/Metrics'));
+const MisReportPage = React.lazy(() => import('./pages/MisReportPage'));
+const Users = React.lazy(() => import('./pages/Users'));
+const FamilyOffices = React.lazy(() => import('./pages/FamilyOffices'));
+const FamilyOfficeDetail = React.lazy(() => import('./pages/FamilyOfficeDetail'));
+const BulkSearch = React.lazy(() => import('./pages/BulkSearch'));
+const CompanyDatabase = React.lazy(() => import('./pages/CompanyDatabase'));
+const History = React.lazy(() => import('./pages/History'));
+const Followups = React.lazy(() => import('./pages/Followups'));
+const RocketReach = React.lazy(() => import('./pages/RocketReach'));
+const Inbox = React.lazy(() => import('./pages/Inbox'));
+const InboundDeals = React.lazy(() => import('./pages/InboundDeals'));
+const DealIntelligence = React.lazy(() => import('./pages/DealIntelligence'));
+const Meetings = React.lazy(() => import('./pages/Meetings'));
+const GmailDrafts = React.lazy(() => import('./pages/GmailDrafts'));
+const GmailSent = React.lazy(() => import('./pages/GmailSent'));
+const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
+const AdminAuditLogs = React.lazy(() => import('./pages/AdminAuditLogs'));
+
+// Page loader component
+const PageLoader = () => (
+  <div className="min-h-screen bg-[#0b0f19] flex items-center justify-center">
+    <div className="flex flex-col items-center gap-4">
+      <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+      <p className="text-slate-500 font-black uppercase tracking-[4px] text-[10px]">Loading Page...</p>
+    </div>
+  </div>
+);
 
 const ProtectedRoute = ({ children }) => {
   const token = localStorage.getItem('token') || localStorage.getItem('token_admin');
@@ -111,51 +119,53 @@ function App() {
       <div className="orb orb-2"></div>
       <div className="orb orb-3"></div>
 
-      <Routes>
-        <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
-        <Route path="/admin" element={<PublicRoute><AdminLogin /></PublicRoute>} />
-        <Route path="/signup" element={<PublicRoute><Signup /></PublicRoute>} />
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
+          <Route path="/admin" element={<PublicRoute><AdminLogin /></PublicRoute>} />
+          <Route path="/signup" element={<PublicRoute><Signup /></PublicRoute>} />
 
-        {/* Authenticated Dashboard Routes */}
-        <Route path="/dashboard" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-          <Route index element={<Dashboard />} />
-          <Route path="leads" element={<Leads />} />
-          <Route path="leads/:leadId" element={<LeadDetail />} />
-          <Route path="emails" element={<Emails />} />
-          <Route path="emails/:draftId/edit" element={<EditEmail />} />
-          <Route path="prompts" element={<Prompts />} />
-          <Route path="signatures" element={<Signatures />} />
-          <Route path="metrics" element={<Metrics />} />
-          <Route path="users" element={<Users />} />
-          <Route path="family-offices" element={<FamilyOffices />} />
-          <Route path="family-offices/:officeId" element={<ErrorBoundary><FamilyOfficeDetail /></ErrorBoundary>} />
-          <Route path="bulk-search" element={<BulkSearch />} />
-          <Route path="companies" element={<CompanyDatabase />} />
-          <Route path="followups" element={<Followups />} />
-          <Route path="rocketreach" element={<RocketReach />} />
-          <Route path="inbox" element={<Inbox />} />
-          <Route path="deals" element={<InboundDeals />} />
-          <Route path="intelligence" element={<DealIntelligence />} />
-          <Route path="meetings" element={<Meetings />} />
-          <Route path="gmail-drafts" element={<GmailDrafts />} />
-          <Route path="gmail-sent" element={<GmailSent />} />
-          <Route path="admin-intelligence" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
-          <Route path="admin-audit-logs" element={<AdminRoute><AdminAuditLogs /></AdminRoute>} />
-          <Route path="history" element={<AdminRoute><History /></AdminRoute>} />
-        </Route>
-        <Route path="/mis-report" element={<ProtectedRoute><MisReportPage /></ProtectedRoute>} />
+          {/* Authenticated Dashboard Routes */}
+          <Route path="/dashboard" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+            <Route index element={<Dashboard />} />
+            <Route path="leads" element={<Leads />} />
+            <Route path="leads/:leadId" element={<LeadDetail />} />
+            <Route path="emails" element={<Emails />} />
+            <Route path="emails/:draftId/edit" element={<EditEmail />} />
+            <Route path="prompts" element={<Prompts />} />
+            <Route path="signatures" element={<Signatures />} />
+            <Route path="metrics" element={<Metrics />} />
+            <Route path="users" element={<Users />} />
+            <Route path="family-offices" element={<FamilyOffices />} />
+            <Route path="family-offices/:officeId" element={<ErrorBoundary><FamilyOfficeDetail /></ErrorBoundary>} />
+            <Route path="bulk-search" element={<BulkSearch />} />
+            <Route path="companies" element={<CompanyDatabase />} />
+            <Route path="followups" element={<Followups />} />
+            <Route path="rocketreach" element={<RocketReach />} />
+            <Route path="inbox" element={<Inbox />} />
+            <Route path="deals" element={<InboundDeals />} />
+            <Route path="intelligence" element={<DealIntelligence />} />
+            <Route path="meetings" element={<Meetings />} />
+            <Route path="gmail-drafts" element={<GmailDrafts />} />
+            <Route path="gmail-sent" element={<GmailSent />} />
+            <Route path="admin-intelligence" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
+            <Route path="admin-audit-logs" element={<AdminRoute><AdminAuditLogs /></AdminRoute>} />
+            <Route path="history" element={<AdminRoute><History /></AdminRoute>} />
+          </Route>
+          <Route path="/mis-report" element={<ProtectedRoute><MisReportPage /></ProtectedRoute>} />
 
-        {/* Public Unsubscribe Pages — no auth required */}
-        <Route path="/unsubscribe" element={<Unsubscribe />} />
-        <Route path="/unsubscribe/success" element={<UnsubscribeSuccess />} />
-        <Route path="/unsubscribe/resubscribe" element={<Resubscribe />} />
+          {/* Public Unsubscribe Pages — no auth required */}
+          <Route path="/unsubscribe" element={<Unsubscribe />} />
+          <Route path="/unsubscribe/success" element={<UnsubscribeSuccess />} />
+          <Route path="/unsubscribe/resubscribe" element={<Resubscribe />} />
 
-        {/* Root Redirect — also catch /index.html?token=... from Render 301 fallback */}
-        <Route path="/" element={<RootRedirect token={token} />} />
+          {/* Root Redirect — also catch /index.html?token=... from Render 301 fallback */}
+          <Route path="/" element={<RootRedirect token={token} />} />
 
-        {/* Redirect unknown routes — but check for Render 301 fallback token */}
-        <Route path="*" element={<CatchAllRedirect token={token} />} />
-      </Routes>
+          {/* Redirect unknown routes — but check for Render 301 fallback token */}
+          <Route path="*" element={<CatchAllRedirect token={token} />} />
+        </Routes>
+      </Suspense>
     </Router>
   );
 }

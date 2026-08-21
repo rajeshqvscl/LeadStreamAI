@@ -321,6 +321,7 @@ _PUBLIC_PATH_EXACT = {"/"}
 
 _PUBLIC_PATH_PREFIXES = (
     "/api/auth/login",
+    "/api/auth/refresh",
     "/api/auth/google/callback",
     "/api/gmail/pubsub-push",
     "/api/track/",

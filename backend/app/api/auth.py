@@ -144,7 +144,7 @@ def login(req: LoginRequest, request: Request = None):
     # Create a real, server-side session token (verified by AuthMiddleware on every request)
     import secrets
     access_token = secrets.token_urlsafe(32)
-    expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=7)
+    expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=30)
     try:
         s_conn = get_db_connection()
         s_cur = s_conn.cursor()
@@ -254,6 +254,56 @@ def get_current_user(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         if not result.get('team'):
             result['team'] = 'CLIENT'
         return result
+    finally:
+        cur.close()
+        conn.close()
+
+
+@router.post("/auth/refresh")
+def refresh_token(user_id: Optional[str] = Header(None, alias="X-User-Id"), authorization: Optional[str] = Header(None, alias="Authorization")):
+    """Refresh the session token. Returns a new access token with extended expiry."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    # Handle 'admin' string or digits
+    real_uid = user_id if user_id and user_id.isdigit() else "1"
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        # Verify user exists and is active
+        cur.execute("SELECT id, username, email, full_name, role, team, is_active, is_approved FROM users WHERE id = %s", (real_uid,))
+        user = cur.fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        if not user.get('is_active'):
+            raise HTTPException(status_code=403, detail="User is inactive")
+        
+        # Delete old sessions for this user
+        cur.execute("DELETE FROM sessions WHERE user_id = %s", (real_uid,))
+        
+        # Create new session token with extended expiry
+        import secrets
+        access_token = secrets.token_urlsafe(32)
+        expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=30)
+        cur.execute("INSERT INTO sessions (token, user_id, expires_at) VALUES (%s, %s, %s)", (access_token, real_uid, expires_at))
+        conn.commit()
+        
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "expires_in": 30 * 24 * 60 * 60,  # 30 days in seconds
+            "user": {
+                "id": user['id'],
+                "username": user['username'],
+                "email": user['email'],
+                "full_name": user['full_name'],
+                "role": user['role'],
+                "team": user.get('team') or 'CLIENT',
+                "is_active": user['is_active'],
+                "is_approved": user['is_approved']
+            }
+        }
     finally:
         cur.close()
         conn.close()

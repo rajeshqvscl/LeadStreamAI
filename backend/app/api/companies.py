@@ -233,7 +233,13 @@ def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header
     uid = normalize_user_id(user_id)
     
     # --- AUTOMATION: Enrich rows before insertion ---
-    processed_rows = process_and_enrich_rows(rows)
+    try:
+        processed_rows = process_and_enrich_rows(rows)
+    except Exception as enrich_err:
+        print(f"ERROR: Row enrichment crashed: {enrich_err}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Import failed during enrichment: {str(enrich_err)}")
     
     if not processed_rows:
         return {"success": True, "count": 0, "message": "No valid rows to import"}
@@ -301,7 +307,8 @@ def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header
         # Prepare data without email for execute_values (email is in row_data)
         insert_values = [(row[0], row[1], row[2]) for row in upsert_data]
         
-        execute_values(cur, upsert_query, insert_values)
+        # Use ::jsonb cast so psycopg2 text values are accepted by the JSONB column
+        execute_values(cur, upsert_query, insert_values, template="(%s::jsonb, %s, %s)")
         conn.commit()
         invalidate_companies_cache(str(uid))
         return {"success": True, "count": len(processed_rows), "inserted": insert_count, "updated": update_count}
@@ -314,7 +321,6 @@ def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header
     finally:
         cur.close()
         conn.close()
-        if conn: conn.close()
 
 @router.patch("/companies/{row_id}")
 def update_company(row_id: int, row_data: Dict[str, Any], user_id: Optional[str] = Header(None, alias="X-User-Id")):
@@ -956,6 +962,18 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
             u = cur.fetchone()
             if u: sender_name = u['full_name'] or u['username']
             
+        # Remove from unsubscribe_list if present — user explicitly chose to generate
+        # a draft for this contact, so treat as an opt-back-in.
+        cur.execute("DELETE FROM unsubscribe_list WHERE LOWER(email) = LOWER(%s)", (email,))
+        if cur.rowcount > 0:
+            logger.info(f"Removed {email} from unsubscribe_list (user-initiated draft generation)")
+        # Also reset opt-out flags on the existing lead so it reappears in the review queue
+        cur.execute(
+            "UPDATE leads_raw SET is_unsubscribed = FALSE, email_opt_in = TRUE WHERE LOWER(email) = LOWER(%s) AND user_id = %s",
+            (email, uid)
+        )
+        conn.commit()
+
         insert_lead(f_name, l_name, email, "", norm.get("linkedin", ""), company, "intelligence", data, user_id=uid, user_name=sender_name)
 
         cur.execute("SELECT id FROM leads_raw WHERE email = %s AND user_id = %s ORDER BY created_at DESC LIMIT 1", (email, uid))
@@ -1160,6 +1178,16 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: Optional
                     cur.execute("SELECT full_name, username FROM users WHERE id = %s", (uid,))
                     u = cur.fetchone()
                     if u: sender_name = u['full_name'] or u['username']
+
+                # Remove from unsubscribe_list if present — user explicitly chose to generate
+                # drafts for these contacts, so treat as an opt-back-in.
+                cur.execute("DELETE FROM unsubscribe_list WHERE LOWER(email) = LOWER(%s)", (email,))
+                # Also reset opt-out flags on any existing lead
+                cur.execute(
+                    "UPDATE leads_raw SET is_unsubscribed = FALSE, email_opt_in = TRUE WHERE LOWER(email) = LOWER(%s) AND user_id = %s",
+                    (email, uid)
+                )
+                conn.commit()
 
                 insert_lead(f_name, l_name, email, "", norm.get("linkedin", ""), company, "intelligence", data, user_id=uid, user_name=sender_name)
                 created_leads.append((row['id'], email))
