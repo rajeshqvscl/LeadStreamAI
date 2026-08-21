@@ -33,34 +33,60 @@ async def maintenance_loop():
 
 _scheduler_lock = asyncio.Lock()
 
+# Separate task intervals (seconds)
+FOLLOWUP_INTERVAL = 5
+SCHEDULED_INTERVAL = 15
+REPLY_POLL_INTERVAL = 30
+
 async def scheduler_loop():
     from app.services.email_service import check_scheduled_emails
     from app.services.followup_service import process_outreach_sequences
     from app.api.gmail import poll_all_users_for_replies
+    
+    # Track last run times
+    last_followup = 0
+    last_scheduled = 0
+    last_reply_poll = 0
+    
     while True:
         if _scheduler_lock.locked():
             logger.warning("Scheduler: previous iteration still running, skipping this cycle")
-            await asyncio.sleep(10)
+            await asyncio.sleep(2)
             continue
+        
+        now = asyncio.get_event_loop().time()
         async with _scheduler_lock:
             try:
-                # Run all three tasks in PARALLEL to cut end-to-end latency by ~3x.
-                # Each runs in its own thread; they share the DB connection pool.
-                # process_outreach_sequences uses atomic UPDATE claims so it's safe
-                # even if poll_all_users_for_replies updates a lead concurrently.
-                results = await asyncio.gather(
-                    asyncio.to_thread(poll_all_users_for_replies),
-                    asyncio.to_thread(check_scheduled_emails),
-                    asyncio.to_thread(process_outreach_sequences),
-                    return_exceptions=True,
-                )
-                # Log any exceptions that bubbled up despite internal error handling
-                for r in results:
-                    if isinstance(r, Exception):
-                        logger.error(f"Scheduler task error: {r}")
+                tasks = []
+                
+                # Follow-ups: every 5s (high frequency, latency-sensitive)
+                if now - last_followup >= FOLLOWUP_INTERVAL:
+                    tasks.append(("followup", asyncio.to_thread(process_outreach_sequences)))
+                    last_followup = now
+                
+                # Scheduled emails: every 15s (time-based, less urgent)
+                if now - last_scheduled >= SCHEDULED_INTERVAL:
+                    tasks.append(("scheduled", asyncio.to_thread(check_scheduled_emails)))
+                    last_scheduled = now
+                
+                # Reply polling: every 30s (polling, can tolerate delay)
+                if now - last_reply_poll >= REPLY_POLL_INTERVAL:
+                    tasks.append(("replies", asyncio.to_thread(poll_all_users_for_replies)))
+                    last_reply_poll = now
+                
+                if tasks:
+                    # Run selected tasks in parallel
+                    results = await asyncio.gather(
+                        *[task[1] for task in tasks],
+                        return_exceptions=True,
+                    )
+                    # Log any exceptions
+                    for (name, _), r in zip(tasks, results):
+                        if isinstance(r, Exception):
+                            logger.error(f"Scheduler task '{name}' error: {r}")
             except Exception as e:
                 logger.error(f"Scheduler error: {e}")
-        await asyncio.sleep(10)
+        await asyncio.sleep(2)
 
 # Daily reply-monitoring cleanup + report runs at these IST hours
 _REPLY_CLEANUP_HOURS_IST = (10, 16)

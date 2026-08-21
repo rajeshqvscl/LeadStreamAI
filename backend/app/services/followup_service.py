@@ -14,9 +14,12 @@ from app.models.lead import add_activity_log
 logger = logging.getLogger(__name__)
 
 # Max auto follow-ups sent per user per scheduler cycle. Bounds the scheduler
-# lock hold time (each send has a 5s cool-down) so reply polling stays fresh
+# lock hold time (each send has a 1.5s cool-down) so reply polling stays fresh
 # even when a user has a huge backlog. Remaining leads roll into the next cycle.
-MAX_AUTO_SENDS_PER_CYCLE = 30
+MAX_AUTO_SENDS_PER_CYCLE = 200
+
+# Parallel workers per user (max 2 to stay within Gmail quota: 250 units/sec, send≈100)
+MAX_PARALLEL_WORKERS = 2
 
 def is_generic_followup(body: Optional[str]) -> bool:
     """Detects legacy, standard, or HTML-wrapped default placeholder follow-ups to allow dynamic healing."""
@@ -796,8 +799,8 @@ def process_outreach_sequences():
                     add_activity_log(lead_id, "AUTO_FOLLOWUP_SENT", f"Stage {next_stage} auto-sent", "system", uid)
                     sent_count += 1
 
-                    logger.info(f"Auto-followup sent from {first_lead['sender_name']} ({first_lead['sender_email']}) to {lead['email']}. Enforcing 5s cool-down...")
-                    time.sleep(5)
+                    logger.info(f"Auto-followup sent from {first_lead['sender_name']} ({first_lead['sender_email']}) to {lead['email']}. Enforcing 1.5s cool-down...")
+                    time.sleep(1.5)
                 except Exception as ex:
                     logger.error(f"Error dispatching auto-followup for lead {lead.get('id')}: {ex}")
                 finally:
