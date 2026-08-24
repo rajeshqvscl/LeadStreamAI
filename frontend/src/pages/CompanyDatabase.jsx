@@ -5,7 +5,6 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
-import * as XLSX from 'xlsx';
 import api from '../services/api';
 import DraftTemplatePicker from '../components/DraftTemplatePicker';
 
@@ -183,6 +182,7 @@ const CompanyDatabase = () => {
       reader.onload = async (e) => {
       setIsImporting(true);
       try {
+        const XLSX = (await import('xlsx')).default;
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
         const allRows = [];
@@ -221,8 +221,9 @@ const CompanyDatabase = () => {
   });
 
   // Export Logic
-  const handleExport = () => {
+  const handleExport = async () => {
     if (companies.length === 0) return;
+    const XLSX = (await import('xlsx')).default;
     const exportData = companies.map(({ id: _id, ...rest }) => rest);
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -244,20 +245,37 @@ const CompanyDatabase = () => {
     }
   };
 
+  const [showManualTab, setShowManualTab] = useState(false);
+  const [manualTabName, setManualTabName] = useState('');
+
   const handleLoadTabs = async () => {
     if (!gsheetUrl) return;
     setIsLoadingTabs(true);
     setSheetTabs([]);
     setSelectedTab(null);
+    setShowManualTab(false);
     try {
       const res = await api.post('/api/companies/gsheet-tabs', { url: gsheetUrl });
       const tabs = res.data.tabs || [];
       setSheetTabs(tabs);
       if (tabs.length > 0) setSelectedTab(tabs[0].name);
-    } catch (_err) {
-      showNotification('error', 'Failed to load sheet tabs.');
+    } catch (err) {
+      const detail = err.response?.data?.detail || 'Failed to load sheet tabs.';
+      showNotification('error', detail);
+      // Show manual entry option
+      setShowManualTab(true);
     } finally {
       setIsLoadingTabs(false);
+    }
+  };
+
+  const handleManualTabEntry = () => {
+    if (manualTabName.trim()) {
+      const tab = { name: manualTabName.trim(), gid: '0' };
+      setSheetTabs([tab]);
+      setSelectedTab(tab.name);
+      setShowManualTab(false);
+      setManualTabName('');
     }
   };
 
@@ -522,7 +540,8 @@ const CompanyDatabase = () => {
     }
   };
 
-  const handleBulkExport = () => {
+  const handleBulkExport = async () => {
+    const XLSX = (await import('xlsx')).default;
     const dataToExport = companies.filter(c => selectedIds.includes(c.id)).map(({ id: _id, ...rest }) => rest);
     const ws = XLSX.utils.json_to_sheet(dataToExport);
     const wb = XLSX.utils.book_new();
@@ -819,14 +838,33 @@ const CompanyDatabase = () => {
                     className="w-full h-10 appearance-none bg-white/5 border border-white/10 rounded-xl px-4 pr-10 text-[10px] font-black text-slate-300 uppercase tracking-widest focus:outline-none focus:border-emerald-500/30 transition-all cursor-pointer"
                   >
                     <option value="" disabled className="bg-[#0d1117]">Select Individual Tab</option>
-                    {sheetTabs.map(tab => (
-                      <option key={tab.gid} value={tab.name} className="bg-[#0d1117] text-white py-2">
+                    {sheetTabs.map((tab, idx) => (
+                      <option key={tab.name || `tab-${idx}`} value={tab.name} className="bg-[#0d1117] text-white py-2">
                         {tab.name}
                       </option>
                     ))}
                   </select>
                   <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none group-hover/select:text-slate-300 transition-colors" />
                 </div>
+              </div>
+            )}
+            {showManualTab && (
+              <div className="flex items-center gap-2 mt-2 animate-in slide-in-from-top-2 duration-200">
+                <input
+                  type="text"
+                  placeholder="Enter sheet name manually..."
+                  value={manualTabName}
+                  onChange={(e) => setManualTabName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleManualTabEntry()}
+                  className="flex-1 h-10 appearance-none bg-white/5 border border-amber-500/30 rounded-xl px-4 text-[10px] font-black text-white uppercase tracking-widest focus:outline-none focus:border-amber-500/50 transition-all placeholder:text-slate-600"
+                />
+                <button
+                  onClick={handleManualTabEntry}
+                  disabled={!manualTabName.trim()}
+                  className="h-10 px-4 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded-xl flex items-center justify-center gap-2 text-[9px] font-black uppercase tracking-widest text-amber-500 disabled:opacity-40 cursor-pointer transition-all"
+                >
+                  Add
+                </button>
               </div>
             )}
             <div className="flex items-center gap-4 self-end">

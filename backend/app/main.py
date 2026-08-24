@@ -20,6 +20,8 @@ from app.database import create_tables
 from contextlib import asynccontextmanager
 import asyncio
 
+from app.core.pipeline.scheduler import get_scheduler_config
+
 async def maintenance_loop():
     from app.services.google_service import renew_all_gmail_watches
     while True:
@@ -33,15 +35,12 @@ async def maintenance_loop():
 
 _scheduler_lock = asyncio.Lock()
 
-# Separate task intervals (seconds)
-FOLLOWUP_INTERVAL = 5
-SCHEDULED_INTERVAL = 15
-REPLY_POLL_INTERVAL = 30
-
 async def scheduler_loop():
     from app.services.email_service import check_scheduled_emails
     from app.services.followup_service import process_outreach_sequences
     from app.api.gmail import poll_all_users_for_replies
+    
+    config = get_scheduler_config()
     
     # Track last run times
     last_followup = 0
@@ -59,18 +58,18 @@ async def scheduler_loop():
             try:
                 tasks = []
                 
-                # Follow-ups: every 5s (high frequency, latency-sensitive)
-                if now - last_followup >= FOLLOWUP_INTERVAL:
+                # Follow-ups: every FOLLOWUP_INTERVAL
+                if now - last_followup >= config.followup_interval_sec:
                     tasks.append(("followup", asyncio.to_thread(process_outreach_sequences)))
                     last_followup = now
                 
-                # Scheduled emails: every 15s (time-based, less urgent)
-                if now - last_scheduled >= SCHEDULED_INTERVAL:
+                # Scheduled emails: every SCHEDULED_INTERVAL
+                if now - last_scheduled >= config.scheduled_interval_sec:
                     tasks.append(("scheduled", asyncio.to_thread(check_scheduled_emails)))
                     last_scheduled = now
                 
-                # Reply polling: every 30s (polling, can tolerate delay)
-                if now - last_reply_poll >= REPLY_POLL_INTERVAL:
+                # Reply polling: every REPLY_POLL_INTERVAL
+                if now - last_reply_poll >= config.reply_poll_interval_sec:
                     tasks.append(("replies", asyncio.to_thread(poll_all_users_for_replies)))
                     last_reply_poll = now
                 
@@ -88,24 +87,26 @@ async def scheduler_loop():
                 logger.error(f"Scheduler error: {e}")
         await asyncio.sleep(2)
 
-# Daily reply-monitoring cleanup + report runs at these IST hours
-_REPLY_CLEANUP_HOURS_IST = (10, 16)
-
 async def reply_cleanup_loop():
     """
-    Runs the reply-monitoring job twice a day (10:00 & 16:00 IST):
+    Runs the reply-monitoring job twice a day (configurable hours IST):
       - deletes remaining generated follow-ups for replied leads
       - sends the admin email report + in-app reminder notification
     The loop sleeps precisely until the next scheduled slot.
     """
     from datetime import datetime, timedelta, timezone
+    from app.core.pipeline.scheduler import get_scheduler_config
+    
+    config = get_scheduler_config()
     IST = timezone(timedelta(hours=5, minutes=30))
+    cleanup_hours = config.get_reply_cleanup_hours()
+    
     while True:
         try:
             now = datetime.now(IST)
             candidates = [
                 datetime(now.year, now.month, now.day, h, 0, 0, tzinfo=IST)
-                for h in _REPLY_CLEANUP_HOURS_IST
+                for h in cleanup_hours
             ]
             future = [c for c in candidates if c > now]
             next_run = min(future) if future else candidates[0] + timedelta(days=1)
@@ -131,6 +132,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to create/verify tables on startup: {e}")
         logger.warning("App will still start — DB may be temporarily unavailable")
+    
+    # Start email engine dispatcher
+    email_dispatcher = None
+    try:
+        from app.email_engine.worker.pool import get_dispatcher
+        email_dispatcher = get_dispatcher()
+        email_dispatcher.start()
+        logger.info("Email engine dispatcher started")
+    except Exception as e:
+        logger.warning(f"Could not start email dispatcher: {e}")
+    
     t1 = asyncio.create_task(scheduler_loop())
     t2 = asyncio.create_task(maintenance_loop())
     t3 = asyncio.create_task(reply_cleanup_loop())
@@ -138,6 +150,11 @@ async def lifespan(app: FastAPI):
     t1.cancel()
     t2.cancel()
     t3.cancel()
+    
+    # Stop email dispatcher
+    if email_dispatcher:
+        email_dispatcher.stop()
+        logger.info("Email engine dispatcher stopped")
 
 app = FastAPI(lifespan=lifespan)
 

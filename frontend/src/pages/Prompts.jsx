@@ -5,7 +5,18 @@ import ToolbarTextarea from '../components/ToolbarTextarea';
 import { applyForcedLogoStyles } from '../utils/logoSize';
 import { getPdfJs } from '../utils/pdfWorker';
 
-import mammoth from 'mammoth';
+// Mammoth - use dynamic import since it's CommonJS only
+let mammothModule = null;
+async function getMammoth() {
+  if (mammothModule) return mammothModule;
+  try {
+    mammothModule = await import('mammoth');
+    return mammothModule;
+  } catch (e) {
+    console.error('Failed to load mammoth:', e);
+    throw new Error('mammoth module not available');
+  }
+}
 
 const Prompts = () => {
   const [prompts, setPrompts] = useState([]);
@@ -54,6 +65,7 @@ const Prompts = () => {
       const buffer = await file.arrayBuffer();
       let html = '';
       if (file.name.endsWith('.docx')) {
+        const mammoth = await getMammoth();
         const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
         html = result.value;
       } else if (file.name.endsWith('.pdf')) {
@@ -116,6 +128,7 @@ const Prompts = () => {
       const buffer = await file.arrayBuffer();
       let html = '';
       if (file.name.endsWith('.docx')) {
+        const mammoth = await getMammoth();
         const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
         html = result.value;
       } else if (file.name.endsWith('.pdf')) {
@@ -194,6 +207,7 @@ const Prompts = () => {
       const buffer = await file.arrayBuffer();
       let html = '';
       if (file.name.endsWith('.docx')) {
+        const mammoth = await getMammoth();
         const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
         html = result.value;
       } else if (file.name.endsWith('.pdf')) {
@@ -304,6 +318,15 @@ const Prompts = () => {
         });
       // Palak's logo must preview at 150x150 (backend forces the same size in sent emails).
       html = applyForcedLogoStyles(html);
+      // Add list styling for bullet points in HTML content
+      html = html.replace(/<ul(\s[^>]*)?>/gi, (m) => {
+        if (m.includes('style="')) return m.replace(/style="([^"]*)"/, 'style="margin:0.8em 0;padding-left:1.5em;list-style-type:disc;$1"');
+        return '<ul style="margin:0.8em 0;padding-left:1.5em;list-style-type:disc;">';
+      });
+      html = html.replace(/<li(\s[^>]*)?>/gi, (m) => {
+        if (m.includes('style="')) return m.replace(/style="([^"]*)"/, 'style="margin-bottom:0.4em;line-height:1.5;$1"');
+        return '<li style="margin-bottom:0.4em;line-height:1.5;">';
+      });
       return `<div style="color:#cbd5e1;font-size:18px;line-height:1.5;">${html}</div>`;
     }
 
@@ -339,10 +362,10 @@ const Prompts = () => {
       const isUnordered = lines.some(l => /^\s*[*\-•]\s+/.test(l));
       const isOrdered = lines.some(l => /^\s*\d+\.\s+/.test(l));
       if (isUnordered) {
-        let listHtml = '<ul style="margin: 0.8em 0; padding-left: 0; list-style: none;">';
+        let listHtml = '<ul style="margin: 0.8em 0; padding-left: 1.5em; list-style-type: disc;">';
         lines.forEach(l => {
           const match = l.trim().match(/^[*\-•]\s+(.*)/);
-          if (match) listHtml += `<li style="margin-bottom: 0.4em; position: relative; padding-left: 14px; line-height: 1.6; color: #cbd5e1;"><span style="position: absolute; left: 0; color: #94a3b8; font-size: 9px; top: 0px; display: inline-block; vertical-align: middle;">•</span>${match[1].trim()}</li>`;
+          if (match) listHtml += `<li style="margin-bottom: 0.4em; line-height: 1.5; color: #cbd5e1;">${match[1].trim()}</li>`;
           else if (l.trim()) listHtml += ` ${l.trim()}`;
         });
         listHtml += '</ul>';
@@ -667,19 +690,11 @@ const Prompts = () => {
                       <div className="flex gap-2">
                         <ToolbarTextarea value={tpl.content} onChange={e => { const updated = [...prompts]; const idx = updated.findIndex(p => p.id === tpl.id); updated[idx] = {...updated[idx], content: e.target.value}; setPrompts(updated); }} rows={6} placeholder="Email body..." />
                         <div className="flex flex-col gap-2">
-                          <button onClick={() => setExpandedBodyPreview(prev => ({...prev, [tpl.id]: !prev[tpl.id]}))} className={`px-3 py-2 rounded-lg text-[10px] font-bold border whitespace-nowrap transition-all ${expandedBodyPreview[tpl.id] ? 'bg-blue-600/20 text-blue-400 border-blue-500/30' : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 border-white/10'}`}>
-                            <Eye className="w-3 h-3" />
-                          </button>
                           <button onClick={() => setPreview({ show: true, content: tpl.content, label: 'Body', subject: tpl.subject, attachment: tpl.attachment_file })} className="px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-[10px] font-bold border border-blue-500/20 whitespace-nowrap transition-all">Preview</button>
                           <button onClick={() => handleFieldSave(tpl.id, 'content', tpl.content)} disabled={saveField.id === tpl.id && saveField.field === 'content'} className={`px-3 py-2 rounded-lg text-[10px] font-bold border whitespace-nowrap transition-all ${saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === 'content' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/30' : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 border-white/10'}`}>
                             {saveField.id === tpl.id && saveField.field === 'content' ? <Loader2 className="w-3 h-3 animate-spin" /> : saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === 'content' ? <CheckCircle2 className="w-3 h-3" /> : 'Save'}
                           </button>
                         </div>
-                        {expandedBodyPreview[tpl.id] && (
-                          <div className="mt-2 bg-[#0a0d14] border border-white/5 rounded-xl p-4 max-h-[400px] overflow-y-auto">
-                            <div className="email-preview text-[14px] leading-relaxed" dangerouslySetInnerHTML={{ __html: tpl.content ? renderEmailPreview(tpl.content, true, false) : '<p class="text-slate-500 italic text-[12px]">(empty)</p>' }} />
-                          </div>
-                        )}
                       </div>
                     </div>
                     <div className="flex items-center justify-between">

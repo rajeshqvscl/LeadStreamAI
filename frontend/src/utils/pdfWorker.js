@@ -1,4 +1,4 @@
-// Dynamic PDF.js worker loader - prevents bundling 1.2MB worker in initial chunk
+// Dynamic PDF.js worker loader - uses CDN to avoid bundling 1.2MB worker
 let pdfjsLib = null;
 let workerLoaded = false;
 
@@ -9,8 +9,8 @@ export async function getPdfJs() {
   pdfjsLib = await import('pdfjs-dist');
   
   if (!workerLoaded) {
-    const workerModule = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
-    pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default;
+    // Use CDN for worker to avoid bundling 1.2MB in build
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@4.x/build/pdf.worker.min.mjs';
     workerLoaded = true;
   }
   

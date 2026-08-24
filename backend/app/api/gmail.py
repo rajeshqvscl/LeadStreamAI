@@ -286,43 +286,26 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 return  # Hard stop — don't process random inbox mail
         
         lead_id = lead_exists['id']
-        # Step 1: AI Intent Classification
-        print(f"DEBUG: Classifying reply from {sender_email}...")
-        from app.services.llm_services import EmailGenerator
-        llm = EmailGenerator()
-        ai_data = llm.classify_reply(body)
-        # intent is None when classification failed (LLM timeout / parse error).
-        # determine_followup_status maps None -> ACTIVE so the sequence stays
-        # alive for manual review instead of being silently stopped. Never
-        # default to INTERESTED on failure.
-        intent = ai_data.get("intent")
-
-        # ── HARD DECLINE-PHRASE OVERRIDE ──
-        # Deterministic safety net: if the reply body contains any known
-        # decline/pass phrase ("We will pass", "Not fit for us", "No, thankyou",
-        # "Please share a detailed deck", "we only invest in", etc.), force
-        # NOT_INTERESTED so follow-ups stop — regardless of what the LLM said.
-        from app.services.reply_workflow_service import detect_decline_phrase
-        decline_phrase = detect_decline_phrase(body)
-        if decline_phrase:
-            print(f"DEBUG: Decline phrase detected ('{decline_phrase}') — overriding intent to NOT_INTERESTED")
-            intent = "NOT_INTERESTED"
-            ai_data["intent"] = "NOT_INTERESTED"
-            if not ai_data.get("rejection_reason"):
-                ai_data["rejection_reason"] = decline_phrase
-            # Keep sentiment consistent with a decline so dashboards don't
-            # show a high-sentiment lead with a NOT_INTERESTED intent.
-            try:
-                cur_sent = int(ai_data.get("sentiment_score") or 0)
-                ai_data["sentiment_score"] = min(cur_sent, 20)
-            except (TypeError, ValueError):
-                ai_data["sentiment_score"] = 10
         
-        # Extract check size / ticket size from the reply text (monetary values only)
-        # LLM returns "deal_size" key — use it for both check_size and deal_size
-        check_size = ai_data.get("deal_size")
-        deal_size = ai_data.get("deal_size")
-        pitch_deck_url = ai_data.get("pitch_deck_url")
+        # Step 1: AI Intent Classification using new ReplyClassifier
+        from app.core.reply.classifier import get_reply_classifier
+        from app.core.reply.workflow import get_reply_workflow
+        
+        classifier = get_reply_classifier()
+        workflow = get_reply_workflow()
+        
+        print(f"DEBUG: Classifying reply from {sender_email}...")
+        classification = classifier.classify(body)
+        
+        print(f"DEBUG: Classification result: intent={classification.intent}, source={classification.source}, confidence={classification.confidence}")
+        
+        # Step 2: Apply workflow to get lead updates
+        lead_update = workflow.apply(classification)
+        
+        # Extract check size / ticket size from the reply text
+        check_size = classification.deal_size
+        deal_size = classification.deal_size
+        pitch_deck_url = None
         
         # If we got an actual PDF attachment, upload to Google Drive
         if pdf_attachment:
@@ -428,29 +411,18 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         except Exception as rag_err:
             print(f"Warning: RAG error: {rag_err}")
  
-        # Step 2: Update Lead Status
-        from app.services.reply_workflow_service import determine_followup_status
+        # Step 2: Update Lead Status using workflow
+        lead_update = lead_update
 
-        final_status = 'REPLIED'
-        if intent == 'NOT_INTERESTED':
-            final_status = 'CLOSED'
-            
+        final_status = lead_update.email_status
+        
         # Allow deal_size to be populated from the LLM-extracted value if not already set by PDF analysis
         if not deal_size:
-            deal_size = ai_data.get("deal_size")
-
+            deal_size = classification.deal_size
+        
         rag_intel_json = json.dumps(rag_intel) if rag_intel else None
-
-        rejection_reason = ai_data.get("rejection_reason")
-
-        # Centralized business logic: map intent → followup_status
-        new_followup_status = determine_followup_status(intent)
-
-        # NOTE: last_outreach_at is intentionally NOT reset here. A replied lead
-        # is always is_responded=TRUE, so the follow-up engine never sends to it
-        # again regardless of followup_status — resetting the timer would only
-        # mislabel the reply time as the "last outreach" in dashboards/timing.
-
+        rejection_reason = classification.rejection_reason
+        
         cur.execute("""
             UPDATE leads_raw 
             SET is_responded = TRUE,
@@ -468,10 +440,11 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 remarks = %s,
                 rejection_reason = %s,
                 followup_status = %s,
+                pipeline_state = %s,
                 updated_at = NOW()
             WHERE LOWER(email) = LOWER(%s) AND user_id = %s
             RETURNING id, first_name, last_name, user_id
-        """, (final_status, intent, check_size, deal_size, pitch_deck_url, rag_advice, rag_intel_json, rag_category, ai_data.get("sentiment_score"), ai_data.get("urgency_level"), body, rejection_reason, new_followup_status, sender_email, user_id))
+        """, (final_status, classification.intent, check_size, deal_size, pitch_deck_url, rag_advice, rag_intel_json, rag_category, classification.sentiment_score, classification.urgency_level, body, rejection_reason, lead_update.followup_status, lead_update.pipeline_state.value, sender_email, user_id))
 
         
         lead = cur.fetchone()
@@ -486,7 +459,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             # Audit: log the reply so the daily 10:00 / 16:00 IST report can list it
             try:
                 from app.models.lead import add_activity_log
-                add_activity_log(lead_id, "REPLY_DETECTED", f"Reply detected from {sender_email} — intent: {intent or 'UNKNOWN'}", "system", user_id)
+                add_activity_log(lead_id, "REPLY_DETECTED", f"Reply detected from {sender_email} — intent: {classification.intent or 'UNKNOWN'} (via {classification.source})", "system", user_id)
             except Exception as reply_log_err:
                 logger.warning(f"Reply detection log failed: {reply_log_err}")
 

@@ -978,7 +978,12 @@ const Leads = () => {
             <thead>
               <tr>
                 <th className="w-10">
-                  <input type="checkbox" className="custom-checkbox" disabled />
+                  <input
+                    type="checkbox"
+                    className="custom-checkbox"
+                    disabled={true}
+                    checked={false}
+                  />
                 </th>
                 <th>Name</th>
                 <th>Company</th>

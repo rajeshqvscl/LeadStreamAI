@@ -173,6 +173,35 @@ const ToolButton = ({ icon: Icon, title, onClick, active, className = '' }) => (
   </button>
 );
 
+// Inject global styles for contentEditable lists
+if (typeof document !== 'undefined' && !document.getElementById('wysiwyg-list-styles')) {
+  const style = document.createElement('style');
+  style.id = 'wysiwyg-list-styles';
+  style.textContent = `
+    .wysiwyg-editor ul, .wysiwyg-editor ol {
+      margin: 0.8em 0;
+      padding-left: 1.5em;
+      list-style-type: disc;
+    }
+    .wysiwyg-editor ol {
+      list-style-type: decimal;
+    }
+    .wysiwyg-editor li {
+      margin-bottom: 0.4em;
+      line-height: 1.5;
+    }
+    .wysiwyg-editor ul ul {
+      list-style-type: circle;
+      margin-top: 0.4em;
+      margin-bottom: 0.4em;
+    }
+    .wysiwyg-editor ol ol {
+      list-style-type: lower-alpha;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 // ─── ToolbarTextarea ───────────────────────────────────────────────────
 
 const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOnly }) => {
@@ -738,7 +767,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
           onInput={syncFromEditor}
           onKeyDown={handleEditorKeyDown}
           onBlur={syncFromEditor}
-          className={`w-full bg-black/40 border border-white/5 rounded-b-xl p-3 text-[13px] text-white outline-none resize-none overflow-y-auto leading-relaxed min-h-[120px] focus:border-blue-500/50 [&:empty:before]:content-[attr(data-placeholder)] [&:empty:before]:text-slate-500 [&:empty:before]:italic ${className || ''}`}
+          className={`wysiwyg-editor w-full bg-black/40 border border-white/5 rounded-b-xl p-3 text-[13px] text-white outline-none resize-none overflow-y-auto leading-relaxed min-h-[120px] focus:border-blue-500/50 [&:empty:before]:content-[attr(data-placeholder)] [&:empty:before]:text-slate-500 [&:empty:before]:italic ${className || ''}`}
           style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0, ...(rows ? { minHeight: `${rows * 28}px` } : {}) }}
           data-placeholder={placeholder || 'Start writing...'}
         />

@@ -205,7 +205,9 @@ def create_tables():
         # Timestamp of when the lead's reply was actually received/detected.
         # NULL means the lead was flagged replied but no reply event evidence
         # exists (unsourced/manual flag) — excluded from monthly reply counts.
-        ("replied_at", "TIMESTAMP")
+        ("replied_at", "TIMESTAMP"),
+        # Pipeline state machine (replaces scattered status columns)
+        ("pipeline_state", "TEXT DEFAULT 'NEW'"),
     ]
     # Skip ALTER TABLEs if all columns already exist (saves ~11s on Neon)
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'leads_raw'")
@@ -288,6 +290,15 @@ def create_tables():
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_leads_raw_unsubscribe_token
             ON leads_raw (unsubscribe_token);
+        """)
+        conn.commit()
+    except psycopg2.Error:
+        conn.rollback()
+
+    try:
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_leads_raw_pipeline_state
+            ON leads_raw (pipeline_state);
         """)
         conn.commit()
     except psycopg2.Error:
@@ -521,7 +532,13 @@ def create_tables():
         ("team", "TEXT DEFAULT 'CLIENT'"),
         ("signature", "TEXT"),
         ("signature_mode", "TEXT DEFAULT 'custom'"),
-        ("sector", "TEXT")
+        ("sector", "TEXT"),
+        ("email_font", "TEXT DEFAULT 'sans-serif'"),
+        ("email_font_size", "TEXT DEFAULT '15px'"),
+        ("signature_font", "TEXT DEFAULT 'sans-serif'"),
+        ("signature_font_size", "TEXT DEFAULT '13px'"),
+        ("image_width", "TEXT DEFAULT '400px'"),
+        ("image_height", "TEXT DEFAULT 'auto'"),
     ]
     # Skip users ALTER TABLEs if all columns exist
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'users'")
@@ -719,6 +736,64 @@ def create_tables():
     """)
     conn.commit()
 
+    # ── org_settings Table (org-level configuration) ──
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS org_settings (
+        id SERIAL PRIMARY KEY,
+        default_cc TEXT DEFAULT 'lalit.h@qvscl.com',
+        vismaya_cc TEXT DEFAULT 'rajesh.s@qvscl.com',
+        website TEXT DEFAULT 'https://qvscl.com',
+        linkedin_url TEXT DEFAULT 'https://linkedin.com/company/qvscl',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+    );
+    """)
+    conn.commit()
+
+    # Insert default org settings if table is empty
+    cur.execute("""
+        INSERT INTO org_settings (default_cc, vismaya_cc, website, linkedin_url)
+        SELECT 'lalit.h@qvscl.com', 'rajesh.s@qvscl.com', 'https://qvscl.com', 'https://linkedin.com/company/qvscl'
+        WHERE NOT EXISTS (SELECT 1 FROM org_settings)
+    """)
+    conn.commit()
+
+    # Add trigger to auto-update updated_at on org_settings
+    cur.execute("""
+    CREATE OR REPLACE FUNCTION update_org_settings_timestamp()
+    RETURNS TRIGGER AS $$
+    BEGIN
+        NEW.updated_at = NOW();
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    """)
+    conn.commit()
+
+    cur.execute("""
+    DROP TRIGGER IF EXISTS trigger_org_settings_updated ON org_settings;
+    CREATE TRIGGER trigger_org_settings_updated
+        BEFORE UPDATE ON org_settings
+        FOR EACH ROW
+        EXECUTE FUNCTION update_org_settings_timestamp();
+    """)
+    conn.commit()
+
+    # ── email_idempotency Table (prevent duplicate sends) ──
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS email_idempotency (
+        key VARCHAR(64) PRIMARY KEY,
+        created_at TIMESTAMP DEFAULT NOW(),
+        expires_at TIMESTAMP NOT NULL
+    );
+    """)
+    conn.commit()
+
+    cur.execute("""
+    CREATE INDEX IF NOT EXISTS idx_email_idempotency_expires ON email_idempotency(expires_at);
+    """)
+    conn.commit()
+
     # ── user_signatures Table (Multiple Signatures Support) ──
     cur.execute("""
     CREATE TABLE IF NOT EXISTS user_signatures (
@@ -777,9 +852,9 @@ def create_tables():
         for legacy in legacy_rows:
             try:
                 from app.utils.signature_clean import clean_signature_markdown
-                clean = clean_signature_markdown(legacy[1])
+                clean = clean_signature_markdown(legacy['signature'])
             except Exception:
-                clean = legacy[1]
+                clean = legacy['signature']
             if not clean:
                 continue
             cur.execute(
@@ -788,7 +863,7 @@ def create_tables():
                    WHERE NOT EXISTS (
                        SELECT 1 FROM user_signatures WHERE user_id = %s
                    )""",
-                (legacy[0], clean, legacy[0]),
+                (legacy['id'], clean, legacy['id']),
             )
             migrated += cur.rowcount
         if migrated > 0:

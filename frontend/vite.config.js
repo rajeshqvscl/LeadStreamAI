@@ -16,6 +16,7 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
+      external: ['pdfjs-dist/build/pdf.worker.min.mjs'],
       output: {
         manualChunks: (id) => {
           if (id.includes('node_modules')) {
@@ -34,8 +35,20 @@ export default defineConfig({
             if (id.includes('react-hook-form') || id.includes('react-quill') || id.includes('react-datepicker')) {
               return 'vendor-forms';
             }
-            if (id.includes('xlsx') || id.includes('mammoth') || id.includes('pdfjs-dist') || id.includes('dompurify') || id.includes('papaparse') || id.includes('react-markdown') || id.includes('react-dropzone')) {
-              return 'vendor-heavy';
+            if (id.includes('xlsx') || id.includes('papaparse')) {
+              return 'vendor-excel';
+            }
+            if (id.includes('mammoth')) {
+              return 'vendor-mammoth';
+            }
+            if (id.includes('pdfjs-dist')) {
+              return 'vendor-pdfjs';
+            }
+            if (id.includes('dompurify')) {
+              return 'vendor-dompurify';
+            }
+            if (id.includes('react-markdown') || id.includes('react-dropzone')) {
+              return 'vendor-other';
             }
             return 'vendor-other';
           }

@@ -293,6 +293,27 @@ def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header
         
         print(f"DEBUG: Upserting {insert_count} new, {update_count} existing rows. Marked {match_count} as Generated")
         
+        # Deduplicate by the EXACT constrained value (row_data->>'Email') to prevent
+        # ON CONFLICT "cannot affect row a second time". The old logic scanned any
+        # '@' value in the row, which can differ from the indexed "Email" field.
+        # Keep the last occurrence of each email (more complete data).
+        seen_constrained = set()
+        deduped_upsert_data = []
+        for row in reversed(upsert_data):
+            try:
+                constrained_email = json.loads(row[0]).get("Email")
+            except Exception:
+                constrained_email = None
+            if constrained_email:
+                if constrained_email in seen_constrained:
+                    continue
+                seen_constrained.add(constrained_email)
+            deduped_upsert_data.append(row)
+        deduped_upsert_data.reverse()
+        
+        if len(deduped_upsert_data) < len(upsert_data):
+            print(f"DEBUG: Deduplicated {len(upsert_data)} rows to {len(deduped_upsert_data)} by email")
+        
         # Upsert using ON CONFLICT on the unique index (user_id, email)
         # We need to extract email from row_data for the conflict target
         upsert_query = """
@@ -305,7 +326,7 @@ def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header
         """
         
         # Prepare data without email for execute_values (email is in row_data)
-        insert_values = [(row[0], row[1], row[2]) for row in upsert_data]
+        insert_values = [(row[0], row[1], row[2]) for row in deduped_upsert_data]
         
         # Use ::jsonb cast so psycopg2 text values are accepted by the JSONB column
         execute_values(cur, upsert_query, insert_values, template="(%s::jsonb, %s, %s)")
@@ -366,13 +387,19 @@ def request_db_access(user_id: Optional[str] = Header(None, alias="X-User-Id")):
 
 def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Cleans and auto-enriches a list of rows in parallel, ensuring critical columns exist."""
+    # Strip control chars (incl. NUL \x00) — PostgreSQL jsonb rejects them with a 500
+    import re as _re_ctrl
+    ctrl_chars = _re_ctrl.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
+    
     # Process all rows: clean keys and values synchronously (very fast, <0.05s for 10k rows)
     cleaned_rows = []
     for row in rows:
         clean_row = {}
         for k, v in row.items():
-            k_str = str(k).strip()
-            val = str(v).strip() if v else ""
+            k_str = ctrl_chars.sub('', str(k)).strip()
+            val = ctrl_chars.sub('', str(v)).strip() if v else ""
+            if not k_str:
+                continue
             clean_row[k_str] = val
         cleaned_rows.append(clean_row)
 
@@ -435,62 +462,77 @@ def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     break
         if email_val:
             row["Email"] = email_val
+        else:
+            # Empty "Email" values collide in the unique index (row_data->>'Email')
+            # because '' == '' in Postgres (unlike NULL). Remove empty email keys
+            # so the expression evaluates to NULL and never conflicts.
+            for key in ["Email", "Emails", "email", "Email Address", "Work Email", "Primary Email", "Contact Email"]:
+                if key in row and not str(row[key]).strip():
+                    del row[key]
 
     return cleaned_rows
 
 async def discover_gsheet_tabs(doc_id: str) -> List[Dict[str, str]]:
     """
-    Scrapes the real GIDs (Grid IDs) from the Google Sheet HTML.
-    Uses multiple regex patterns for maximum reliability.
+    Discovers sheet tabs - returns sheet NAMES with gid=None (import uses name-based GViz fallback which works).
+    Order: XLSX (Anyone with link) -> GViz (Anyone with link) -> HTML (Publish to web, returns real GID)
     """
+    import re
+    
+    # Method 1: XLSX export - works with "Anyone with link", returns sheet names (gid=None)
+    print(f"DEBUG: Trying XLSX discovery for doc_id={doc_id}")
+    tabs = await discover_gsheet_tabs_xlsx(doc_id)
+    if tabs:
+        for tab in tabs:
+            tab['gid'] = None  # XLSX sheetId != CSV GID
+        print(f"DEBUG: Discovered {len(tabs)} tabs via XLSX: {[t['name'] for t in tabs]}")
+        return tabs
+    
+    # Method 2: GViz API - works with "Anyone with link", returns sheet names (gid=None, it's index not GID)
+    print(f"DEBUG: Trying GViz discovery for doc_id={doc_id}")
+    tabs = await discover_gsheet_tabs_gviz(doc_id)
+    if tabs:
+        print(f"DEBUG: Discovered {len(tabs)} tabs via GViz: {[t['name'] for t in tabs]}")
+        return tabs
+    
+    # Method 3: HTML scraping - requires "Publish to web", returns REAL GID
+    print(f"DEBUG: Trying HTML discovery for doc_id={doc_id}")
     try:
         url = f"https://docs.google.com/spreadsheets/d/{doc_id}/edit"
-        # We use a standard user agent to ensure we get the full HTML bootstrap
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
             resp = await client.get(url, headers=headers)
-        if resp.status_code != 200:
-            return []
+        print(f"DEBUG: HTML scrape status: {resp.status_code}")
+        if resp.status_code == 200:
+            html = resp.text
+            patterns = [
+                r'\{"name":"([^"]+)","id":(\d+)',
+                r'"sheetName":"([^"]+)","sheetId":(\d+)',
+                r'"name":"([^"]+)","gid":(\d+)',
+                r'\{"1":"([^"]+)","2":(\d+)',
+                r'{"label":"([^"]+)",.*?"id":(\d+)',
+                r'{"name":"([^"]+)"[^}]*"id":(\d+)',
+                r'sheets\[\d+\].*?gid["\']?\s*[:=]\s*["\']?(\d+)["\']?.*?title["\']?\s*[:=]\s*["\']([^"\']+)',
+            ]
             
-        html = resp.text
-        import re
-        
-        # Primary Pattern: Modern Google Sheets bootstrap structure
-        # Look for combinations of name and id/gid
-        patterns = [
-            r'\{"name":"([^"]+)","id":(\d+)',              # Standard id
-            r'"sheetName":"([^"]+)","sheetId":(\d+)',      # Modern sheetId
-            r'"name":"([^"]+)","gid":(\d+)',               # Alternative gid
-            r'\{"1":"([^"]+)","2":(\d+)',                  # Obfuscated internal
-            r'{"label":"([^"]+)",.*?"id":(\d+)',           # Label pattern
-            r'{"name":"([^"]+)"[^}]*"id":(\d+)',           # Flexible name+id
-            r'sheets\[\d+\].*?gid["\']?\s*[:=]\s*["\']?(\d+)["\']?.*?title["\']?\s*[:=]\s*["\']([^"\']+)',  # JS format
-        ]
-        
-        tabs_map = {} # Using map to prevent duplicates
-        for pattern in patterns:
-            matches = re.findall(pattern, html)
-            for name, gid in matches:
-                if name not in tabs_map:
-                    tabs_map[name] = str(gid)
-        
-        tabs = [{"name": name, "gid": gid} for name, gid in tabs_map.items()]
-        
-        if not tabs:
-            print("DEBUG: HTML GID discovery failed. Trying GViz API for tab metadata...")
-            tabs = await discover_gsheet_tabs_gviz(doc_id)
-
-        if not tabs:
-            print("DEBUG: GViz also failed. Falling back to XLSX sheet names.")
-            return await discover_gsheet_tabs_xlsx(doc_id)
+            tabs_map = {}
+            for pattern in patterns:
+                matches = re.findall(pattern, html)
+                for name, gid in matches:
+                    if name not in tabs_map:
+                        tabs_map[name] = str(gid)
             
-        print(f"DEBUG: Discovered {len(tabs)} tabs with real GIDs: {[t['name'] for t in tabs]}")
-        return tabs
+            tabs = [{"name": name, "gid": gid} for name, gid in tabs_map.items()]
+            if tabs:
+                print(f"DEBUG: Discovered {len(tabs)} tabs via HTML (real GIDs): {[t['name'] for t in tabs]}")
+                return tabs
     except Exception as e:
-        print(f"Tab Discovery Error: {str(e)}")
-        return []
+        print(f"DEBUG: Tab Discovery HTML Error: {str(e)}")
+    
+    print("DEBUG: All tab discovery methods failed")
+    return []
 
 async def discover_gsheet_tabs_xlsx(doc_id: str) -> List[Dict[str, str]]:
     """Fallback method using XLSX structure."""
@@ -500,9 +542,12 @@ async def discover_gsheet_tabs_xlsx(doc_id: str) -> List[Dict[str, str]]:
         import io
         
         xlsx_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=xlsx"
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
             resp = await client.get(xlsx_url)
-        if resp.status_code != 200: return []
+        print(f"DEBUG: XLSX export status: {resp.status_code}, content-length: {len(resp.content)}")
+        if resp.status_code != 200: 
+            print(f"DEBUG: XLSX failed - status {resp.status_code}")
+            return []
             
         with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
             with z.open('xl/workbook.xml') as f:
@@ -518,49 +563,56 @@ async def discover_gsheet_tabs_xlsx(doc_id: str) -> List[Dict[str, str]]:
                             "name": s.get('name'),
                             "gid": s.get('sheetId') or str(i)
                         })
+                print(f"DEBUG: XLSX found tabs: {tabs}")
                 return tabs
-    except Exception:
+    except Exception as e:
+        print(f"DEBUG: XLSX discovery error: {e}")
         return []
 
 async def discover_gsheet_tabs_gviz(doc_id: str) -> List[Dict[str, str]]:
-    """Discover tabs using the Google Visualization API which returns sheet metadata in JSON."""
+    """Discover tabs using the Google Visualization API - returns sheet names (gid will be set to None by caller)."""
     try:
         import json as json_lib
         url = f"https://docs.google.com/spreadsheets/d/{doc_id}/gviz/tq?tqx=reqId:0&tq=&_t={int(time.time())}"
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
             resp = await client.get(url)
+        print(f"DEBUG: GViz API status: {resp.status_code}")
         if resp.status_code != 200:
+            print(f"DEBUG: GViz failed - status {resp.status_code}")
             return []
 
         text = resp.text
-        # GViz wraps response in: /*O_o*/ google.visualization.Query.setResponse({...});
         json_start = text.find('{')
         json_end = text.rfind('}')
         if json_start == -1 or json_end == -1:
+            print("DEBUG: GViz - no JSON found in response")
             return []
 
         body = text[json_start:json_end + 1]
         data = json_lib.loads(body)
         sheets = data.get('sheets') or data.get('table', {}).get('sheets', [])
         if not sheets:
-            # Try alternative: look for sheet names in the response
-            raw_sheets = data.get('status', {}).get('warnings', [])
+            print("DEBUG: GViz - no sheets in response")
             return []
 
         tabs = []
         for s in sheets:
             name = s.get('label') or s.get('name', '')
-            gid = str(s.get('id', s.get('gid', '')))
-            if name and gid:
-                tabs.append({"name": name, "gid": gid})
+            if name:
+                tabs.append({"name": name, "gid": None})  # GViz 'id' is index, not GID
+        print(f"DEBUG: GViz found tabs: {tabs}")
         return tabs
-    except Exception:
+    except Exception as e:
+        print(f"DEBUG: GViz discovery error: {e}")
         return []
 
 
 @router.post("/companies/gsheet-tabs")
 async def get_gsheet_tabs(req: Dict[str, str]):
-    """Fetches the list of sheet tabs/names from a public Google Sheet using HTML scraping for maximum reliability."""
+    """Fetches the list of sheet tabs/names from a Google Sheet.
+    Requires: File > Share > 'Anyone with link' (Viewer) minimum.
+    For best results: File > Share > Publish to web.
+    """
     url = req.get("url", "").strip()
     if not url or "/d/" not in url:
         raise HTTPException(status_code=400, detail="Invalid Google Sheet URL.")
@@ -568,7 +620,10 @@ async def get_gsheet_tabs(req: Dict[str, str]):
     tabs = await discover_gsheet_tabs(doc_id)
     if tabs:
         return {"tabs": tabs}
-    return {"tabs": [{"name": "Sheet1", "gid": "0"}]}
+    raise HTTPException(
+        status_code=400, 
+        detail="Could not discover sheet tabs. Fix: Open Google Sheet > Share > 'Anyone with link' (Viewer) > Done. For best results: File > Share > Publish to web > Entire Document > Publish."
+    )
 
 @router.post("/companies/import-gsheet")
 async def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header(None, alias="X-User-Id")):
@@ -599,7 +654,7 @@ async def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = 
     else:
         target_gid = default_gid
         if sheet_name:
-            tabs = discover_gsheet_tabs(doc_id)
+            tabs = await discover_gsheet_tabs(doc_id)
             for t in tabs:
                 if t['name'].strip().lower() == sheet_name.strip().lower():
                     target_gid = t['gid']
@@ -699,18 +754,25 @@ async def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = 
                 except OverflowError:
                     max_limit = int(max_limit / 10)
 
-            gid = tab.get('gid', '0')
+            gid = tab.get('gid')
             sheet_name_encoded = urllib.parse.quote(tab['name'])
-            export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv&gid={gid}"
-            print(f"DEBUG: Syncing tab '{tab['name']}' (GID: {gid})")
+            csv_data = ""
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.get(export_url)
-            csv_data = resp.text
-            if resp.status_code != 200 or len(csv_data) < 10:
-                print(f"DEBUG: GID export failed or empty for '{tab['name']}'. Falling back to GViz JSON Name-based...")
+            # Try GID-based CSV export first (only if we have a valid numeric GID)
+            if gid and str(gid).isdigit():
+                export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv&gid={gid}"
+                print(f"DEBUG: Syncing tab '{tab['name']}' via GID CSV export (GID: {gid})")
+                
+                async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                    resp = await client.get(export_url)
+                if resp.status_code == 200:
+                    csv_data = resp.text
+            
+            # Fallback to GViz JSON by sheet name (works without GID)
+            if not csv_data or len(csv_data) < 10:
+                print(f"DEBUG: Falling back to GViz JSON by sheet name for '{tab['name']}'")
                 export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/gviz/tq?sheet={sheet_name_encoded}&headers=0&_t={int(time.time())}"
-                async with httpx.AsyncClient(timeout=30.0) as client:
+                async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                     resp = await client.get(export_url)
                 if resp.status_code == 200:
                     import json, io

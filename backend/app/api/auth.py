@@ -245,7 +245,7 @@ def get_current_user(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
-        cur.execute("SELECT id, username, email, full_name, role, team, is_active, is_approved, google_linked_at, google_email, credits_used, COALESCE(credits_limit, 200) as credits_limit, signature, signature_mode FROM users WHERE id = %s", (real_uid,))
+        cur.execute("SELECT id, username, email, full_name, role, team, is_active, is_approved, google_linked_at, google_email, credits_used, COALESCE(credits_limit, 200) as credits_limit, signature, signature_mode, email_font, email_font_size, signature_font, signature_font_size, image_width, image_height FROM users WHERE id = %s", (real_uid,))
         user = cur.fetchone()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
@@ -282,7 +282,7 @@ def refresh_token(user_id: Optional[str] = Header(None, alias="X-User-Id"), auth
         # Delete old sessions for this user
         cur.execute("DELETE FROM sessions WHERE user_id = %s", (real_uid,))
         
-        # Create new session token with extended expiry
+# Create new session token with extended expiry
         import secrets
         access_token = secrets.token_urlsafe(32)
         expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=30)
@@ -382,6 +382,112 @@ def update_signature_mode(req: SignatureModeUpdateRequest, user_id: Optional[str
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+class PreferencesUpdateRequest(BaseModel):
+    email_font: Optional[str] = None
+    email_font_size: Optional[str] = None
+    signature_font: Optional[str] = None
+    signature_font_size: Optional[str] = None
+    signature_mode: Optional[str] = None
+    team: Optional[str] = None
+    image_width: Optional[str] = None
+    image_height: Optional[str] = None
+
+@router.put("/auth/preferences")
+def update_preferences(req: PreferencesUpdateRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Updates the current user's email composition preferences."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    real_uid = user_id if user_id and user_id.isdigit() else "1"
+    
+    # Validate team if provided
+    if req.team is not None:
+        team = req.team.upper()
+        if team not in ('CLIENT', 'INVESTOR'):
+            raise HTTPException(status_code=400, detail="Team must be CLIENT or INVESTOR")
+    
+    # Validate signature_mode if provided
+    if req.signature_mode is not None:
+        if req.signature_mode not in ('custom', 'auto'):
+            raise HTTPException(status_code=400, detail="signature_mode must be 'custom' or 'auto'")
+    
+    # Validate email_font_size format if provided
+    if req.email_font_size is not None:
+        if not req.email_font_size.endswith('px'):
+            raise HTTPException(status_code=400, detail="email_font_size must end with 'px' (e.g., '13px')")
+    
+    # Validate signature_font_size format if provided
+    if req.signature_font_size is not None:
+        if not req.signature_font_size.endswith('px'):
+            raise HTTPException(status_code=400, detail="signature_font_size must end with 'px' (e.g., '13px')")
+    
+    # Validate image_width format if provided
+    if req.image_width is not None:
+        if not any(req.image_width.endswith(unit) for unit in ('px', '%', 'em', 'rem', 'vw', 'vh')) and req.image_width != 'auto':
+            raise HTTPException(status_code=400, detail="image_width must end with 'px', '%', 'em', 'rem', 'vw', 'vh' or be 'auto' (e.g., '400px', '50%', 'auto')")
+    
+    # Validate image_height format if provided
+    if req.image_height is not None:
+        if not any(req.image_height.endswith(unit) for unit in ('px', '%', 'em', 'rem', 'vw', 'vh')) and req.image_height != 'auto':
+            raise HTTPException(status_code=400, detail="image_height must end with 'px', '%', 'em', 'rem', 'vw', 'vh' or be 'auto' (e.g., 'auto', '400px', '50%')")
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        updates = []
+        params = []
+        
+        if req.email_font is not None:
+            updates.append("email_font = %s")
+            params.append(req.email_font)
+        
+        if req.email_font_size is not None:
+            updates.append("email_font_size = %s")
+            params.append(req.email_font_size)
+        
+        if req.signature_font is not None:
+            updates.append("signature_font = %s")
+            params.append(req.signature_font)
+        
+        if req.signature_font_size is not None:
+            updates.append("signature_font_size = %s")
+            params.append(req.signature_font_size)
+        
+        if req.signature_mode is not None:
+            updates.append("signature_mode = %s")
+            params.append(req.signature_mode)
+        
+        if req.team is not None:
+            updates.append("team = %s")
+            params.append(req.team.upper())
+        
+        if req.image_width is not None:
+            updates.append("image_width = %s")
+            params.append(req.image_width)
+        
+        if req.image_height is not None:
+            updates.append("image_height = %s")
+            params.append(req.image_height)
+        
+        if not updates:
+            raise HTTPException(status_code=400, detail="No valid fields to update")
+        
+        updates.append("updated_at = NOW()")
+        params.append(real_uid)
+        
+        query = f"UPDATE users SET {', '.join(updates)} WHERE id = %s RETURNING id, username, email, full_name, role, team, is_active, is_approved, email_font, email_font_size, signature_font, signature_font_size, signature, signature_mode, signature, image_width, image_height"
+        cur.execute(query, params)
+        user = cur.fetchone()
+        conn.commit()
+        
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        return dict(user)
     finally:
         cur.close()
         conn.close()

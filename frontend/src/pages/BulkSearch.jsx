@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Rocket, Loader2, CheckCircle, AlertCircle, Database, Filter, MapPin, Building2, Tag, ChevronLeft, ChevronRight, User, FileText, Trash2, Check, Sparkles, FileSpreadsheet, Download, Pencil, ShieldAlert } from 'lucide-react';
-import * as XLSX from 'xlsx';
-import Papa from 'papaparse';
+// Papa Parse - use global window.Papa (loaded via script tag or bundled)
+const Papa = typeof window !== 'undefined' ? window.Papa : {};
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import DraftTemplatePicker from '../components/DraftTemplatePicker';
+import { LazyXLSX } from '../utils/lazyLibs';
 
 const BulkSearch = () => {
   const navigate = useNavigate();
@@ -345,7 +346,7 @@ const BulkSearch = () => {
     );
   };
 
-  const handleFileUpload = (e) => {
+  const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
@@ -384,8 +385,9 @@ const BulkSearch = () => {
         }
       });
     } else {
-      reader.onload = (evt) => {
+      reader.onload = async (evt) => {
         const bstr = evt.target.result;
+        const XLSX = (await import('xlsx')).default;
         const wb = XLSX.read(bstr, { type: 'binary' });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
@@ -397,7 +399,7 @@ const BulkSearch = () => {
   };
 
 
-  const downloadTemplate = () => {
+  const downloadTemplate = async () => {
     const template = [
       {
         Name: 'John Doe',
@@ -413,6 +415,7 @@ const BulkSearch = () => {
         Sector: 'FinTech'
       }
     ];
+    const XLSX = (await import('xlsx')).default;
     const ws = XLSX.utils.json_to_sheet(template);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "LeadStream_Template");
@@ -706,7 +709,7 @@ const BulkSearch = () => {
 
               <button
                 type="button"
-                onClick={downloadTemplate}
+                onClick={() => downloadTemplate()}
                 className="flex-1 px-8 py-5 rounded-[16px] bg-[#1e293b]/50 border border-amber-500/30 hover:bg-amber-500/10 hover:border-amber-500/50 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer group"
               >
                 <Download className="w-8 h-8 text-amber-500 group-hover:-translate-y-1 transition-transform" />

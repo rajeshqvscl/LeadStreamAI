@@ -1043,7 +1043,7 @@ def _convert_markdown_remnants(text: str, convert_newlines: bool = True) -> str:
     return text
 
 
-def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_size="15px"):
+def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_size="15px", image_width="400px", image_height="auto"):
     import re
     # Normalize newlines
     text = text.replace("\r\n", "\n")
@@ -1085,12 +1085,13 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
             return tag
         src = src_m.group(1)
         forced = _forced_logo_style(src)
-        # Fallback: legacy data-URI images already in content get a fixed width
+        # Fallback: legacy data-URI images already in content get user-configured width/height
         if src.startswith("data:image/"):
+            style = f'width:{image_width};height:{image_height};display:block;'
             if re.search(r'style\s*=', tag, re.IGNORECASE):
-                tag = re.sub(r'style\s*=\s*"[^"]*"', 'style="width:400px;height:auto;display:block;"', tag, flags=re.IGNORECASE)
+                tag = re.sub(r'style\s*=\s*"[^"]*"', f'style="{style}"', tag, flags=re.IGNORECASE)
             else:
-                tag = tag.replace(' src="', ' style="width:400px;height:auto;display:block;" src="')
+                tag = tag.replace(' src="', f' style="{style}" src="')
             return tag
         # Palak's logo: force the fixed 150x150 style regardless of how the
         # stored content wrote it (HTML form re-saved by the editor, etc.).
@@ -1108,7 +1109,11 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
         # branch does (line ~1012), so markdown images render correctly.
         backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
         src = src.replace("[[BACKEND_URL]]", backend_url)
-        style = _forced_logo_style(src) or "width:100%;height:auto;display:block;"
+        # Use user-configured width/height for data-URI images, responsive for external
+        if src.startswith("data:image/"):
+            style = f'width:{image_width};height:{image_height};display:block;'
+        else:
+            style = _forced_logo_style(src) or "width:100%;height:auto;display:block;"
         # Fallback: convert any unknown image markdown to an <img> tag
         return f'<img src="{src}" alt="{alt_text}" style="{style}" />'
     
@@ -1142,6 +1147,8 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
             if _sig.strip():
                 _sig_style = "margin-top: 4px; border-top: 1px solid #f0f0f0; padding-top: 6px; line-height: 1.4;"
                 text = _head + f'<div style="{_sig_style}">' + _sig_marker + _sig.strip() + '</div>'
+        # Wrap the entire HTML content in a styled div with font settings
+        text = f'<div style="font-family: {font_family}; font-size: {font_size}; line-height: 1.6; color: #333333;">{text}</div>'
         return _restore_rich(text)
 
     text = re.sub(r'!\[(.*?)\]\((.*?)\)', _inline_md_img, text)
@@ -1269,22 +1276,14 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
         
         lines = p.split("\n")
         # Bullet points with exact Indentation
-        if any(re.match(r'^\s*[◦◦]\s+', l) or re.match(r'^\s{4,}[•\-\*]\s+', l) for l in lines):
-            list_html = "<ul style='margin-top: 0; margin-bottom: 12px; padding-left: 50px; list-style-type: circle;'>"
+        if any(re.match(r'^\s*[•\-\*]\s+', l) for l in lines):
+            list_html = "<ul style='margin-top: 0; margin-bottom: 8px; padding-left: 20px; list-style-type: disc;'>"
             for l in lines:
                 l_strip = l.strip()
-                content = re.sub(r'^\s*[◦◦•\-\*]\s+', '', l_strip)
-                list_html += f"<li style='margin-bottom: 4px; line-height: 1.6; font-family: {font_family};'>{content}</li>"
-            list_html += "</ul>"
-            html_parts.append(list_html)
-        elif any(re.match(r'^\s*[\*\-•]\s+', l) for l in lines):
-            list_html = "<ul style='margin-top: 0; margin-bottom: 15px; padding-left: 35px; list-style-type: disc;'>"
-            for l in lines:
-                l_strip = l.strip()
-                match = re.match(r'^[\*\-•]\s+(.*)', l_strip)
+                match = re.match(r'^[•\-\*]\s+(.*)', l_strip)
                 if match:
                     content = match.group(1)
-                    list_html += f"<li style='margin-bottom: 6px; line-height: 1.6; font-family: {font_family};'>{content}</li>"
+                    list_html += f"<li style='margin-bottom: 4px; line-height: 1.5; font-family: {font_family};'>{content}</li>"
                 else:
                     list_html += f" {l_strip}"
             list_html += "</ul>"
@@ -1312,7 +1311,7 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
                     html_parts.append(p.strip())
                 else:
                     content = p.replace("\n", "<br>")
-                    p_style = f"margin-top: 0; margin-bottom: 18px; line-height: 1.6; font-size: {font_size};" if gmail_style else f"margin-top: 0; margin-bottom: 8px; line-height: 1.4; font-size: {font_size};"
+                    p_style = f"margin-top: 0; margin-bottom: 10px; line-height: 1.5; font-size: {font_size}; font-family: {font_family};" if gmail_style else f"margin-top: 0; margin-bottom: 6px; line-height: 1.4; font-size: {font_size}; font-family: {font_family};"
                     html_parts.append(f"<p style='{p_style}'>{content}</p>")
     
     result = "".join(html_parts)
@@ -1525,8 +1524,8 @@ def get_sender_profile(user_id: Optional[str]) -> dict:
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        # Select all relevant signature fields
-        cur.execute("SELECT full_name, username, job_title, phone, linkedin_url, signature, signature_mode FROM users WHERE id = %s", (uid,))
+        # Select all relevant signature fields including font settings
+        cur.execute("SELECT full_name, username, job_title, phone, linkedin_url, signature, signature_mode, signature_font, signature_font_size FROM users WHERE id = %s", (uid,))
         user = cur.fetchone()
         if user:
             profile = dict(user)
@@ -1555,7 +1554,9 @@ def get_sender_profile(user_id: Optional[str]) -> dict:
         "job_title": "ITTEAM", 
         "phone": "8527083798", 
         "linkedin_url": "https://linkedin.com",
-        "signatures": []
+        "signatures": [],
+        "signature_font": "sans-serif",
+        "signature_font_size": "13px"
     }
 
 def get_followup_signature_markdown(user_id: Optional[str]) -> str:
@@ -2098,13 +2099,18 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
             sig_content = sig_content.replace('{{Sender Title}}', title)
             sig_content = sig_content.replace('{{Sender LinkedIn}}', linkedin)
             sig_content = sig_content.replace('{{Sender Phone}}', phone)
-            return body_text + "\n\n" + sig_content
+            # Wrap saved signature in styled div using signature font settings
+            sig_font = profile.get('signature_font', 'sans-serif')
+            sig_size = profile.get('signature_font_size', '13px')
+            return body_text + "\n\n" + f'<div style="font-family: {sig_font}; font-size: {sig_size}; line-height: 1.4;">{sig_content}</div>'
 
-    # ── Minimal fallback — no disclaimer, no images, just contact info ──
+# ── Minimal fallback — no disclaimer, no images, just contact info ──
+    sig_font = profile.get('signature_font', 'sans-serif')
+    sig_size = profile.get('signature_font_size', '13px')
     sig_html = f"""
-<div style="color: #000000; font-family: sans-serif; font-size: 18px; line-height: 1.4; text-align: left; margin-top: 4px;">
+<div style="color: #000000; font-family: {sig_font}; font-size: {sig_size}; line-height: 1.4; text-align: left; margin-top: 4px;">
 --<br>
-<i>Thanks &amp; Regards,</i><br>
+<i>Thanks & Regards,</i><br>
 <i><strong>{name}</strong></i><br>
 <i>{title}</i><br>
 <i><a href="https://qvscl.com" style="color:#1d5fd0;text-decoration:underline;">Website</a> | <a href="{linkedin}" style="color:#1d5fd0;text-decoration:underline;">LinkedIn</a></i><br>
@@ -2285,8 +2291,8 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         if subject_found:
             body_with_sig = "\n".join(new_body_lines).strip()
         
-        from app.services.email_service import get_user_email_font, get_user_email_font_size
-        html_body = markdown_to_html(body_with_sig, gmail_style=is_yashika, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id))
+        from app.services.email_service import get_user_email_font, get_user_email_font_size, get_user_image_width, get_user_image_height
+        html_body = markdown_to_html(body_with_sig, gmail_style=is_yashika, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id), image_width=get_user_image_width(user_id), image_height=get_user_image_height(user_id))
         # Store the RENDERED HTML (html_body) so drafts display correctly in every
         # view — the raw body_with_sig would bake markdown signature remnants
         # (***Name***, [Website](url)) into the stored draft as literal text.
@@ -3189,7 +3195,8 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
         body_with_sig = inject_signature(final_body, profile, lead_id)
 
         # RE-GENERATE html_body AFTER deduplication
-        html_body = markdown_to_html(body_with_sig, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id))
+        from app.services.email_service import get_user_image_width, get_user_image_height
+        html_body = markdown_to_html(body_with_sig, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id), image_width=get_user_image_width(user_id), image_height=get_user_image_height(user_id))
 
         # Full content for local DB storage
         # Store the RENDERED HTML (html_body) — see note in generate_email_internal.
@@ -3341,6 +3348,8 @@ def get_bulk_progress(batch_id: str):
 @router.get("/pending-drafts")
 @router.get("/emails")
 def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Optional[str] = None, geo: Optional[str] = None, company: Optional[str] = None, name: Optional[str] = None, per_page: int = 60, ids_only: Optional[str] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    # Import email service functions for font/image settings
+    from app.services.email_service import get_user_email_font, get_user_email_font_size, get_user_image_width, get_user_image_height
     try:
         # Resolve user — non-admin users only see their own drafts
         resolved_uid = None
@@ -3551,7 +3560,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
                 "fit_score": r.get("fit_score", 0),
                 "subject": subject,
                 "body": body_replaced,
-                "html_body": markdown_to_html(body_replaced, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id)),
+                "html_body": markdown_to_html(body_replaced, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id), image_width=get_user_image_width(user_id), image_height=get_user_image_height(user_id)),
                 "attachments": [],
                 "draft_template_used": r.get("draft_template_used") or "",
                 "status": r["email_status"] or "PENDING_APPROVAL",
@@ -3631,7 +3640,8 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[s
             uid = normalize_user_id(user_id)
             service = get_gmail_service(int(uid))
             if service:
-                html_body = markdown_to_html(full_body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid))
+                from app.services.email_service import get_user_image_width, get_user_image_height
+                html_body = markdown_to_html(full_body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid), image_width=get_user_image_width(uid), image_height=get_user_image_height(uid))
                 from app.services.email_service import build_unsubscribe_footer, strip_old_unsubscribe_links
                 html_body = strip_old_unsubscribe_links(html_body)
                 html_body += build_unsubscribe_footer(draft_id)
@@ -3777,10 +3787,11 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         # Replace asset URLs in body with Google Drive share links
         for old_url, new_url in url_replacements.items():
             body = body.replace(old_url, new_url)
+        from app.services.email_service import get_user_image_width, get_user_image_height
         success, error_msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=email,
             subject=subject,
-            html_content=markdown_to_html(body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid)),
+            html_content=markdown_to_html(body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid), image_width=get_user_image_width(uid), image_height=get_user_image_height(uid)),
             from_email=sender_email,
             from_name=sender_name,
             lead_id=draft_id,
@@ -4095,7 +4106,11 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
         raise HTTPException(status_code=400, detail=f"Daily Limit Exceeded: Sending this batch would exceed your daily limit of {limit} emails. Please wait for the daily reset.")
     
     sent_count = 0
-    for lead in leads_to_send:
+    import time
+    for i, lead in enumerate(leads_to_send):
+        if i > 0:
+            time.sleep(2.0)
+        
         try:
             draft_content = lead['email_draft'] or ""
             template_name = lead.get('draft_template_used')
@@ -4129,16 +4144,18 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
             body = inject_signature(body, batch_profile, lead['id'])
 
             uid_val = normalize_user_id(user_id)
+            from app.services.email_service import get_user_image_width, get_user_image_height
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=lead['email'],
                 subject=subject,
-                html_content=markdown_to_html(body, font_family=get_user_email_font(uid_val), font_size=get_user_email_font_size(uid_val)),
+                html_content=markdown_to_html(body, font_family=get_user_email_font(uid_val), font_size=get_user_email_font_size(uid_val), image_width=get_user_image_width(uid_val), image_height=get_user_image_height(uid_val)),
                 from_email=sender_email,
                 from_name=sender_name,
                 lead_id=lead['id'],
                 user_id=int(uid_val),
                 cc=lead['cc_email'],
-                template_name=template_name
+                template_name=template_name,
+                bulk_mode=True
             )
 
             if success:
@@ -4279,10 +4296,11 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
                 subject = parts[0].replace("Subject: ", "").strip()
                 body = parts[1].strip() if len(parts) > 1 else ""
 
+            from app.services.email_service import get_user_image_width, get_user_image_height
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=lead['email'],
                 subject=subject,
-                html_content=markdown_to_html(body, font_family=get_user_email_font(lead_uid), font_size=get_user_email_font_size(lead_uid)),
+                html_content=markdown_to_html(body, font_family=get_user_email_font(lead_uid), font_size=get_user_email_font_size(lead_uid), image_width=get_user_image_width(lead_uid), image_height=get_user_image_height(lead_uid)),
                 from_email=lead_sender_email,
                 from_name=lead_sender_name,
                 lead_id=lead['id'],
@@ -4483,7 +4501,8 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
                                 logger.warning(f"⚠️ Could not delete old draft {old_gmail_id}: {de}")
 
                         # Use HTML for better consistency with individual drafts
-                        html_body = markdown_to_html(body, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id))
+                        from app.services.email_service import get_user_image_width, get_user_image_height
+                        html_body = markdown_to_html(body, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id), image_width=get_user_image_width(user_id), image_height=get_user_image_height(user_id))
                         from app.services.email_service import build_unsubscribe_footer, strip_old_unsubscribe_links
                         html_body = strip_old_unsubscribe_links(html_body)
                         html_body += build_unsubscribe_footer(lead_item['id'])
@@ -4588,9 +4607,14 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
         sent_count = 0
         from app.models.lead import add_activity_log
         from app.services.llm_services import EmailGenerator
+        import time
         generator = EmailGenerator()
 
-        for lead in leads:
+        for i, lead in enumerate(leads):
+            # Delay between sends to respect Gmail rate limits (2s = 30 emails/min max)
+            if i > 0:
+                time.sleep(2.0)
+            
             try:
                 # If draft already exists, use it. Otherwise generate.
                 email_content = lead.get("email_draft")
@@ -4615,16 +4639,18 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                 final_body = inject_signature(body, profile, lead['id'])
 
                 # Real Dispatch
+                from app.services.email_service import get_user_image_width, get_user_image_height
                 success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                     to_email=lead['email'],
                     subject=subject,
-                    html_content=markdown_to_html(final_body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid)),
+                    html_content=markdown_to_html(final_body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid), image_width=get_user_image_width(uid), image_height=get_user_image_height(uid)),
                     from_email=sender_email,
                     from_name=sender_name,
                     lead_id=lead['id'],
                     user_id=int(uid),
                     cc=req.cc or lead['cc_email'],
-                    template_name=lead.get('draft_template_used')
+                    template_name=lead.get('draft_template_used'),
+                    bulk_mode=True
                 )
 
                 if success:

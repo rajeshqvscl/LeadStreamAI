@@ -1054,11 +1054,17 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
             (lead_id,),
         )
 
-        from app.services.email_service import get_user_email_font, get_user_email_font_size
+        from app.services.email_service import get_user_email_font, get_user_email_font_size, get_user_image_width, get_user_image_height
         success, msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=lead['email'],
             subject=saved_subject,
-            html_content=markdown_to_html(body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid)),
+            html_content=markdown_to_html(
+                body, 
+                font_family=get_user_email_font(uid), 
+                font_size=get_user_email_font_size(uid),
+                image_width=get_user_image_width(uid),
+                image_height=get_user_image_height(uid)
+            ),
             from_email=profile.get('sender_email') or profile.get('username'),
             from_name=profile.get('full_name') or profile.get('username'),
             lead_id=lead_id,

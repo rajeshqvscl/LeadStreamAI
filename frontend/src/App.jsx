@@ -1,40 +1,42 @@
-import React, { Suspense, useSearchParams } from 'react';
+import React, { Suspense, useSearchParams, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import Login from './pages/Login';
-import AdminLogin from './pages/AdminLogin';
-import Signup from './pages/Signup';
-import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
-import Unsubscribe from './public_pages/Unsubscribe';
-import UnsubscribeSuccess from './public_pages/UnsubscribeSuccess';
-import Resubscribe from './public_pages/Resubscribe';
 
-// Lazy-loaded pages (code-split for faster initial load)
-const Dashboard = React.lazy(() => import('./pages/Dashboard'));
-const Leads = React.lazy(() => import('./pages/Leads'));
-const LeadDetail = React.lazy(() => import('./pages/LeadDetail'));
-const Emails = React.lazy(() => import('./pages/Emails'));
-const EditEmail = React.lazy(() => import('./pages/EditEmail'));
-const Prompts = React.lazy(() => import('./pages/Prompts'));
-const Signatures = React.lazy(() => import('./pages/Signatures'));
-const Metrics = React.lazy(() => import('./pages/Metrics'));
-const MisReportPage = React.lazy(() => import('./pages/MisReportPage'));
-const Users = React.lazy(() => import('./pages/Users'));
-const FamilyOffices = React.lazy(() => import('./pages/FamilyOffices'));
-const FamilyOfficeDetail = React.lazy(() => import('./pages/FamilyOfficeDetail'));
-const BulkSearch = React.lazy(() => import('./pages/BulkSearch'));
-const CompanyDatabase = React.lazy(() => import('./pages/CompanyDatabase'));
-const History = React.lazy(() => import('./pages/History'));
-const Followups = React.lazy(() => import('./pages/Followups'));
-const RocketReach = React.lazy(() => import('./pages/RocketReach'));
-const Inbox = React.lazy(() => import('./pages/Inbox'));
-const InboundDeals = React.lazy(() => import('./pages/InboundDeals'));
-const DealIntelligence = React.lazy(() => import('./pages/DealIntelligence'));
-const Meetings = React.lazy(() => import('./pages/Meetings'));
-const GmailDrafts = React.lazy(() => import('./pages/GmailDrafts'));
-const GmailSent = React.lazy(() => import('./pages/GmailSent'));
-const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
-const AdminAuditLogs = React.lazy(() => import('./pages/AdminAuditLogs'));
+// Lazy-loaded ALL pages (code-split for faster initial load)
+const Login = lazy(() => import('./pages/Login'));
+const AdminLogin = lazy(() => import('./pages/AdminLogin'));
+const Signup = lazy(() => import('./pages/Signup'));
+const Layout = lazy(() => import('./components/Layout'));
+const Unsubscribe = lazy(() => import('./public_pages/Unsubscribe'));
+const UnsubscribeSuccess = lazy(() => import('./public_pages/UnsubscribeSuccess'));
+const Resubscribe = lazy(() => import('./public_pages/Resubscribe'));
+
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Leads = lazy(() => import('./pages/Leads'));
+const LeadDetail = lazy(() => import('./pages/LeadDetail'));
+const Emails = lazy(() => import('./pages/Emails'));
+const EditEmail = lazy(() => import('./pages/EditEmail'));
+const Prompts = lazy(() => import('./pages/Prompts'));
+const Signatures = lazy(() => import('./pages/Signatures'));
+const Metrics = lazy(() => import('./pages/Metrics'));
+const MisReportPage = lazy(() => import('./pages/MisReportPage'));
+const Users = lazy(() => import('./pages/Users'));
+const FamilyOffices = lazy(() => import('./pages/FamilyOffices'));
+const FamilyOfficeDetail = lazy(() => import('./pages/FamilyOfficeDetail'));
+const BulkSearch = lazy(() => import('./pages/BulkSearch'));
+const CompanyDatabase = lazy(() => import('./pages/CompanyDatabase'));
+const History = lazy(() => import('./pages/History'));
+const Followups = lazy(() => import('./pages/Followups'));
+const RocketReach = lazy(() => import('./pages/RocketReach'));
+const Inbox = lazy(() => import('./pages/Inbox'));
+const InboundDeals = lazy(() => import('./pages/InboundDeals'));
+const DealIntelligence = lazy(() => import('./pages/DealIntelligence'));
+const Meetings = lazy(() => import('./pages/Meetings'));
+const GmailDrafts = lazy(() => import('./pages/GmailDrafts'));
+const GmailSent = lazy(() => import('./pages/GmailSent'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const AdminAuditLogs = lazy(() => import('./pages/AdminAuditLogs'));
+const Settings = lazy(() => import('./pages/Settings'));
 
 // Page loader component
 const PageLoader = () => (
@@ -148,6 +150,7 @@ function App() {
             <Route path="meetings" element={<Meetings />} />
             <Route path="gmail-drafts" element={<GmailDrafts />} />
             <Route path="gmail-sent" element={<GmailSent />} />
+            <Route path="settings" element={<Settings />} />
             <Route path="admin-intelligence" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
             <Route path="admin-audit-logs" element={<AdminRoute><AdminAuditLogs /></AdminRoute>} />
             <Route path="history" element={<AdminRoute><History /></AdminRoute>} />

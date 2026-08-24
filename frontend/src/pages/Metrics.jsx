@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Search, RefreshCw, Mail, MousePointerClick, Eye, XCircle, Clock, AlertTriangle, ChevronDown, ChevronUp, BarChart3, PieChart as PieChartIcon, TrendingUp, Download, FileText } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
 import { useNavigate } from 'react-router-dom';
-import * as XLSX from 'xlsx';
 import api from '../services/api';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
@@ -216,13 +215,14 @@ const Metrics = () => {
     a.click();
   };
 
-  const exportUnsubscribedExcel = () => {
+  const exportUnsubscribedExcel = async () => {
     if (!data?.report?.length) return;
     const unsubscribed = data.report.filter(r => r.action === 'Unsubscribed');
     if (!unsubscribed.length) {
       alert('No unsubscribed leads found for the selected period.');
       return;
     }
+    const XLSX = (await import('xlsx')).default;
     const exportData = unsubscribed.map(r => ({
       Name: r.name || '',
       Email: r.email || '',

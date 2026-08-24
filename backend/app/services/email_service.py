@@ -2,10 +2,11 @@ import os
 import re
 import ssl
 import logging
+import traceback
 from datetime import datetime
 from dotenv import load_dotenv
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable, Any
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO)
@@ -15,6 +16,78 @@ logger = logging.getLogger(__name__)
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path, override=True)
 logger.info(f"Module initialized with env_path: {env_path}")
+
+
+def _execute_with_retry(func: Callable, max_retries: int = 3, base_delay: int = 30, max_delay: int = 300, bulk_mode: bool = False) -> Any:
+    """
+    Execute a function with exponential backoff retry logic.
+    Retries up to max_retries times with delays: base_delay, base_delay*2, base_delay*4... (capped at max_delay)
+    Handles Gmail API specific errors with longer backoff.
+    In bulk_mode: uses much shorter delays (2s base, 30s max) for faster failure recovery.
+    """
+    import time
+    last_error = None
+    
+    # Bulk mode uses aggressive short delays
+    if bulk_mode:
+        multiplier = 2.0
+        base_delay = 2  # 2 seconds base
+        max_delay = 30  # 30 seconds max
+    else:
+        multiplier = 2.0
+    
+    for attempt in range(max_retries + 1):
+        try:
+            return func()
+        except Exception as e:
+            last_error = e
+            error_str = str(e).lower()
+            
+            # Non-retryable errors - only truly permanent auth/permission errors
+            non_retryable = [
+                "unauthorized",
+                "permission denied",
+                "forbidden",
+                "403",
+                "401",
+            ]
+            
+            should_retry = True
+            for nr in non_retryable:
+                if nr in error_str:
+                    logger.info(f"Non-retryable error on attempt {attempt + 1}: {nr}")
+                    should_retry = False
+                    break
+            
+            # Gmail API specific retryable errors - use longer backoff
+            gmail_retryable = [
+                "429",
+                "rate limit exceeded",
+                "dailylimitexceeded",
+                "userratelimitexceeded",
+                "backend error",
+                "internal error",
+                "quota exceeded",
+                "service unavailable",
+                "503",
+                "500",
+            ]
+            
+            gmail_delay_multiplier = 1.0
+            for gr in gmail_retryable:
+                if gr in error_str:
+                    gmail_delay_multiplier = 3.0 if not bulk_mode else 2.0  # Less aggressive in bulk
+                    logger.warning(f"Gmail rate limit error detected: {gr}. Using extended backoff.")
+                    break
+            
+            if attempt < max_retries and should_retry:
+                delay = min(base_delay * (multiplier ** attempt) * gmail_delay_multiplier, max_delay)
+                logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying in {delay}s...")
+                time.sleep(delay)
+            else:
+                break
+    
+    raise last_error
 
 
 def clean_display_filename(filename: str) -> str:
@@ -113,6 +186,23 @@ USER_EMAIL_FONT_SIZES = {
 }
 DEFAULT_EMAIL_FONT_SIZE = "15px"
 
+# Signature font settings (separate from email body)
+USER_SIGNATURE_FONTS = {
+    2: "Arial, sans-serif",  # Ayush
+    3: SANS_SERIF_FONT,      # Kajal
+    4: SANS_SERIF_FONT,      # Yashika
+    5: SANS_SERIF_FONT,      # Palak
+}
+DEFAULT_SIGNATURE_FONT = SANS_SERIF_FONT
+
+USER_SIGNATURE_FONT_SIZES = {
+    2: "13px",  # Ayush
+    3: "11px",  # Kajal
+    4: "12px",  # Yashika
+    5: "11px",  # Palak
+}
+DEFAULT_SIGNATURE_FONT_SIZE = "13px"
+
 
 def get_user_email_font(user_id) -> str:
     """Resolve the preferred email font for a user id."""
@@ -120,6 +210,24 @@ def get_user_email_font(user_id) -> str:
         uid = int(user_id) if user_id is not None else None
     except (TypeError, ValueError):
         uid = None
+    # First check database for user's custom font setting
+    if uid:
+        try:
+            from app.database import get_db_connection
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT email_font FROM users WHERE id = %s", (uid,))
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            if row and row.get('email_font'):
+                return row['email_font']
+            else:
+                logger.warning(f"get_user_email_font: No email_font found for user {uid}")
+        except Exception as e:
+            logger.error(f"get_user_email_font: DB error for user {uid}: {repr(e)}")
+            logger.error(traceback.format_exc())
+    # Fall back to hardcoded dictionary
     return USER_EMAIL_FONTS.get(uid, DEFAULT_EMAIL_FONT)
 
 
@@ -129,7 +237,123 @@ def get_user_email_font_size(user_id) -> str:
         uid = int(user_id) if user_id is not None else None
     except (TypeError, ValueError):
         uid = None
+    # First check database for user's custom font size setting
+    if uid:
+        try:
+            from app.database import get_db_connection
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT email_font_size FROM users WHERE id = %s", (uid,))
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            if row and row.get('email_font_size'):
+                return row['email_font_size']
+            else:
+                logger.warning(f"get_user_email_font_size: No email_font_size found for user {uid}")
+        except Exception as e:
+            logger.error(f"get_user_email_font_size: DB error for user {uid}: {repr(e)}")
+            logger.error(traceback.format_exc())
+    # Fall back to hardcoded dictionary
     return USER_EMAIL_FONT_SIZES.get(uid, DEFAULT_EMAIL_FONT_SIZE)
+
+
+def get_user_signature_font(user_id) -> str:
+    """Resolve the preferred signature font for a user id."""
+    try:
+        uid = int(user_id) if user_id is not None else None
+    except (TypeError, ValueError):
+        uid = None
+    # First check database for user's custom font setting
+    if uid:
+        try:
+            from app.database import get_db_connection
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT signature_font FROM users WHERE id = %s", (uid,))
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            if row and row.get('signature_font'):
+                return row['signature_font']
+            else:
+                logger.warning(f"get_user_signature_font: No signature_font found for user {uid}")
+        except Exception as e:
+            logger.error(f"get_user_signature_font: DB error for user {uid}: {repr(e)}")
+            logger.error(traceback.format_exc())
+    # Fall back to hardcoded dictionary
+    return USER_SIGNATURE_FONTS.get(uid, DEFAULT_SIGNATURE_FONT)
+
+
+def get_user_signature_font_size(user_id) -> str:
+    """Resolve the preferred signature font size (px string) for a user id."""
+    try:
+        uid = int(user_id) if user_id is not None else None
+    except (TypeError, ValueError):
+        uid = None
+    # First check database for user's custom font size setting
+    if uid:
+        try:
+            from app.database import get_db_connection
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT signature_font_size FROM users WHERE id = %s", (uid,))
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            if row and row.get('signature_font_size'):
+                return row['signature_font_size']
+            else:
+                logger.warning(f"get_user_signature_font_size: No signature_font_size found for user {uid}")
+        except Exception as e:
+            logger.error(f"get_user_signature_font_size: DB error for user {uid}: {repr(e)}")
+            logger.error(traceback.format_exc())
+    # Fall back to hardcoded dictionary
+    return USER_SIGNATURE_FONT_SIZES.get(uid, DEFAULT_SIGNATURE_FONT_SIZE)
+
+
+def get_user_image_width(user_id) -> str:
+    """Resolve the preferred image width for a user id."""
+    try:
+        uid = int(user_id) if user_id is not None else None
+    except (TypeError, ValueError):
+        uid = None
+    if uid:
+        try:
+            from app.database import get_db_connection
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT image_width FROM users WHERE id = %s", (uid,))
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            if row and row.get('image_width'):
+                return row['image_width']
+        except Exception as e:
+            logger.error(f"get_user_image_width: DB error for user {uid}: {repr(e)}")
+    return "400px"
+
+
+def get_user_image_height(user_id) -> str:
+    """Resolve the preferred image height for a user id."""
+    try:
+        uid = int(user_id) if user_id is not None else None
+    except (TypeError, ValueError):
+        uid = None
+    if uid:
+        try:
+            from app.database import get_db_connection
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT image_height FROM users WHERE id = %s", (uid,))
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            if row and row.get('image_height'):
+                return row['image_height']
+        except Exception as e:
+            logger.error(f"get_user_image_height: DB error for user {uid}: {repr(e)}")
+    return "auto"
 
 
 def strip_old_unsubscribe_links(html_content: str) -> str:
@@ -198,7 +422,7 @@ def build_unsubscribe_footer(lead_id: int) -> str:
 <a href="{_uurl}" style="color:#888;text-decoration:underline">Click here to unsubscribe</a>
 </p>"""
 
-def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None, lead_id: Optional[int] = None, is_system_email: bool = False, user_id: Optional[int] = None, cc: Optional[str] = None, thread_id: Optional[str] = None, in_reply_to: Optional[str] = None, template_name: Optional[str] = None) -> tuple:
+def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None, lead_id: Optional[int] = None, is_system_email: bool = False, user_id: Optional[int] = None, cc: Optional[str] = None, thread_id: Optional[str] = None, in_reply_to: Optional[str] = None, template_name: Optional[str] = None, bulk_mode: bool = False) -> tuple:
     """Sends an email via the Gmail API (the only dispatch method; SMTP/Resend fallback removed).
 
     Returns a 4-tuple: (success: bool, message: str, thread_id: Optional[str], rfc_message_id: Optional[str]).
@@ -561,24 +785,44 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                     send_body['threadId'] = thread_id
                 logger.info(f"📧 send_email: thread_id={thread_id!r}, in_reply_to={in_reply_to!r}, lead_id={lead_id}, to={clean_to}, subject={clean_subject}")
                 
-                # Gmail API send with SSL retry + thread recovery
+                # Gmail API send with retry logic (3 retries, exponential backoff)
+                def _send_gmail():
+                    return service.users().messages().send(userId='me', body=send_body).execute()
+                
                 try:
-                    sent = service.users().messages().send(userId='me', body=send_body).execute()
+                    sent = _execute_with_retry(_send_gmail, bulk_mode=bulk_mode)
                 except ssl.SSLError as ssl_err:
-                    logger.warning(f"SSL error on first attempt for user {user_id}: {ssl_err}. Invalidating cache and retrying...")
+                    logger.warning(f"SSL error after retries for user {user_id}: {ssl_err}. Invalidating cache and final retry...")
                     from app.services.google_service import invalidate_gmail_service_cache
                     invalidate_gmail_service_cache(int(uid_t))
                     service = get_gmail_service(int(uid_t))
                     if service:
-                        sent = service.users().messages().send(userId='me', body=send_body).execute()
+                        sent = _execute_with_retry(
+                            lambda: service.users().messages().send(userId='me', body=send_body).execute(),
+                            bulk_mode=bulk_mode
+                        )
                     else:
                         raise ssl_err
                 except Exception as api_err:
                     err_str = str(api_err)
-                    if '404' in err_str and 'not found' in err_str.lower() and thread_id:
+                    err_lower = err_str.lower()
+                    
+                    # Thread not found - retry without thread_id
+                    if '404' in err_str and 'not found' in err_lower and thread_id:
                         logger.warning(f"Thread {thread_id} not found in Gmail — retrying without thread_id")
                         send_body.pop('threadId', None)
-                        sent = service.users().messages().send(userId='me', body=send_body).execute()
+                        sent = _execute_with_retry(
+                            lambda: service.users().messages().send(userId='me', body=send_body).execute(),
+                            bulk_mode=bulk_mode
+                        )
+                    
+                    # Gmail API specific retryable errors - let _execute_with_retry handle retries
+                    # These are now retried automatically via _execute_with_retry's gmail_retryable list
+                    # Just re-raise to let the retry logic handle it
+                    elif any(x in err_lower for x in ['429', 'rate limit', 'dailylimit', 'userratelimit', 'quota exceeded', '503', '500', 'backend error', 'internal error', 'service unavailable']):
+                        logger.warning(f"Gmail retryable error (will retry): {err_str}")
+                        raise
+                    
                     else:
                         raise
                 sent_thread_id = sent.get('threadId')
@@ -715,10 +959,17 @@ def check_scheduled_emails():
             # Fetch user ID to enable Gmail dispatch
             user_id = lead['user_id']
             from app.api.drafts import markdown_to_html
+            from app.services.email_service import get_user_image_width, get_user_image_height
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=to_email,
                 subject=subject,
-                html_content=markdown_to_html(body, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id)),
+                html_content=markdown_to_html(
+                    body, 
+                    font_family=get_user_email_font(user_id), 
+                    font_size=get_user_email_font_size(user_id),
+                    image_width=get_user_image_width(user_id),
+                    image_height=get_user_image_height(user_id)
+                ),
                 from_email=sender_email,
                 from_name=sender_name,
                 lead_id=lead_id,
