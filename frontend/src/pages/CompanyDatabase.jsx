@@ -375,8 +375,19 @@ const CompanyDatabase = () => {
             }));
             if (p.status === 'done') {
               clearInterval(pollInterval);
+              // Smart reconciliation: verify actual draft results from the DB
+              // instead of blindly trusting in-memory progress counters.
+              let finalSuccess = p.success;
+              try {
+                const leadIds = (p.results || []).filter(r => r.ok && r.lead_id).map(r => r.lead_id);
+                if (leadIds.length > 0) {
+                  const st = await api.post('/api/leads/status-batch', { lead_ids: leadIds }, { timeout: 15000 });
+                  const verified = (st.data.statuses || []).filter(s => ['PENDING_APPROVAL', 'APPROVED', 'SENT'].includes(s.email_status)).length;
+                  finalSuccess = Math.max(verified, p.success);
+                }
+              } catch { /* fall back to reported counter */ }
               fetchCompanies();
-              showNotification('success', `✓ ${p.success} lead${p.success > 1 ? 's' : ''} moved to pipeline. Drafts added to Email Queue.`);
+              showNotification('success', `✓ ${finalSuccess} lead${finalSuccess > 1 ? 's' : ''} moved to pipeline. Drafts added to Email Queue.`);
               navigate('/dashboard/emails?status=PENDING_APPROVAL');
             } else if (p.status === 'error') {
               clearInterval(pollInterval);
@@ -440,8 +451,19 @@ const CompanyDatabase = () => {
             }));
             if (p.status === 'done') {
               clearInterval(pollInterval);
+              // Smart reconciliation: verify actual draft results from the DB
+              // instead of blindly trusting in-memory progress counters.
+              let finalSuccess = p.success;
+              try {
+                const leadIds = (p.results || []).filter(r => r.ok && r.lead_id).map(r => r.lead_id);
+                if (leadIds.length > 0) {
+                  const st = await api.post('/api/leads/status-batch', { lead_ids: leadIds }, { timeout: 15000 });
+                  const verified = (st.data.statuses || []).filter(s => ['PENDING_APPROVAL', 'APPROVED', 'SENT'].includes(s.email_status)).length;
+                  finalSuccess = Math.max(verified, p.success);
+                }
+              } catch { /* fall back to reported counter */ }
               fetchCompanies();
-              showNotification('success', `Template "${templateName}" applied to ${p.success} lead${p.success > 1 ? 's' : ''}.`);
+              showNotification('success', `Template "${templateName}" applied to ${finalSuccess} lead${finalSuccess > 1 ? 's' : ''}.`);
               navigate('/dashboard/emails?status=PENDING_APPROVAL');
             } else if (p.status === 'error') {
               clearInterval(pollInterval);

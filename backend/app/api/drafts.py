@@ -4210,6 +4210,29 @@ class BulkSendRequest(BaseModel):
     lead_ids: list
     cc: Optional[str] = None
 
+class LeadStatusBatchRequest(BaseModel):
+    lead_ids: list
+
+@router.post("/leads/status-batch")
+def leads_status_batch(req: LeadStatusBatchRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Returns the current email_status for a batch of lead IDs. Used by the
+    frontend to reconcile actual send results when a bulk-send HTTP request
+    times out but the backend still completes the sends in the background."""
+    uid = normalize_user_id(user_id)
+    if not req.lead_ids:
+        return {"statuses": []}
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        cur.execute(
+            "SELECT id, email_status FROM leads_raw WHERE id = ANY(%s) AND user_id = %s",
+            (req.lead_ids, uid)
+        )
+        return {"statuses": [{"id": r["id"], "email_status": r["email_status"]} for r in cur.fetchall()]}
+    finally:
+        cur.close()
+        conn.close()
+
 @router.post("/send-selected-batch")
 def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Send emails for a specific list of lead IDs via the logged-in user's Gmail account."""

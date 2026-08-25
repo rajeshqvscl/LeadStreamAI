@@ -1271,28 +1271,32 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: Optional
 
             template_type = req.template_name or 'standard'
             success_ids, failed_ids = [], []
+            lead_results = []  # [{lead_id, ok}] for frontend DB reconciliation
 
             with ThreadPoolExecutor(max_workers=3) as executor:
                 def process_one(row_id):
                     lid = lead_id_map.get(row_id)
                     if not lid:
-                        return (row_id, False, "lead not found")
+                        return (row_id, None, False, "lead not found")
                     try:
                         draft_req = DraftRequest(lead_id=lid, template_type=template_type)
                         res = generate_email_internal(draft_req, user_id)
-                        return (row_id, "error" not in res, res)
+                        return (row_id, lid, "error" not in res, res)
                     except Exception as e:
-                        return (row_id, False, str(e))
+                        return (row_id, lid, False, str(e))
 
                 futures = {executor.submit(process_one, rid): rid for rid in lead_id_map}
                 for future in as_completed(futures):
-                    rid, ok, _ = future.result()
+                    rid, lid, ok, _ = future.result()
+                    if lid:
+                        lead_results.append({"lead_id": lid, "ok": ok})
                     if ok:
                         success_ids.append(rid)
                     else:
                         failed_ids.append(rid)
                     p = _bulk_company_progress[batch_id]
                     p["processed"] += 1
+                    p["results"] = list(lead_results)  # snapshot for reconciliation
                     if ok:
                         p["success"] += 1
                     else:
