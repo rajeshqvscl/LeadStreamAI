@@ -182,9 +182,21 @@ const CompanyDatabase = () => {
       reader.onload = async (e) => {
       setIsImporting(true);
       try {
-        const XLSX = (await import('xlsx')).default;
+        const mod = await import('xlsx');
+        const XLSX = mod.default || mod;
         const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
+        let workbook;
+        try {
+          workbook = XLSX.read(data, { type: 'array' });
+        } catch (parseErr) {
+          // CSV dropped via drag may arrive without proper accept filtering
+          const text = new TextDecoder().decode(e.target.result.slice(0, 1000));
+          if (text.includes(',') || text.includes('\n')) {
+            workbook = XLSX.read(text, { type: 'string' });
+          } else {
+            throw parseErr;
+          }
+        }
         const allRows = [];
         for (const sheetName of workbook.SheetNames) {
           const worksheet = workbook.Sheets[sheetName];
@@ -205,8 +217,9 @@ const CompanyDatabase = () => {
         fetchCompanies();
         fetchTabs();
       } catch (err) {
-        showNotification('error', 'Import Failure: Encryption mismatch or malformed file.');
-        console.error(err);
+        console.error('Import failure details:', err);
+        const detail = err.response?.data?.detail || err.message || 'Unknown error';
+        showNotification('error', `Import Failure: ${detail}`);
       } finally {
         setIsImporting(false);
       }
@@ -223,7 +236,8 @@ const CompanyDatabase = () => {
   // Export Logic
   const handleExport = async () => {
     if (companies.length === 0) return;
-    const XLSX = (await import('xlsx')).default;
+    const mod = await import('xlsx');
+    const XLSX = mod.default || mod;
     const exportData = companies.map(({ id: _id, ...rest }) => rest);
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -563,7 +577,8 @@ const CompanyDatabase = () => {
   };
 
   const handleBulkExport = async () => {
-    const XLSX = (await import('xlsx')).default;
+    const mod = await import('xlsx');
+    const XLSX = mod.default || mod;
     const dataToExport = companies.filter(c => selectedIds.includes(c.id)).map(({ id: _id, ...rest }) => rest);
     const ws = XLSX.utils.json_to_sheet(dataToExport);
     const wb = XLSX.utils.book_new();
