@@ -3347,7 +3347,7 @@ def get_bulk_progress(batch_id: str):
 
 @router.get("/pending-drafts")
 @router.get("/emails")
-def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Optional[str] = None, geo: Optional[str] = None, company: Optional[str] = None, name: Optional[str] = None, per_page: int = 60, ids_only: Optional[str] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Optional[str] = None, geo: Optional[str] = None, company: Optional[str] = None, name: Optional[str] = None, per_page: int = 60, ids_only: Optional[str] = None, lead_id: Optional[int] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     # Import email service functions for font/image settings
     from app.services.email_service import get_user_email_font, get_user_email_font_size, get_user_image_width, get_user_image_height
     try:
@@ -3378,7 +3378,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         # would collide with the full payload cached under the same params).
         _ids_only_flag = str(ids_only or '').strip().lower() in ('1', 'true', 'yes', 'on')
         cache_key = None
-        if redis_available and redis_client and not _ids_only_flag and not any([region, geo, company, name]):
+        if redis_available and redis_client and not _ids_only_flag and lead_id is None and not any([region, geo, company, name]):
             cache_key = f"pending_drafts:{resolved_uid or 'unassigned'}:{status or 'all'}:{page}:{per_page}"
             try:
                 cached = redis_client.get(cache_key)
@@ -3435,6 +3435,10 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         if name:
             where_clause += " AND (first_name ILIKE %s OR last_name ILIKE %s)"
             params.extend([f"%{name}%", f"%{name}%"])
+
+        if lead_id is not None:
+            where_clause += " AND lr.id = %s"
+            params.append(lead_id)
 
         # ids_only=true → return ALL matching lead IDs (no pagination, no draft
         # content). Powers the UI's "Select all N drafts" across every page, so

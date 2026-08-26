@@ -629,8 +629,8 @@ const Emails = () => {
               onClick={toggleAutoPilot}
               disabled={autoPilotLoading}
               title={autoPilot
-                ? 'ON: Naye drafts 30 min review window ke baad automatic drip-schedule honge'
-                : 'OFF: Drafts manually send karne padenge'}
+                ? 'ON: New drafts will be automatically drip-scheduled after the 30 min review window'
+                : 'OFF: Drafts must be sent manually'}
               className={`w-10 h-5 rounded-full relative transition-all disabled:opacity-50 cursor-pointer ${
                 autoPilot ? 'bg-emerald-600' : 'bg-slate-700'
               }`}

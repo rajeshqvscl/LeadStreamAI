@@ -236,27 +236,21 @@ const LeadDetail = () => {
         remarks: l.remarks || ''
       });
       setLogs(logsRes.data || []);
-
-      try {
-        const foRes = await api.get('/api/family-offices');
-        setFamilyOffices(foRes.data || []);
-      } catch {
-        setFamilyOffices([]);
-      }
-
-      try {
-        const emailsRes = await api.get(`/api/emails`);
-        const allDrafts = emailsRes.data?.drafts || [];
-        setDrafts(allDrafts.filter(d => String(d.lead_id) === String(leadId)));
-      } catch {
-        setDrafts([]);
-      }
     } catch (err) {
       console.error('Failed to fetch lead details', err);
       setError(err.response?.data?.detail || 'This lead profile could not be retrieved. It may have been deleted or you may not have permission to view it.');
     } finally {
       setIsLoading(false);
     }
+
+    // Non-blocking secondary data — never delays the page render
+    api.get('/api/family-offices')
+      .then(foRes => setFamilyOffices(foRes.data || []))
+      .catch(() => setFamilyOffices([]));
+
+    api.get('/api/emails', { params: { lead_id: leadId } })
+      .then(emailsRes => setDrafts(emailsRes.data?.drafts || []))
+      .catch(() => setDrafts([]));
   };
 
   const fetchTimeline = async () => {
@@ -272,7 +266,7 @@ const LeadDetail = () => {
     }
   };
 
-  useEffect(() => { 
+  useEffect(() => {
     fetchData();
     fetchTimeline();
   }, [leadId]);
