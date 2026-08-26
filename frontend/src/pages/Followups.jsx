@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import api from '../services/api';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
+import ToolbarTextarea from '../components/ToolbarTextarea';
 import { FOLLOWUP_CONFIG, LEAD_TYPES, STATUS_OPTIONS, getLeadType, getStageColor, getStageConfigs, getStageLabel } from '../services/followupConfig';
 
 const Followups = () => {
@@ -835,12 +836,14 @@ const Followups = () => {
               </div>
 
               {isEditing ? (
-                <textarea
-                  value={editedDraft}
-                  onChange={(e) => setEditedDraft(e.target.value)}
-                  className="w-full h-[300px] bg-slate-950/60 border border-indigo-500/30 rounded-2xl p-6 text-slate-200 text-sm font-medium outline-none focus:border-indigo-500 transition-all resize-none leading-relaxed"
-                  placeholder="Enter your custom message here..."
-                />
+                <div className="bg-slate-950/60 border border-indigo-500/30 rounded-2xl overflow-hidden">
+                  <ToolbarTextarea
+                    value={editedDraft}
+                    onChange={(e) => setEditedDraft(e.target.value)}
+                    rows={12}
+                    placeholder="Enter your custom message here... Use the toolbar to add images and formatting."
+                  />
+                </div>
               ) : (
                 <div className="bg-slate-950/40 rounded-2xl p-6 border border-white/[0.03] relative overflow-hidden">
                   <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500/40" />

@@ -73,6 +73,8 @@ def _redis_delete_pattern(pattern: str):
 
 
 def invalidate_companies_cache(user_id: str = "*"):
+    from app.utils.microcache import mc_invalidate_prefix
+    mc_invalidate_prefix("ctabs:")
     _redis_delete_pattern(f"companies:{user_id}:*")
 
 
@@ -199,6 +201,27 @@ def list_companies(
 @router.get("/companies/unique-tabs")
 def get_unique_tabs(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Returns a list of unique _source_tab values present in the registry."""
+    uid = normalize_user_id(user_id)
+
+    # L1 micro-cache (0ms) → L2 Redis (60s) — fires on every page load
+    from app.utils.microcache import mc_get, mc_set
+    cache_key = f"ctabs:{uid}"
+    hit = mc_get(cache_key)
+    if hit is not None:
+        return hit
+
+    # Redis cache (60s) — this endpoint fires on every page load
+    cache_key = f"companies:{uid}:unique-tabs"
+    if redis_available and redis_client:
+        try:
+            cached = redis_client.get(cache_key)
+            if cached:
+                parsed = json.loads(cached)
+                mc_set(f"ctabs:{uid}", parsed, 60)
+                return parsed
+        except Exception:
+            pass
+
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     
@@ -219,7 +242,14 @@ def get_unique_tabs(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         query = f"SELECT DISTINCT row_data->>'_source_tab' AS tab_name FROM company_registry {where_clause}"
         cur.execute(query, params)
         tabs = [r['tab_name'] for r in cur.fetchall() if r['tab_name']]
-        return {"tabs": tabs}
+        result = {"tabs": tabs}
+        mc_set(f"ctabs:{uid}", result, 60)
+        if redis_available and redis_client:
+            try:
+                redis_client.setex(cache_key, 60, json.dumps(result))
+            except Exception:
+                pass
+        return result
     except Exception as e:
         logger.error(f"Error fetching unique tabs: {str(e)}")
         return {"tabs": []}
@@ -385,6 +415,29 @@ def request_db_access(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Submits access request (Legacy - keeping for route compatibility if needed)."""
     return {"message": "Access restriction removed. You have full system clearance."}
 
+@router.delete("/companies/{row_id}")
+def delete_company_row(row_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Deletes a single company registry row (user-scoped)."""
+    uid = normalize_user_id(user_id)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM company_registry WHERE id = %s AND user_id = %s", (row_id, uid))
+        deleted = cur.rowcount
+        conn.commit()
+        invalidate_companies_cache(str(uid))
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Company record not found")
+        return {"success": True, "deleted": deleted}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
 def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Cleans and auto-enriches a list of rows in parallel, ensuring critical columns exist."""
     # Strip control chars (incl. NUL \x00) — PostgreSQL jsonb rejects them with a 500
@@ -403,9 +456,11 @@ def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             clean_row[k_str] = val
         cleaned_rows.append(clean_row)
 
-    # Identify the first 100 rows missing email/phone for parallel AI enrichment
+    # Identify the first 25 rows missing email/phone for parallel AI enrichment.
+    # Capped at 25 (was 100): LLM enrichment was blocking imports for minutes —
+    # this keeps imports snappy while still enriching the most visible rows.
     rows_to_enrich = []
-    for i in range(min(100, len(cleaned_rows))):
+    for i in range(min(25, len(cleaned_rows))):
         row = cleaned_rows[i]
         # Skip rows that look like garbage header rows (no company name, no email, short values)
         name_val = (row.get("Company Name") or row.get("Person Name") or '').strip()
@@ -617,9 +672,26 @@ async def get_gsheet_tabs(req: Dict[str, str]):
     if not url or "/d/" not in url:
         raise HTTPException(status_code=400, detail="Invalid Google Sheet URL.")
     doc_id = url.split("/d/")[1].split("/")[0]
+
+    # Cache discovery for 5 min — XLSX download takes seconds every time otherwise
+    cache_key = f"gsheet-tabs:{doc_id}"
+    if redis_available and redis_client:
+        try:
+            cached = redis_client.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+
     tabs = await discover_gsheet_tabs(doc_id)
     if tabs:
-        return {"tabs": tabs}
+        result = {"tabs": tabs}
+        if redis_available and redis_client:
+            try:
+                redis_client.setex(cache_key, 300, json.dumps(result))
+            except Exception:
+                pass
+        return result
     raise HTTPException(
         status_code=400, 
         detail="Could not discover sheet tabs. Fix: Open Google Sheet > Share > 'Anyone with link' (Viewer) > Done. For best results: File > Share > Publish to web > Entire Document > Publish."
@@ -938,7 +1010,7 @@ def enrich_row_data_internal(data: Dict[str, Any]) -> Dict[str, Any]:
         return data
 
 @router.post("/companies/{row_id}/generate-draft")
-def generate_company_draft(row_id: int, template_name: Optional[str] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def generate_company_draft(row_id: int, template_name: Optional[str] = None, auto_schedule: bool = True, user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """Converts a company registry record to a lead and generates an email draft."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -1057,6 +1129,19 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, use
                 cur.execute("UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = %s AND user_id = %s", (row_id, uid))
             conn.commit()
             invalidate_companies_cache(str(uid))
+
+            # AUTO-DRIP: single-row generation also enters the drip queue
+            # (skipped when the caller dispatches immediately, e.g. /send).
+            if auto_schedule:
+                try:
+                    from app.services.email_service import schedule_drip_batch
+                    sched_info = schedule_drip_batch([lead_id], uid)
+                    if sched_info.get("scheduled"):
+                        logger.info(f"AUTO-DRIP: lead {lead_id} scheduled (single generate)")
+                        res["scheduled_info"] = sched_info
+                except Exception as sched_err:
+                    logger.error(f"AUTO-DRIP scheduling failed for lead {lead_id}: {sched_err}")
+
             return res
         except Exception as e:
             import logging
@@ -1319,6 +1404,19 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: Optional
                 cur2.close(); conn2.close()
 
             invalidate_companies_cache(str(uid))
+
+            # AUTO-DRIP: successfully generated drafts go straight into the
+            # drip queue (30-min grace, 1/min pacing, working-hours aware).
+            successful_lead_ids = [r["lead_id"] for r in lead_results if r["ok"] and r.get("lead_id")]
+            if successful_lead_ids:
+                try:
+                    from app.services.email_service import schedule_drip_batch
+                    sched_info = schedule_drip_batch(successful_lead_ids, uid)
+                    logger.info(f"AUTO-DRIP: {sched_info['scheduled']}/{len(successful_lead_ids)} drafts drip-scheduled for user {uid}")
+                    _bulk_company_progress[batch_id]["scheduled_info"] = sched_info
+                except Exception as sched_err:
+                    logger.error(f"AUTO-DRIP scheduling failed for batch {batch_id}: {sched_err}")
+
             _bulk_company_progress[batch_id]["status"] = "done"
         except Exception as e:
             _bulk_company_progress[batch_id]["status"] = "error"
@@ -1347,8 +1445,8 @@ def send_company_email(row_id: int, user_id: Optional[str] = Header(None, alias=
     from app.services.email_service import send_email
     from app.api.drafts import markdown_to_html
     
-    # 1. Generate the draft and lead record
-    res = generate_company_draft(row_id, user_id=user_id)
+    # 1. Generate the draft and lead record (no auto-scheduling — we send immediately)
+    res = generate_company_draft(row_id, user_id=user_id, auto_schedule=False)
     lead_id = res["lead_id"]
     
     conn = get_db_connection()

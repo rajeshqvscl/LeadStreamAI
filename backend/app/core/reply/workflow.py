@@ -18,7 +18,7 @@ class LeadUpdate:
     replied_at: Optional[datetime] = None
     email_status: str = "REPLIED"
     reply_intent: Optional[str] = None
-    followup_status: str = "ACTIVE"
+    followup_status: str = "STOPPED"  # safe default: any reply pauses automation
     pipeline_state: LeadState = LeadState.REPLIED
     sentiment_score: int = 0
     urgency_level: str = "MEDIUM"
@@ -65,8 +65,11 @@ class ReplyWorkflow:
         """
         intent = classification.intent
         
-        # Default for unknown/None intent - keep sequence ACTIVE for manual review
-        followup_status = self.INTENT_TO_FOLLOWUP_STATUS.get(intent, "ACTIVE")
+        # SAFETY RULE: ANY reply that doesn't map to a known classification
+        # (unknown, None, or LLM fallback failure) STOPS the followup sequence
+        # immediately. A human reply means automation must pause — the lead can
+        # be manually re-activated after review.
+        followup_status = self.INTENT_TO_FOLLOWUP_STATUS.get(intent, "STOPPED")
         email_status = self.INTENT_TO_EMAIL_STATUS.get(intent, "REPLIED")
         pipeline_state = self.INTENT_TO_PIPELINE_STATE.get(intent, LeadState.REPLIED)
         
@@ -86,8 +89,8 @@ class ReplyWorkflow:
         )
     
     def get_followup_status(self, intent: Optional[str]) -> str:
-        """Get followup_status for intent (legacy compatibility)"""
-        return self.INTENT_TO_FOLLOWUP_STATUS.get(intent, "ACTIVE")
+        """Get followup_status for intent (legacy compatibility). Unknown -> STOPPED."""
+        return self.INTENT_TO_FOLLOWUP_STATUS.get(intent, "STOPPED")
     
     def get_email_status(self, intent: Optional[str]) -> str:
         """Get email_status for intent (legacy compatibility)"""

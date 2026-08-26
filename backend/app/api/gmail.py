@@ -326,7 +326,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
                 pitch_deck_url = f"{base_url}/{file_path}"
             
-        print(f"DEBUG: AI detected intent: {intent}, body_size_estimation: {ai_data.get('deal_size')}, deck: {pitch_deck_url}")
+        print(f"DEBUG: AI detected intent: {classification.intent}, body_size_estimation: {classification.deal_size}, deck: {pitch_deck_url}")
         
         # --- STRICT RAG ENHANCEMENT (STABLE SESSION) ---
         rag_advice = None
@@ -452,7 +452,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         if lead:
             lead_id = lead['id']
             lead_name = f"{lead['first_name'] or ''} {lead['last_name'] or ''}".strip() or "Lead"
-            print(f"SUCCESS: Auto-detected reply from {sender_email}. Intent: {intent}")
+            print(f"SUCCESS: Auto-detected reply from {sender_email}. Intent: {classification.intent}")
             conn.commit()
             invalidate_inbound_deals_cache(str(user_id))
 
@@ -546,6 +546,8 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 logger.warning(f"Cross-account same-email followup stop failed: {same_email_err}")
 
             # Step 3: Auto-create a reminder when MEETING_REQUESTED
+            ai_data = classification.raw_llm_output or {}
+            intent = classification.intent
             if intent == 'MEETING_REQUESTED':
                 proposed_text = ai_data.get('proposed_meeting_text') or body[:200]
                 proposed_date_str = ai_data.get('proposed_meeting_date')

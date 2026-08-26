@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Eye, Edit3, Loader2, Send, ChevronLeft, ChevronRight, X, Archive, CheckCircle2, Sparkles, History, User, Globe, Calendar, Trash2, AlertCircle, Square, Star, Check } from 'lucide-react';
+import { Eye, Edit3, Loader2, Send, ChevronLeft, ChevronRight, X, Archive, CheckCircle2, Sparkles, History, User, Globe, Calendar, Trash2, AlertCircle, Square, Star, Check, Bot } from 'lucide-react';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import api from '../services/api';
@@ -31,6 +31,8 @@ const Emails = () => {
   const [isBulkSending, setIsBulkSending] = useState(false);
   const stopBulkSendRef = useRef(false);
   const [bulkSendProgress, setBulkSendProgress] = useState({ sent: 0, failed: 0, total: 0, current: '' });
+  const [autoPilot, setAutoPilot] = useState(false);
+  const [autoPilotLoading, setAutoPilotLoading] = useState(false);
   
   // ✨ Generation Logic State
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
@@ -108,6 +110,30 @@ const Emails = () => {
     api.get('/api/custom-draft-templates').then(r => setCustomTemplates(r.data || [])).catch(() => {});
   }, []);
 
+  // Auto-Pilot: load current user's preference once
+  useEffect(() => {
+    api.get('/api/users/pilot-settings')
+      .then(r => setAutoPilot(!!r.data.auto_pilot_drafts))
+      .catch(() => {});
+  }, []);
+
+  const toggleAutoPilot = async () => {
+    if (autoPilotLoading) return;
+    const next = !autoPilot;
+    setAutoPilotLoading(true);
+    try {
+      await api.put('/api/users/pilot-settings', { auto_pilot_drafts: next });
+      setAutoPilot(next);
+      showNotification('success', next
+        ? '🤖 Auto-Pilot ON — naye drafts 30 min baad automatic drip-schedule honge'
+        : 'Auto-Pilot OFF — drafts manually send karne padenge');
+    } catch {
+      showNotification('error', 'Failed to update Auto-Pilot setting');
+    } finally {
+      setAutoPilotLoading(false);
+    }
+  };
+
   // Cleanup ref on unmount to prevent memory leak
   useEffect(() => {
     return () => {
@@ -125,10 +151,8 @@ const Emails = () => {
   }, [showTemplatePicker, fetchSignatures]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchEmails();
-    }, 500);
-    return () => clearTimeout(timer);
+    // Instant fetch — filters are dropdowns (no typing), so no debounce needed.
+    fetchEmails();
   }, [pagination.page, filterStatus, filterRegion, filterGeo, filterCompany, filterName]);
 
   const handleApprove = async (id) => {
@@ -595,6 +619,25 @@ const Emails = () => {
               value={filterName}
               onChange={(e) => setFilterName(e.target.value)}
             />
+          </div>
+
+          {/* Auto-Pilot Toggle */}
+          <div className="flex items-center gap-2 ml-2 pl-3 border-l border-[#ffffff10]">
+            <Bot className={`w-4 h-4 transition-colors ${autoPilot ? 'text-emerald-400' : 'text-slate-600'}`} />
+            <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">Auto-Pilot</span>
+            <button
+              onClick={toggleAutoPilot}
+              disabled={autoPilotLoading}
+              title={autoPilot
+                ? 'ON: Naye drafts 30 min review window ke baad automatic drip-schedule honge'
+                : 'OFF: Drafts manually send karne padenge'}
+              className={`w-10 h-5 rounded-full relative transition-all disabled:opacity-50 cursor-pointer ${
+                autoPilot ? 'bg-emerald-600' : 'bg-slate-700'
+              }`}
+            >
+              {autoPilot && <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
+              <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all ${autoPilot ? 'left-6' : 'left-1'}`} />
+            </button>
           </div>
 
           <button

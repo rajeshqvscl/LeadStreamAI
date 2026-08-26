@@ -37,15 +37,15 @@ _scheduler_lock = asyncio.Lock()
 
 async def scheduler_loop():
     from app.services.email_service import check_scheduled_emails
+    from app.services.email_service import process_auto_pilot_sweep
     from app.services.followup_service import process_outreach_sequences
-    from app.api.gmail import poll_all_users_for_replies
     
     config = get_scheduler_config()
     
     # Track last run times
     last_followup = 0
     last_scheduled = 0
-    last_reply_poll = 0
+    last_autopilot = 0
     
     while True:
         if _scheduler_lock.locked():
@@ -68,11 +68,11 @@ async def scheduler_loop():
                     tasks.append(("scheduled", asyncio.to_thread(check_scheduled_emails)))
                     last_scheduled = now
                 
-                # Reply polling: every REPLY_POLL_INTERVAL
-                if now - last_reply_poll >= config.reply_poll_interval_sec:
-                    tasks.append(("replies", asyncio.to_thread(poll_all_users_for_replies)))
-                    last_reply_poll = now
-                
+                # Auto-pilot sweep: pick up review-queue drafts every ~5 min
+                if now - last_autopilot >= 300:
+                    tasks.append(("autopilot", asyncio.to_thread(process_auto_pilot_sweep)))
+                    last_autopilot = now
+
                 if tasks:
                     # Run selected tasks in parallel
                     results = await asyncio.gather(
@@ -125,6 +125,59 @@ async def reply_cleanup_loop():
             logger.error(f"Reply monitor loop error: {e}")
             await asyncio.sleep(60)
 
+async def reply_polling_loop():
+    """
+    Runs the Gmail reply detector at fixed IST hours (default 9 AM, 1 PM, 5 PM).
+    Replaces the old continuous 30s polling — ~97% less Gmail API quota usage.
+    Pub/Sub push still provides real-time detection when configured; this loop
+    is the reliable fallback. Manual /gmail/sync-inbound remains available.
+
+    Startup catch-up: if the most recent passed slot was missed <2 hours ago
+    (e.g. server restart), poll immediately once so replies aren't delayed.
+    """
+    from datetime import datetime, timedelta, timezone
+    from app.core.pipeline.scheduler import get_scheduler_config
+    from app.api.gmail import poll_all_users_for_replies
+
+    config = get_scheduler_config()
+    IST = timezone(timedelta(hours=5, minutes=30))
+    CATCHUP_WINDOW_HOURS = 2
+
+    # Startup catch-up: run once if we're just past a missed slot
+    try:
+        now = datetime.now(IST)
+        for h in sorted(config.get_reply_poll_hours(), reverse=True):
+            slot = now.replace(hour=h, minute=0, second=0, microsecond=0)
+            if slot <= now and (now - slot) <= timedelta(hours=CATCHUP_WINDOW_HOURS):
+                logger.info(f"Reply polling: catching up on {h}:00 IST slot")
+                await asyncio.to_thread(poll_all_users_for_replies)
+                break
+    except Exception as e:
+        logger.error(f"Reply polling catch-up error: {e}")
+
+    while True:
+        try:
+            now = datetime.now(IST)
+            candidates = [
+                datetime(now.year, now.month, now.day, h, 0, 0, tzinfo=IST)
+                for h in config.get_reply_poll_hours()
+            ]
+            future = [c for c in candidates if c > now]
+            next_run = min(future) if future else candidates[0] + timedelta(days=1)
+            wait_seconds = (next_run - now).total_seconds()
+            logger.info(
+                "Reply polling: next run at %s IST (in %.1f h)",
+                next_run.strftime("%d %b %Y %I:%M %p"),
+                wait_seconds / 3600,
+            )
+            await asyncio.sleep(wait_seconds)
+            await asyncio.to_thread(poll_all_users_for_replies)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Reply polling loop error: {e}")
+            await asyncio.sleep(60)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
@@ -146,10 +199,12 @@ async def lifespan(app: FastAPI):
     t1 = asyncio.create_task(scheduler_loop())
     t2 = asyncio.create_task(maintenance_loop())
     t3 = asyncio.create_task(reply_cleanup_loop())
+    t4 = asyncio.create_task(reply_polling_loop())
     yield
     t1.cancel()
     t2.cancel()
     t3.cancel()
+    t4.cancel()
     
     # Stop email dispatcher
     if email_dispatcher:
@@ -469,7 +524,7 @@ if mimetypes.guess_type("x.webp")[0] != "image/webp":
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/assets", StaticFiles(directory="assets"), name="assets")
 
-from app.api import ingest, drafts, dashboard, leads, auth, family_offices, campaigns, metrics, users, prompts, admin, companies, rocketreach, gmail, intelligence, admin_dashboard, tracking, reminders, public_email
+from app.api import ingest, drafts, dashboard, leads, auth, family_offices, campaigns, metrics, users, prompts, admin, companies, rocketreach, gmail, intelligence, admin_dashboard, tracking, reminders, public_email, generate
 
 app.include_router(ingest.router, prefix="/api")
 app.include_router(drafts.router, prefix="/api")
@@ -489,4 +544,5 @@ app.include_router(intelligence.router, prefix="/api/intelligence", tags=["intel
 app.include_router(tracking.router, prefix="/api", tags=["tracking"])
 app.include_router(admin_dashboard.router, prefix="/api/admin", tags=["admin_dashboard"])
 app.include_router(reminders.router, prefix="/api", tags=["reminders"])
+app.include_router(generate.router, prefix="/api", tags=["generate"])
 app.include_router(public_email.router)

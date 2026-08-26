@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Mail, Loader2, RefreshCw, ExternalLink, Calendar, Search, Filter, Edit3, Send, X, Save, Sparkles, Type, Bold, Italic, Wand2, Shield, Zap, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
 import api from '../services/api';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
+import ToolbarTextarea from '../components/ToolbarTextarea';
 
 const GmailDrafts = () => {
   const [drafts, setDrafts] = useState([]);
@@ -11,7 +12,6 @@ const GmailDrafts = () => {
   const [editingDraft, setEditingDraft] = useState(null);
   const [notification, setNotification] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const editorRef = useRef(null);
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
@@ -138,34 +138,6 @@ const GmailDrafts = () => {
     } finally {
       setIsProcessing(false);
     }
-  };
-
-  const applyFormat = (tag) => {
-    const textarea = editorRef.current;
-    if (!textarea) return;
-    
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const text = editingDraft.body;
-    const selected = text.substring(start, end);
-    
-    if (!selected) return;
-
-    const before = text.substring(0, start);
-    const after = text.substring(end);
-    
-    let newBody;
-    if (tag === 'b') newBody = `${before}**${selected}**${after}`;
-    else if (tag === 'i') newBody = `${before}_${selected}_${after}`;
-    else newBody = `${before}<${tag}>${selected}</${tag}>${after}`;
-
-    setEditingDraft({ ...editingDraft, body: newBody });
-    
-    // Reset focus
-    setTimeout(() => {
-        textarea.focus();
-        textarea.setSelectionRange(start, start + newBody.length - before.length - after.length);
-    }, 10);
   };
 
   const renderEmailPreview = (text) => {
@@ -450,46 +422,27 @@ const GmailDrafts = () => {
                         <div className="space-y-4">
                             <div className="flex items-center justify-between">
                                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Email Body</label>
-                                <div className="flex items-center gap-2">
-                                    <div className="flex items-center bg-white/5 rounded-lg border border-white/5 p-1">
-                                        <button 
-                                            onClick={() => applyFormat('b')}
-                                            className="p-1.5 hover:bg-white/10 rounded text-slate-400 hover:text-white transition-all cursor-pointer"
-                                            title="Bold"
-                                        >
-                                            <Bold className="w-3.5 h-3.5" />
-                                        </button>
-                                        <button 
-                                            onClick={() => applyFormat('i')}
-                                            className="p-1.5 hover:bg-white/10 rounded text-slate-400 hover:text-white transition-all cursor-pointer"
-                                            title="Italic"
-                                        >
-                                            <Italic className="w-3.5 h-3.5" />
-                                        </button>
-                                    </div>
-                                    <div className="h-4 w-px bg-white/10 mx-1"></div>
-                                    <div className="flex items-center gap-1.5">
-                                        <button 
-                                            onClick={() => handleAIRefine('professional')}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg text-[10px] font-black text-blue-400 uppercase tracking-tight transition-all cursor-pointer"
-                                        >
-                                            <Shield className="w-3 h-3" /> Professional
-                                        </button>
-                                        <button 
-                                            onClick={() => handleAIRefine('shorten')}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-lg text-[10px] font-black text-purple-400 uppercase tracking-tight transition-all cursor-pointer"
-                                        >
-                                            <Type className="w-3 h-3" /> Concise
-                                        </button>
-                                    </div>
+                                <div className="flex items-center gap-1.5">
+                                    <button 
+                                        onClick={() => handleAIRefine('professional')}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg text-[10px] font-black text-blue-400 uppercase tracking-tight transition-all cursor-pointer"
+                                    >
+                                        <Shield className="w-3 h-3" /> Professional
+                                    </button>
+                                    <button 
+                                        onClick={() => handleAIRefine('shorten')}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-lg text-[10px] font-black text-purple-400 uppercase tracking-tight transition-all cursor-pointer"
+                                    >
+                                        <Type className="w-3 h-3" /> Concise
+                                    </button>
                                 </div>
                             </div>
-                            
-                            <textarea 
-                                ref={editorRef}
-                                className="w-full bg-[#131722] border border-white/10 rounded-xl px-4 py-4 text-white text-sm focus:outline-none focus:border-blue-500/30 transition-all min-h-[400px] leading-relaxed font-mono resize-none"
+
+                            <ToolbarTextarea
                                 value={editingDraft.body}
                                 onChange={(e) => setEditingDraft({...editingDraft, body: e.target.value})}
+                                rows={14}
+                                placeholder="Write your email here... Use the toolbar for formatting and images."
                             />
                             
                             <div className="flex items-center gap-3 p-4 rounded-2xl bg-blue-500/5 border border-blue-500/10">

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Pen, Save, Loader2, CheckCircle2, X, FileUp, Sparkles, Plus, Trash2, Star, Copy, Pencil } from 'lucide-react';
 import api from '../services/api';
 import ToolbarTextarea from './ToolbarTextarea';
+import SignaturePreview from './SignaturePreview';
 import { applyForcedLogoStyles } from '../utils/logoSize';
 
 const TEMPLATES = [
@@ -446,18 +447,12 @@ const SignatureEditor = ({ userId, onSave, onClose, children }) => {
                 {/* Preview */}
                 <div>
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2">Preview</label>
-                  <div className="bg-black/40 border border-white/5 rounded-xl p-5 text-slate-300 text-[13px] leading-relaxed email-preview">
-                    {currentContent ? (
-                      <div
-                        style={{ color: '#666', fontFamily: 'Arial, sans-serif', fontSize: '13px', lineHeight: '1.4' }}
-                        dangerouslySetInnerHTML={{
-                          __html: mdToPreviewHtml(currentContent)
-                        }}
-                      />
-                    ) : (
-                      <span className="text-slate-600 italic">Write your signature above to see a preview.</span>
-                    )}
-                  </div>
+                  <SignaturePreview
+                    html={mdToPreviewHtml(currentContent)}
+                    content={currentContent}
+                    onChangeContent={setCurrentContent}
+                    emptyText="Write your signature above to see a preview. Tip: click an image in the preview to Replace or Remove it."
+                  />
                 </div>
 
                 {/* Actions */}

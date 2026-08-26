@@ -298,20 +298,17 @@ const Dashboard = () => {
         setData(prev => ({ ...prev, ...response.data }));
       }
 
-      // Fetch Gmail Intelligence if linked
-      if (user.google_linked_at) {
-        try {
-          const gmailRes = await axios.get('/api/gmail/inbox');
-          setData(prev => ({ ...prev, inboxMessages: gmailRes.data.messages || [] }));
-        } catch (err) {
-          console.error('Gmail sync error:', err);
-        }
-      }
-
       setLoading(false);
     } catch (err) {
       console.error('Data fetch error:', err);
       setLoading(false);
+    }
+
+    // Gmail Intelligence loads in background — must NOT block initial render
+    if (user.google_linked_at) {
+      axios.get('/api/gmail/inbox')
+        .then(gmailRes => setData(prev => ({ ...prev, inboxMessages: gmailRes.data.messages || [] })))
+        .catch(err => console.error('Gmail sync error:', err));
     }
   };
 

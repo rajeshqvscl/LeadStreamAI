@@ -88,12 +88,18 @@ const CompanyDatabase = () => {
   };
 
   // Debounced Search & Filter Effect
+  // Instant for initial load / pagination / tab switches; debounce ONLY for typing.
+  const prevSearchRef = useRef(search);
   useEffect(() => {
+    const searchChanged = prevSearchRef.current !== search;
+    prevSearchRef.current = search;
+    const delay = searchChanged ? 300 : 0;
+
     const handler = setTimeout(() => {
       fetchCompanies(currentPage);
       localStorage.setItem('current_company_page', String(currentPage));
       localStorage.setItem('active_browsing_tab', activeBrowsingTab);
-    }, 400); // 400ms debounce
+    }, delay);
 
     return () => clearTimeout(handler);
   }, [search, columnFilters, activeBrowsingTab, currentPage, pageSize]);
@@ -401,7 +407,11 @@ const CompanyDatabase = () => {
                 }
               } catch { /* fall back to reported counter */ }
               fetchCompanies();
-              showNotification('success', `✓ ${finalSuccess} lead${finalSuccess > 1 ? 's' : ''} moved to pipeline. Drafts added to Email Queue.`);
+              const sched = p.scheduled_info;
+              const schedNote = sched?.scheduled
+                ? ` Drip-scheduled ${sched.scheduled} — first email ${new Date(sched.first_send).toLocaleString('en-IN', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}.`
+                : '';
+              showNotification('success', `✓ ${finalSuccess} lead${finalSuccess > 1 ? 's' : ''} moved to pipeline.${schedNote}`);
               navigate('/dashboard/emails?status=PENDING_APPROVAL');
             } else if (p.status === 'error') {
               clearInterval(pollInterval);

@@ -2,8 +2,24 @@ from fastapi import APIRouter, Header
 from app.database import get_db_connection
 import psycopg2.extras
 from typing import Optional
+import json
+from app.utils.microcache import mc_get, mc_set
 
 router = APIRouter()
+
+# Lightweight Redis cache for the heavy stats aggregation (30s TTL).
+try:
+    import os as _os
+    import redis as _redis
+    _r = None
+    try:
+        _redis_url = _os.getenv("REDIS_URL") or _os.getenv("REDIS_TLS_URL") or "redis://localhost:6379"
+        _r = _redis.Redis.from_url(_redis_url, decode_responses=True)
+        _r.ping()
+    except Exception:
+        _r = None
+except Exception:
+    _r = None
 
 @router.get("/dashboard/stats")
 def get_dashboard_stats(
@@ -11,6 +27,22 @@ def get_dashboard_stats(
     year: Optional[int] = None,
     user_id: Optional[str] = Header(None, alias="X-User-Id")
 ):
+    # Cache check — this endpoint aggregates 15+ queries per load.
+    # L1: in-process micro-cache (0ms) → L2: Redis (30s, for multi-worker).
+    cache_key = f"dash-stats:{str(user_id)}:{month}:{year}"
+    hit = mc_get(cache_key)
+    if hit is not None:
+        return hit
+    if _r:
+        try:
+            cached = _r.get(cache_key)
+            if cached:
+                parsed = json.loads(cached)
+                mc_set(cache_key, parsed, 30)
+                return parsed
+        except Exception:
+            pass
+
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
@@ -250,7 +282,7 @@ def get_dashboard_stats(
     cur.close()
     conn.close()
 
-    return {
+    result = {
         "total_ingested": total_ingested,
         "total_leads": total_leads,
         "valid_leads": valid_leads,
@@ -278,6 +310,14 @@ def get_dashboard_stats(
         "filter_year": year,
         "pending_reminders": meeting_reminders
     }
+
+    mc_set(cache_key, result, 30)
+    if _r:
+        try:
+            _r.setex(cache_key, 30, json.dumps(result, default=str))
+        except Exception:
+            pass
+    return result
 
 @router.get("/dashboard/card-detail")
 def get_card_detail(

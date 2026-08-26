@@ -70,12 +70,8 @@ def determine_followup_status(intent: str) -> str:
         INTERESTED        → MEETING_REQUIRED   (stop auto-emails, trigger meeting workflow)
         MEETING_REQUESTED → MEETING_REQUIRED   (same as INTERESTED)
         NEEDS_MORE_INFO   → STOPPED            (end sequence — any reply stops follow-ups)
-        Any other/None    → ACTIVE             (AI failure — don't silently stop outreach)
-
-    IMPORTANT: Unknown/unexpected intents default to ACTIVE, NOT STOPPED.
-    An LLM timeout, JSON parse failure, or prompt regression should never
-    silently end a lead's sequence. Defaulting to ACTIVE keeps the sequence
-    alive for manual review rather than killing it permanently.
+        Any other/None    → STOPPED            (SAFETY: ANY human reply stops automation;
+                                                lead can be manually re-activated after review)
     """
     if intent == 'NOT_INTERESTED':
         new_status = 'STOPPED'
@@ -85,11 +81,11 @@ def determine_followup_status(intent: str) -> str:
         new_status = 'STOPPED'
     else:
         logger.warning(
-            "Unknown reply_intent '%s' — defaulting to ACTIVE to avoid "
-            "silently stopping outreach. Fix the LLM prompt or handle this intent.",
+            "Unknown reply_intent '%s' — defaulting to STOPPED. "
+            "Any human reply must pause automated followups.",
             intent
         )
-        new_status = 'ACTIVE'
+        new_status = 'STOPPED'
 
     logger.info("Reply classification: intent=%s -> followup_status=%s", intent, new_status)
     return new_status

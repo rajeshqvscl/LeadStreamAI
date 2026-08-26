@@ -900,19 +900,208 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     logger.error(f"Cannot send email to {to_email}: No Gmail connection available for User {user_id}.")
     return False, "Gmail not connected. Please link your Google account in Settings.", None, None
 
+def schedule_drip_batch(lead_ids: list, uid, grace_minutes: int = None):
+    """
+    Schedules a batch of leads for drip-sending:
+      - First slot: now + grace (default 30 min), rolled to the next working window
+      - Each subsequent email: +drip_interval_minutes with random jitter
+      - Every slot rolled forward past blackouts (7PM-9AM IST) and weekends
+
+    Atomic per-row: only rows still in PENDING_APPROVAL are scheduled, so a
+    concurrent manual reject/edit always wins over auto-scheduling.
+
+    Returns dict: {scheduled, skipped, first_send, last_send}
+    """
+    from app.core.pipeline.scheduler import get_scheduler_config
+    import random as _random
+    from app.models.lead import add_activity_log
+    from datetime import datetime, timedelta
+    from app.database import get_db_connection
+
+    cfg = get_scheduler_config()
+    grace = grace_minutes if grace_minutes is not None else cfg.drip_grace_minutes
+    uid_int = int(uid) if uid and str(uid).isdigit() else None
+    if not lead_ids:
+        return {"scheduled": 0, "skipped": 0}
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    scheduled = 0
+    skipped = 0
+    try:
+        slot = datetime.now() + timedelta(minutes=grace)
+        first_send = last_send = None
+        for i, lid in enumerate(lead_ids):
+            if i > 0:
+                offset = cfg.drip_interval_minutes * 60 + _random.randint(0, max(cfg.drip_jitter_seconds, 1))
+                slot = slot + timedelta(seconds=offset)
+            slot = cfg.next_working_time(slot)
+
+            cur.execute("""
+                UPDATE leads_raw
+                SET email_status = 'SCHEDULED',
+                    scheduled_at = %s,
+                    updated_at = NOW()
+                WHERE id = %s
+                  AND user_id = %s
+                  AND email_status IN ('PENDING_APPROVAL', 'APPROVED')
+            """, (slot, lid, uid_int))
+            if cur.rowcount > 0:
+                scheduled += 1
+                if first_send is None:
+                    first_send = slot
+                last_send = slot
+                try:
+                    add_activity_log(lid, "EMAIL_SCHEDULED",
+                                     f"Drip scheduled for {slot.strftime('%a %d %b %I:%M %p')} IST (position {i+1})",
+                                     "system")
+                except Exception:
+                    pass
+            else:
+                skipped += 1
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"schedule_drip_batch failed: {e}")
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+    # Refresh review-queue caches — these drafts left PENDING_APPROVAL
+    try:
+        invalidate_pending_drafts_cache(str(uid) if uid else None)
+    except Exception:
+        pass
+
+    return {
+        "scheduled": scheduled,
+        "skipped": skipped,
+        "first_send": first_send.isoformat() if first_send else None,
+        "last_send": last_send.isoformat() if last_send else None,
+    }
+
+
+def process_auto_pilot_sweep():
+    """
+    Auto-Pilot sweep (runs ~every 5 min from the scheduler):
+    For each user with auto_pilot_drafts enabled AND a connected Gmail account,
+    finds their review-queue drafts that have been pending for at least the
+    grace window (30 min) and drip-schedules them automatically.
+
+    Eligibility mirrors the dispatcher's safety filters so nothing gets
+    scheduled that could never be sent.
+    """
+    try:
+        from app.database import get_db_connection
+        from app.core.pipeline.scheduler import get_scheduler_config
+
+        cfg = get_scheduler_config()
+        grace_minutes = cfg.drip_grace_minutes
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id FROM users
+            WHERE COALESCE(auto_pilot_drafts, FALSE) = TRUE
+              AND google_refresh_token IS NOT NULL
+              AND is_active = TRUE
+        """)
+        pilot_users = [list(r.values())[0] if isinstance(r, dict) else r[0] for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+
+        if not pilot_users:
+            return {"scheduled": 0, "users": 0}
+
+        total_scheduled = 0
+        for uid in pilot_users:
+            try:
+                conn = get_db_connection()
+                cur = conn.cursor()
+                cur.execute(f"""
+                    SELECT lr.id
+                    FROM leads_raw lr
+                    WHERE lr.user_id = %s
+                      AND lr.email_status = 'PENDING_APPROVAL'
+                      AND lr.email_draft IS NOT NULL
+                      AND lr.updated_at <= NOW() - INTERVAL '{int(grace_minutes)} minutes'
+                      AND (lr.email_opt_in IS NULL OR lr.email_opt_in = TRUE)
+                      AND (lr.is_unsubscribed IS NULL OR lr.is_unsubscribed = FALSE)
+                      AND lr.email NOT IN (SELECT email FROM unsubscribe_list)
+                    ORDER BY lr.id
+                    LIMIT 200
+                """, (uid,))
+                lead_ids = [list(r.values())[0] if isinstance(r, dict) else r[0] for r in cur.fetchall()]
+                cur.close()
+                conn.close()
+
+                if not lead_ids:
+                    continue
+
+                result = schedule_drip_batch(lead_ids, uid)
+                total_scheduled += result.get("scheduled", 0)
+                if result.get("scheduled"):
+                    logger.info(
+                        f"Auto-Pilot: scheduled {result['scheduled']} drafts for user {uid} "
+                        f"(first: {result.get('first_send')})"
+                    )
+            except Exception as ue:
+                logger.error(f"Auto-Pilot sweep failed for user {uid}: {ue}")
+
+        return {"scheduled": total_scheduled, "users": len(pilot_users)}
+    except Exception as e:
+        logger.error(f"Auto-Pilot sweep error: {e}")
+        return {"scheduled": 0, "error": str(e)}
+
+
 def check_scheduled_emails():
     """
     Checks the database for any emails in 'SCHEDULED' state where
     scheduled_at <= NOW(). Attempts to send them and updates state to SENT.
+
+    Hardened with drip-safety guards:
+      1. Working-hours blackout (9AM-7PM IST, Mon-Fri) — due emails simply wait
+      2. Cooldown: >=N sends in the rolling window pauses this cycle
+      3. Per-cycle cap on dispatches
+      4. Daily-limit exceeded → lead pushed to next working day 9AM
     """
     try:
         from app.database import get_db_connection
         from app.models.lead import add_activity_log
+        from app.core.pipeline.scheduler import get_scheduler_config
+        from app.utils.auth_helpers import check_daily_email_limit
         import psycopg2.extras
-        
+
+        cfg = get_scheduler_config()
+
+        # Guard 1: working-hours blackout — scheduled items just wait here
+        if not cfg.is_working_hours_now():
+            return
+
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
+
+        # Guard 2: rolling-window cooldown — any recent outreach counts
+        # (manual + drip) so total volume stays human-like.
+        cur.execute(f"""
+            SELECT COUNT(*) FROM leads_raw
+            WHERE email_status = 'SENT'
+              AND updated_at > NOW() - INTERVAL '{int(cfg.cooldown_window_minutes)} minutes'
+        """)
+        recent_sends = cur.fetchone()[0]
+        if recent_sends >= cfg.cooldown_every_n_emails:
+            logger.info(
+                f"Drip cooldown active: {recent_sends} sends in last {cfg.cooldown_window_minutes} min "
+                f"(>= {cfg.cooldown_every_n_emails}). Cycle skipped."
+            )
+            cur.close()
+            conn.close()
+            return
+
+        # Guard 3: per-cycle cap
+        fetch_limit = max(cfg.scheduled_max_per_cycle, 1)
+
         cur.execute("""
             SELECT l.id, l.email, l.email_draft, l.cc_email, l.user_id, l.draft_template_used,
                    u.email as sender_email, u.full_name, u.username
@@ -925,7 +1114,9 @@ def check_scheduled_emails():
               AND (l.email_opt_in IS NULL OR l.email_opt_in = TRUE)
               AND (l.is_unsubscribed IS NULL OR l.is_unsubscribed = FALSE)
               AND l.email NOT IN (SELECT email FROM unsubscribe_list)
-        """)
+            ORDER BY l.scheduled_at ASC
+            LIMIT %s
+        """, (fetch_limit,))
         
         due_leads = cur.fetchall()
         
@@ -943,7 +1134,21 @@ def check_scheduled_emails():
             cc_email = lead['cc_email']
             sender_email = lead['sender_email']
             sender_name = lead['full_name'] or lead['username'] or "the team"
-            
+
+            # Guard 4: daily-limit exceeded → push this lead to next working day 9AM
+            if not check_daily_email_limit(str(lead['user_id']) if lead['user_id'] else None, 1):
+                from datetime import timedelta as _td
+                push_to = cfg.next_working_time(
+                    (datetime.now() + _td(days=1)).replace(hour=cfg.working_hours_start, minute=0, second=0)
+                )
+                cur.execute("""
+                    UPDATE leads_raw SET scheduled_at = %s, updated_at = NOW()
+                    WHERE id = %s
+                """, (push_to, lead_id))
+                conn.commit()
+                logger.info(f"Daily limit reached for user {lead['user_id']} — lead {lead_id} pushed to {push_to}")
+                continue
+
             if not draft_content or not to_email:
                 continue
                 

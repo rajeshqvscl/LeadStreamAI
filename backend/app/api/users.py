@@ -14,6 +14,40 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+class PilotSettingsRequest(BaseModel):
+    auto_pilot_drafts: bool
+
+@router.get("/users/pilot-settings")
+def get_pilot_settings(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Returns the current user's auto-pilot preference."""
+    uid = normalize_user_id(user_id)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COALESCE(auto_pilot_drafts, FALSE) FROM users WHERE id = %s", (uid,))
+        row = cur.fetchone()
+        return {"auto_pilot_drafts": bool(row[0]) if row else False}
+    finally:
+        cur.close()
+        conn.close()
+
+@router.put("/users/pilot-settings")
+def update_pilot_settings(req: PilotSettingsRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Toggles the current user's auto-pilot (auto-schedule new drafts)."""
+    uid = normalize_user_id(user_id)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "UPDATE users SET auto_pilot_drafts = %s WHERE id = %s",
+            (req.auto_pilot_drafts, uid)
+        )
+        conn.commit()
+        return {"success": True, "auto_pilot_drafts": req.auto_pilot_drafts}
+    finally:
+        cur.close()
+        conn.close()
+
 class UserBase(BaseModel):
     username: str
     email: str

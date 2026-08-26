@@ -3,6 +3,7 @@ import { Pen, Save, Loader2, CheckCircle2, FileUp, Upload, Sparkles, Plus, Trash
 import { Link } from 'react-router-dom';
 import api from '../services/api';
 import ToolbarTextarea from '../components/ToolbarTextarea';
+import SignaturePreview from '../components/SignaturePreview';
 import { applyForcedLogoStyles } from '../utils/logoSize';
 
 const TEMPLATES = [
@@ -580,18 +581,12 @@ const Signatures = () => {
                     <Eye className="w-4 h-4 text-slate-400" />
                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Live Preview</label>
                   </div>
-                  <div className="bg-black/40 border border-white/5 rounded-xl p-6 text-slate-300 text-[13px] leading-relaxed email-preview min-h-[120px]">
-                    {currentContent ? (
-                      <div
-                        style={{ color: '#666', fontFamily: 'Arial, sans-serif', fontSize: '13px', lineHeight: '1.4' }}
-                        dangerouslySetInnerHTML={{
-                          __html: mdToPreviewHtml(currentContent)
-                        }}
-                      />
-                    ) : (
-                      <span className="text-slate-600 italic">Write your signature above to see a live preview.</span>
-                    )}
-                  </div>
+                  <SignaturePreview
+                    html={mdToPreviewHtml(currentContent)}
+                    content={currentContent}
+                    onChangeContent={setCurrentContent}
+                    emptyText="Write your signature above to see a live preview. Tip: click an image in the preview to Replace or Remove it."
+                  />
                 </div>
 
                 {/* Optional Attachments */}
