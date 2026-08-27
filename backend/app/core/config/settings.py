@@ -24,7 +24,7 @@ class FollowupSettings(BaseSettings):
     client_max_stage: int = 2
     client_intervals: str = "0:2,1:4"
     investor_max_stage: int = 3
-    investor_intervals: str = "0:2,1:5,2:8"
+    investor_intervals: str = "0:2,1:4,2:6"
 
     class Config:
         env_prefix = "FOLLOWUP_"

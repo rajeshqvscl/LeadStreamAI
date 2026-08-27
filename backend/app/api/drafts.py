@@ -2099,10 +2099,19 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
             sig_content = sig_content.replace('{{Sender Title}}', title)
             sig_content = sig_content.replace('{{Sender LinkedIn}}', linkedin)
             sig_content = sig_content.replace('{{Sender Phone}}', phone)
-            # Wrap saved signature in styled div using signature font settings
+            # Wrap saved signature in styled div using signature font settings.
+            # - border-top marker => email_service's _strip_fontsize_preserving_design
+            #   exempts this block, so the chosen signature size + inline sizes survive.
+            # - drop a leading standalone '--'/'---'/'—' so markdown_to_html's
+            #   "Smart Signature Styling" won't re-grey / re-size it.
             sig_font = profile.get('signature_font', 'sans-serif')
             sig_size = profile.get('signature_font_size', '13px')
-            return body_text + "\n\n" + f'<div style="font-family: {sig_font}; font-size: {sig_size}; line-height: 1.4;">{sig_content}</div>'
+            sig_content = re.sub(r'^\s*(?:-{2,}|—)\s*$', '', sig_content, flags=re.MULTILINE).strip()
+            return body_text + "\n\n" + (
+                f'<div style="border-top: 1px solid #f0f0f0; padding-top: 10px; '
+                f'margin-top: 8px; font-family: {sig_font}; font-size: {sig_size}; '
+                f'line-height: 1.4;">{sig_content}</div>'
+            )
 
 # ── Minimal fallback — no disclaimer, no images, just contact info ──
     sig_font = profile.get('signature_font', 'sans-serif')

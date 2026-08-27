@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Save, Loader2, CheckCircle, AlertCircle, Mail, Type, Users, Shield } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Save, Loader2, CheckCircle, AlertCircle, Mail, Type, Users, Shield, ChevronDown } from 'lucide-react';
 import api from '../services/api';
 
 const FONTS = [
@@ -16,9 +16,49 @@ const FONTS = [
   { label: 'Lucida Console', value: '"Lucida Console", Monaco, monospace' },
 ];
 
-const FONT_SIZES = Array.from({ length: 11 }, (_, i) => i + 6).map(n => `${n}px`);
+const FONT_SIZES = Array.from({ length: 17 }, (_, i) => i + 6).map(n => `${n}px`);
 
 const SAMPLE_TEXT = "Dear John,\n\nThank you for your time today. I wanted to follow up on our conversation about the partnership opportunity.\n\nBest regards,\nYour Name\nYour Title\nCompany Name\n+1 (555) 123-4567";
+
+const FontSizeDropdown = ({ value, onChange, options }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500/50 outline-none flex items-center justify-between"
+      >
+        <span>{value}</span>
+        <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-2 w-full bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl max-h-[240px] overflow-y-auto custom-scrollbar">
+          {options.map(s => (
+            <button
+              type="button"
+              key={s}
+              onClick={() => { onChange(s); setOpen(false); }}
+              className={`w-full text-left px-4 py-2 text-sm hover:bg-white/5 transition-colors ${s === value ? 'text-blue-400 font-bold' : 'text-white'}`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const Settings = () => {
   const [loading, setLoading] = useState(false);
@@ -142,15 +182,11 @@ const Settings = () => {
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
                 Font Size
               </label>
-              <select
+              <FontSizeDropdown
                 value={prefs.email_font_size}
-                onChange={e => handleChange('email_font_size', e.target.value)}
-                className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500/50 outline-none appearance-none"
-              >
-                {FONT_SIZES.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
+                onChange={s => handleChange('email_font_size', s)}
+                options={FONT_SIZES}
+              />
             </div>
           </div>
 
@@ -207,15 +243,11 @@ const Settings = () => {
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
                 Signature Font Size
               </label>
-              <select
+              <FontSizeDropdown
                 value={prefs.signature_font_size}
-                onChange={e => handleChange('signature_font_size', e.target.value)}
-                className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:border-purple-500/50 outline-none appearance-none"
-              >
-                {FONT_SIZES.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
+                onChange={s => handleChange('signature_font_size', s)}
+                options={FONT_SIZES}
+              />
             </div>
             <div className="flex-1">
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">

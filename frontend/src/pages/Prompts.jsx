@@ -300,21 +300,21 @@ const Prompts = () => {
           if (m.includes('style="')) {
             let s = m.replace(/style="([^"]*)"/, (_, existing) => {
               let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '');
-              return `style="${clean};padding:2px 4px;font-size:18px;"`;
+              return `style="${clean};padding:2px 4px;"`;
             });
             return s;
           }
-          return '<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;font-size:18px;">';
+          return '<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;">';
         })
         .replace(/<td(\s[^>]*)?>/gi, (m) => {
           if (m.includes('style="')) {
             let s = m.replace(/style="([^"]*)"/, (_, existing) => {
               let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '');
-              return `style="${clean};padding:1px 4px;font-size:18px;"`;
+              return `style="${clean};padding:1px 4px;"`;
             });
             return s;
           }
-          return '<td style="padding:1px 4px;border:1px solid #475569;text-align:left;font-size:18px;">';
+          return '<td style="padding:1px 4px;border:1px solid #475569;text-align:left;">';
         });
       // Palak's logo must preview at 150x150 (backend forces the same size in sent emails).
       html = applyForcedLogoStyles(html);
@@ -327,7 +327,7 @@ const Prompts = () => {
         if (m.includes('style="')) return m.replace(/style="([^"]*)"/, 'style="margin-bottom:0.4em;line-height:1.5;$1"');
         return '<li style="margin-bottom:0.4em;line-height:1.5;">';
       });
-      return `<div style="color:#cbd5e1;font-size:18px;line-height:1.5;">${html}</div>`;
+      return `<div style="color:#cbd5e1;line-height:1.5;">${html}</div>`;
     }
 
     if (!isFollowup) {
@@ -380,14 +380,14 @@ const Prompts = () => {
         listHtml += '</ol>';
         htmlParts.push(listHtml);
       } else if (lines.length >= 2 && lines.every(l => !l.trim() || (l.trim().startsWith('|') && l.trim().endsWith('|')))) {
-        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-family:Georgia,serif;font-size:18px;">';
+        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-family:Georgia,serif;">';
         const dataLines = lines.filter(l => l.trim() && !l.trim().match(/^\|[-:\s]+\|$/));
         dataLines.forEach((line, i) => {
           const cells = line.trim().split('|').slice(1, -1).map(c => c.trim());
           const tag = i === 0 ? 'th' : 'td';
           const cellStyle = tag === 'th'
-            ? 'border:1px solid #475569;padding:2px 4px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:18px;'
-            : 'border:1px solid #475569;padding:1px 4px;text-align:left;color:#cbd5e1;font-size:18px;';
+            ? 'border:1px solid #475569;padding:2px 4px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;'
+            : 'border:1px solid #475569;padding:1px 4px;text-align:left;color:#cbd5e1;';
           const cellHtml = cells.map(c => `<${tag} style="${cellStyle}">${c}</${tag}>`).join('');
           tableHtml += `<tr>${cellHtml}</tr>`;
         });
@@ -403,7 +403,7 @@ const Prompts = () => {
         // Handle markdown images ![alt](url) and links [text](url)
         content = content.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0;" />');
         content = content.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>');
-        htmlParts.push(`<p style="margin-bottom: 1em; color: #cbd5e1; font-size: 18px;">${content}</p>`);
+        htmlParts.push(`<p style="margin-bottom: 1em; color: #cbd5e1;">${content}</p>`);
       }
     });
 
@@ -426,31 +426,39 @@ const Prompts = () => {
     });
     // Palak's logo must preview at 150x150 (backend forces the same size in sent emails).
     finalHtml = applyForcedLogoStyles(finalHtml);
-    // Ensure all HTML tables have visible borders — force concise padding/font-size!
+    // Ensure all HTML tables have visible borders and INHERIT the body font-size
+    // (strip any hardcoded font-size so the table matches the normal text size).
     finalHtml = finalHtml
       .replace(/<table(\s[^>]*)?>/gi, (m) => {
-        if (m.includes('style="')) return m.replace(/style="([^"]*)"/, 'style="border-collapse:collapse;$1"');
+        if (m.includes('style="')) {
+          return m.replace(/style="([^"]*)"/, (_, existing) => {
+            let clean = existing.replace(/\bfont-size[^;]*;?/gi, '');
+            return `style="border-collapse:collapse;${clean}"`;
+          });
+        }
         return '<table style="border-collapse:collapse;">';
       })
       .replace(/<th(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
-          // Force concise padding/font-size — strip existing values & replace
           return m.replace(/style="([^"]*)"/, (_, existing) => {
-            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '').replace(/\btext-transform[^;]*;?/gi, '');return `style="${clean};padding:2px 4px;font-size:18px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;"`;
-            });
-          }
-          return '<th style="padding:2px 4px;font-size:18px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;">';
+            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\btext-transform[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '');
+            return `style="${clean};padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;"`;
+          });
+        }
+        return '<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;">';
       })
       .replace(/<td(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
-          // Force concise padding/font-size — strip existing values & replace
           return m.replace(/style="([^"]*)"/, (_, existing) => {
-            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '');return `style="${clean};padding:1px 4px;font-size:18px;border:1px solid #475569;text-align:left;color:#cbd5e1;"`;
-            });
-          }
-          return '<td style="padding:1px 4px;font-size:18px;border:1px solid #475569;text-align:left;color:#cbd5e1;">';
+            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '');
+            return `style="${clean};padding:1px 4px;border:1px solid #475569;text-align:left;color:#cbd5e1;"`;
+          });
+        }
+        return '<td style="padding:1px 4px;border:1px solid #475569;text-align:left;color:#cbd5e1;">';
       });
-    return finalHtml;
+    const _ff = user.email_font || 'sans-serif';
+    const _fs = user.email_font_size || '13px';
+    return `<div style="font-family:${_ff};font-size:${_fs};line-height:1.6;">${finalHtml}</div>`;
   };
 
   return (
@@ -524,7 +532,7 @@ const Prompts = () => {
                 </div>
               </div>
               <p className="text-[10px] text-slate-600 mb-2">Use placeholders: {'{{First Name}}'}, {'{{Company Name}}'}, {'{{Sender Name}}'}</p>
-              <ToolbarTextarea value={form.content} onChange={e => setForm({...form, content: e.target.value})} rows={8} placeholder="Write your email body here..." />
+              <ToolbarTextarea value={form.content} onChange={e => setForm({...form, content: e.target.value})} rows={8} placeholder="Write your email body here..." fontSizeOptions={[6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22]} />
               <button
                 type="button"
                 onClick={() => setShowBodyPreview(!showBodyPreview)}
@@ -569,7 +577,7 @@ const Prompts = () => {
                 <div key={i} className="mb-3">
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">{getFollowupLabel(i)}</label>
                   <div className="flex gap-2">
-                    <ToolbarTextarea value={form[followupKey]} onChange={e => setForm({...form, [followupKey]: e.target.value})} rows={3} placeholder={`Follow-up ${i} content...`} />
+                    <ToolbarTextarea value={form[followupKey]} onChange={e => setForm({...form, [followupKey]: e.target.value})} rows={3} placeholder={`Follow-up ${i} content...`} fontSizeOptions={[6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22]} />
                     <div className="flex flex-col gap-1.5">
                       <button onClick={() => setPreview({ show: true, content: form[followupKey], label: followupKey, isFollowup: true })} className="px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-[10px] font-bold border border-blue-500/20 whitespace-nowrap transition-all">Preview</button>
                       <label className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-white/10 text-slate-400 hover:text-white hover:border-blue-500/50 cursor-pointer transition-all text-[10px] font-bold ${fuploading ? 'opacity-50' : ''}`}>
@@ -688,7 +696,7 @@ const Prompts = () => {
                     <div>
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Body</label>
                       <div className="flex gap-2">
-                        <ToolbarTextarea value={tpl.content} onChange={e => { const updated = [...prompts]; const idx = updated.findIndex(p => p.id === tpl.id); updated[idx] = {...updated[idx], content: e.target.value}; setPrompts(updated); }} rows={6} placeholder="Email body..." />
+                        <ToolbarTextarea value={tpl.content} onChange={e => { const updated = [...prompts]; const idx = updated.findIndex(p => p.id === tpl.id); updated[idx] = {...updated[idx], content: e.target.value}; setPrompts(updated); }} rows={6} placeholder="Email body..." fontSizeOptions={[6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22]} />
                         <div className="flex flex-col gap-2">
                           <button onClick={() => setPreview({ show: true, content: tpl.content, label: 'Body', subject: tpl.subject, attachment: tpl.attachment_file })} className="px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-[10px] font-bold border border-blue-500/20 whitespace-nowrap transition-all">Preview</button>
                           <button onClick={() => handleFieldSave(tpl.id, 'content', tpl.content)} disabled={saveField.id === tpl.id && saveField.field === 'content'} className={`px-3 py-2 rounded-lg text-[10px] font-bold border whitespace-nowrap transition-all ${saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === 'content' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/30' : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 border-white/10'}`}>
@@ -718,7 +726,7 @@ const Prompts = () => {
                       <div key={i}>
                         <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">{getFollowupLabel(i)}</label>
                         <div className="flex gap-2">
-                          <ToolbarTextarea value={tpl[fkey] || ''} onChange={e => { const updated = [...prompts]; const idx = updated.findIndex(p => p.id === tpl.id); updated[idx] = {...updated[idx], [fkey]: e.target.value}; setPrompts(updated); }} rows={2} placeholder="(empty)" />
+                          <ToolbarTextarea value={tpl[fkey] || ''} onChange={e => { const updated = [...prompts]; const idx = updated.findIndex(p => p.id === tpl.id); updated[idx] = {...updated[idx], [fkey]: e.target.value}; setPrompts(updated); }} rows={2} placeholder="(empty)" fontSizeOptions={[6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22]} />
                           <div className="flex flex-col gap-1.5">
                             <button onClick={() => setPreview({ show: true, content: tpl[fkey] || '', label: fkey, subject: tpl.subject, isFollowup: true })} className="px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-[10px] font-bold border border-blue-500/20 whitespace-nowrap transition-all">Preview</button>
                             <button onClick={() => handleFieldSave(tpl.id, fkey, tpl[fkey] || '')} disabled={saveField.id === tpl.id && saveField.field === fkey} className={`px-3 py-2 rounded-lg text-[10px] font-bold border whitespace-nowrap transition-all ${saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === fkey ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/30' : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 border-white/10'}`}>

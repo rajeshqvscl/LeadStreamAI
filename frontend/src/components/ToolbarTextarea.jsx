@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Bold, Italic, Underline, List, ListOrdered, Link, Image, Paperclip, Palette, Code, Table, Eye } from 'lucide-react';
+import { Bold, Italic, Underline, List, ListOrdered, Link, Image, Paperclip, Palette, Code, Table, Eye, ChevronDown } from 'lucide-react';
 import api from '../services/api';
 import { applyForcedLogoStyles } from '../utils/logoSize';
 
@@ -141,6 +141,46 @@ const FONTS = [
 
 const FONT_SIZES = Array.from({ length: 11 }, (_, i) => i + 6);
 
+// Scrollable font-size picker (used in the toolbar)
+const SizeDropdown = ({ options, onSelect }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onMouseDown={(e) => { e.preventDefault(); setOpen(o => !o); }}
+        className="bg-black/50 border border-white/10 rounded-md px-1.5 py-1 text-[10px] text-slate-300 cursor-pointer outline-none hover:text-white flex items-center gap-1"
+      >
+        Size <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 z-50 bg-[#1a1d26] border border-white/10 rounded-xl shadow-2xl max-h-[200px] overflow-y-auto custom-scrollbar w-[84px]">
+          {options.map(s => (
+            <button
+              key={s}
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); onSelect(String(s)); setOpen(false); }}
+              className="w-full text-left px-3 py-1.5 text-[11px] text-slate-200 hover:bg-white/10 hover:text-white"
+            >
+              {s}px
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const HEADINGS = [
   { label: 'H1', prefix: '# ', tag: 'h1' },
   { label: 'H2', prefix: '## ', tag: 'h2' },
@@ -204,7 +244,7 @@ if (typeof document !== 'undefined' && !document.getElementById('wysiwyg-list-st
 
 // ─── ToolbarTextarea ───────────────────────────────────────────────────
 
-const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOnly }) => {
+const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOnly, fontSizeOptions = FONT_SIZES }) => {
   const textareaRef = useRef(null);
   const editorRef = useRef(null);
   const [showSource, setShowSource] = useState(false);
@@ -494,10 +534,8 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
     }
   };
 
-  const handleSizeChange = (e) => {
-    const size = e.target.value;
+  const handleSizeChange = (size) => {
     if (!size) return;
-    e.target.value = '';
     if (showSource) {
       insert(`<span style="font-size:${size}px;">`, `</span>`);
       return;
@@ -726,16 +764,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
             <option key={f.value} value={f.value} style={{ fontFamily: f.value }}>{f.label}</option>
           ))}
         </select>
-        <select
-          onChange={handleSizeChange}
-          defaultValue=""
-          className="bg-black/50 border border-white/10 rounded-md px-1.5 py-1 text-[10px] text-slate-300 cursor-pointer outline-none focus:border-blue-500/50 appearance-none"
-        >
-          <option value="" disabled>Size</option>
-          {FONT_SIZES.map(s => (
-            <option key={s} value={s}>{s}px</option>
-          ))}
-        </select>
+        <SizeDropdown options={fontSizeOptions} onSelect={handleSizeChange} />
         <div className="w-px h-4 bg-white/10 mx-1" />
         <button
           type="button"

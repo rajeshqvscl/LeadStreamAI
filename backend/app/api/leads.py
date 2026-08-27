@@ -615,7 +615,7 @@ def list_followups(
             # stages, everything else at 3 (followup_service._get_lead_type_config).
             _lead_lt = str(lead_dict.get('lead_type') or '').upper()
             lead_dict['max_followup_stage'] = 2 if _lead_lt == 'CLIENT' else 3
-            # Force INVESTOR lead_type for investor-users so frontend labels stages correctly (Day 7/14/30 not Day 2/4)
+            # Force INVESTOR lead_type for investor-users so frontend labels stages correctly (Day 2/4/6)
             if is_yashika or is_kajal:
                 lead_dict['lead_type'] = 'Investor'
             results.append(lead_dict)

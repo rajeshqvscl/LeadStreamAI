@@ -604,3 +604,9 @@ body {
 .animate-shimmer {
   animation: shimmer 1.5s ease-in-out infinite;
 }
+
+/* Styled scrollbar for scrollable dropdowns / panels */
+.custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 10px; }
+.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
