@@ -1,8 +1,10 @@
-import requests
+import contextlib
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dotenv import load_dotenv
 from pathlib import Path
+
+import requests
+from dotenv import load_dotenv
 
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path, override=True)
@@ -42,38 +44,36 @@ def _make_request(method, url, **kwargs):
     try:
         if 'headers' not in kwargs:
             kwargs['headers'] = HEADERS
-        
+
         # Merge API Key if not present
         if 'Api-Key' not in kwargs['headers']:
             kwargs['headers'].update(HEADERS)
 
         r = requests.request(method, url, **kwargs)
-        
+
         if r.status_code == 429:
             data = {}
-            try:
+            with contextlib.suppress(Exception):
                 data = r.json()
-            except Exception: pass
-            
+
             # RocketReach returns {"detail": "...", "wait": 123.4} or similar
             wait = data.get("wait") or r.headers.get("Retry-After")
             try:
                 wait_val = float(wait) if wait else None
             except Exception:
                 wait_val = None
-                
+
             raise RocketReachRateLimitError(
                 "RocketReach API Quota/Rate Limit Exceeded.",
                 wait_seconds=wait_val
             )
-            
+
         if not r.ok:
             error_msg = r.text
-            try:
+            with contextlib.suppress(Exception):
                 error_msg = r.json().get('response', r.text)
-            except Exception: pass
             raise Exception(f"RocketReach error ({r.status_code}): {error_msg}")
-            
+
         return r.json()
     except RocketReachRateLimitError:
         raise
@@ -93,7 +93,7 @@ def _parse_profile_details(details, fallback_email=None):
     # --- Email Extraction ---
     email = None
     trusted_statuses = {"current", "verified", "valid", "accept_all", ""}
-    
+
     # 1. First Pass: Try to find a trusted email
     for email_obj in (details.get("emails") or []):
         status = (email_obj.get("status") or "").lower()
@@ -101,11 +101,11 @@ def _parse_profile_details(details, fallback_email=None):
         if addr and (status in trusted_statuses or not trusted_statuses):
             email = addr
             break
-            
+
     # 2. Second Pass: If no verified email, take the first one available
     if not email and (details.get("emails") or []):
         email = details.get("emails")[0].get("email")
-        
+
     # 3. Third Pass: Use search-time fallback if still nothing
     if not email:
         email = fallback_email
@@ -122,7 +122,7 @@ def _parse_profile_details(details, fallback_email=None):
 
     if any(n in full_name_lower for n in dummy_names):
         return None
-        
+
     if any(d in email_lower for d in dummy_domains):
         return None
 
@@ -173,7 +173,7 @@ def search_leads(employer=None, title=None, location=None, page_size=10):
     leads = []
     max_pages = 5
     current_page = 1
-    
+
     while len(leads) < page_size and current_page <= max_pages:
         try:
             payload = { "start": current_page, "page_size": max(page_size * 2, 20), "query": query }
@@ -220,7 +220,7 @@ def lookup_by_email(email):
     params = {"email": email}
     try:
         r = requests.get(url, headers=HEADERS, params=params, timeout=30)
-        
+
         if r.ok:
             details = r.json()
             parsed = _parse_profile_details(details, fallback_email=email)
@@ -233,15 +233,15 @@ def lookup_by_email(email):
     # If API fails or returns nothing, we generate a basic lead so it shows on display as requested.
     prefix = email.split('@')[0]
     domain = email.split('@')[1] if '@' in email else "unknown"
-    
+
     # Try to parse name from prefix (e.g. mukesh.ambani)
     name_parts = prefix.replace('.', ' ').replace('_', ' ').split(' ')
     f_name = name_parts[0].capitalize() if name_parts else "Unknown"
     l_name = " ".join([p.capitalize() for p in name_parts[1:]]) if len(name_parts) > 1 else "Lead"
-    
+
     # Clean company name from domain (e.g. ril.co.in -> Ril)
     company = domain.split('.')[0].capitalize()
-    
+
     fallback_lead = {
         "first_name": f_name,
         "last_name": l_name,
@@ -269,7 +269,7 @@ def lookup_by_linkedin_url(linkedin_url):
     params = {"linkedin_url": linkedin_url}
     try:
         r = requests.get(url, headers=HEADERS, params=params, timeout=30)
-        
+
         if r.ok:
             details = r.json()
             parsed = _parse_profile_details(details)
@@ -284,7 +284,7 @@ def lookup_by_linkedin_url(linkedin_url):
     name_parts = slug.replace('-', ' ').replace('_', ' ').split(' ')
     f_name = name_parts[0].capitalize() if name_parts else "LinkedIn"
     l_name = " ".join([p.capitalize() for p in name_parts[1:]]) if len(name_parts) > 1 else "Lead"
-    
+
     fallback_lead = {
         "first_name": f_name,
         "last_name": l_name,
@@ -311,13 +311,13 @@ def lookup_by_name(name, company=None):
     query = {"name": name}
     if company:
         query["current_employer"] = [company]
-        
+
     payload = {
         "start": 1,
         "page_size": 10,
         "query": query
     }
-    
+
     try:
         data = _make_request("POST", url, json=payload)
     except Exception as e:
@@ -326,7 +326,7 @@ def lookup_by_name(name, company=None):
 
     profiles = data.get("profiles", [])
     leads = []
-    
+
     def process_name_profile(p):
         pid = p.get("id")
         if not pid: return None
@@ -339,7 +339,7 @@ def lookup_by_name(name, company=None):
             parsed = future.result()
             if parsed:
                 leads.append(parsed)
-            
+
     return leads
 
 

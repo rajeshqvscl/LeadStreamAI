@@ -1,73 +1,158 @@
-from fastapi import FastAPI, Request, Form
-from fastapi.responses import JSONResponse
-import logging
-
-# Setup structured logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-from dotenv import load_dotenv
-from pathlib import Path
 import os
+from pathlib import Path
+from contextlib import asynccontextmanager
+import asyncio
+
+from fastapi import FastAPI, Form, Request
+from fastapi.responses import JSONResponse
+from dotenv import load_dotenv
+
 # Load environment variables (authoritative source)
 env_path = Path(__file__).resolve().parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
-from app.database import create_tables
-from contextlib import asynccontextmanager
-import asyncio
+# Configure structured logging
+from app.core.observability.logging import configure_logging
+configure_logging(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    json_output=os.getenv("LOG_FORMAT", "json").lower() == "json",
+)
+
+import logging
+logger = logging.getLogger(__name__)
 
 from app.core.pipeline.scheduler import get_scheduler_config
+from app.database import create_tables
+from app.core.rate_limiter import get_rate_limiter, RateLimitMiddleware
+
 
 async def maintenance_loop():
-    from app.services.google_service import renew_all_gmail_watches
+    """
+    Runs maintenance tasks at fixed IST hours (default 8 AM and 8 PM),
+    Monday–Saturday only.
+
+    The actual work (renew Gmail watches, cache cleanup, etc.) is a no-op
+    placeholder for now; only the scheduling window is enforced so it can be
+    wired up later without touching the loop logic.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.core.pipeline.scheduler import get_scheduler_config
+
+    config = get_scheduler_config()
+    IST = timezone(timedelta(hours=5, minutes=30))
+    maint_hours = config.get_maintenance_hours()
+    maint_days = config.get_maintenance_days()
+
     while True:
         try:
-            # logger.info("Running background maintenance: Renewing Gmail watches")
-            # renew_all_gmail_watches()
-            pass
+            now = datetime.now(IST)
+            # Skip on off-days (outside Mon–Sat)
+            if now.weekday() not in maint_days:
+                # Wait until the next Monday at the first maintenance hour
+                days_to_monday = (7 - now.weekday()) % 7 or 7
+                next_run = (now + timedelta(days=days_to_monday)).replace(
+                    hour=maint_hours[0], minute=0, second=0, microsecond=0
+                )
+                wait_seconds = (next_run - now).total_seconds()
+                logger.info(
+                    "Maintenance: off-day skip, next run %s IST (in %.1f h)",
+                    next_run.strftime("%d %b %Y %I:%M %p"),
+                    wait_seconds / 3600,
+                )
+                await asyncio.sleep(wait_seconds)
+                continue
+
+            candidates = [
+                datetime(now.year, now.month, now.day, h, 0, 0, tzinfo=IST)
+                for h in maint_hours
+            ]
+            future = [c for c in candidates if c > now]
+            next_run = min(future) if future else candidates[0] + timedelta(days=1)
+            wait_seconds = (next_run - now).total_seconds()
+            logger.info(
+                "Maintenance: next run at %s IST (in %.1f h)",
+                next_run.strftime("%d %b %Y %I:%M %p"),
+                wait_seconds / 3600,
+            )
+            await asyncio.sleep(wait_seconds)
+            # Run the actual maintenance work.
+            try:
+                # renew_all_gmail_watches()
+                pass
+            except Exception as e:
+                logger.exception(f"Maintenance task error: {e}")
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
-            logger.error(f"Maintenance loop error: {e}")
-        await asyncio.sleep(86400) # Run every 24 hours
+            logger.exception(f"Maintenance loop error: {e}")
+            await asyncio.sleep(60)
 
 _scheduler_lock = asyncio.Lock()
 
 async def scheduler_loop():
-    from app.services.email_service import check_scheduled_emails
-    from app.services.email_service import process_auto_pilot_sweep
+    from app.services.email_service import check_scheduled_emails, process_auto_pilot_sweep
     from app.services.followup_service import process_outreach_sequences
-    
+
     config = get_scheduler_config()
-    
+
     # Track last run times
     last_followup = 0
     last_scheduled = 0
     last_autopilot = 0
-    
+
+    # Startup cooldown: keep ALL automated dispatch paused for the first
+    # `scheduler_startup_cooldown_sec` seconds after boot. This guarantees that
+    # any drafts created right before/after a restart stay in the review queue
+    # (PENDING_APPROVAL) long enough for a human to manually send or reject them
+    # before the auto-pilot sweep promotes them to SCHEDULED.
+    loop_start = asyncio.get_event_loop().time()
+    cooldown_sec = config.scheduler_startup_cooldown_sec
+    _last_cd_log = cooldown_sec + 1  # force the first cooldown log
+
     while True:
         if _scheduler_lock.locked():
             logger.warning("Scheduler: previous iteration still running, skipping this cycle")
             await asyncio.sleep(2)
             continue
-        
+
         now = asyncio.get_event_loop().time()
+
+        # Startup cooldown gate — skip ALL automated work while active.
+        if (now - loop_start) < cooldown_sec:
+            remaining = int(cooldown_sec - (now - loop_start))
+            if remaining <= _last_cd_log - 30 or remaining <= 5:
+                logger.info(
+                    f"Scheduler: startup cooldown active — {remaining}s remaining, "
+                    f"drafts held in review queue"
+                )
+                _last_cd_log = remaining
+            await asyncio.sleep(2)
+            continue
+
         async with _scheduler_lock:
             try:
+                # Check if it's weekend (Saturday=5, Sunday=6)
+                from datetime import datetime, timezone, timedelta
+                IST = timezone(timedelta(hours=5, minutes=30))
+                now_ist = datetime.now(IST)
+                if now_ist.weekday() >= 5:
+                    # Weekend - skip this cycle
+                    await asyncio.sleep(config.followup_interval_sec)
+                    continue
+
                 tasks = []
-                
+
                 # Follow-ups: every FOLLOWUP_INTERVAL
                 if now - last_followup >= config.followup_interval_sec:
                     tasks.append(("followup", asyncio.to_thread(process_outreach_sequences)))
                     last_followup = now
-                
+
                 # Scheduled emails: every SCHEDULED_INTERVAL
                 if now - last_scheduled >= config.scheduled_interval_sec:
                     tasks.append(("scheduled", asyncio.to_thread(check_scheduled_emails)))
                     last_scheduled = now
-                
+
                 # Auto-pilot sweep: pick up review-queue drafts every ~5 min
                 if now - last_autopilot >= 300:
                     tasks.append(("autopilot", asyncio.to_thread(process_auto_pilot_sweep)))
@@ -80,11 +165,11 @@ async def scheduler_loop():
                         return_exceptions=True,
                     )
                     # Log any exceptions
-                    for (name, _), r in zip(tasks, results):
+                    for (name, _), r in zip(tasks, results, strict=False):
                         if isinstance(r, Exception):
                             logger.error(f"Scheduler task '{name}' error: {r}")
             except Exception as e:
-                logger.error(f"Scheduler error: {e}")
+                logger.exception(f"Scheduler error: {e}")
         await asyncio.sleep(2)
 
 async def reply_cleanup_loop():
@@ -93,17 +178,31 @@ async def reply_cleanup_loop():
       - deletes remaining generated follow-ups for replied leads
       - sends the admin email report + in-app reminder notification
     The loop sleeps precisely until the next scheduled slot.
+    Skips weekends (Saturday/Sunday).
     """
     from datetime import datetime, timedelta, timezone
+
     from app.core.pipeline.scheduler import get_scheduler_config
-    
+
     config = get_scheduler_config()
     IST = timezone(timedelta(hours=5, minutes=30))
     cleanup_hours = config.get_reply_cleanup_hours()
-    
+
     while True:
         try:
             now = datetime.now(IST)
+            # Skip cleanup on weekends (Sat=5, Sun=6)
+            if now.weekday() >= 5:
+                # Calculate wait until Monday at first cleanup hour
+                days_to_monday = 7 - now.weekday()
+                next_monday = (now + timedelta(days=days_to_monday)).replace(
+                    hour=cleanup_hours[0], minute=0, second=0, microsecond=0
+                )
+                wait_seconds = (next_monday - now).total_seconds()
+                logger.info(f"Reply cleanup: weekend skip, next run Monday at {next_monday.strftime('%I:%M %p')} IST (in {wait_seconds/3600:.1f} h)")
+                await asyncio.sleep(wait_seconds)
+                continue
+
             candidates = [
                 datetime(now.year, now.month, now.day, h, 0, 0, tzinfo=IST)
                 for h in cleanup_hours
@@ -122,7 +221,7 @@ async def reply_cleanup_loop():
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.error(f"Reply monitor loop error: {e}")
+            logger.exception(f"Reply monitor loop error: {e}")
             await asyncio.sleep(60)
 
 async def reply_polling_loop():
@@ -136,8 +235,9 @@ async def reply_polling_loop():
     (e.g. server restart), poll immediately once so replies aren't delayed.
     """
     from datetime import datetime, timedelta, timezone
-    from app.core.pipeline.scheduler import get_scheduler_config
+
     from app.api.gmail import poll_all_users_for_replies
+    from app.core.pipeline.scheduler import get_scheduler_config
 
     config = get_scheduler_config()
     IST = timezone(timedelta(hours=5, minutes=30))
@@ -146,18 +246,36 @@ async def reply_polling_loop():
     # Startup catch-up: run once if we're just past a missed slot
     try:
         now = datetime.now(IST)
-        for h in sorted(config.get_reply_poll_hours(), reverse=True):
-            slot = now.replace(hour=h, minute=0, second=0, microsecond=0)
-            if slot <= now and (now - slot) <= timedelta(hours=CATCHUP_WINDOW_HOURS):
-                logger.info(f"Reply polling: catching up on {h}:00 IST slot")
-                await asyncio.to_thread(poll_all_users_for_replies)
-                break
+        # Skip catch-up on weekends
+        if now.weekday() < 5:
+            for h in sorted(config.get_reply_poll_hours(), reverse=True):
+                slot = now.replace(hour=h, minute=0, second=0, microsecond=0)
+                if slot <= now and (now - slot) <= timedelta(hours=CATCHUP_WINDOW_HOURS):
+                    logger.info(f"Reply polling: catching up on {h}:00 IST slot")
+                    # Run in thread with error handling
+                    try:
+                        await asyncio.to_thread(poll_all_users_for_replies)
+                    except Exception as e:
+                        logger.exception(f"Reply polling catch-up error: {e}")
+                    break
     except Exception as e:
-        logger.error(f"Reply polling catch-up error: {e}")
+        logger.exception(f"Reply polling catch-up setup error: {e}")
 
     while True:
         try:
             now = datetime.now(IST)
+            # Skip polling on weekends (Sat=5, Sun=6)
+            if now.weekday() >= 5:
+                # Calculate wait until Monday 9 AM
+                days_to_monday = 7 - now.weekday()
+                next_monday = (now + timedelta(days=days_to_monday)).replace(
+                    hour=config.get_reply_poll_hours()[0], minute=0, second=0, microsecond=0
+                )
+                wait_seconds = (next_monday - now).total_seconds()
+                logger.info(f"Reply polling: weekend skip, next run Monday at {next_monday.strftime('%I:%M %p')} IST (in {wait_seconds/3600:.1f} h)")
+                await asyncio.sleep(wait_seconds)
+                continue
+
             candidates = [
                 datetime(now.year, now.month, now.day, h, 0, 0, tzinfo=IST)
                 for h in config.get_reply_poll_hours()
@@ -171,11 +289,16 @@ async def reply_polling_loop():
                 wait_seconds / 3600,
             )
             await asyncio.sleep(wait_seconds)
-            await asyncio.to_thread(poll_all_users_for_replies)
+            
+            # Run polling in thread with error handling
+            try:
+                await asyncio.to_thread(poll_all_users_for_replies)
+            except Exception as e:
+                logger.exception(f"Reply polling error: {e}")
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.error(f"Reply polling loop error: {e}")
+            logger.exception(f"Reply polling loop error: {e}")
             await asyncio.sleep(60)
 
 @asynccontextmanager
@@ -183,9 +306,9 @@ async def lifespan(app: FastAPI):
     try:
         create_tables()
     except Exception as e:
-        logger.error(f"Failed to create/verify tables on startup: {e}")
+        logger.exception(f"Failed to create/verify tables on startup: {e}")
         logger.warning("App will still start — DB may be temporarily unavailable")
-    
+
     # Start email engine dispatcher
     email_dispatcher = None
     try:
@@ -195,7 +318,7 @@ async def lifespan(app: FastAPI):
         logger.info("Email engine dispatcher started")
     except Exception as e:
         logger.warning(f"Could not start email dispatcher: {e}")
-    
+
     t1 = asyncio.create_task(scheduler_loop())
     t2 = asyncio.create_task(maintenance_loop())
     t3 = asyncio.create_task(reply_cleanup_loop())
@@ -205,7 +328,7 @@ async def lifespan(app: FastAPI):
     t2.cancel()
     t3.cancel()
     t4.cancel()
-    
+
     # Stop email dispatcher
     if email_dispatcher:
         email_dispatcher.stop()
@@ -213,10 +336,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Root health check — keeps cron jobs from getting 404
-@app.get("/")
-def root():
-    return {"status": "ok", "message": "LeadStreamAI Backend is running"}
+# Prometheus metrics endpoint
+@app.get("/metrics")
+async def metrics():
+    from app.core.observability.metrics import metrics_endpoint
+    return await metrics_endpoint()
 
 # Debug endpoint — only available when DEBUG=True
 @app.get("/debug/unsubscribe-env")
@@ -236,7 +360,7 @@ def debug_unsubscribe_env():
 @app.get("/unsubscribe")
 async def unsubscribe_get(token: str, request: Request):
     logger.info(f"Unsubscribe GET request: token={token}, url={request.url}, referer={request.headers.get('referer')}, ua={request.headers.get('user-agent')}, origin={request.headers.get('origin')}")
-    from app.api.leads import validate_unsubscribe_token, process_unsubscribe_by_token
+    from app.api.leads import validate_unsubscribe_token
     try:
         lead = validate_unsubscribe_token(token)
     except Exception:
@@ -332,6 +456,7 @@ for o in ALWAYS_ALLOWED:
         allowed_origins.append(o)
 
 import re as _re
+
 _ONRENDER_RE = _re.compile(r"^https://[a-zA-Z0-9\-]+\.onrender\.com$")
 
 def _origin_allowed(origin: str) -> bool:
@@ -339,12 +464,11 @@ def _origin_allowed(origin: str) -> bool:
         return False
     if origin in allowed_origins:
         return True
-    if _ONRENDER_RE.match(origin):
-        return True
-    return False
+    return bool(_ONRENDER_RE.match(origin))
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response as StarletteResponse
+
 
 class DynamicCORSMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -400,13 +524,22 @@ _PUBLIC_PATH_PREFIXES = (
     "/api/unsubscribe",
     "/api/resubscribe",
     "/api/preferences",
-    "/api/admin/approve-user/",
     "/unsubscribe",
     "/resubscribe",
     "/preferences",
     "/static/",
     "/assets/",
     "/debug/",
+    "/health",
+    "/metrics",
+    "/openapi.json",
+    "/api/health",
+    "/api/v1/health",
+    "/api/v1/metrics",
+    "/api/health/ready",
+    "/api/v1/health/ready",
+    "/api/health/startup",
+    "/api/v1/health/startup",
 )
 
 
@@ -437,6 +570,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         path = request.url.path
+        # Registration (POST /api/users/) must be publicly accessible, but other
+        # /api/users/* methods (list/update/delete) stay protected.
+        if path == "/api/users/" and request.method == "POST":
+            return await call_next(request)
         if path in _PUBLIC_PATH_EXACT or path.startswith(_PUBLIC_PATH_PREFIXES):
             return await call_next(request)
 
@@ -461,23 +598,89 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+import uuid as _uuid
+import time as _time
+import structlog
+import structlog.contextvars as _ctx_vars
+
+_corr_log = structlog.get_logger("correlation")
+
+
+class CorrelationIdMiddleware(BaseHTTPMiddleware):
+    """Attach a correlation/request ID to every request, bind it to the
+    structured-log context, and echo it back in the response headers so
+    failures can be traced end-to-end (observability)."""
+
+    async def dispatch(self, request: Request, call_next):
+        rid = request.headers.get("x-request-id") or _uuid.uuid4().hex
+        _ctx_vars.bind_contextvars(request_id=rid)
+        request.state.request_id = rid
+        start = _time.perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            _ctx_vars.unbind_contextvars("request_id", "user_id")
+            raise
+        latency_ms = (_time.perf_counter() - start) * 1000.0
+        user_id = getattr(request.state, "user_id", None)
+        if user_id:
+            _ctx_vars.bind_contextvars(user_id=str(user_id))
+        response.headers["X-Request-ID"] = rid
+        _corr_log.info(
+            "request_completed",
+            path=request.url.path,
+            method=request.method,
+            status_code=response.status_code,
+            latency_ms=round(latency_ms, 2),
+        )
+        _ctx_vars.unbind_contextvars("request_id", "user_id")
+        return response
+
+
 # Middleware order matters: Starlette's add_middleware inserts at position 0,
-# so the LAST registered middleware is OUTERMOST. Auth is registered FIRST
-# (inner); CORS is registered LAST (outermost) so that 401 responses raised by
-# AuthMiddleware still flow back through CORS and get CORS headers — otherwise
-# the browser would block them and the frontend's 401 interceptor could never
-# read the response to clear the stale token.
+# so the LAST registered middleware is OUTERMOST. 
+# Order (outer to inner): CorrelationId -> CORS -> Prometheus -> RateLimit -> Auth
+# CorrelationId is outermost so it wraps every request (and is echoed to clients).
 app.add_middleware(AuthMiddleware)
+# Add rate limiting middleware (uses Redis-backed sliding window)
+try:
+    rate_limiter = get_rate_limiter()
+    app.add_middleware(RateLimitMiddleware, limiter=rate_limiter, default_limit=100, default_window=60)
+    logger.info("Rate limiting middleware enabled")
+except Exception as e:
+    logger.warning(f"Rate limiting disabled: {e}")
+
+# Add Prometheus metrics middleware
+try:
+    from app.core.observability.metrics import PrometheusMiddleware
+    app.add_middleware(PrometheusMiddleware)
+    logger.info("Prometheus metrics middleware enabled")
+except Exception as e:
+    logger.warning(f"Prometheus metrics disabled: {e}")
+
 app.add_middleware(DynamicCORSMiddleware)
 
+# CorrelationId middleware MUST be the LAST registered (outermost) so it
+# surrounds CORS/Auth/rate-limit and binds request_id for the whole request.
+app.add_middleware(CorrelationIdMiddleware)
+
 from fastapi.exceptions import RequestValidationError
+
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     logger.error(f"VALIDATION ERROR on {request.url}: {exc.errors()}")
+    # exc.body can be a non-JSON-serializable object (e.g. FormData for file
+    # uploads); coerce it so this handler never crashes while reporting a 422.
+    try:
+        import json as _json
+        _json.dumps(exc.body)
+        body = exc.body
+    except TypeError:
+        body = str(exc.body)
     return JSONResponse(
         status_code=422,
-        content={"detail": exc.errors(), "body": exc.body}
+        content={"detail": exc.errors(), "body": body}
     )
 
 @app.exception_handler(Exception)
@@ -485,7 +688,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     import traceback
     error_details = traceback.format_exc()
     logger.error(f"GLOBAL ERROR: {str(exc)}\n{error_details}")
-    
+
     # Use same CORS logic as DynamicCORSMiddleware
     origin = request.headers.get("origin", "")
     headers = {}
@@ -508,7 +711,14 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-from fastapi.staticfiles import StaticFiles
+# Import v1 API router (primary) and legacy router (backward compatibility)
+from app.api.v1 import api_v1_router, legacy_router
+
+# Include v1 API (primary) - new endpoints should use /api/v1/
+app.include_router(api_v1_router)
+
+# Include legacy API for backward compatibility - maps /api/* to v1
+app.include_router(legacy_router)
 
 # Ensure .webp assets are served with the correct image/webp content type.
 # Starlette's StaticFiles falls back to Python's mimetypes registry, which on
@@ -517,6 +727,9 @@ from fastapi.staticfiles import StaticFiles
 # refuse to render it (exactly what broke Palak's logo). Registering the type
 # here (before the mounts below) makes every .webp upload render correctly.
 import mimetypes
+
+from fastapi.staticfiles import StaticFiles
+
 if mimetypes.guess_type("x.webp")[0] != "image/webp":
     mimetypes.add_type("image/webp", ".webp")
 
@@ -524,25 +737,7 @@ if mimetypes.guess_type("x.webp")[0] != "image/webp":
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/assets", StaticFiles(directory="assets"), name="assets")
 
-from app.api import ingest, drafts, dashboard, leads, auth, family_offices, campaigns, metrics, users, prompts, admin, companies, rocketreach, gmail, intelligence, admin_dashboard, tracking, reminders, public_email, generate
-
-app.include_router(ingest.router, prefix="/api")
-app.include_router(drafts.router, prefix="/api")
-app.include_router(dashboard.router, prefix="/api")
-app.include_router(leads.router, prefix="/api")
-app.include_router(auth.router, prefix="/api")
-app.include_router(family_offices.router, prefix="/api")
-app.include_router(campaigns.router, prefix="/api")
-app.include_router(metrics.router, prefix="/api")
-app.include_router(users.router, prefix="/api")
-app.include_router(prompts.router, prefix="/api")
-app.include_router(admin.router, prefix="/api", tags=["admin"])
-app.include_router(companies.router, prefix="/api", tags=["companies"])
-app.include_router(rocketreach.router, prefix="/api", tags=["rocketreach"])
-app.include_router(gmail.router, prefix="/api", tags=["gmail"])
-app.include_router(intelligence.router, prefix="/api/intelligence", tags=["intelligence"])
-app.include_router(tracking.router, prefix="/api", tags=["tracking"])
-app.include_router(admin_dashboard.router, prefix="/api/admin", tags=["admin_dashboard"])
-app.include_router(reminders.router, prefix="/api", tags=["reminders"])
-app.include_router(generate.router, prefix="/api", tags=["generate"])
-app.include_router(public_email.router)
+# Mount frontend SPA (React build) as catch-all for non-API routes
+frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+if frontend_dist.exists():
+    app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")

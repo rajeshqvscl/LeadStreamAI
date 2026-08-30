@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Header, Query
-from typing import Optional
-from app.database import get_db_connection
+from datetime import UTC, datetime
+
 import psycopg2.extras
-from datetime import datetime, timezone
+from app.database import get_db_connection
+from fastapi import APIRouter, Header, Query
 
 router = APIRouter(tags=["Metrics"])
 
@@ -37,9 +37,9 @@ def _period_clause_activity(val):
 def _date_clause(date_from, date_to):
     clauses = []
     if date_from:
-        clauses.append(f"AND updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= %s::date AT TIME ZONE 'Asia/Kolkata'")
+        clauses.append("AND updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= %s::date AT TIME ZONE 'Asia/Kolkata'")
     if date_to:
-        clauses.append(f"AND updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < (%s::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata'")
+        clauses.append("AND updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < (%s::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata'")
     return " ".join(clauses)
 
 # Activity-log clauses qualified with `al.` — the report list joins activity_log
@@ -77,22 +77,24 @@ def _period_clause_replied(val):
 def _date_clause_replied(date_from, date_to):
     clauses = []
     if date_from:
-        clauses.append(f"AND replied_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= %s::date AT TIME ZONE 'Asia/Kolkata'")
+        clauses.append("AND replied_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' >= %s::date AT TIME ZONE 'Asia/Kolkata'")
     if date_to:
-        clauses.append(f"AND replied_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < (%s::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata'")
+        clauses.append("AND replied_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' < (%s::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata'")
     return " ".join(clauses)
 
-@router.get("/metrics")
+from app.core.responses import JsonObject
+
+@router.get("/metrics", response_model=JsonObject)
 def get_metrics(
-    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    user_id: str | None = Header(None, alias="X-User-Id"),
     period: str = Query('all'),
     date_from: str = Query(None),
     date_to: str = Query(None),
     status: str = Query(None),
-    for_user: Optional[str] = Query(None, description="Admin-only override: 'all' for global scope, or a user id/username to view. Non-admins are always limited to their own data."),
+    for_user: str | None = Query(None, description="Admin-only override: 'all' for global scope, or a user id/username to view. Non-admins are always limited to their own data."),
 ):
     conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     # ── Admin-only view override (for_user) ──
     # Admins can view 'all' users or a specific user. Regular users can only
@@ -381,16 +383,16 @@ def get_metrics(
 
     # Sector breakdown — split comma-separated sectors into individual counts
     cur.execute(f"""
-        SELECT industry, COUNT(*) as count 
+        SELECT industry, COUNT(*) as count
         FROM (
-            SELECT TRIM(BOTH FROM s) as industry 
-            FROM leads_raw, 
+            SELECT TRIM(BOTH FROM s) as industry
+            FROM leads_raw,
                  regexp_split_to_table(COALESCE(sector, 'Other'), ',') as s
             {where_clause}
         ) sub
         WHERE industry != '' AND industry IS NOT NULL
-        GROUP BY industry 
-        ORDER BY count DESC 
+        GROUP BY industry
+        ORDER BY count DESC
         LIMIT 10
     """, full_params)
     industry_rows = cur.fetchall()
@@ -398,12 +400,12 @@ def get_metrics(
 
     # Country breakdown
     cur.execute(f'''
-        SELECT COALESCE(country, raw_payload->>'country', 'Unknown') as country, COUNT(*) as count 
-        FROM leads_raw 
+        SELECT COALESCE(country, raw_payload->>'country', 'Unknown') as country, COUNT(*) as count
+        FROM leads_raw
         {where_clause}
         AND COALESCE(country, raw_payload->>'country') IS NOT NULL
         GROUP BY 1
-        ORDER BY count DESC 
+        ORDER BY count DESC
         LIMIT 8
     ''', full_params)
     country_rows = cur.fetchall()
@@ -486,9 +488,7 @@ def get_metrics(
         _ms = 2 if _palak_user else 3
         if fs == 'COMPLETED' or stage >= _ms:
             followup_display = 'Completed'
-        elif fs == 'ACTIVE' and stage > 0:
-            followup_display = str(stage)
-        elif stage > 0:
+        elif fs == 'ACTIVE' and stage > 0 or stage > 0:
             followup_display = str(stage)
         elif fs == 'ACTIVE':
             followup_display = 'Active'
@@ -578,5 +578,5 @@ def get_metrics(
         "report": report,
         "report_for": _view_label or resolved_name or "All Users",
 
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": datetime.now(UTC).isoformat()
     }

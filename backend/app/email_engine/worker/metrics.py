@@ -2,12 +2,11 @@
 Metrics Collection - Prometheus + Structured Logging
 """
 
-import time
 import logging
-from typing import Optional
+import time
 from functools import wraps
-from prometheus_client import Counter, Histogram, Gauge, CollectorRegistry, generate_latest
-from app.core.config import get_email_engine_settings
+
+from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, generate_latest
 
 logger = logging.getLogger(__name__)
 
@@ -68,35 +67,35 @@ active_workers = Gauge(
 
 class MetricsCollector:
     """Collects and exports metrics"""
-    
+
     @staticmethod
     def record_enqueue(priority: str, user_id: int):
         jobs_enqueued.labels(priority=priority, user_id=str(user_id)).inc()
-    
+
     @staticmethod
     def record_completion(status: str, template: str):
         jobs_completed.labels(status=status, template=template).inc()
-    
+
     @staticmethod
     def record_failure(error_type: str, template: str):
         jobs_failed.labels(error_type=error_type, template=template).inc()
-    
+
     @staticmethod
     def record_duration(template: str, duration: float):
         send_duration.labels(template=template).observe(duration)
-    
+
     @staticmethod
     def update_queue_depth(priority: str, depth: int):
         queue_depth.labels(priority=priority).set(depth)
-    
+
     @staticmethod
     def update_rate_limit(user_id: int, remaining: int):
         rate_limit_remaining.labels(user_id=str(user_id)).set(remaining)
-    
+
     @staticmethod
     def update_workers(user_id: int, count: int):
         active_workers.labels(user_id=str(user_id)).set(count)
-    
+
     @staticmethod
     def export() -> bytes:
         """Export Prometheus metrics"""

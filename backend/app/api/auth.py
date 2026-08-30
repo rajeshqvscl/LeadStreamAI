@@ -1,18 +1,17 @@
-from pathlib import Path
-from fastapi import APIRouter, HTTPException, Depends, Header, Request
-from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
-from typing import Optional
+import datetime
+import logging
 import os
-import requests
+from pathlib import Path
+
 import bcrypt
 import psycopg2
 import psycopg2.extras
-import logging
-from dotenv import load_dotenv
-import datetime
 from app.database import get_db_connection
 from app.services.google_service import get_google_flow, register_gmail_watch
+from dotenv import load_dotenv
+from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -86,35 +85,35 @@ def _record_login_attempt(key: str):
                     del _login_blocked[k]
 
 
-@router.post("/auth/login")
+@router.post("/login")
 def login(req: LoginRequest, request: Request = None):
     from app.database import get_db_connection
     from fastapi import HTTPException
-    
+
     rate_key = _check_login_rate_limit(req.username, request)
-    
+
     username = req.username.strip()
     password = req.password
-    
+
     conn = get_db_connection()
     cur = conn.cursor()
-    
+
     # Query user by username (case-insensitive)
-    cur.execute("SELECT id, username, email, full_name, password_hash, role, team, is_active, is_approved, signature, signature_mode FROM users WHERE LOWER(username) = LOWER(%s)", (username,))
+    cur.execute("SELECT id, username, email, full_name, password_hash, role, team, is_active, is_approved, signature, signature_mode, image_width, image_height FROM users WHERE LOWER(username) = LOWER(%s)", (username,))
 
     user = cur.fetchone()
-    
+
     cur.close()
     conn.close()
-    
+
     if not user:
         _record_login_attempt(rate_key)
         raise HTTPException(status_code=401, detail="Invalid username or password")
-        
+
     if not user['is_active']:
         _record_login_attempt(rate_key)
         raise HTTPException(status_code=403, detail="Account is deactivated")
-        
+
     # Verify password hash (support both bcrypt and legacy SHA256)
     stored_hash = user['password_hash']
     # Detect if it's a bcrypt hash (starts with $2b$ or $2a$)
@@ -155,7 +154,7 @@ def login(req: LoginRequest, request: Request = None):
         s_cur.close()
         s_conn.close()
     except Exception as sess_err:
-        logger.error(f"Failed to create session: {sess_err}")
+        logger.exception(f"Failed to create session: {sess_err}")
         raise HTTPException(status_code=500, detail="Could not create session. Please try again.")
 
     # Successful login — clear any failed-attempt history + lockout for this user+IP
@@ -175,12 +174,14 @@ def login(req: LoginRequest, request: Request = None):
             "team": user.get('team') or 'CLIENT',
             "is_approved": user['is_approved'],
             "signature": user.get('signature'),
-            "signature_mode": user.get('signature_mode') or 'custom'
+            "signature_mode": user.get('signature_mode') or 'custom',
+            "image_width": user.get('image_width') or '400px',
+            "image_height": user.get('image_height') or 'auto'
         }
     }
 
-@router.post("/auth/google/disconnect")
-def disconnect_google(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+@router.post("/google/disconnect")
+def disconnect_google(user_id: str | None = Header(None, alias="X-User-Id")):
     """Forcefully removes all Google tokens for a user (Nuclear Reset).
 
     Schema-robust: builds the SET clause from the google_* columns that
@@ -227,21 +228,21 @@ def disconnect_google(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         raise
     except Exception as e:
         conn.rollback()
-        logger.error(f"Google disconnect failed for user {uid}: {e}")
+        logger.exception(f"Google disconnect failed for user {uid}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
         conn.close()
 
-@router.get("/auth/me")
-def get_current_user(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+@router.get("/me")
+def get_current_user(user_id: str | None = Header(None, alias="X-User-Id")):
     """Returns the current user profile and approval status."""
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
-    
+
     # Handle 'admin' string or digits
     real_uid = user_id if user_id and user_id.isdigit() else "1"
-    
+
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
@@ -249,7 +250,7 @@ def get_current_user(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         user = cur.fetchone()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        
+
         result = dict(user)
         if not result.get('team'):
             result['team'] = 'CLIENT'
@@ -259,36 +260,36 @@ def get_current_user(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         conn.close()
 
 
-@router.post("/auth/refresh")
-def refresh_token(user_id: Optional[str] = Header(None, alias="X-User-Id"), authorization: Optional[str] = Header(None, alias="Authorization")):
+@router.post("/refresh")
+def refresh_token(user_id: str | None = Header(None, alias="X-User-Id"), authorization: str | None = Header(None, alias="Authorization")):
     """Refresh the session token. Returns a new access token with extended expiry."""
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
-    
+
     # Handle 'admin' string or digits
     real_uid = user_id if user_id and user_id.isdigit() else "1"
-    
+
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
         # Verify user exists and is active
-        cur.execute("SELECT id, username, email, full_name, role, team, is_active, is_approved FROM users WHERE id = %s", (real_uid,))
+        cur.execute("SELECT id, username, email, full_name, role, team, is_active, is_approved, image_width, image_height FROM users WHERE id = %s", (real_uid,))
         user = cur.fetchone()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         if not user.get('is_active'):
             raise HTTPException(status_code=403, detail="User is inactive")
-        
+
         # Delete old sessions for this user
         cur.execute("DELETE FROM sessions WHERE user_id = %s", (real_uid,))
-        
+
 # Create new session token with extended expiry
         import secrets
         access_token = secrets.token_urlsafe(32)
         expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=30)
         cur.execute("INSERT INTO sessions (token, user_id, expires_at) VALUES (%s, %s, %s)", (access_token, real_uid, expires_at))
         conn.commit()
-        
+
         return {
             "access_token": access_token,
             "token_type": "bearer",
@@ -301,7 +302,9 @@ def refresh_token(user_id: Optional[str] = Header(None, alias="X-User-Id"), auth
                 "role": user['role'],
                 "team": user.get('team') or 'CLIENT',
                 "is_active": user['is_active'],
-                "is_approved": user['is_approved']
+                "is_approved": user['is_approved'],
+                "image_width": user.get('image_width') or '400px',
+                "image_height": user.get('image_height') or 'auto'
             }
         }
     finally:
@@ -311,18 +314,18 @@ def refresh_token(user_id: Optional[str] = Header(None, alias="X-User-Id"), auth
 class TeamUpdateRequest(BaseModel):
     team: str
 
-@router.put("/auth/team")
-def update_team(req: TeamUpdateRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+@router.put("/team")
+def update_team(req: TeamUpdateRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     """Updates the current user's team (CLIENT/INVESTOR)."""
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
-    
+
     team = req.team.upper()
     if team not in ('CLIENT', 'INVESTOR'):
         raise HTTPException(status_code=400, detail="Team must be CLIENT or INVESTOR")
-    
+
     real_uid = user_id if user_id and user_id.isdigit() else "1"
-    
+
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
@@ -339,8 +342,8 @@ def update_team(req: TeamUpdateRequest, user_id: Optional[str] = Header(None, al
 class SignatureUpdateRequest(BaseModel):
     signature: str
 
-@router.put("/auth/signature")
-def update_signature(req: SignatureUpdateRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+@router.put("/signature")
+def update_signature(req: SignatureUpdateRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     """Updates the current user's custom signature."""
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -364,8 +367,8 @@ def update_signature(req: SignatureUpdateRequest, user_id: Optional[str] = Heade
 class SignatureModeUpdateRequest(BaseModel):
     signature_mode: str
 
-@router.put("/auth/signature-mode")
-def update_signature_mode(req: SignatureModeUpdateRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+@router.put("/signature-mode")
+def update_signature_mode(req: SignatureModeUpdateRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     """Sets whether to use the custom signature or the auto-generated one."""
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -387,49 +390,48 @@ def update_signature_mode(req: SignatureModeUpdateRequest, user_id: Optional[str
         conn.close()
 
 class PreferencesUpdateRequest(BaseModel):
-    email_font: Optional[str] = None
-    email_font_size: Optional[str] = None
-    signature_font: Optional[str] = None
-    signature_font_size: Optional[str] = None
-    signature_mode: Optional[str] = None
-    team: Optional[str] = None
-    image_width: Optional[str] = None
-    image_height: Optional[str] = None
+    email_font: str | None = None
+    email_font_size: str | None = None
+    signature_font: str | None = None
+    signature_font_size: str | None = None
+    signature_mode: str | None = None
+    team: str | None = None
+    image_width: str | None = None
+    image_height: str | None = None
 
-@router.put("/auth/preferences")
-def update_preferences(req: PreferencesUpdateRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+@router.put("/preferences")
+def update_preferences(req: PreferencesUpdateRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     """Updates the current user's email composition preferences."""
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
-    
+
     real_uid = user_id if user_id and user_id.isdigit() else "1"
-    
+
     # Validate team if provided
     if req.team is not None:
         team = req.team.upper()
         if team not in ('CLIENT', 'INVESTOR'):
             raise HTTPException(status_code=400, detail="Team must be CLIENT or INVESTOR")
-    
+
     # Validate signature_mode if provided
-    if req.signature_mode is not None:
-        if req.signature_mode not in ('custom', 'auto'):
-            raise HTTPException(status_code=400, detail="signature_mode must be 'custom' or 'auto'")
-    
+    if req.signature_mode is not None and req.signature_mode not in ('custom', 'auto'):
+        raise HTTPException(status_code=400, detail="signature_mode must be 'custom' or 'auto'")
+
     # Validate email_font_size format if provided
     if req.email_font_size is not None:
         if not req.email_font_size.endswith('px'):
             raise HTTPException(status_code=400, detail="email_font_size must end with 'px' (e.g., '13px')")
-    
+
     # Validate signature_font_size format if provided
     if req.signature_font_size is not None:
         if not req.signature_font_size.endswith('px'):
             raise HTTPException(status_code=400, detail="signature_font_size must end with 'px' (e.g., '13px')")
-    
+
     # Validate image_width format if provided
     if req.image_width is not None:
         if not any(req.image_width.endswith(unit) for unit in ('px', '%', 'em', 'rem', 'vw', 'vh')) and req.image_width != 'auto':
             raise HTTPException(status_code=400, detail="image_width must end with 'px', '%', 'em', 'rem', 'vw', 'vh' or be 'auto' (e.g., '400px', '50%', 'auto')")
-    
+
     # Validate image_height format if provided
     if req.image_height is not None:
         if not any(req.image_height.endswith(unit) for unit in ('px', '%', 'em', 'rem', 'vw', 'vh')) and req.image_height != 'auto':
@@ -440,53 +442,53 @@ def update_preferences(req: PreferencesUpdateRequest, user_id: Optional[str] = H
     try:
         updates = []
         params = []
-        
+
         if req.email_font is not None:
             updates.append("email_font = %s")
             params.append(req.email_font)
-        
+
         if req.email_font_size is not None:
             updates.append("email_font_size = %s")
             params.append(req.email_font_size)
-        
+
         if req.signature_font is not None:
             updates.append("signature_font = %s")
             params.append(req.signature_font)
-        
+
         if req.signature_font_size is not None:
             updates.append("signature_font_size = %s")
             params.append(req.signature_font_size)
-        
+
         if req.signature_mode is not None:
             updates.append("signature_mode = %s")
             params.append(req.signature_mode)
-        
+
         if req.team is not None:
             updates.append("team = %s")
             params.append(req.team.upper())
-        
+
         if req.image_width is not None:
             updates.append("image_width = %s")
             params.append(req.image_width)
-        
+
         if req.image_height is not None:
             updates.append("image_height = %s")
             params.append(req.image_height)
-        
+
         if not updates:
             raise HTTPException(status_code=400, detail="No valid fields to update")
-        
+
         updates.append("updated_at = NOW()")
         params.append(real_uid)
-        
+
         query = f"UPDATE users SET {', '.join(updates)} WHERE id = %s RETURNING id, username, email, full_name, role, team, is_active, is_approved, email_font, email_font_size, signature_font, signature_font_size, signature, signature_mode, signature, image_width, image_height"
         cur.execute(query, params)
         user = cur.fetchone()
         conn.commit()
-        
+
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        
+
         return dict(user)
     finally:
         cur.close()
@@ -494,8 +496,8 @@ def update_preferences(req: PreferencesUpdateRequest, user_id: Optional[str] = H
 
 # --- LOGOUT & STATE RESET ---
 
-@router.post("/auth/logout")
-def logout(request: Request, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+@router.post("/logout")
+def logout(request: Request, user_id: str | None = Header(None, alias="X-User-Id")):
     """Handles logout — revokes the server-side session token."""
     auth_header = request.headers.get("authorization", "")
     token = None
@@ -511,26 +513,26 @@ def logout(request: Request, user_id: Optional[str] = Header(None, alias="X-User
             cur.close()
             conn.close()
         except Exception as e:
-            logger.error(f"Logout session revoke failed: {e}")
+            logger.exception(f"Logout session revoke failed: {e}")
 
     return {"success": True, "message": "Logged out"}
 
 # --- ACCESS REQUEST & APPROVAL ---
 
-@router.post("/auth/google/unlink")
-def unlink_google(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+@router.post("/google/unlink")
+def unlink_google(user_id: str | None = Header(None, alias="X-User-Id")):
     """Removes the Google connection for the current user."""
     from app.database import get_db_connection
     if not user_id:
         raise HTTPException(status_code=400, detail="Missing user context")
-    
+
     conn = get_db_connection()
     cur = conn.cursor()
     try:
         cur.execute("""
-            UPDATE users 
-            SET google_refresh_token = NULL, 
-                google_linked_at = NULL 
+            UPDATE users
+            SET google_refresh_token = NULL,
+                google_linked_at = NULL
             WHERE id = %s OR username = %s
         """, (user_id if user_id.isdigit() else 0, user_id))
         conn.commit()
@@ -545,70 +547,77 @@ def unlink_google(user_id: Optional[str] = Header(None, alias="X-User-Id")):
 class AccessRequest(BaseModel):
     user_id: int
 
-@router.post("/auth/request-access")
-def request_access(req: AccessRequest):
+@router.post("/request-access")
+def request_access(req: AccessRequest, request: Request):
     """Triggers an email notification to the Admin for approval."""
-    from app.services.email_service import send_email
-    from app.database import get_db_connection
     import psycopg2.extras
+    from app.database import get_db_connection
+    from app.services.email_service import send_email
+    from fastapi import HTTPException
+
+    # Trust the authenticated session identity, not the client-supplied body
+    verified_user_id = getattr(request.state, "user_id", None)
+    if not verified_user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
 
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
+
     # Get user details
-    cur.execute("SELECT id, username, email, full_name FROM users WHERE id = %s", (req.user_id,))
+    cur.execute("SELECT id, username, email, full_name FROM users WHERE id = %s", (verified_user_id,))
     user = cur.fetchone()
-    
+
     # Get admin email from database
     cur.execute("SELECT email, full_name, username FROM users WHERE role = 'ADMIN' LIMIT 1")
     admin = cur.fetchone()
-    
+
     cur.close()
     conn.close()
-    
+
     # Resolve Backend URL: Priority .env > Production Guess > Local Fallback
     import os
+
     from dotenv import load_dotenv
     load_dotenv(dotenv_path=env_path, override=True) # Refresh env
-    
+
     # 1. Try environment variables
     base_url = os.getenv("BACKEND_URL")
-    
+
     # 2. Try Render specific variables
     if not base_url or base_url.lower() == "null" or "localhost" in base_url.lower():
         # Only use localhost if we are NOT on Render
         if os.getenv("RENDER_EXTERNAL_URL"):
             base_url = os.getenv("RENDER_EXTERNAL_URL")
-    
+
     # 3. Final Fallback to a valid string, never Null
     if not base_url or base_url.lower() == "null" or base_url.strip() == "":
         # We also check the commented out production URL in case it's helpful
         base_url = "http://127.0.0.1:8000"
-    
+
     # Clean the URL
     base_url = base_url.rstrip("/")
     if not base_url.startswith("http"):
         base_url = f"https://{base_url}"
-        
+
     approve_url = f"{base_url}/api/admin/approve-user/{user['id']}"
     logger.info(f"Generated Approval URL: {approve_url}")
-    
+
     subject = f"🚨 Discovery Access Request: {user['full_name'] or user['username']}"
     html_content = f"""
     <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #f8fafc;">
         <h2 style="color: #6366f1;">Discovery Access Request</h2>
         <p>User <strong>{user['full_name'] or user['username']}</strong> ({user['email']}) is requesting access to the <strong>Lead Discovery & Bulk Search</strong> engine.</p>
-        
+
         <div style="margin: 30px 0; text-align: center;">
             <a href="{approve_url}" style="background-color: #6366f1; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
                 Approve Discovery Access
             </a>
         </div>
-        
+
         <p style="color: #64748b; font-size: 14px;">Approving will grant them a strict limit of 200 leads and enable all search features.</p>
     </div>
     """
-    
+
     # Send email from system to admin (Gmail API only — SMTP removed system-wide)
     res = send_email(
         to_email=admin['email'],
@@ -620,25 +629,41 @@ def request_access(req: AccessRequest):
         user_id=1
     )
     success = res[0] if isinstance(res, tuple) else res
-    
+
     if not success:
         raise HTTPException(status_code=500, detail="Failed to send notification email")
-        
+
     return {"message": "Access request sent to administrator"}
 
 @router.get("/admin/approve-user/{user_id}")
-def approve_user_landing(user_id: int):
+def approve_user_landing(user_id: int, request: Request):
     """One-click approval landing page for Admins."""
     from app.database import get_db_connection
     from fastapi.responses import HTMLResponse
-    
+
+    # Require an authenticated ADMIN to perform approval (prevents privilege escalation)
+    requester_id = getattr(request.state, "user_id", None)
+    if not requester_id:
+        return HTMLResponse(content="<h1>403 - Unauthorized</h1>", status_code=403)
+
     conn = get_db_connection()
     cur = conn.cursor()
-    
+    try:
+        cur.execute("SELECT role FROM users WHERE id = %s", (requester_id,))
+        requester = cur.fetchone()
+        if not requester or str(requester[0]).upper() != "ADMIN":
+            return HTMLResponse(content="<h1>403 - Admin access required</h1>", status_code=403)
+    finally:
+        cur.close()
+        conn.close()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
     try:
         cur.execute("""
-            UPDATE users 
-            SET is_approved = TRUE, 
+            UPDATE users
+            SET is_approved = TRUE,
                 is_active = TRUE
             WHERE id = %s
         """, (user_id,))
@@ -651,14 +676,14 @@ def approve_user_landing(user_id: int):
         conn.close()
 
     frontend_url = os.getenv("FRONTEND_URL", "https://leadstreamai.onrender.com")
-    
+
     return HTMLResponse(content=f"""
         <div style="font-family: sans-serif; text-align: center; padding: 50px; background-color: #f8fafc; min-height: 100vh;">
             <div style="max-width: 500px; margin: auto; background: white; padding: 40px; border-radius: 20px; shadow: 0 10px 15px -3px rgba(0,0,0,0.1);">
                 <div style="font-size: 60px; margin-bottom: 20px;">✅</div>
                 <h1 style="color: #10b981; margin-bottom: 15px;">User Approved!</h1>
                 <p style="color: #475569; font-size: 16px; line-height: 1.6;">Account access has been granted. The user is now active and can perform extractions.</p>
-                
+
                 <div style="margin-top: 40px;">
                     <a href="{frontend_url}" style="background-color: #6366f1; color: white; padding: 12px 30px; text-decoration: none; border-radius: 10px; font-weight: bold; display: inline-block;">
                         Open Dashboard →
@@ -671,20 +696,20 @@ def approve_user_landing(user_id: int):
 
 # --- GOOGLE OAUTH FLOW ---
 
-@router.get("/auth/google/link")
+@router.get("/google/link")
 def google_link(request: Request, user_id: str = Header(..., alias="X-User-Id")):
     """Initiates the Google OAuth 2.0 flow for a specific user."""
     # Use configured redirect URI or fallback to current request host
     redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
     if not redirect_uri:
         redirect_uri = f"{request.base_url.scheme}://{request.base_url.netloc}/api/auth/google/callback"
-    
+
     import base64
     import json
-    
+
     flow = get_google_flow(redirect_uri=redirect_uri)
-    
-    # Generate the authorization URL. 
+
+    # Generate the authorization URL.
     # This generates flow.code_verifier internally.
     # Force a fresh grant to clear any accidental "Metadata-only" selections
     authorization_url, _ = flow.authorization_url(
@@ -692,11 +717,11 @@ def google_link(request: Request, user_id: str = Header(..., alias="X-User-Id"))
         prompt='consent select_account',
         include_granted_scopes='false'
     )
-    
+
     # Bundle user_id and code_verifier into a tiny state string
     state_payload = json.dumps({"u": user_id, "v": flow.code_verifier})
     state_str = base64.urlsafe_b64encode(state_payload.encode()).decode()
-    
+
     # Regenerate URL with our bundled state
     authorization_url, _ = flow.authorization_url(
         access_type='offline',
@@ -704,33 +729,33 @@ def google_link(request: Request, user_id: str = Header(..., alias="X-User-Id"))
         include_granted_scopes='false',
         state=state_str
     )
-    
+
     return {"url": authorization_url}
 
-@router.get("/auth/google/callback")
+@router.get("/google/callback")
 def google_callback(request: Request, code: str, state: str):
     """Handles the Google OAuth 2.0 callback, exchanges code for tokens, and performs watch() registration."""
     import base64
     import json
-    
+
     # Extract user_id and code_verifier from the state bundle
     try:
         state_data = json.loads(base64.urlsafe_b64decode(state).decode())
         user_id = state_data.get('u')
         code_verifier = state_data.get('v')
     except Exception as e:
-        logger.error(f"Error decoding OAuth state: {e}")
+        logger.exception(f"Error decoding OAuth state: {e}")
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
 
     # Use configured redirect URI or fallback to current request host
     redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
     if not redirect_uri:
         redirect_uri = f"{request.base_url.scheme}://{request.base_url.netloc}/api/auth/google/callback"
-    
+
     flow = get_google_flow(redirect_uri=redirect_uri)
     # CRITICAL: Restore the code_verifier so fetch_token succeeds
     flow.code_verifier = code_verifier
-    
+
     # Exchange the authorization code for tokens
     flow.fetch_token(code=code)
     creds = flow.credentials
@@ -742,8 +767,9 @@ def google_callback(request: Request, code: str, state: str):
         google_email = None
         google_id = None
         try:
-            import requests
             import json
+
+            import requests
             user_info_resp = requests.get(
                 "https://www.googleapis.com/oauth2/v2/userinfo",
                 headers={"Authorization": f"Bearer {creds.token}"}
@@ -752,16 +778,16 @@ def google_callback(request: Request, code: str, state: str):
             google_email = user_info.get('email')
             google_id = user_info.get('id')
         except Exception as e:
-            logger.error(f"Failed to fetch Google user info: {e}")
+            logger.exception(f"Failed to fetch Google user info: {e}")
             pass
 
         # Store tokens and identity in database
         # Only update refresh_token if Google provided a new one (to avoid nullifying old working one)
         if creds.refresh_token:
             cur.execute("""
-                UPDATE users 
-                SET google_access_token = %s, 
-                    google_refresh_token = %s, 
+                UPDATE users
+                SET google_access_token = %s,
+                    google_refresh_token = %s,
                     google_token_expiry = %s,
                     google_linked_at = NOW(),
                     google_email = %s,
@@ -770,8 +796,8 @@ def google_callback(request: Request, code: str, state: str):
             """, (creds.token, creds.refresh_token, creds.expiry, google_email, google_id, user_id))
         else:
             cur.execute("""
-                UPDATE users 
-                SET google_access_token = %s, 
+                UPDATE users
+                SET google_access_token = %s,
                     google_token_expiry = %s,
                     google_linked_at = NOW(),
                     google_email = %s,
@@ -779,25 +805,25 @@ def google_callback(request: Request, code: str, state: str):
                 WHERE id = %s
             """, (creds.token, creds.expiry, google_email, google_id, user_id))
         conn.commit()
-        
+
         # Scope Validation: Check if we actually got the required permission
         received_scopes = creds.scopes or []
         logger.info(f"Scopes received from Google for user {user_id}: {received_scopes}")
-        
+
         has_full_scope = any('gmail.readonly' in s or 'mail.google.com' in s for s in received_scopes)
         if not has_full_scope:
             logger.warning(f"User {user_id} linked account without read scope. Scopes received: {received_scopes}")
             # Redirect to a specialized error page
             frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
             return RedirectResponse(url=f"{frontend_url}/dashboard?error=permissions_denied")
-        
+
         # Invalidate cached Gmail service so next call rebuilds with fresh tokens
         from app.services.google_service import invalidate_gmail_service_cache
         invalidate_gmail_service_cache(int(user_id))
 
         # Immediately register Gmail watch() for this user
         register_gmail_watch(int(user_id))
-        
+
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to link Google account: {str(e)}")

@@ -1,31 +1,37 @@
-from fastapi import APIRouter, Header
-from app.database import get_db_connection
-import psycopg2.extras
-from typing import Optional
+import contextlib
 import json
+
+import psycopg2.extras
+from app.database import get_db_connection
+from app.utils.auth_helpers import is_admin_user
 from app.utils.microcache import mc_get, mc_set
+from fastapi import APIRouter, Header
 
 router = APIRouter()
 
 # Lightweight Redis cache for the heavy stats aggregation (30s TTL).
 try:
     import os as _os
+
     import redis as _redis
+    from app.core.redis_pool import get_redis_pool
     _r = None
     try:
         _redis_url = _os.getenv("REDIS_URL") or _os.getenv("REDIS_TLS_URL") or "redis://localhost:6379"
-        _r = _redis.Redis.from_url(_redis_url, decode_responses=True)
+        _r = _redis.Redis(connection_pool=get_redis_pool())
         _r.ping()
     except Exception:
         _r = None
 except Exception:
     _r = None
 
-@router.get("/dashboard/stats")
+from app.core.responses import JsonObject
+
+@router.get("/dashboard/stats", response_model=JsonObject)
 def get_dashboard_stats(
-    month: Optional[int] = None,
-    year: Optional[int] = None,
-    user_id: Optional[str] = Header(None, alias="X-User-Id")
+    month: int | None = None,
+    year: int | None = None,
+    user_id: str | None = Header(None, alias="X-User-Id")
 ):
     # Cache check — this endpoint aggregates 15+ queries per load.
     # L1: in-process micro-cache (0ms) → L2: Redis (30s, for multi-worker).
@@ -45,8 +51,8 @@ def get_dashboard_stats(
 
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
-    is_admin = (str(user_id or '').lower() == 'admin')
+
+    is_admin = is_admin_user(user_id)
 
     # Build date filter condition
     date_cond = ""
@@ -61,7 +67,7 @@ def get_dashboard_stats(
         date_cond = "AND EXTRACT(YEAR FROM created_at) = %s"
         date_params = [year]
     # For tables with different timestamp column
-    date_cond_unsub = date_cond.replace("created_at", "unsubscribed_at") if date_cond else ""
+    date_cond.replace("created_at", "unsubscribed_at") if date_cond else ""
 
     # Resolve user_id to numeric DB id + full_name for activity_log queries
     # (activity_log stores performed_by=full_name or username, not user_id)
@@ -108,7 +114,6 @@ def get_dashboard_stats(
         lr_date_params = date_params
     # Build date filter for company_registry (has created_at column)
     cr_date = lr_date
-    cr_date_params = lr_date_params
 
     # Replied-lead counts must be filtered on replied_at (the actual reply
     # received timestamp — set by the reply handler / backfill), NOT created_at
@@ -141,9 +146,9 @@ def get_dashboard_stats(
             (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND email IS NOT NULL AND email != '') AS with_email,
             (SELECT COUNT(*) FROM leads_raw WHERE {user_cond} {lr_date} AND linkedin_url IS NOT NULL AND linkedin_url != '') AS with_linkedin
     """, all_params * 13 if all_params else [])
-    
+
     row = cur.fetchone()
-    
+
     total_ingested = row['total_ingested'] or 0
     total_leads = row['total_leads'] or 0
     valid_leads = row['valid_leads'] or 0
@@ -172,7 +177,7 @@ def get_dashboard_stats(
         log_params = act_params + al_date_params if act_params else al_date_params
         log_params_2x = log_params + log_params if log_params else []
         cur.execute(f"""
-            SELECT 
+            SELECT
                 (SELECT COUNT(DISTINCT lead_id) FROM activity_log WHERE action IN ('OPENED','EMAIL_OPENED') AND {act_cond} {al_date}) AS log_opens,
                 (SELECT COUNT(DISTINCT lead_id) FROM activity_log WHERE action IN ('CLICKED','EMAIL_CLICKED') AND {act_cond} {al_date}) AS log_clicks
         """, log_params_2x if log_params_2x else [])
@@ -190,13 +195,13 @@ def get_dashboard_stats(
         if is_admin:
             admin_ce_date = lr_date.replace('created_at', 'created_at') if lr_date else ""
             cur.execute(f"""
-                SELECT 
+                SELECT
                     (SELECT COUNT(DISTINCT recipient_id) FROM campaign_events WHERE event_type = 'OPEN' {admin_ce_date}) AS ce_opens,
                     (SELECT COUNT(DISTINCT recipient_id) FROM campaign_events WHERE event_type = 'CLICK' {admin_ce_date}) AS ce_clicks
             """, lr_date_params * 2 if lr_date_params else [])
         else:
             cur.execute(f"""
-                SELECT 
+                SELECT
                     (SELECT COUNT(DISTINCT ce.recipient_id) FROM campaign_events ce
                      JOIN recipients r ON ce.recipient_id = r.id
                      JOIN leads_raw l ON r.lead_id = l.id
@@ -224,10 +229,10 @@ def get_dashboard_stats(
         engagement_rate = float(f"{(classified / total_leads * 100):.1f}") if total_leads > 0 else 0.0
         open_rate = float(f"{(with_email / total_leads * 100):.1f}") if total_leads > 0 else 0.0
         click_rate = float(f"{(with_linkedin / total_leads * 100):.1f}") if total_leads > 0 else 0.0
-        
+
         unique_opens = with_email
         unique_clicks = with_linkedin
-        
+
         bounce_rate = 0.0
         unsub_rate = float(f"{(total_unsubs / total_leads * 100):.1f}") if total_leads > 0 else 0.0
 
@@ -238,14 +243,14 @@ def get_dashboard_stats(
     for r in persona_rows:
         if r['persona']:
             persona_data[r['persona']] = r['count']
-        
+
     cur.execute(f"SELECT * FROM activity_log WHERE {act_cond} {al_date} ORDER BY created_at DESC LIMIT 7", act_params + al_date_params if act_params and al_date_params else (act_params if act_params else (al_date_params if al_date_params else [])))
     logs_rows = cur.fetchall()
     recent_logs = []
     for row in logs_rows:
         recent_logs.append(dict(row))
 
-        
+
     # Count of emails sent today (using activity_log for accuracy, IST timezone)
     # Today counts — always today regardless of month filter
     ist_date = "(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date"
@@ -271,7 +276,7 @@ def get_dashboard_stats(
         elif resolved_id is not None:
             cur.execute("SELECT COUNT(*) as total FROM reminders WHERE status = 'PENDING' AND user_id = %s", (resolved_id,))
         else:
-            rem_count = 0
+            pass
         if not is_admin and resolved_id is None:
             meeting_reminders = 0
         else:
@@ -313,25 +318,23 @@ def get_dashboard_stats(
 
     mc_set(cache_key, result, 30)
     if _r:
-        try:
+        with contextlib.suppress(Exception):
             _r.setex(cache_key, 30, json.dumps(result, default=str))
-        except Exception:
-            pass
     return result
 
 @router.get("/dashboard/card-detail")
 def get_card_detail(
     card_type: str,
-    month: Optional[int] = None,
-    year: Optional[int] = None,
+    month: int | None = None,
+    year: int | None = None,
     page: int = 1,
     per_page: int = 100,
-    user_id: Optional[str] = Header(None, alias="X-User-Id")
+    user_id: str | None = Header(None, alias="X-User-Id")
 ):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-    is_admin = (str(user_id or '').lower() == 'admin')
+    is_admin = is_admin_user(user_id)
     resolved_id = None
     if user_id and not is_admin and user_id.strip():
         uid_value = user_id.strip()
@@ -342,7 +345,7 @@ def get_card_detail(
         row = cur.fetchone()
         if row:
             resolved_id = row['id']
-            resolved_name = row['full_name'] or row['username']
+            row['full_name'] or row['username']
 
     if is_admin:
         user_cond = "1=1"
@@ -454,7 +457,7 @@ def get_card_detail(
         # Must fetch data BEFORE running any other query on same cursor
         bounce_rows = cur.fetchall()
         bounce_records = [dict(r) for r in bounce_rows]
-        
+
         company_breakdown = []
         try:
             breakdown_sql = f"""

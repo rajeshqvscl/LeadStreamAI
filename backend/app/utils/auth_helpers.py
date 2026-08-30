@@ -1,5 +1,3 @@
-from typing import Optional
-from fastapi import Header
 import logging
 
 from app.database import get_db_connection
@@ -7,21 +5,21 @@ from app.database import get_db_connection
 logger = logging.getLogger(__name__)
 
 
-def normalize_user_id(user_id: Optional[str]) -> Optional[str]:
+def normalize_user_id(user_id: str | None) -> str | None:
     """Normalizes the user ID from the header to a valid numeric database ID string.
     Handles 'admin' or string usernames by resolving them to their numeric database ID.
     Returns None if no valid user_id (callers handle by showing all unscoped data).
     """
     if not user_id or str(user_id).strip() == "":
         return None
-    
+
     u_str = str(user_id).strip()
     if u_str.lower() == "admin":
         return "1"
-    
+
     if u_str.isdigit():
         return u_str
-        
+
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -30,18 +28,45 @@ def normalize_user_id(user_id: Optional[str]) -> Optional[str]:
         cur.close()
         conn.close()
         if row:
-            return str(row[0])
+            return str(row['id'])
     except Exception as e:
-        logger.error(f"Error resolving user_id for '{u_str}': {e}")
-        
-    return "1"  # Fallback to admin/system if resolution fails
+        logger.exception(f"Error resolving user_id for '{u_str}': {e}")
+
+    return None  # Do NOT fall back to admin on failure; callers must treat as unauthenticated
 
 
-def get_daily_email_limit(user_id: Optional[str]) -> int:
+def is_admin_user(user_id: str | None) -> bool:
+    """Returns True if the (numeric session) user_id belongs to a user with ADMIN role.
+
+    The AuthMiddleware overrides X-User-Id with the verified numeric session id, so
+    admin must be resolved from the users.role column, never from a literal 'admin' string
+    (which is always False for a numeric header and previously broke admin visibility).
+    """
+    if not user_id:
+        return False
+    uid = str(user_id).strip()
+    if not uid.isdigit():
+        return False
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT role FROM users WHERE id = %s", (int(uid),))
+            row = cur.fetchone()
+            return bool(row and str(row['role']).strip().upper() == "ADMIN")
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.exception(f"Error checking admin role for '{uid}': {e}")
+        return False
+
+
+def get_daily_email_limit(user_id: str | None) -> int:
     """Returns the user's configured daily outreach limit (default 2000)."""
     uid = normalize_user_id(user_id)
-    is_admin = (str(user_id or '').lower() == 'admin')
-    
+    is_admin = is_admin_user(user_id)
+
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -54,18 +79,18 @@ def get_daily_email_limit(user_id: Optional[str]) -> int:
                 daily_limit = int(stored)
         return daily_limit
     except Exception as e:
-        logger.error(f"Error fetching email limit: {e}")
+        logger.exception(f"Error fetching email limit: {e}")
         return 2000
     finally:
         cur.close()
         conn.close()
 
 
-def check_daily_email_limit(user_id: Optional[str], batch_size: int = 1) -> bool:
+def check_daily_email_limit(user_id: str | None, batch_size: int = 1) -> bool:
     """Returns True if the user has not exceeded their daily outreach limit."""
     uid = normalize_user_id(user_id)
-    is_admin = (str(user_id or '').lower() == 'admin')
-    
+    is_admin = is_admin_user(user_id)
+
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -83,11 +108,11 @@ def check_daily_email_limit(user_id: Optional[str], batch_size: int = 1) -> bool
             cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id = %s AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'", (uid,))
         else:
             cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id IS NULL AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
-        
+
         sent_today = cur.fetchone()[0] or 0
         return (sent_today + batch_size) <= daily_limit
     except Exception as e:
-        logger.error(f"Error checking email limit: {e}")
+        logger.exception(f"Error checking email limit: {e}")
         return True
     finally:
         cur.close()

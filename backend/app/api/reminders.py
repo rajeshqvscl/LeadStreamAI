@@ -1,16 +1,17 @@
-from fastapi import APIRouter, Header, HTTPException
-from app.database import get_db_connection
-import psycopg2.extras
-from typing import Optional
 from datetime import datetime
+
+import psycopg2.extras
+from app.database import get_db_connection
+from app.utils.auth_helpers import is_admin_user
+from fastapi import APIRouter, Header, HTTPException
 
 router = APIRouter()
 
 @router.get("/reminders")
-def list_reminders(status: Optional[str] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def list_reminders(status: str | None = None, user_id: str | None = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    is_admin = (str(user_id or '').lower() == 'admin')
+    is_admin = is_admin_user(user_id)
     try:
         if is_admin:
             if status:
@@ -30,7 +31,7 @@ def list_reminders(status: Optional[str] = None, user_id: Optional[str] = Header
         conn.close()
 
 @router.post("/reminders")
-def create_reminder(data: dict, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def create_reminder(data: dict, user_id: str | None = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
@@ -65,10 +66,10 @@ def create_reminder(data: dict, user_id: Optional[str] = Header(None, alias="X-U
         conn.close()
 
 @router.patch("/reminders/{reminder_id}")
-def update_reminder(reminder_id: int, data: dict, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def update_reminder(reminder_id: int, data: dict, user_id: str | None = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
-    is_admin = (str(user_id or '').lower() == 'admin')
+    is_admin = is_admin_user(user_id)
     try:
         fields = []
         values = []
@@ -102,10 +103,10 @@ def update_reminder(reminder_id: int, data: dict, user_id: Optional[str] = Heade
         conn.close()
 
 @router.delete("/reminders/{reminder_id}")
-def delete_reminder(reminder_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def delete_reminder(reminder_id: int, user_id: str | None = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
-    is_admin = (str(user_id or '').lower() == 'admin')
+    is_admin = is_admin_user(user_id)
     try:
         if is_admin:
             cur.execute("DELETE FROM reminders WHERE id = %s", (reminder_id,))
@@ -118,11 +119,13 @@ def delete_reminder(reminder_id: int, user_id: Optional[str] = Header(None, alia
         cur.close()
         conn.close()
 
-@router.get("/reminders/due")
-def get_due_reminders(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+from app.core.responses import JsonObject
+
+@router.get("/reminders/due", response_model=list[JsonObject])
+def get_due_reminders(user_id: str | None = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    is_admin = (str(user_id or '').lower() == 'admin')
+    is_admin = is_admin_user(user_id)
     try:
         now = datetime.utcnow().isoformat()
         if is_admin:
@@ -136,11 +139,11 @@ def get_due_reminders(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         cur.close()
         conn.close()
 
-@router.get("/reminders/urgent-actions")
-def get_urgent_actions(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+@router.get("/reminders/urgent-actions", response_model=JsonObject)
+def get_urgent_actions(user_id: str | None = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    is_admin = (str(user_id or '').lower() == 'admin')
+    is_admin = is_admin_user(user_id)
     try:
         uid_cond = ""
         uid_val = None

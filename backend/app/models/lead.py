@@ -1,7 +1,8 @@
 # from app.database import get_db_connection
-from app.database import get_db_connection
 import json
 import secrets
+
+from app.database import get_db_connection
 
 
 def insert_lead(first_name, last_name, email, domain, linkedin, company, source, payload, fit_score=0, persona="OTHER", phone=None, user_id=None, user_name=None, lead_type="CLIENT", sector=None, intent_level="Warm", ai_score=85, system_confidence=90):
@@ -31,7 +32,7 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
     from app.utils.classification import infer_lead_classification
     remarks = payload.get('remarks', '') if payload else ''
     inferred_type, inferred_sector = infer_lead_classification(company, designation, remarks, sector)
-    
+
     # Use inferred values if defaults were provided
     if lead_type == "CLIENT" and inferred_type == "INVESTOR":
         lead_type = "INVESTOR"
@@ -72,12 +73,12 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
             created_at = CURRENT_TIMESTAMP,
             unsubscribe_token = COALESCE(leads_raw.unsubscribe_token, EXCLUDED.unsubscribe_token)
     """
-    
+
     _token = secrets.token_urlsafe(32)
-    
+
     cur.execute(update_query, (
-        first_name, last_name, email, domain, linkedin, company, source, 
-        json.dumps(payload), fit_score, persona, phone, user_id, user_name, designation, 
+        first_name, last_name, email, domain, linkedin, company, source,
+        json.dumps(payload), fit_score, persona, phone, user_id, user_name, designation,
         lead_type, sector, intent_level, ai_score, system_confidence, _token
     ))
 
@@ -133,7 +134,7 @@ def get_lead_by_id(lead_id):
 def update_lead(lead_id, data):
     conn = get_db_connection()
     cur = conn.cursor()
-    
+
     # Generate dynamic SET clause
     fields = []
     values = []
@@ -144,10 +145,10 @@ def update_lead(lead_id, data):
         # For now assume keys match or we handle mapping in the API layer
         fields.append(f"{db_key} = %s")
         values.append(val)
-    
+
     values.append(lead_id)
     query = f"UPDATE leads_raw SET {', '.join(fields)} WHERE id = %s"
-    
+
     cur.execute(query, tuple(values))
     conn.commit()
     cur.close()
@@ -157,10 +158,10 @@ def update_lead(lead_id, data):
 def add_activity_log(lead_id, action, details=None, performed_by='system', user_id=None, user_name=None):
     conn = get_db_connection()
     cur = conn.cursor()
-    
+
     # If user_name is not provided but user_id is, try to fetch it if it's cheap (optional optimization)
     # For now, we assume the caller provides it for efficiency.
-    
+
     cur.execute(
         "INSERT INTO activity_log (lead_id, action, details, performed_by, user_id, user_name) VALUES (%s, %s, %s, %s, %s, %s)",
         (lead_id, action, details, performed_by, user_id, user_name)
@@ -205,7 +206,7 @@ def save_email_draft(lead_id, draft):
     conn.commit()
     cur.close()
     conn.close()
-    
+
     # Log activity
     try:
         add_activity_log(lead_id, "DRAFT_GENERATED", "AI email draft generated and saved for review", "system")

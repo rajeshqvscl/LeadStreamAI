@@ -1,13 +1,13 @@
 # app/services/llm_services.py
 
-import os
 import json
+import os
+from pathlib import Path
+
 import structlog
 from anthropic import Anthropic
-from groq import Groq
-
-from pathlib import Path
 from dotenv import load_dotenv
+from groq import Groq
 
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
@@ -43,12 +43,12 @@ class EmailGenerator:
         self.anthropic_client = None
         if self.anthropic_key:
             try: self.anthropic_client = Anthropic(api_key=self.anthropic_key)
-            except Exception as e: logger.error("anthropic_init_failed", error=str(e))
+            except Exception as e: logger.exception("anthropic_init_failed", error=str(e))
 
         self.groq_client = None
         if self.groq_key:
             try: self.groq_client = Groq(api_key=self.groq_key)
-            except Exception as e: logger.error("groq_init_failed", error=str(e))
+            except Exception as e: logger.exception("groq_init_failed", error=str(e))
 
         self.gemini_model = None
         if self.gemini_key:
@@ -56,11 +56,11 @@ class EmailGenerator:
                 import google.generativeai as genai
                 genai.configure(api_key=self.gemini_key)
                 self.gemini_model = genai.GenerativeModel(GEMINI_MODEL)
-            except Exception as e: logger.error("gemini_init_failed", error=str(e))
+            except Exception as e: logger.exception("gemini_init_failed", error=str(e))
 
     def _call_llm(self, prompt: str, max_tokens: int = 1024):
         """Internal helper to call available LLMs in priority: Groq -> Gemini -> Claude."""
-        
+
         # 1. Try Groq (Priority 1)
         if self.groq_client:
             try:
@@ -72,7 +72,7 @@ class EmailGenerator:
                 return chat_completion.choices[0].message.content.strip()
             except Exception as e:
                 if "429" in str(e) or "limit" in str(e).lower():
-                    logger.error("!!! GROQ KEY EXHAUSTED !!! Falling back to Gemini...")
+                    logger.exception("!!! GROQ KEY EXHAUSTED !!! Falling back to Gemini...")
                 else:
                     logger.warning("groq_failed", error=str(e))
 
@@ -83,7 +83,7 @@ class EmailGenerator:
                 return response.text.strip()
             except Exception as e:
                 if "429" in str(e) or "limit" in str(e).lower():
-                    logger.error("!!! GEMINI KEY EXHAUSTED !!! Falling back to Claude...")
+                    logger.exception("!!! GEMINI KEY EXHAUSTED !!! Falling back to Claude...")
                 else:
                     logger.warning("gemini_failed", error=str(e))
 
@@ -98,32 +98,32 @@ class EmailGenerator:
                 return response.content[0].text.strip()
             except Exception as e:
                 if "429" in str(e) or "limit" in str(e).lower():
-                    logger.error("!!! CLAUDE KEY EXHAUSTED !!! No more fallback options.")
+                    logger.exception("!!! CLAUDE KEY EXHAUSTED !!! No more fallback options.")
                 else:
-                    logger.error("claude_failed", error=str(e))
-        
+                    logger.exception("claude_failed", error=str(e))
+
         return None
 
     def generate_email(self, lead: dict, sender_name: str = "the team", sender_linkedin: str = "https://www.linkedin.com/company/qvscl/"):
         """Generates a hyper-personalized email using RAG data if available, else falls back to standard template."""
-        
+
         first_name = (lead.get('first_name') or lead.get('name') or "there").strip().capitalize()
         rag_advice = lead.get('rag_advice')
-        
+
         # If we have RAG Intelligence, use LLM to craft a personalized version
         if rag_advice and len(rag_advice) > 100:
             prompt = f"""
-            You are a senior investment associate at QVSCL (Gurugram). 
+            You are a senior investment associate at QVSCL (Gurugram).
             Write a highly personalized outreach email to {first_name} based on the following RAG Intelligence.
-            
+
             SENDER INFO:
             Name: {sender_name}
             Company: QVSCL
             LinkedIn: {sender_linkedin}
-            
+
             RAG INTELLIGENCE DATA:
             {rag_advice}
-            
+
             GUIDELINES:
             1. Maintain a professional, executive tone.
             2. Reference the specific metrics (Actuals) and sector insights from the RAG data.
@@ -132,11 +132,11 @@ class EmailGenerator:
             5. Use HTML tags <b></b> for key metrics or business terms.
             6. Do NOT include placeholder bracket text like [Your Name]. Use the provided sender info.
             7. Return ONLY the email subject and body separated by "---SUBJECT_END---".
-            
+
             EXAMPLE OUTPUT FORMAT:
             Strategic Opportunity: [Topic] ---SUBJECT_END--- Hi [Name], ...
             """
-            
+
             ai_response = self._call_llm(prompt, max_tokens=2048)
             if ai_response and "---SUBJECT_END---" in ai_response:
                 parts = ai_response.split("---SUBJECT_END---", 1)
@@ -201,7 +201,7 @@ For more details about our services: [Website](https://qvscl.com) | [Linkedin]({
 Looking forward to your response.
 """
         return {
-            "subject": f"Strategic Investment Opportunity: Climate-focused Agritech Platform",
+            "subject": "Strategic Investment Opportunity: Climate-focused Agritech Platform",
             "body": body
         }
 
@@ -212,12 +212,12 @@ Looking forward to your response.
         """Generates a personalized follow-up email with multi-LLM fallback."""
         prompt = f"""
         You are a polite, professional executive assistant. Write a SHORT follow-up email for {lead_name}.
-        
+
         Previous Context:
         {original_content}
-        
+
         Follow-up Stage: {stage} (1=First nudge, 2=Second nudge, 3=Final follow-up)
-        
+
         Guidelines:
         1. Reference the previous email naturally.
         2. Keep it under 3-4 sentences.
@@ -225,7 +225,7 @@ Looking forward to your response.
         4. If Stage 3, mention this is the final follow-up.
         5. Write ONLY the email body. Use HTML for bolding important parts.
         """
-        
+
         res = self._call_llm(prompt)
         return res if res else "Hi, just following up on my previous email. Let me know if you have any questions!"
 
@@ -239,11 +239,11 @@ Looking forward to your response.
             "italic": "Add slight emphasis to call-to-actions or expressive phrases using <i></i> tags.",
             "persuasive": "Make the email more compelling and persuasive to increase the chance of a meeting."
         }
-        
+
         instruction = instructions.get(action, action)
         content = f"Subject: {subject}\n\n{body}"
         prompt = REFINEMENT_PROMPT.format(content=content, instruction=instruction)
-        
+
         refined_text = self._call_llm(prompt, max_tokens=2048)
         if not refined_text: return {"subject": subject, "body": body}
 
@@ -254,7 +254,7 @@ Looking forward to your response.
             new_subject = parts[0].replace("Subject:", "").strip()
             if len(parts) > 1:
                 new_body = parts[1].strip()
-        
+
         return {"subject": new_subject, "body": new_body}
 
     def detect_intent(self, query: str):
@@ -268,9 +268,9 @@ Looking forward to your response.
         3. COMPARISON: User wants to compare two or more leads or documents.
         4. WEB_SEARCH: User is asking for current market data or external info not in the docs.
         5. CHAT: General conversation or follow-up questions.
-        
+
         Query: "{query}"
-        
+
         Return ONLY the category name in uppercase.
         """
         intent = self._call_llm(prompt, max_tokens=20)
@@ -288,7 +288,7 @@ Looking forward to your response.
         1. Current funding climate for the relevant sector.
         2. Top 3 competitors or emerging players.
         3. Recent regulatory or technology shifts (2025-2026).
-        
+
         Return ONLY the intelligence brief as a list of bullet points.
         """
         market_intel = self._call_llm(market_prompt, max_tokens=512)
@@ -300,17 +300,17 @@ Looking forward to your response.
         """
         prompt = f"""
         Answer the following query based ONLY on the provided context.
-        
+
         RULES:
         1. For every claim you make, you MUST include a citation in the format [Source: X] where X is the document/section name.
         2. If the information is not in the context, state "Information not found in documents."
         3. Use a professional, analyst-style tone.
-        
+
         Context:
         {context}
-        
+
         Query: {query}
-        
+
         Answer:
         """
         return self._call_llm(prompt, max_tokens=1024)
@@ -319,16 +319,16 @@ Looking forward to your response.
         """Analyzes a lead's reply to determine intent and extract details."""
         prompt = f"""
         Analyze this email reply from a potential investor/client and extract details in JSON format.
-        
+
         CRITICAL RULES:
         1. Identify the new response/reply at the very beginning/top of the text. Ignore any quoted historical thread or original outreach text trailing after it (e.g., descriptions of QVSCL, the climate agritech project, traction, etc.).         2. If the lead declines the opportunity in the new reply—even in a short sentence like "Pass from us", "Pass for now", "Not interested", "Not within our mandate", "Too early for us", "No thank you", "We will pass", "Not fit for us", "No, thankyou", "not a current fit for us", "We will pass on this opportunity", "we only invest in", "we only do", "Please share a detailed deck", "We will pass. Thanks for sharing."—you MUST classify the intent as "NOT_INTERESTED" and set the sentiment_score between 0 and 20.
         3. Do NOT let the details of the original outreach email (which is positive) confuse you. Focus 100% on the lead's new reply at the top.
         4. CRITICAL — deal_size: Extract the ticket size, investment range, check size, or revenue criteria (MONETARY VALUES ONLY, e.g., '$1M', '$500K-$1M', 'INR 100 cr+', '10-20 Cr') explicitly mentioned in the lead's NEW reply (the top part). Crucially: DO NOT include stage names like 'Series A', 'Series B', 'Seed', or 'Pre-Seed' — only extract numeric monetary values/ranges. If none is mentioned, set null.
          5. CRITICAL — pitch_deck_url: ONLY set if the lead's NEW reply explicitly includes a URL or attachment reference. Do not fabricate or copy from the quoted thread.
-        
+
         REPLY TEXT:
         {text}
-        
+
          JSON STRUCTURE:
          {{
            "intent": "MEETING_REQUESTED" | "INTERESTED" | "NEEDS_MORE_INFO" | "NOT_INTERESTED",

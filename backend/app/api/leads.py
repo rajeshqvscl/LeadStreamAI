@@ -1,22 +1,56 @@
-from fastapi import APIRouter, HTTPException, Header, Response, Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from typing import Optional, Any, Dict
 import json
+import logging
 import re
 import secrets
+from typing import Any
+
 import psycopg2
 import psycopg2.extras
-from app.database import get_db_connection
-from app.models.lead import get_lead_by_id, update_lead, get_activity_log, add_activity_log
 from app.api.drafts import get_sender_profile, inject_signature
-from app.utils.auth_helpers import check_daily_email_limit, get_daily_email_limit, normalize_user_id
-
-import logging
+from app.database import get_db_connection
+from app.models.lead import add_activity_log, get_activity_log, get_lead_by_id, update_lead
+from app.utils.auth_helpers import (
+    check_daily_email_limit,
+    get_daily_email_limit,
+    is_admin_user,
+    normalize_user_id,
+)
+from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+
+def _is_admin_user(conn, user_id) -> bool:
+    """Return True if the given user_id corresponds to a user with the ADMIN role.
+
+    Uses the provided connection if available, otherwise opens its own.
+    """
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return False
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_connection()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        try:
+            cur.execute("SELECT role FROM users WHERE id = %s", (uid,))
+            row = cur.fetchone()
+        finally:
+            cur.close()
+    finally:
+        if own_conn:
+            conn.close()
+    if not row:
+        return False
+    return str(row.get("role", "")).upper() == "ADMIN"
+
+
 # --- REDIS CACHE INITIALIZATION ---
+import contextlib
 import os
 
 redis_client = None
@@ -24,11 +58,9 @@ redis_available = False
 
 try:
     import redis
+    from app.core.redis_pool import get_redis_pool
     REDIS_URL = os.getenv("REDIS_URL") or os.getenv("REDIS_TLS_URL") or "redis://localhost:6379"
-    redis_client = redis.Redis.from_url(
-        REDIS_URL,
-        decode_responses=True,
-    )
+    redis_client = redis.Redis(connection_pool=get_redis_pool())
     redis_client.ping()
     redis_available = True
     logger.info(f"SUCCESS: Connected to Redis Cache inside leads.py at {REDIS_URL.split('@')[-1]}")
@@ -54,7 +86,7 @@ def _redis_delete_pattern(pattern: str):
         if deleted:
             logger.info(f"SUCCESS: Invalidated {deleted} cache keys for pattern: {pattern}")
     except Exception as ie:
-        logger.error(f"Failed to invalidate cache for pattern {pattern}: {ie}")
+        logger.exception(f"Failed to invalidate cache for pattern {pattern}: {ie}")
 
 
 def invalidate_leads_cache(user_id: str = "*"):
@@ -64,76 +96,78 @@ router = APIRouter()
 
 
 class LeadUpdate(BaseModel):
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    company_name: Optional[str] = None
-    industry: Optional[str] = None
-    city: Optional[str] = None
-    country: Optional[str] = None
-    linkedin_url: Optional[str] = None
-    persona: Optional[str] = None
-    fit_score: Optional[int] = None
-    campaign_id: Optional[int] = None
-    family_office_name: Optional[str] = None
-    source: Optional[str] = None
-    remarks: Optional[str] = None
-    designation: Optional[str] = None
+    first_name: str | None = None
+    last_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    company_name: str | None = None
+    industry: str | None = None
+    city: str | None = None
+    country: str | None = None
+    linkedin_url: str | None = None
+    persona: str | None = None
+    fit_score: int | None = None
+    campaign_id: int | None = None
+    family_office_name: str | None = None
+    source: str | None = None
+    remarks: str | None = None
+    designation: str | None = None
 
 class LeadCreate(BaseModel):
     first_name: str
-    last_name: Optional[str] = ""
+    last_name: str | None = ""
     email: str
-    company_name: Optional[str] = ""
-    designation: Optional[str] = ""
-    phone: Optional[str] = ""
-    city: Optional[str] = ""
-    country: Optional[str] = ""
-    linkedin_url: Optional[str] = ""
-    persona: Optional[str] = "OTHER"
-    source: Optional[str] = "manual"
-    remarks: Optional[str] = ""
+    company_name: str | None = ""
+    designation: str | None = ""
+    phone: str | None = ""
+    city: str | None = ""
+    country: str | None = ""
+    linkedin_url: str | None = ""
+    persona: str | None = "OTHER"
+    source: str | None = "manual"
+    remarks: str | None = ""
 
-from typing import List
+
 
 class BulkLabelRequest(BaseModel):
-    lead_ids: List[int]
-    labels: List[str]
+    lead_ids: list[int]
+    labels: list[str]
 
 class LabelRemoveRequest(BaseModel):
     label: str
 
 class BulkApproveFollowupsRequest(BaseModel):
-    lead_ids: List[int]
+    lead_ids: list[int]
 
 class ApproveFollowupRequest(BaseModel):
-    custom_body: Optional[str] = None
+    custom_body: str | None = None
 
-@router.get("/leads")
+from app.core.responses import JsonObject
+
+@router.get("/leads", response_model=JsonObject)
 def get_leads(
     page: int = 1,
-    search: Optional[str] = "",
-    title: Optional[str] = "",
-    persona: Optional[str] = "",
-    company: Optional[str] = "",
-    validation_status: Optional[str] = "",
-    city: Optional[str] = "",
-    country: Optional[str] = "",
-    source: Optional[str] = "",
+    search: str | None = "",
+    title: str | None = "",
+    persona: str | None = "",
+    company: str | None = "",
+    validation_status: str | None = "",
+    city: str | None = "",
+    country: str | None = "",
+    source: str | None = "",
     per_page: int = 25,
     exclude_drafted: bool = False,
-    exclude_source: Optional[str] = None,
-    search_type: Optional[str] = "",
-    user_id: Optional[str] = Header(None, alias="X-User-Id")
+    exclude_source: str | None = None,
+    search_type: str | None = "",
+    user_id: str | None = Header(None, alias="X-User-Id")
 ):
     # Re-standardize user_id for private pipeline filtering
     uid = normalize_user_id(user_id)
-    is_admin = (str(user_id).lower() == 'admin')
-    
+    is_admin = _is_admin_user(None, user_id)
+
     # Build unique composite cache key for leads list queries
     cache_key = f"leads:{uid}:{page}:{per_page}:{exclude_drafted}:{search}:{title}:{persona}:{company}:{validation_status}:{city}:{country}:{source}:{exclude_source}:{search_type}:{is_admin}"
-    
+
     if redis_available and redis_client:
         try:
             cached = redis_client.get(cache_key)
@@ -145,27 +179,27 @@ def get_leads(
 
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
+
     # Dynamically extract designation if needed (to handle cases where schema update was blocked)
     query = """
-        SELECT *, 
+        SELECT *,
                COALESCE(
-                   NULLIF(designation, ''), 
-                   raw_payload->>'Designation', 
-                   raw_payload->>'Role/Designation', 
-                   raw_payload->>'designation', 
+                   NULLIF(designation, ''),
+                   raw_payload->>'Designation',
+                   raw_payload->>'Role/Designation',
+                   raw_payload->>'designation',
                    persona
-               ) as designation, 
-               labels, remarks 
-        FROM leads_raw 
+               ) as designation,
+               labels, remarks
+        FROM leads_raw
         WHERE 1=1
     """
     params = []
-    
+
     # Re-standardize user_id for private pipeline filtering
     uid = normalize_user_id(user_id)
-    # Only treat as admin if the header literal value is 'admin' — numeric ids always filter by owner
-    is_admin = (str(user_id).lower() == 'admin')
+    # Only treat as admin if the user has the ADMIN role
+    is_admin = _is_admin_user(None, user_id)
 
     if is_admin:
         pass  # Admin sees all leads
@@ -184,7 +218,7 @@ def get_leads(
             params.append(source)
     elif search_type == 'discovery_only':
         query += " AND source IN ('bulk', 'csv_import')"
-        
+
     if exclude_source:
         query += " AND source != %s"
         params.append(exclude_source)
@@ -210,10 +244,10 @@ def get_leads(
         bad_names = r'test|dummy|sample|example|unknown|admin|user|lead test|mock|noreply'
         bad_domains = r'@(test|dummy|example|mailinator|fake|temp|noemail)\.(com|net|io|org)$'
         bad_titles = r'\b(ex|former|previous|past|advisor|retired|consultant|board member)\b'
-        
-        query += f""" 
+
+        query += f"""
             AND (
-                COALESCE(manual_entry, FALSE) IS TRUE 
+                COALESCE(manual_entry, FALSE) IS TRUE
                 OR (
                     COALESCE(first_name,'') !~* '{bad_names}'
                     AND COALESCE(last_name,'') !~* '{bad_names}'
@@ -222,12 +256,12 @@ def get_leads(
                 )
             )
         """
-        
+
     # Global Blacklist Exclusion
     query += " AND (email_opt_in IS NULL OR email_opt_in = TRUE)"
     query += " AND (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)"
     query += " AND email NOT IN (SELECT email FROM unsubscribe_list)"
-    
+
     # Exclude ghost leads auto-created by Gmail sync:
     # These have source=NULL and were never manually added by the user.
     # Real user-created leads always have source set (bulk, csv_import, direct, manual, intelligence).
@@ -236,7 +270,7 @@ def get_leads(
     # ──────────────────────────────────────────────────────────────────────────
 
     if exclude_drafted:
-        if source == 'bulk' or source == 'csv_import' or search_type == 'discovery_only':
+        if source in {'bulk', 'csv_import'} or search_type == 'discovery_only':
             # Bulk Discovery: ONLY show leads that are NOT yet drafted
             query += " AND (COALESCE(email_status, '') IN ('', 'PENDING') AND COALESCE(manual_entry, FALSE) IS FALSE)"
         else:
@@ -246,7 +280,7 @@ def get_leads(
             query += "  (source NOT IN ('bulk', 'csv_import'))" # Intel/Direct always show
             query += "  OR (COALESCE(email_status, '') NOT IN ('', 'PENDING'))" # Bulk shows if it's drafted, sent, approved, etc.
             query += ")"
-    
+
     if search:
         query += " AND (first_name ILIKE %s OR last_name ILIKE %s OR email ILIKE %s OR company_name ILIKE %s OR raw_payload->>'current_title' ILIKE %s OR persona ILIKE %s OR phone ILIKE %s)"
         s = f"%{search}%"
@@ -259,30 +293,30 @@ def get_leads(
             query += f" AND ({title_conditions})"
             for t in titles:
                 params.append(f"%{t}%")
-        
+
     if persona:
         query += " AND persona = %s"
         params.append(persona)
-        
+
     if company:
         query += " AND company_name ILIKE %s"
         params.append(f"%{company}%")
-        
+
     if validation_status:
         query += " AND validation_status = %s"
         params.append(validation_status)
 
-        
+
     # count total - handle multi-line select correctly
     count_query = f"SELECT COUNT(*) FROM ({query}) as total_count"
     cur.execute(count_query, tuple(params))
     total = cur.fetchone()[0]
-    
+
     query += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
     params.extend([per_page, (page - 1) * per_page])
     cur.execute(query, tuple(params))
     rows = cur.fetchall()
-    
+
     cur.close()
     conn.close()
 
@@ -306,7 +340,7 @@ def get_leads(
             phones = payload.get("phones")
             if phones and isinstance(phones, list) and len(phones) > 0:
                 phone = phones[0].get("number")
- 
+
         leads.append({
             "id": r["id"],
             "name": f"{r['first_name'] or ''} {r['last_name'] or ''}".strip(),
@@ -329,7 +363,7 @@ def get_leads(
             "email_status": r.get("email_status"),
             "status": r.get("email_status") or "PENDING_APPROVAL",
             "is_unsubscribed": r.get("is_unsubscribed", False),
-            "email_opt_in": True if r.get("email_opt_in") is not False else False,
+            "email_opt_in": r.get("email_opt_in") is not False,
             "remarks": r.get("remarks", ""),
             "created_at": r["created_at"].isoformat() + "Z" if r["created_at"] else None
         })
@@ -338,7 +372,7 @@ def get_leads(
         "leads": leads,
         "total": total
     }
-    
+
     if redis_available and redis_client:
         try:
             # Cache results for 10 seconds to keep load off the database, but keep pagination/searching highly snappy
@@ -346,7 +380,7 @@ def get_leads(
             logger.info(f"INFO: Cached leads query for user {uid} on page {page}")
         except Exception as ce:
             logger.warning(f"WARNING: Redis leads cache write error: {ce}")
-            
+
     return result
 
 
@@ -364,10 +398,10 @@ _DUE_INTERVAL_SQL = (
 
 @router.get("/leads/followups")
 def list_followups(
-    page: Any = 1, 
-    per_page: Any = 100, 
-    type: Any = None, 
-    stage: Any = None, 
+    page: Any = 1,
+    per_page: Any = 100,
+    type: Any = None,
+    stage: Any = None,
     search: Any = None,
     status: Any = 'DUE',
     date: Any = None,
@@ -379,9 +413,9 @@ def list_followups(
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
+
         status_val = (status or 'DUE').upper()
-        
+
         # Base query depends on status
         if status_val == 'SENT':
             base_query = " FROM leads_raw lr WHERE email_status IN ('SENT', 'OPENED', 'CLICKED') AND COALESCE(followup_stage, 0) > 0 AND followup_status != 'STOPPED' AND last_outreach_at >= NOW() - INTERVAL '7 days' "
@@ -408,12 +442,12 @@ def list_followups(
                 AND followup_status != 'STOPPED'
                 AND ({_DUE_INTERVAL_SQL})
             """
-        
+
         params = []
-        
+
         # 1. Multi-user Segregation
         uid = normalize_user_id(user_id)
-        
+
         # SECURE ADMIN CHECK using existing connection
         is_admin = False
         if uid:
@@ -426,7 +460,7 @@ def list_followups(
 
         # LOG FOR DEBUGGING PRIVACY
         logger.info(f"FETCH_FOLLOWUPS: header_user_id={user_id}, normalized_uid={uid}, is_admin={is_admin}")
-        
+
         if not is_admin:
             if uid:
                 base_query += " AND user_id = %s"
@@ -434,7 +468,7 @@ def list_followups(
             else:
                 # If we can't identify the user and they aren't admin, return empty
                 return {"leads": [], "total": 0}
-            
+
         # 2. Lead Type Filtering
         investor_kw = ["VENTURE", "CAPITAL", "EQUITY", "INVEST", "PARTNER", "ASSET", "FAMILY OFFICE", "ANGEL", "CIRCLE", "NETWORK", "FUND", "VC", "PE", "HOLDING", "SFO", "OFFICE", "ADVISORY", "MANAGEMENT", "PRIVATE", "TRUST", "WEALTH", "ASSOCIATES", "GROUP", "PARTNERS", "ADVISORS", "FOUNDATION"]
         kw_conditions = " OR ".join([f"company_name ILIKE '%%{kw}%%' OR sector ILIKE '%%{kw}%%'" for kw in investor_kw])
@@ -480,7 +514,7 @@ def list_followups(
             # If no type filter, but it's Yashika, we still treat all as Investors for timing rules in base_query if needed
             # (The base_query already handles the interval logic, but we must ensure it uses Investor rules)
             pass
-        
+
         # 3. Search Filter
         if search:
             base_query += " AND (first_name ILIKE %s OR last_name ILIKE %s OR email ILIKE %s OR company_name ILIKE %s)"
@@ -509,7 +543,7 @@ def list_followups(
                 d_key = r['d'].isoformat() if hasattr(r['d'], 'isoformat') else str(r['d'])
                 date_stage_counts.setdefault(d_key, {})[str(r['stage'])] = r['n']
         except Exception as date_err:
-            logger.error(f"Error computing followup date-stage counts: {date_err}")
+            logger.exception(f"Error computing followup date-stage counts: {date_err}")
 
         # 3.7. Date Filter — only leads whose most recent outreach happened on the
         # given calendar day (YYYY-MM-DD). Composes with status/type/search, and the
@@ -533,7 +567,7 @@ def list_followups(
             for r in cur.fetchall():
                 stage_counts[str(r['stage'])] = r['n']
         except Exception as count_err:
-            logger.error(f"Error computing followup stage counts: {count_err}")
+            logger.exception(f"Error computing followup stage counts: {count_err}")
 
         # 5. Stage Filter
         if stage is not None and str(stage).strip() != "":
@@ -587,7 +621,7 @@ def list_followups(
         """
         cur.execute(query, tuple(params + [per_page_val, (page_val - 1) * per_page_val]))
         rows = cur.fetchall()
-        
+
         results = []
         for r in rows:
             lead_dict = dict(r)
@@ -619,44 +653,44 @@ def list_followups(
             if is_yashika or is_kajal:
                 lead_dict['lead_type'] = 'Investor'
             results.append(lead_dict)
-            
+
         return {"leads": results, "total": total, "stage_counts": stage_counts, "date_stage_counts": date_stage_counts}
     except Exception as e:
-        logger.error(f"Error fetching follow-ups: {e}")
+        logger.exception(f"Error fetching follow-ups: {e}")
         return {"error": str(e)}
     finally:
         if 'cur' in locals(): cur.close()
         if 'conn' in locals(): conn.close()
 
 @router.get("/leads/export-all")
-def export_all_leads(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def export_all_leads(user_id: str | None = Header(None, alias="X-User-Id")):
     """Fetches every lead for the current user for CSV export."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
+
     uid = normalize_user_id(user_id)
-    is_admin = (str(user_id).lower() == 'admin')
-    
+    is_admin = _is_admin_user(conn, user_id)
+
     query = "SELECT * FROM leads_raw lr WHERE (email_opt_in IS NULL OR email_opt_in = TRUE) AND (is_unsubscribed IS NULL OR is_unsubscribed = FALSE)"
     params = []
-    
+
     if not is_admin:
         query += " AND user_id = %s"
         params.append(uid)
-        
+
     query += " ORDER BY created_at DESC"
     cur.execute(query, tuple(params))
     rows = cur.fetchall()
     cur.close()
     conn.close()
-    
+
     leads = []
     for r in rows:
         payload = r.get("raw_payload") or {}
         if isinstance(payload, str):
             try: payload = json.loads(payload)
             except Exception: payload = {}
-            
+
         leads.append({
             "id": r["id"],
             "first_name": r["first_name"],
@@ -680,13 +714,13 @@ def export_all_leads(user_id: Optional[str] = Header(None, alias="X-User-Id")):
     return leads
 
 @router.get("/leads/{lead_id}")
-def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_lead_detail(lead_id: int, user_id: str | None = Header(None, alias="X-User-Id")):
     """Retrieves full details for a single lead, scoped to the requesting user."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
+
     uid = normalize_user_id(user_id)
-    is_admin = (str(user_id).lower() == 'admin')
+    is_admin = _is_admin_user(conn, user_id)
 
     if is_admin:
         cur.execute("SELECT * FROM leads_raw lr WHERE id = %s", (lead_id,))
@@ -694,22 +728,22 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
         cur.execute("SELECT * FROM leads_raw lr WHERE id = %s AND user_id = %s", (lead_id, uid))
     else:
         cur.execute("SELECT * FROM leads_raw lr WHERE id = %s AND user_id IS NULL", (lead_id,))
-        
+
     row = cur.fetchone()
     cur.close()
     conn.close()
 
     if not row:
         raise HTTPException(status_code=404, detail="Lead not found")
-    
+
     # Convert to mutable dict
     lead = dict(row)
     lead["status"] = lead.get("email_status") or "PENDING_APPROVAL"
-    
+
     if lead.get("email_draft"):
         from app.api.drafts import heal_draft_content
         lead["email_draft"] = heal_draft_content(lead["email_draft"], user_id, template_name=lead.get('draft_template_used'))
-    
+
     # Enrich with payload if needed
     payload = lead.get("raw_payload")
     if isinstance(payload, str):
@@ -719,10 +753,10 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
             payload = {}
     elif not payload:
         payload = {}
-        
+
     city = lead.get("city") or payload.get("city") or ""
     country = lead.get("country") or payload.get("country") or ""
-    
+
     lead["city"] = city
     lead["country"] = country
 
@@ -737,7 +771,7 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
                 generic = {"gmail", "yahoo", "hotmail", "outlook", "protonmail", "icloud", "qvscl", "me", "live", "microsoft", "samsung", "sea", "example"}
                 if domain not in generic:
                     lead["company_name"] = domain.capitalize()
-    
+
     # Robust phone extraction fallback for details
     phone = lead.get("phone")
     if not phone and payload and "phones" in payload:
@@ -745,29 +779,29 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
         if phones and isinstance(phones, list) and len(phones) > 0:
             phone = phones[0].get("number")
     lead["phone"] = phone or payload.get("phone") or ""
-    
+
     # ensure job title is included (designation)
     # PRIORITIZE existing designation column over payload to prevent wiping out manual entries
     if not lead.get("designation") and payload:
         lead["designation"] = payload.get("current_title", payload.get("designation", ""))
-        
+
     # Serialize datetime
     if lead.get("created_at"):
         if hasattr(lead["created_at"], "isoformat"):
             lead["created_at"] = lead["created_at"].isoformat() + "Z"
         else:
             lead["created_at"] = str(lead["created_at"])
-            
+
     if lead.get("scheduled_at"):
         if hasattr(lead["scheduled_at"], "isoformat"):
             lead["scheduled_at"] = lead["scheduled_at"].isoformat() + "Z"
         else:
             lead["scheduled_at"] = str(lead["scheduled_at"])
-        
+
     # Normalize email_draft content to handle literal escapes
     if lead.get("email_draft"):
         draft_raw = lead["email_draft"].replace("\\n", "\n").replace("\\r\\n", "\n")
-        
+
         # DYNAMIC REPAIR: If signature/unsubscribe is missing, inject it on the fly (but don't save to DB)
         if "unsubscribe" not in draft_raw.lower():
             try:
@@ -778,46 +812,46 @@ def get_lead_detail(lead_id: int, user_id: Optional[str] = Header(None, alias="X
                     parts = draft_raw.split("\n\n", 1)
                     subject = parts[0].replace("Subject: ", "").strip()
                     body = parts[1].strip() if len(parts) > 1 else ""
-                
+
                 profile = get_sender_profile(user_id)
                 repaired_body = inject_signature(body, profile, lead_id)
                 draft_raw = f"Subject: {subject}\n\n{repaired_body}"
             except Exception as e:
-                logger.error(f"Dynamic signature repair failed: {e}")
-                
+                logger.exception(f"Dynamic signature repair failed: {e}")
+
         lead["email_draft"] = draft_raw
-    
+
     lead["attachments"] = []
-    
+
     return lead
 
 class UpdateLeadRequest(BaseModel):
-    email: Optional[str] = None
-    email_draft: Optional[str] = None
-    remarks: Optional[str] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    company_name: Optional[str] = None
-    designation: Optional[str] = None
-    phone: Optional[str] = None
-    city: Optional[str] = None
-    country: Optional[str] = None
-    linkedin_url: Optional[str] = None
-    persona: Optional[str] = None
-    campaign_id: Optional[int] = None
-    industry: Optional[str] = None
-    family_office_name: Optional[str] = None
-    is_responded: Optional[bool] = None
-    cc_email: Optional[str] = None
+    email: str | None = None
+    email_draft: str | None = None
+    remarks: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    company_name: str | None = None
+    designation: str | None = None
+    phone: str | None = None
+    city: str | None = None
+    country: str | None = None
+    linkedin_url: str | None = None
+    persona: str | None = None
+    campaign_id: int | None = None
+    industry: str | None = None
+    family_office_name: str | None = None
+    is_responded: bool | None = None
+    cc_email: str | None = None
 
 @router.patch("/leads/{lead_id}")
-def update_lead(lead_id: int, req: UpdateLeadRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def update_lead(lead_id: int, req: UpdateLeadRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     """Updates specific lead fields (draft, remarks, etc.) — scoped to the requesting user."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
+
     uid = normalize_user_id(user_id)
-    is_admin = (str(user_id).lower() == 'admin')
+    is_admin = _is_admin_user(conn, user_id)
 
     # Verify existence and ownership
     if is_admin:
@@ -831,7 +865,7 @@ def update_lead(lead_id: int, req: UpdateLeadRequest, user_id: Optional[str] = H
         cur.close()
         conn.close()
         return JSONResponse({"detail": "Lead not found or access denied"}, status_code=404)
-        
+
     update_data = req.model_dump(exclude_unset=True)
     if not update_data:
         cur.close()
@@ -840,12 +874,12 @@ def update_lead(lead_id: int, req: UpdateLeadRequest, user_id: Optional[str] = H
 
     updates = []
     params = []
-    
+
     # Map of frontend fields to DB columns
     valid_fields = [
-        'first_name', 'last_name', 'email', 'linkedin_url', 
-        'company_name', 'designation', 'phone', 'persona', 'city', 
-        'country', 'remarks', 'fit_score', 'campaign_id', 
+        'first_name', 'last_name', 'email', 'linkedin_url',
+        'company_name', 'designation', 'phone', 'persona', 'city',
+        'country', 'remarks', 'fit_score', 'campaign_id',
         'family_office_name', 'industry', 'email_draft', 'is_responded',
         'cc_email'
     ]
@@ -860,58 +894,58 @@ def update_lead(lead_id: int, req: UpdateLeadRequest, user_id: Optional[str] = H
     conn.commit()
     cur.close()
     conn.close()
-    
+
     invalidate_leads_cache()
     return {"message": "Lead updated successfully"}
 
 @router.post("/leads/{lead_id}/respond")
-def mark_lead_responded(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def mark_lead_responded(lead_id: int, user_id: str | None = Header(None, alias="X-User-Id")):
     """Manually mark a lead as responded to stop automated follow-ups."""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        
+
         uid = normalize_user_id(user_id)
-        is_admin = (str(user_id).lower() == 'admin')
-        
+        is_admin = _is_admin_user(conn, user_id)
+
         # Stop follow-up sequence — scoped to owner unless admin (prevents cross-account changes)
         if is_admin:
             cur.execute("""
-                UPDATE leads_raw 
-                SET is_responded = TRUE, 
-                    replied_at = COALESCE(replied_at, NOW()), 
-                    followup_status = 'STOPPED', 
-                    updated_at = NOW() 
+                UPDATE leads_raw
+                SET is_responded = TRUE,
+                    replied_at = COALESCE(replied_at, NOW()),
+                    followup_status = 'STOPPED',
+                    updated_at = NOW()
                 WHERE id = %s
             """, (lead_id,))
         elif uid:
             cur.execute("""
-                UPDATE leads_raw 
-                SET is_responded = TRUE, 
-                    replied_at = COALESCE(replied_at, NOW()), 
-                    followup_status = 'STOPPED', 
-                    updated_at = NOW() 
+                UPDATE leads_raw
+                SET is_responded = TRUE,
+                    replied_at = COALESCE(replied_at, NOW()),
+                    followup_status = 'STOPPED',
+                    updated_at = NOW()
                 WHERE id = %s AND user_id = %s
             """, (lead_id, uid))
         else:
             cur.execute("""
-                UPDATE leads_raw 
-                SET is_responded = TRUE, 
-                    replied_at = COALESCE(replied_at, NOW()), 
-                    followup_status = 'STOPPED', 
-                    updated_at = NOW() 
+                UPDATE leads_raw
+                SET is_responded = TRUE,
+                    replied_at = COALESCE(replied_at, NOW()),
+                    followup_status = 'STOPPED',
+                    updated_at = NOW()
                 WHERE id = %s AND user_id IS NULL
             """, (lead_id,))
-        
+
         if cur.rowcount == 0:
             conn.rollback()
             cur.close()
             conn.close()
             raise HTTPException(status_code=404, detail="Lead not found or access denied")
-        
+
         from app.models.lead import add_activity_log
         add_activity_log(lead_id, "RESPONDED", "Marked as responded (Follow-up stopped)", get_user_name(user_id))
-        
+
         conn.commit()
         cur.close()
         conn.close()
@@ -923,21 +957,21 @@ def mark_lead_responded(lead_id: int, user_id: Optional[str] = Header(None, alia
 
 
 @router.post("/leads/{lead_id}/save-followup-draft")
-def save_followup_draft(lead_id: int, req: ApproveFollowupRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def save_followup_draft(lead_id: int, req: ApproveFollowupRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     """Saves a follow-up draft for later review — scoped to owner unless admin."""
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
+
         uid = normalize_user_id(user_id)
-        is_admin = (str(user_id).lower() == 'admin')
+        is_admin = _is_admin_user(conn, user_id)
         if is_admin:
             cur.execute("UPDATE leads_raw SET followup_draft = %s, updated_at = NOW() WHERE id = %s", (req.custom_body, lead_id))
         elif uid:
             cur.execute("UPDATE leads_raw SET followup_draft = %s, updated_at = NOW() WHERE id = %s AND user_id = %s", (req.custom_body, lead_id, uid))
         else:
             cur.execute("UPDATE leads_raw SET followup_draft = %s, updated_at = NOW() WHERE id = %s AND user_id IS NULL", (req.custom_body, lead_id))
-        
+
         if cur.rowcount == 0:
             conn.rollback()
             cur.close()
@@ -948,11 +982,11 @@ def save_followup_draft(lead_id: int, req: ApproveFollowupRequest, user_id: Opti
         conn.close()
         return {"status": "success"}
     except Exception as e:
-        logger.error(f"Error saving draft: {e}")
+        logger.exception(f"Error saving draft: {e}")
         return {"error": str(e)}
 
 @router.post("/leads/{lead_id}/approve-followup")
-def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id"), skip_daily_check: bool = False):
+def approve_followup(lead_id: int, req: ApproveFollowupRequest | None = None, user_id: str | None = Header(None, alias="X-User-Id"), skip_daily_check: bool = False):
     """Approves and sends a pending follow-up draft. Supports optional custom body."""
     if not skip_daily_check and not check_daily_email_limit(user_id, 1):
         limit = get_daily_email_limit(user_id)
@@ -960,16 +994,16 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
+
         uid = normalize_user_id(user_id)
-        is_admin = (str(user_id).lower() == 'admin')
-        
+        is_admin = _is_admin_user(conn, user_id)
+
         # Verify access
         if is_admin:
             cur.execute("SELECT * FROM leads_raw lr WHERE id = %s", (lead_id,))
         else:
             cur.execute("SELECT * FROM leads_raw lr WHERE id = %s AND user_id = %s", (lead_id, uid))
-            
+
         lead = cur.fetchone()
         if not lead:
             raise HTTPException(status_code=404, detail="Lead not found.")
@@ -1002,17 +1036,18 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
         if _is_unsub:
             raise HTTPException(status_code=400, detail="Cannot send follow-up — this lead has unsubscribed.")
 
-        from app.api.drafts import get_sender_profile, markdown_to_html, get_followup_signature_markdown
+        from app.api.drafts import (
+            get_followup_signature_markdown,
+            get_sender_profile,
+            markdown_to_html,
+        )
         profile = get_sender_profile(user_id)
-        
+
         # If custom body provided, use it. Otherwise use DB draft.
         body_text = ""
-        if req and req.custom_body:
-            body_text = req.custom_body
-        else:
-            body_text = lead['followup_draft'] or ""
-        
-        from app.services.followup_service import is_generic_followup, get_template_followup
+        body_text = req.custom_body if req and req.custom_body else lead['followup_draft'] or ""
+
+        from app.services.followup_service import get_template_followup, is_generic_followup
         # If draft is missing entirely or matches a generic placeholder, generate it via template
         if is_generic_followup(body_text):
             stage = (lead['followup_stage'] or 0) + 1
@@ -1023,16 +1058,16 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
         # is saved, the followup goes out without any signature.
         followup_sig = get_followup_signature_markdown(user_id)
         final_body = body_text + (f"\n\n{followup_sig}" if followup_sig else "")
-        
+
         # Parse subject/body from draft if needed
         subject = "Following up"
         body = final_body
-        
+
         if "Subject: " in body:
             parts = body.split("\n\n", 1)
             subject = parts[0].replace("Subject: ", "").strip()
             body = parts[1] if len(parts) > 1 else body
-            
+
         from app.services.email_service import send_email
 
         # Use original thread/message IDs to reply in the same Gmail thread
@@ -1054,13 +1089,18 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
             (lead_id,),
         )
 
-        from app.services.email_service import get_user_email_font, get_user_email_font_size, get_user_image_width, get_user_image_height
+        from app.services.email_service import (
+            get_user_email_font,
+            get_user_email_font_size,
+            get_user_image_height,
+            get_user_image_width,
+        )
         success, msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=lead['email'],
             subject=saved_subject,
             html_content=markdown_to_html(
-                body, 
-                font_family=get_user_email_font(uid), 
+                body,
+                font_family=get_user_email_font(uid),
                 font_size=get_user_email_font_size(uid),
                 image_width=get_user_image_width(uid),
                 image_height=get_user_image_height(uid)
@@ -1072,7 +1112,7 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
             thread_id=existing_thread_id,
             in_reply_to=existing_message_id
         )
-        
+
         lead_type = str(lead.get('lead_type') or '').upper()
         max_followup_stage = 2 if lead_type == 'CLIENT' else 3
         current_stage = lead['followup_stage'] or 0
@@ -1084,7 +1124,7 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
             save_thread = new_thread_id or existing_thread_id
             save_msg_id = new_rfc_message_id or existing_message_id
             cur.execute("""
-                UPDATE leads_raw 
+                UPDATE leads_raw
                 SET followup_stage = %s,
                     followup_status = %s,
                     email_status = 'SENT',
@@ -1096,26 +1136,27 @@ def approve_followup(lead_id: int, req: Optional[ApproveFollowupRequest] = None,
                     updated_at = NOW()
                 WHERE id = %s
             """, (next_stage, new_followup_status, saved_subject, save_thread, save_msg_id, lead_id))
-            
+
             from app.models.lead import add_activity_log
-            add_activity_log(lead_id, "FOLLOWUP_APPROVED", f"Manual follow-up approved and sent via Gmail", "user", uid)
+            add_activity_log(lead_id, "FOLLOWUP_APPROVED", "Manual follow-up approved and sent via Gmail", "user", uid)
             conn.commit()
             return {"status": "success"}
         else:
             return {"error": f"Gmail dispatch failed: {msg}"}
-            
+
     except Exception as e:
-        logger.error(f"Approval failed: {e}")
+        logger.exception(f"Approval failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if 'cur' in locals(): cur.close()
         if 'conn' in locals(): conn.close()
 
 @router.post("/leads/bulk-approve-followups")
-def bulk_approve_followups(req: BulkApproveFollowupsRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def bulk_approve_followups(req: BulkApproveFollowupsRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     """Approves and sends follow-up emails for multiple leads in a batch using parallel workers."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    from app.utils.auth_helpers import check_daily_email_limit, get_daily_email_limit
+
+    from app.utils.auth_helpers import check_daily_email_limit
 
     batch_size = len(req.lead_ids)
     if not check_daily_email_limit(user_id, batch_size):
@@ -1142,11 +1183,11 @@ def bulk_approve_followups(req: BulkApproveFollowupsRequest, user_id: Optional[s
     return results
 
 @router.get("/leads/{lead_id}/followup-preview")
-def get_followup_preview(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_followup_preview(lead_id: int, user_id: str | None = Header(None, alias="X-User-Id")):
     """Generates or retrieves a preview of the next follow-up draft using the LOGGED-IN user's signature."""
-    from app.services.followup_service import generate_followup_preview
     from app.api.drafts import normalize_user_id
-    
+    from app.services.followup_service import generate_followup_preview
+
     # We want the signature of the person CLICKING the button (the logged-in user)
     # Not necessarily the original owner of the lead.
     uid_str = normalize_user_id(user_id)
@@ -1155,26 +1196,26 @@ def get_followup_preview(lead_id: int, user_id: Optional[str] = Header(None, ali
     return generate_followup_preview(lead_id, uid)
 
 @router.get("/leads/{lead_id}/timeline")
-def get_lead_timeline(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_lead_timeline(lead_id: int, user_id: str | None = Header(None, alias="X-User-Id")):
     """Fetches the activity history/timeline for a specific lead."""
-    from app.models.lead import get_activity_log, get_lead_by_id
-    
+    from app.models.lead import get_activity_log
+
     # Check access permissions
     lead = get_lead_by_id(lead_id)
     if not lead:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Lead not found")
-    
+
     uid = normalize_user_id(user_id)
     if user_id and user_id != "admin" and str(lead.get('user_id')) != str(uid):
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="Access denied to this lead's timeline")
-        
+
     return get_activity_log(lead_id)
 
 def get_user_name(user_id):
     if not user_id: return "system"
-    if user_id == "admin": return "admin"
+    if is_admin_user(user_id): return "admin"
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -1192,12 +1233,12 @@ def get_lead_activity(lead_id: int):
     return logs
 
 @router.post("/leads")
-def create_manual_lead(req: LeadCreate, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def create_manual_lead(req: LeadCreate, user_id: str | None = Header(None, alias="X-User-Id")):
     from app.models.lead import insert_lead
-    
+
     # Data Preparation
     li_url = req.linkedin_url.strip() if req.linkedin_url else None
-    
+
     payload = {
         "designation": req.designation,
         "city": req.city,
@@ -1205,7 +1246,7 @@ def create_manual_lead(req: LeadCreate, user_id: Optional[str] = Header(None, al
         "phone": req.phone,
         "manual_entry": True
     }
-    
+
     try:
         from app.models.lead import insert_lead
         insert_lead(
@@ -1226,46 +1267,46 @@ def create_manual_lead(req: LeadCreate, user_id: Optional[str] = Header(None, al
         return {"message": "Lead added to your pipeline successfully."}
 
     except Exception as e:
-        logger.error(f"Error creating lead: {str(e)}")
+        logger.exception(f"Error creating lead: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Storage Conflict: {str(e)}")
 
 @router.post("/leads/bulk-labels")
-def bulk_labels(req: BulkLabelRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def bulk_labels(req: BulkLabelRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
-    
+
     uid = normalize_user_id(user_id)
-    is_admin = (str(user_id).lower() == 'admin')
-    
+    is_admin = _is_admin_user(conn, user_id)
+
     try:
         if is_admin:
             cur.execute("""
-                UPDATE leads_raw 
+                UPDATE leads_raw
                 SET labels = (
-                    SELECT ARRAY_AGG(DISTINCT l) 
+                    SELECT ARRAY_AGG(DISTINCT l)
                     FROM UNNEST(COALESCE(labels, '{}') || %s) l
                 )
                 WHERE id = ANY(%s)
             """, (req.labels, req.lead_ids))
         elif uid:
             cur.execute("""
-                UPDATE leads_raw 
+                UPDATE leads_raw
                 SET labels = (
-                    SELECT ARRAY_AGG(DISTINCT l) 
+                    SELECT ARRAY_AGG(DISTINCT l)
                     FROM UNNEST(COALESCE(labels, '{}') || %s) l
                 )
                 WHERE id = ANY(%s) AND user_id = %s
             """, (req.labels, req.lead_ids, uid))
         else:
             cur.execute("""
-                UPDATE leads_raw 
+                UPDATE leads_raw
                 SET labels = (
-                    SELECT ARRAY_AGG(DISTINCT l) 
+                    SELECT ARRAY_AGG(DISTINCT l)
                     FROM UNNEST(COALESCE(labels, '{}') || %s) l
                 )
                 WHERE id = ANY(%s) AND user_id IS NULL
             """, (req.labels, req.lead_ids))
-        
+
         conn.commit()
         add_activity_log(None, "LABEL_ASSIGNED", f"Assigned labels {req.labels} to {len(req.lead_ids)} leads", get_user_name(user_id))
     except Exception as e:
@@ -1274,37 +1315,37 @@ def bulk_labels(req: BulkLabelRequest, user_id: Optional[str] = Header(None, ali
     finally:
         cur.close()
         conn.close()
-    
+
     return {"message": "Labels assigned successfully"}
 
 @router.post("/leads/{lead_id}/remove-label")
-def remove_lead_label(lead_id: int, req: LabelRemoveRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def remove_lead_label(lead_id: int, req: LabelRemoveRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
-    
+
     uid = normalize_user_id(user_id)
-    is_admin = (str(user_id).lower() == 'admin')
-    
+    is_admin = _is_admin_user(conn, user_id)
+
     try:
         if is_admin:
             cur.execute("""
-                UPDATE leads_raw 
+                UPDATE leads_raw
                 SET labels = ARRAY_REMOVE(labels, %s)
                 WHERE id = %s
             """, (req.label, lead_id))
         elif uid:
             cur.execute("""
-                UPDATE leads_raw 
+                UPDATE leads_raw
                 SET labels = ARRAY_REMOVE(labels, %s)
                 WHERE id = %s AND user_id = %s
             """, (req.label, lead_id, uid))
         else:
             cur.execute("""
-                UPDATE leads_raw 
+                UPDATE leads_raw
                 SET labels = ARRAY_REMOVE(labels, %s)
                 WHERE id = %s AND user_id IS NULL
             """, (req.label, lead_id))
-        
+
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -1312,17 +1353,17 @@ def remove_lead_label(lead_id: int, req: LabelRemoveRequest, user_id: Optional[s
     finally:
         cur.close()
         conn.close()
-    
+
 class BulkUpdateSourceReq(BaseModel):
-    lead_ids: List[int]
+    lead_ids: list[int]
     source: str
 
 @router.post("/leads/bulk-approve")
-def bulk_approve(req: List[int], user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def bulk_approve(req: list[int], user_id: str | None = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
     uid = normalize_user_id(user_id)
-    is_admin = (str(user_id).lower() == 'admin')
+    is_admin = _is_admin_user(conn, user_id)
     try:
         if is_admin:
             cur.execute("UPDATE leads_raw SET source = 'direct' WHERE id = ANY(%s)", (req,))
@@ -1339,7 +1380,6 @@ def bulk_approve(req: List[int], user_id: Optional[str] = Header(None, alias="X-
         conn.close()
     return {"message": "Leads approved and moved to pipeline"}
 
-from app.models.lead import get_or_create_unsubscribe_token
 
 @router.get("/leads/unsubscribe")
 def unsubscribe_lead_get_token(token: str, request: Request = None):
@@ -1489,11 +1529,11 @@ def process_unsubscribe(lead_id: int, conn=None, cur=None):
             conn.close()
 
 @router.post("/leads/bulk-delete")
-def bulk_delete(req: List[int], user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def bulk_delete(req: list[int], user_id: str | None = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
     uid = normalize_user_id(user_id)
-    is_admin = (str(user_id).lower() == 'admin')
+    is_admin = _is_admin_user(conn, user_id)
     try:
         if is_admin:
             cur.execute("DELETE FROM leads_raw lr WHERE id = ANY(%s)", (req,))
@@ -1511,12 +1551,12 @@ def bulk_delete(req: List[int], user_id: Optional[str] = Header(None, alias="X-U
     return {"message": "Leads rejected and deleted"}
 
 @router.delete("/leads/{lead_id}")
-def delete_lead(lead_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def delete_lead(lead_id: int, user_id: str | None = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
         uid = normalize_user_id(user_id)
-        if str(user_id).lower() == 'admin':
+        if _is_admin_user(conn, user_id):
             cur.execute("DELETE FROM leads_raw lr WHERE id = %s", (lead_id,))
         else:
             cur.execute("DELETE FROM leads_raw lr WHERE id = %s AND user_id = %s", (lead_id, uid))
@@ -1530,8 +1570,8 @@ def delete_lead(lead_id: int, user_id: Optional[str] = Header(None, alias="X-Use
         conn.close()
 @router.post("/leads/bulk-import")
 def bulk_import(
-    leads: List[dict],
-    user_id: Optional[str] = Header(None, alias="X-User-Id")
+    leads: list[dict],
+    user_id: str | None = Header(None, alias="X-User-Id")
 ):
     """
     Import a list of leads with flexible header mapping.
@@ -1546,10 +1586,8 @@ def bulk_import(
     try:
         db_user_id = None
         if user_id:
-            try:
+            with contextlib.suppress(Exception):
                 db_user_id = int(user_id)
-            except Exception:
-                pass
 
         for lead in leads:
             # Normalize keys: lower, strip, remove non-alphanumeric (mostly)
@@ -1559,16 +1597,16 @@ def bulk_import(
                     k_norm = "empty_header"
                 else:
                     k_norm = "".join(filter(str.isalnum, str(k).lower()))
-                
+
                 if v and str(v).strip():
                     norm_lead[k_norm] = str(v).strip()
 
             # Flexible Mapping for Email
             email = (
-                norm_lead.get("email") or norm_lead.get("emailaddress") or 
+                norm_lead.get("email") or norm_lead.get("emailaddress") or
                 norm_lead.get("workemail")
             )
-            
+
             # Smart Fallback: If no email header was found, check all values for an @ symbol
             if not email:
                 for k, v in lead.items():
@@ -1579,13 +1617,13 @@ def bulk_import(
 
             # Flexible Mapping for Name
             name = (
-                norm_lead.get("name") or norm_lead.get("fullname") or 
+                norm_lead.get("name") or norm_lead.get("fullname") or
                 norm_lead.get("leadname") or norm_lead.get("investorname") or
                 norm_lead.get("personname") or norm_lead.get("contactname") or
                 norm_lead.get("person") or
                 f"{norm_lead.get('firstname', '')} {norm_lead.get('lastname', '')}".strip()
             )
-            
+
             # Final fallback for name if we found an email but no name
             if email and not name:
                 name = email.split('@')[0].replace('.', ' ').replace('_', ' ').title()
@@ -1593,36 +1631,36 @@ def bulk_import(
             if not email:
                 errors += 1
                 continue
-            
+
             if not name:
                 name = f"Lead {email.split('@')[0]}"
 
             # Flexible Mapping for other fields
             company = (
-                norm_lead.get("companyname") or norm_lead.get("company") or 
+                norm_lead.get("companyname") or norm_lead.get("company") or
                 norm_lead.get("account") or norm_lead.get("organization") or
                 norm_lead.get("client")
             )
             linkedin = (
-                norm_lead.get("linkedinurl") or norm_lead.get("linkedin") or 
+                norm_lead.get("linkedinurl") or norm_lead.get("linkedin") or
                 norm_lead.get("linkedinprofile") or
                 norm_lead.get("profileurl") or norm_lead.get("url")
             )
             designation = (
-                norm_lead.get("designation") or norm_lead.get("role") or 
+                norm_lead.get("designation") or norm_lead.get("role") or
                 norm_lead.get("title") or norm_lead.get("jobtitle") or norm_lead.get("position")
             )
             city = norm_lead.get("city") or norm_lead.get("location") or norm_lead.get("town") or norm_lead.get("place")
             country = norm_lead.get("country") or norm_lead.get("nation")
             persona = norm_lead.get("persona") or norm_lead.get("category") or "OTHER"
             phone = norm_lead.get("phone") or norm_lead.get("phonenumber") or norm_lead.get("mobile")
-            
+
             cc_email = norm_lead.get("ccemail") or norm_lead.get("cc") or norm_lead.get("carboncopy")
-            
+
             # Map Sector/Industry
             sector = (
-                norm_lead.get("sector") or 
-                norm_lead.get("industry") or 
+                norm_lead.get("sector") or
+                norm_lead.get("industry") or
                 norm_lead.get("sectorindustry") or
                 norm_lead.get("sectororindustry") or
                 norm_lead.get("sectorfocus")
@@ -1635,7 +1673,7 @@ def bulk_import(
                 if k.startswith("sector") and k not in ("sector", "sectorindustry", "sectororindustry", "sectorfocus"):
                     if v and v.strip() and v.strip() not in ("—", "-", ""):
                         individual_sectors.append(v.strip())
-            
+
             if individual_sectors:
                 # Use individual sector columns to build/prefer them
                 if not sector:
@@ -1658,7 +1696,7 @@ def bulk_import(
             name_parts = name.split(" ", 1)
             f_name = name_parts[0] if name_parts else ""
             l_name = name_parts[1] if len(name_parts) > 1 else ""
-            
+
             # Create a savepoint for each lead to prevent global transaction abortion
             cur.execute("SAVEPOINT lead_savepoint")
             try:
@@ -1666,8 +1704,8 @@ def bulk_import(
                 _token = secrets.token_urlsafe(32)
                 cur.execute("""
                     INSERT INTO leads_raw (
-                        first_name, last_name, email, company_name, linkedin_url, 
-                        city, country, persona, phone, source, user_id, 
+                        first_name, last_name, email, company_name, linkedin_url,
+                        city, country, persona, phone, source, user_id,
                         raw_payload, remarks, designation, sector, lead_type, cc_email,
                         unsubscribe_token
                     )
@@ -1691,8 +1729,8 @@ def bulk_import(
                         cc_email = COALESCE(EXCLUDED.cc_email, leads_raw.cc_email),
                         unsubscribe_token = COALESCE(leads_raw.unsubscribe_token, EXCLUDED.unsubscribe_token)
                 """, (
-                    f_name, l_name, email, company, linkedin, 
-                    city, country, persona, phone, "csv_import", db_user_id, 
+                    f_name, l_name, email, company, linkedin,
+                    city, country, persona, phone, "csv_import", db_user_id,
                     json.dumps(lead), lead.get("remarks", ""), designation, sector, lead_type, cc_email,
                     _token
                 ))
@@ -1706,7 +1744,7 @@ def bulk_import(
                 print(f"Bulk import individual error: {e}")
                 errors += 1
                 continue
-        
+
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -1722,23 +1760,23 @@ class GSheetImportRequest(BaseModel):
     url: str
 
 @router.get("/unique-companies")
-def get_unique_companies(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_unique_companies(user_id: str | None = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
-    
-    is_admin = (str(user_id).lower() == 'admin' or str(user_id) == '1')
+
+    is_admin = (_is_admin_user(conn, user_id) or str(user_id) == '1')
     query = "SELECT DISTINCT company_name FROM leads_raw lr WHERE company_name IS NOT NULL AND company_name != ''"
     params = []
-    
+
     if not is_admin:
         if user_id:
             query += " AND user_id = %s"
             params.append(user_id)
         else:
             query += " AND user_id IS NULL"
-            
+
     query += " ORDER BY company_name ASC"
-    
+
     try:
         cur.execute(query, tuple(params))
         rows = cur.fetchall()
@@ -1753,10 +1791,14 @@ def get_unique_companies(user_id: Optional[str] = Header(None, alias="X-User-Id"
 @router.post("/leads/import-gsheet")
 def import_from_gsheet(
     req: GSheetImportRequest,
-    user_id: Optional[str] = Header(None, alias="X-User-Id")
+    user_id: str | None = Header(None, alias="X-User-Id")
 ):
+    import csv
+    import io
+    import re
+    import sys
+
     import requests as http_requests
-    import csv, io, re, sys
     max_limit = sys.maxsize
     while True:
         try:
@@ -1766,53 +1808,53 @@ def import_from_gsheet(
             max_limit = int(max_limit / 10)
 
     raw_url = req.url.strip()
-    
+
     if "/d/" not in raw_url:
         raise HTTPException(status_code=400, detail="Invalid Google Sheet URL format.")
-    
+
     doc_id = raw_url.split("/d/")[1].split("/")[0]
-    
+
     # Extract gid (tab ID)
     gid_match = re.search(r"[?&#]gid=(\d+)", raw_url)
     gid = gid_match.group(1) if gid_match else "0"
-    
+
     export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv&gid={gid}"
-    
+
     try:
         resp = http_requests.get(export_url, allow_redirects=True, timeout=15)
         content_type = resp.headers.get("Content-Type", "")
-        
+
         if resp.status_code == 200 and "csv" in content_type.lower():
             # CLEANUP: Remove leading empty lines or garbage before the actual headers
             lines = resp.text.splitlines()
             header_index = 0
-            
+
             # Key headers we expect to find in a valid lead sheet
             keywords = ['email', 'name', 'company', 'linkedin', 'person', 'investor', 'contact', 'designation']
-            
+
             for i, line in enumerate(lines):
                 # Count how many of our keywords are in this line
                 lower_line = line.lower()
                 matches = sum(1 for kw in keywords if kw in lower_line)
-                
+
                 # If a line has at least 2 matching keywords, it's likely our header row
                 if matches >= 2:
                     header_index = i
                     break
-                
+
                 # Fallback: if it's the first line with any significant content
                 if line.strip() and not line.strip().startswith(",,,") and header_index == 0:
                     header_index = i
-            
+
             cleaned_csv = "\n".join(lines[header_index:])
             reader = csv.DictReader(io.StringIO(cleaned_csv))
-            
+
             # Use our generous backend bulk-import logic!
             return bulk_import([dict(row) for row in reader], user_id)
-            
+
         else:
             raise HTTPException(status_code=400, detail="Sheet is fully private or not found. Please make sure 'Anyone with the link can view'.")
-            
+
     except Exception as e:
         if isinstance(e, HTTPException):
             raise

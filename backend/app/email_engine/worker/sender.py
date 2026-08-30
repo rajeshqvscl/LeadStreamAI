@@ -4,15 +4,16 @@ Called by worker to actually send emails.
 """
 
 import logging
-from typing import Optional, Tuple, Dict, Any
-from app.services.email_service import send_email
+from typing import Any
+
 from app.email_engine.queue.job import EmailJob
 from app.email_engine.worker.retry import get_retry_policy
+from app.services.email_service import send_email
 
 logger = logging.getLogger(__name__)
 
 
-def _send_email_once(job: EmailJob) -> Tuple[bool, str, Optional[str], Optional[str]]:
+def _send_email_once(job: EmailJob) -> tuple[bool, str, str | None, str | None]:
     """Single email send attempt - extracted for retry logic"""
     return send_email(
         to_email=job.to_email,
@@ -31,7 +32,7 @@ def _send_email_once(job: EmailJob) -> Tuple[bool, str, Optional[str], Optional[
     )
 
 
-def send_email_job(job_data: Dict[str, Any]) -> Dict[str, Any]:
+def send_email_job(job_data: dict[str, Any]) -> dict[str, Any]:
     """
     Worker entry point - called by RQ worker.
     Returns dict with success status and metadata.
@@ -39,16 +40,15 @@ def send_email_job(job_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     job = EmailJob.from_dict(job_data)
     retry_policy = get_retry_policy()
-    
+
     # Check idempotency
-    if job.idempotency_key:
-        if not check_idempotency(job.idempotency_key):
-            return {
-                "success": False,
-                "error": "Duplicate send prevented by idempotency key",
-                "duplicate": True,
-            }
-    
+    if job.idempotency_key and not check_idempotency(job.idempotency_key):
+        return {
+            "success": False,
+            "error": "Duplicate send prevented by idempotency key",
+            "duplicate": True,
+        }
+
     try:
         # Execute with retry policy (3 retries with exponential backoff)
         success, message, thread_id, message_id = retry_policy.execute_with_retry(
@@ -56,11 +56,31 @@ def send_email_job(job_data: Dict[str, Any]) -> Dict[str, Any]:
             _send_email_once,
             job,
         )
-        
+
         # Record idempotency key on success
         if success and job.idempotency_key:
             save_idempotency(job.idempotency_key)
-        
+
+        # BUG 3: persist Gmail thread/message ids and log activity for follow-ups.
+        # Wrapped in try/except so logging failures never break the send result.
+        if success and getattr(job, 'lead_id', None):
+            try:
+                from app.core.pipeline.claims import LeadClaimer
+                LeadClaimer.save_thread_ids(job.lead_id, thread_id, message_id)
+            except Exception as _e:
+                logger.warning(f"Failed to save thread ids for lead {job.lead_id}: {_e}")
+            try:
+                if job.idempotency_key and str(job.idempotency_key).startswith("followup_lead"):
+                    from app.core.pipeline.claims import LeadClaimer as _LC
+                    _LC.log_activity(
+                        job.lead_id,
+                        'AUTO_FOLLOWUP_SENT',
+                        'Follow-up sent',
+                        user_id=getattr(job, 'user_id', None),
+                    )
+            except Exception as _e:
+                logger.warning(f"Failed to log follow-up activity for lead {job.lead_id}: {_e}")
+
         return {
             "success": success,
             "message": message,
@@ -69,7 +89,7 @@ def send_email_job(job_data: Dict[str, Any]) -> Dict[str, Any]:
             "job_id": job.idempotency_key,
             "retry_count": job.retry_count,
         }
-        
+
     except Exception as e:
         logger.error(f"Send email job failed after {job.retry_count} retries: {e}", exc_info=True)
         return {
@@ -82,7 +102,7 @@ def send_email_job(job_data: Dict[str, Any]) -> Dict[str, Any]:
 def check_idempotency(key: str) -> bool:
     """Check if idempotency key exists (not already sent)"""
     from app.database import get_db_connection
-    
+
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -97,8 +117,9 @@ def check_idempotency(key: str) -> bool:
 def save_idempotency(key: str, ttl_hours: int = 24):
     """Save idempotency key with expiration"""
     from datetime import datetime, timedelta
+
     from app.database import get_db_connection
-    
+
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -120,13 +141,13 @@ def send_email_direct(
     subject: str,
     html_content: str,
     user_id: int,
-    from_email: Optional[str] = None,
-    from_name: Optional[str] = None,
-    lead_id: Optional[int] = None,
-    cc: Optional[str] = None,
-    thread_id: Optional[str] = None,
-    in_reply_to: Optional[str] = None,
-) -> Tuple[bool, str, Optional[str], Optional[str]]:
+    from_email: str | None = None,
+    from_name: str | None = None,
+    lead_id: int | None = None,
+    cc: str | None = None,
+    thread_id: str | None = None,
+    in_reply_to: str | None = None,
+) -> tuple[bool, str, str | None, str | None]:
     """
     Direct synchronous send (bypasses queue).
     Used for testing and immediate sends.

@@ -1,15 +1,16 @@
 import logging
-import base64
-from urllib.parse import quote, unquote
 import re
+from urllib.parse import quote, unquote
+
+from app.database import get_db_connection
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import RedirectResponse
-from app.database import get_db_connection
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["tracking"])
 
 import hashlib
+
 
 def _make_unique_gif(seed: str) -> bytes:
     """1x1 transparent GIF with unique bytes per token.
@@ -68,7 +69,7 @@ async def track_open(token: str, request: Request):
         cur.close()
         conn.close()
     except Exception as e:
-        logger.error(f"Track open failed for token {token}: {e}")
+        logger.exception(f"Track open failed for token {token}: {e}")
 
     return Response(content=_make_unique_gif(token), media_type="image/gif", headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0", "Vary": "Accept-Encoding"})
 
@@ -93,7 +94,7 @@ async def track_click(token: str, request: Request):
         cur.close()
         conn.close()
     except Exception as e:
-        logger.error(f"Track click failed for token {token}: {e}")
+        logger.exception(f"Track click failed for token {token}: {e}")
 
     if url:
         return RedirectResponse(url=unquote(url))

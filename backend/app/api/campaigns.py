@@ -1,48 +1,51 @@
-from fastapi import APIRouter, HTTPException, Query, Request, Header
-from pydantic import BaseModel
-from typing import List, Optional
+
 from app.models.campaign import (
-    create_campaign, get_campaigns, get_campaign_by_id, 
-    update_campaign, delete_campaign
+    create_campaign,
+    delete_campaign,
+    get_campaign_by_id,
+    get_campaigns,
+    update_campaign,
 )
+from fastapi import APIRouter, Header, HTTPException, Request
+from pydantic import BaseModel
 
 router = APIRouter()
 
 class CampaignCreate(BaseModel):
     name: str
-    description: Optional[str] = None
-    tone: Optional[str] = 'professional'
-    target_industry: Optional[str] = None
-    target_persona: Optional[str] = None
-    subject: Optional[str] = None
-    html_body: Optional[str] = None
-    context_prompt: Optional[str] = None
-    strategy_prompt: Optional[str] = None
-    is_active: Optional[bool] = True
-    target_companies: Optional[str] = None
+    description: str | None = None
+    tone: str | None = 'professional'
+    target_industry: str | None = None
+    target_persona: str | None = None
+    subject: str | None = None
+    html_body: str | None = None
+    context_prompt: str | None = None
+    strategy_prompt: str | None = None
+    is_active: bool | None = True
+    target_companies: str | None = None
 
 class CampaignUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    tone: Optional[str] = None
-    target_industry: Optional[str] = None
-    target_persona: Optional[str] = None
-    subject: Optional[str] = None
-    html_body: Optional[str] = None
-    context_prompt: Optional[str] = None
-    strategy_prompt: Optional[str] = None
-    is_active: Optional[bool] = None
-    target_companies: Optional[str] = None
+    name: str | None = None
+    description: str | None = None
+    tone: str | None = None
+    target_industry: str | None = None
+    target_persona: str | None = None
+    subject: str | None = None
+    html_body: str | None = None
+    context_prompt: str | None = None
+    strategy_prompt: str | None = None
+    is_active: bool | None = None
+    target_companies: str | None = None
 
 @router.post("/campaigns")
-def api_create_campaign(campaign: CampaignCreate, user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    from app.database import get_db_connection
+def api_create_campaign(campaign: CampaignCreate, user_id: str | None = Header(None, alias="X-User-Id")):
     import psycopg2.extras
-    
+    from app.database import get_db_connection
+
     try:
         data = campaign.dict()
         data['user_id'] = user_id
-        
+
         # Fetch user_name for metadata
         if user_id:
             conn = get_db_connection()
@@ -54,36 +57,36 @@ def api_create_campaign(campaign: CampaignCreate, user_id: Optional[str] = Heade
                 data['user_name'] = u['full_name'] or u['username']
             cur.close()
             conn.close()
-            
+
         return create_campaign(data)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/campaigns")
 def api_get_campaigns(
-    limit: int = 20, 
-    offset: int = 0, 
+    limit: int = 20,
+    offset: int = 0,
     active_only: bool = False,
-    user_id: Optional[str] = Header(None, alias="X-User-Id")
+    user_id: str | None = Header(None, alias="X-User-Id")
 ):
     return get_campaigns(limit, offset, active_only, user_id)
 
 @router.get("/campaigns/{id}")
-def api_get_campaign(id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def api_get_campaign(id: int, user_id: str | None = Header(None, alias="X-User-Id")):
     campaign = get_campaign_by_id(id, user_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
     return campaign
 
 @router.put("/campaigns/{id}")
-def api_update_campaign(id: int, campaign: CampaignUpdate, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def api_update_campaign(id: int, campaign: CampaignUpdate, user_id: str | None = Header(None, alias="X-User-Id")):
     updated = update_campaign(id, campaign.dict(exclude_unset=True), user_id)
     if not updated:
         raise HTTPException(status_code=404, detail="Campaign not found")
     return updated
 
 @router.delete("/campaigns/{id}")
-def api_delete_campaign(id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def api_delete_campaign(id: int, user_id: str | None = Header(None, alias="X-User-Id")):
     if delete_campaign(id, user_id):
         return {"message": "Campaign deleted successfully"}
     raise HTTPException(status_code=404, detail="Campaign not found")
@@ -91,14 +94,14 @@ def api_delete_campaign(id: int, user_id: Optional[str] = Header(None, alias="X-
 
 
 class CampaignAddLeads(BaseModel):
-    lead_ids: List[int]
+    lead_ids: list[int]
 
 @router.post("/campaigns/{id}/add-leads")
 def api_add_leads_to_campaign(id: int, req: CampaignAddLeads):
     campaign = get_campaign_by_id(id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    
+
     added_count = 0
     for lead_id in req.lead_ids:
         try:
@@ -106,10 +109,11 @@ def api_add_leads_to_campaign(id: int, req: CampaignAddLeads):
             added_count += 1
         except Exception:
             continue # Skip duplicates or errors
-            
+
     return {"message": f"Successfully added {added_count} leads to campaign"}
 
 from app.services.campaign_tracking import CampaignTrackingService
+
 
 # Tracking endpoints (prefixed with /campaigns to avoid conflict with leads tracking in tracking.py)
 @router.get("/campaigns/track/open/{token}")
@@ -117,8 +121,8 @@ async def track_open(token: str, request: Request):
     recipient = CampaignTrackingService.get_recipient_by_token(token)
     if recipient:
         CampaignTrackingService.log_event(
-            recipient['campaign_id'], 
-            recipient['id'], 
+            recipient['campaign_id'],
+            recipient['id'],
             'OPEN',
             ip_address=request.client.host,
             user_agent=request.headers.get('user-agent')
@@ -131,8 +135,8 @@ async def track_click(token: str, request: Request, url: str):
     recipient = CampaignTrackingService.get_recipient_by_token(token)
     if recipient:
         CampaignTrackingService.log_event(
-            recipient['campaign_id'], 
-            recipient['id'], 
+            recipient['campaign_id'],
+            recipient['id'],
             'CLICK',
             ip_address=request.client.host,
             user_agent=request.headers.get('user-agent')

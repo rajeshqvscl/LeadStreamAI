@@ -1,21 +1,20 @@
-from fastapi import APIRouter, HTTPException, Header, Query, Response
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from typing import List, Optional, Dict
-from datetime import datetime, timedelta
-import io
 import csv
-from app.database import get_db_connection
+import io
+import logging
+from datetime import datetime, timedelta
+
 import psycopg2
 import psycopg2.extras
-import logging
+from app.database import get_db_connection
 from app.utils.auth_helpers import normalize_user_id
+from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.get("/admin/stats")
-async def get_admin_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+async def get_admin_stats(user_id: str | None = Header(None, alias="X-User-Id")):
     uid = normalize_user_id(user_id)
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -44,7 +43,7 @@ async def get_admin_stats(user_id: Optional[str] = Header(None, alias="X-User-Id
 @router.get("/admin/velocity")
 async def get_admin_velocity(
     period: str = Query("daily", pattern="^(daily|weekly|monthly|quarterly)$"),
-    user_id: Optional[str] = Header(None, alias="X-User-Id")
+    user_id: str | None = Header(None, alias="X-User-Id")
 ):
     uid = normalize_user_id(user_id)
     conn = get_db_connection()
@@ -102,7 +101,7 @@ async def get_admin_velocity(
                 velocity_data.append({"day": f"Q{((q_start.month-1)//3)+1}", "leads": l_count, "emails": e_count})
         return velocity_data
     except Exception as e:
-        logger.error(f"ADMIN VELOCITY ERROR: {str(e)}")
+        logger.exception(f"ADMIN VELOCITY ERROR: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Velocity Pipeline Failure: {str(e)}")
     finally:
         cur.close()
@@ -110,7 +109,7 @@ async def get_admin_velocity(
 
 
 @router.post("/admin/dispatch-report")
-async def dispatch_admin_report(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+async def dispatch_admin_report(user_id: str | None = Header(None, alias="X-User-Id")):
     """Full MIS Report with CSS bar charts and per-user summaries."""
     uid = normalize_user_id(user_id)
 
@@ -423,7 +422,7 @@ async def dispatch_admin_report(user_id: Optional[str] = Header(None, alias="X-U
         conn.close()
 
 @router.get("/admin/users-stats")
-def get_users_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_users_stats(user_id: str | None = Header(None, alias="X-User-Id")):
     uid = normalize_user_id(user_id)
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -434,10 +433,10 @@ def get_users_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
             raise HTTPException(status_code=403, detail="Unauthorized")
 
         cur.execute("""
-            SELECT 
-                u.id, 
-                u.username, 
-                u.full_name, 
+            SELECT
+                u.id,
+                u.username,
+                u.full_name,
                 u.email,
                 u.role,
                 (SELECT COUNT(*) FROM leads_raw l WHERE l.user_id::integer = u.id OR (u.role = 'ADMIN' AND l.user_id IS NULL)) as total_leads,
@@ -455,9 +454,9 @@ def get_users_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
 
 @router.get("/admin/audit-logs")
 def get_audit_logs(
-    user_id: Optional[str] = Header(None, alias="X-User-Id"),
-    target_user_id: Optional[int] = Query(None),
-    action_type: Optional[str] = Query(None),
+    user_id: str | None = Header(None, alias="X-User-Id"),
+    target_user_id: int | None = Query(None),
+    action_type: str | None = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200)
 ):
@@ -465,7 +464,7 @@ def get_audit_logs(
     uid = normalize_user_id(user_id)
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
+
     try:
         cur.execute("SELECT role FROM users WHERE id = %s", (uid,))
         caller = cur.fetchone()
@@ -478,7 +477,7 @@ def get_audit_logs(
         if target_user_id:
             where_clauses.append("al.user_id = %s")
             params.append(target_user_id)
-        
+
         if action_type:
             where_clauses.append("al.action = %s")
             params.append(action_type)
@@ -488,9 +487,9 @@ def get_audit_logs(
 
         # Fetch Logs
         query = f"""
-            SELECT 
-                al.*, 
-                u.full_name as actor_name, 
+            SELECT
+                al.*,
+                u.full_name as actor_name,
                 u.username as actor_username,
                 l.first_name || ' ' || l.last_name as lead_name,
                 l.email as lead_email,
@@ -527,14 +526,14 @@ def get_audit_logs(
 
 @router.get("/admin/audit-logs/export")
 def export_audit_logs(
-    user_id: Optional[str] = Header(None, alias="X-User-Id"),
-    target_user_id: Optional[int] = Query(None)
+    user_id: str | None = Header(None, alias="X-User-Id"),
+    target_user_id: int | None = Query(None)
 ):
     """Generates a CSV export of the activity audit trail."""
     uid = normalize_user_id(user_id)
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
+
     try:
         cur.execute("SELECT role FROM users WHERE id = %s", (uid,))
         caller = cur.fetchone()
@@ -545,10 +544,10 @@ def export_audit_logs(
         params = [target_user_id] if target_user_id else []
 
         query = f"""
-            SELECT 
-                al.created_at, 
+            SELECT
+                al.created_at,
                 u.full_name as actor,
-                al.action, 
+                al.action,
                 al.details,
                 l.first_name || ' ' || l.last_name as target_lead,
                 l.email as lead_email
@@ -565,7 +564,7 @@ def export_audit_logs(
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(["Timestamp", "Actor", "Action", "Details", "Target Lead", "Email"])
-        
+
         for r in rows:
             writer.writerow([
                 r['created_at'].strftime('%Y-%m-%d %H:%M:%S') if r['created_at'] else '',

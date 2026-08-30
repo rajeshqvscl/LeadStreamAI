@@ -12,6 +12,7 @@ const Emails = () => {
   const initialStatus = searchParams.get('status') || '';
   
   const [emails, setEmails] = useState([]);
+  const [duplicateSummary, setDuplicateSummary] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, total: 0 });
   const [selectedIds, setSelectedIds] = useState([]);
@@ -92,6 +93,7 @@ const Emails = () => {
       setIsLoading(true);
       const res = await api.get(`/api/emails?page=${pagination.page}&per_page=60&status=${filterStatus}&region=${filterRegion}&geo=${filterGeo}&company=${filterCompany}&name=${filterName}`);
       setEmails(res.data.drafts);
+      setDuplicateSummary(res.data.duplicate_summary || null);
       setPagination(prev => ({ ...prev, total: res.data.pages }));
     } catch {
       showNotification('error', 'Failed to fetch emails');
@@ -648,6 +650,24 @@ const Emails = () => {
           </button>
         </div>
 
+        {/* Duplicate monitoring banner (review queue) */}
+        {duplicateSummary && (duplicateSummary.duplicates_in_queue > 0 || duplicateSummary.duplicate_email_drafts > 0 || duplicateSummary.already_contacted_drafts > 0) && (
+          <div className="px-6 py-3 mb-3 rounded-lg border border-orange-500/40 bg-orange-500/10 flex items-center gap-3">
+            <span className="text-orange-400 text-[11px] font-black uppercase tracking-widest">⚠ Duplicate Monitor</span>
+            <span className="text-[11px] text-[#cbd5e1]">
+              {duplicateSummary.duplicates_in_queue > 0 && (
+                <>{duplicateSummary.duplicates_in_queue} drafts same-email collapse hue hain</>
+              )}
+              {duplicateSummary.duplicate_email_drafts > 0 && duplicateSummary.duplicates_in_queue > 0 && ' · '}
+              {duplicateSummary.duplicate_email_drafts > 0 && <>{duplicateSummary.duplicate_email_drafts} drafts is page par duplicate flagged hain</>}
+              {duplicateSummary.already_contacted_drafts > 0 && (
+                <>{(duplicateSummary.duplicates_in_queue > 0 || duplicateSummary.duplicate_email_drafts > 0) ? ' · ' : ''}{duplicateSummary.already_contacted_drafts} already-contacted emails</>
+              )}
+              {' — generate-time block nahi; review karke archive/reject karo.'}
+            </span>
+          </div>
+        )}
+
         {/* Full-width Table */}
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
@@ -730,6 +750,18 @@ const Emails = () => {
                     )}
                     {(!['REJECTED', 'PENDING_APPROVAL', 'SENT', 'APPROVED', 'SCHEDULED', 'FAILED', 'ARCHIVED'].includes(email.status)) && (
                       <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-[1px] border border-slate-500 text-slate-400">{email.status}</span>
+                    )}
+                    {email.is_duplicate && (
+                      <span
+                        className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-[1px] bg-orange-500/15 border border-orange-500 text-orange-400"
+                        title={
+                          email.duplicate_reason === 'already_contacted'
+                            ? 'Is email pehle hi outreach ho chuka hai — duplicate'
+                            : `Is email ke ${email.duplicate_count} drafts queue mein hain — duplicate`
+                        }
+                      >
+                        ⚠ DUP{email.duplicate_count > 1 ? ` ×${email.duplicate_count}` : ''}
+                      </span>
                     )}
                   </td>
                   <td className="px-6 py-4">

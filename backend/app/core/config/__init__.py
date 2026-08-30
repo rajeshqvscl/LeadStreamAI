@@ -1,36 +1,38 @@
-from .settings import (
-    get_settings,
-    get_scheduler_settings,
-    get_followup_settings,
-    get_email_settings,
-    get_llm_settings,
-    get_email_engine_settings,
-    get_database_settings,
-    AppSettings,
-    SchedulerSettings,
-    FollowupSettings,
-    EmailSettings,
-    LLMSettings,
-    EmailEngineSettings,
-    DatabaseSettings,
-)
+from app.core.pipeline.scheduler import get_scheduler_config
+
 from .constants import (
-    INVESTOR_KEYWORDS,
-    CLIENT_KEYWORDS,
-    INVESTOR_SECTORS,
-    CLIENT_SECTORS,
-    OWNER_OVERRIDES,
-    DEFAULT_TEMPLATES,
-    DECLINE_PATTERNS,
     CAMPAIGN_RULES,
-    LOGO_FORCED_STYLES,
-    USER_EMAIL_FONTS,
-    USER_EMAIL_FONT_SIZES,
+    CLIENT_KEYWORDS,
+    CLIENT_SECTORS,
+    DECLINE_PATTERNS,
     DEFAULT_EMAIL_FONT,
     DEFAULT_EMAIL_FONT_SIZE,
+    DEFAULT_TEMPLATES,
+    INVESTOR_KEYWORDS,
+    INVESTOR_SECTORS,
+    LOGO_FORCED_STYLES,
+    OWNER_OVERRIDES,
     SANS_SERIF_FONT,
+    USER_EMAIL_FONT_SIZES,
+    USER_EMAIL_FONTS,
 )
-from .feature_flags import get_feature_flags, FeatureFlags
+from .feature_flags import FeatureFlags, get_feature_flags
+from .settings import (
+    AppSettings,
+    DatabaseSettings,
+    EmailEngineSettings,
+    EmailSettings,
+    FollowupSettings,
+    LLMSettings,
+    SchedulerSettings,
+    get_database_settings,
+    get_email_engine_settings,
+    get_email_settings,
+    get_followup_settings,
+    get_llm_settings,
+    get_scheduler_settings,
+    get_settings,
+)
 
 __all__ = [
     "get_settings",
@@ -41,6 +43,7 @@ __all__ = [
     "get_email_engine_settings",
     "get_database_settings",
     "get_feature_flags",
+    "get_scheduler_config",
     "AppSettings",
     "SchedulerSettings",
     "FollowupSettings",

@@ -4,16 +4,17 @@ Backs the GenerateSector page: sector cards with coverage counts,
 per-sector drafting strategy settings, and bulk AI draft generation.
 """
 
-from fastapi import APIRouter, HTTPException, Header
-from typing import Optional, Dict, Any
 import threading
+from typing import Any
 
 from app.database import get_db_connection
 from app.utils.auth_helpers import normalize_user_id
+from fastapi import APIRouter, Header, HTTPException
 
 router = APIRouter()
 
 import logging
+
 logger = logging.getLogger(__name__)
 
 # Canonical sector catalogue (matches frontend card grid)
@@ -54,12 +55,13 @@ def _ensure_sector_strategies_table(conn):
 
 
 @router.get("/generate/sectors")
-def get_sectors(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_sectors(user_id: str | None = Header(None, alias="X-User-Id")):
     """Returns all sector cards with needing-emails counts and saved strategies."""
     uid = normalize_user_id(user_id)
 
     # L1 micro-cache (0ms) → L2 Redis (60s) — fires on every page load; 3 DB queries otherwise
     import json as _json
+
     from app.utils.microcache import mc_get, mc_set
     mkey = f"gsectors:{uid or 'anon'}"
     hit = mc_get(mkey)
@@ -157,7 +159,7 @@ def get_sectors(user_id: Optional[str] = Header(None, alias="X-User-Id")):
 
 
 @router.post("/generate/bulk")
-def bulk_generate_for_sector(req: Dict[str, Any], user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def bulk_generate_for_sector(req: dict[str, Any], user_id: str | None = Header(None, alias="X-User-Id")):
     """Kicks off background AI draft generation for leads in a sector that lack drafts."""
     uid = normalize_user_id(user_id)
     sector_key = str(req.get("sector", "")).strip()
@@ -185,7 +187,7 @@ def bulk_generate_for_sector(req: Dict[str, Any], user_id: Optional[str] = Heade
         return {"success": True, "queued": 0, "message": f"No leads needing drafts in {sector_key}"}
 
     def _run():
-        from app.api.drafts import generate_email_internal, DraftRequest
+        from app.api.drafts import DraftRequest, generate_email_internal
         ok = fail = 0
         for lid in lead_ids:
             try:
@@ -195,7 +197,7 @@ def bulk_generate_for_sector(req: Dict[str, Any], user_id: Optional[str] = Heade
                 else:
                     ok += 1
             except Exception as ge:
-                logger.error(f"Sector bulk gen failed for lead {lid}: {ge}")
+                logger.exception(f"Sector bulk gen failed for lead {lid}: {ge}")
                 fail += 1
         logger.info(f"Sector bulk generation '{sector_key}' done: ok={ok}, failed={fail}")
         # Counts changed — drop the sectors caches so cards refresh
@@ -213,7 +215,7 @@ def bulk_generate_for_sector(req: Dict[str, Any], user_id: Optional[str] = Heade
 
 
 @router.post("/generate/save-settings")
-def save_sector_settings(req: Dict[str, Any], user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def save_sector_settings(req: dict[str, Any], user_id: str | None = Header(None, alias="X-User-Id")):
     """Saves per-sector drafting context/strategy overrides."""
     sector_key = str(req.get("sector", "")).strip()
     if not sector_key:

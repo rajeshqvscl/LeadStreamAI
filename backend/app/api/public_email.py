@@ -1,15 +1,14 @@
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from typing import Optional
 import logging
-from app.database import get_db_connection
+from datetime import UTC, datetime
+
 import psycopg2.extras
-from datetime import datetime, timezone
+from app.database import get_db_connection
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/public", tags=["public_email"])
+router = APIRouter(prefix="/public", tags=["public_email"])
 
 class UnsubscribeRequest(BaseModel):
     token: str
@@ -52,7 +51,7 @@ def _get_lead_and_prefs_by_token(token: str):
         conn.close()
 
 
-def _sync_email_preferences(lead: dict, token: str, prefs: Optional[dict] = None):
+def _sync_email_preferences(lead: dict, token: str, prefs: dict | None = None):
     """Upsert email_preferences row for a lead, creating or updating as needed."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -70,7 +69,7 @@ def _sync_email_preferences(lead: dict, token: str, prefs: Optional[dict] = None
                 lead.get('email_opt_in', True),
                 True,
                 'unsubscribed' if lead.get('is_unsubscribed') else 'subscribed',
-                datetime.now(timezone.utc) if lead.get('is_unsubscribed') else prefs.get('unsubscribed_at'),
+                datetime.now(UTC) if lead.get('is_unsubscribed') else prefs.get('unsubscribed_at'),
                 prefs['id']
             ))
         else:
@@ -95,13 +94,13 @@ def _sync_email_preferences(lead: dict, token: str, prefs: Optional[dict] = None
         conn.commit()
     except Exception as e:
         conn.rollback()
-        logger.error(f"Failed to sync email_preferences for lead {lead['id']}: {e}")
+        logger.exception(f"Failed to sync email_preferences for lead {lead['id']}: {e}")
     finally:
         cur.close()
         conn.close()
 
 
-def _log_email_event(lead_id: int, event_type: str, metadata: Optional[dict] = None):
+def _log_email_event(lead_id: int, event_type: str, metadata: dict | None = None):
     """Insert a row into email_events."""
     conn = get_db_connection()
     cur = conn.cursor()
@@ -230,7 +229,7 @@ def get_preferences(token: str = Query(...)):
 
     return {
         "email": lead['email'],
-        "marketing_enabled": prefs.get('marketing_enabled', not (lead.get('email_opt_in') is False)) if prefs else not (lead.get('email_opt_in') is False),
+        "marketing_enabled": prefs.get('marketing_enabled', lead.get('email_opt_in') is not False) if prefs else lead.get('email_opt_in') is not False,
         "transactional_enabled": prefs.get('transactional_enabled', True) if prefs else True,
         "status": prefs.get('status', 'subscribed') if prefs else 'subscribed',
         "unsubscribed_at": prefs.get('unsubscribed_at') if prefs else None

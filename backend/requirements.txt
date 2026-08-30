@@ -20,3 +20,7 @@ groq
 redis
 python-multipart
 bcrypt
+python-json-logger
+prometheus_client
+rq
+jinja2

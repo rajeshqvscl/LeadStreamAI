@@ -1,6 +1,6 @@
-from pydantic_settings import BaseSettings
-from typing import Optional
 from functools import lru_cache
+
+from pydantic_settings import BaseSettings
 
 
 class SchedulerSettings(BaseSettings):
@@ -22,9 +22,9 @@ class FollowupSettings(BaseSettings):
     max_parallel_workers: int = 2
     cooldown_sec: float = 1.5
     client_max_stage: int = 2
-    client_intervals: str = "0:2,1:4"
+    client_intervals: str = "0:2,1:5"
     investor_max_stage: int = 3
-    investor_intervals: str = "0:2,1:4,2:6"
+    investor_intervals: str = "0:2,1:5,2:8"
 
     class Config:
         env_prefix = "FOLLOWUP_"
@@ -43,9 +43,9 @@ class EmailSettings(BaseSettings):
 
 
 class LLMSettings(BaseSettings):
-    anthropic_api_key: Optional[str] = None
-    groq_api_key: Optional[str] = None
-    gemini_api_key: Optional[str] = None
+    anthropic_api_key: str | None = None
+    groq_api_key: str | None = None
+    gemini_api_key: str | None = None
     claude_model: str = "claude-3-5-sonnet-20240620"
     gemini_model: str = "gemini-3-flash-preview"
     groq_model: str = "llama-3.3-70b-versatile"
@@ -72,6 +72,8 @@ class EmailEngineSettings(BaseSettings):
 
     class Config:
         env_prefix = "EMAIL_ENGINE_"
+        env_file = ".env"
+        case_sensitive = False
 
 
 class DatabaseSettings(BaseSettings):
@@ -88,10 +90,10 @@ class AppSettings(BaseSettings):
     admin_username: str = "admin"
     admin_password: str = "admin123"
     cors_allowed_origins: str = ""
-    google_client_id: Optional[str] = None
-    google_client_secret: Optional[str] = None
-    google_redirect_uri: Optional[str] = None
-    family_offices_path: Optional[str] = None
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    google_redirect_uri: str | None = None
+    family_offices_path: str | None = None
     rag_url: str = "https://rag-sys-gz59.onrender.com"
     rag_timeout: int = 300
 
@@ -100,36 +102,36 @@ class AppSettings(BaseSettings):
         case_sensitive = False
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> AppSettings:
     return AppSettings()
 
 
-@lru_cache()
+@lru_cache
 def get_scheduler_settings() -> SchedulerSettings:
     return SchedulerSettings()
 
 
-@lru_cache()
+@lru_cache
 def get_followup_settings() -> FollowupSettings:
     return FollowupSettings()
 
 
-@lru_cache()
+@lru_cache
 def get_email_settings() -> EmailSettings:
     return EmailSettings()
 
 
-@lru_cache()
+@lru_cache
 def get_llm_settings() -> LLMSettings:
     return LLMSettings()
 
 
-@lru_cache()
+@lru_cache
 def get_email_engine_settings() -> EmailEngineSettings:
     return EmailEngineSettings()
 
 
-@lru_cache()
+@lru_cache
 def get_database_settings() -> DatabaseSettings:
     return DatabaseSettings()

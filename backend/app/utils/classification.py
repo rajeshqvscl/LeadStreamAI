@@ -7,9 +7,9 @@ def normalize_sectors(sector_str):
     """
     if not sector_str or str(sector_str).strip() in ("", "—", "-", "N/A"):
         return None, []
-    
+
     s = str(sector_str).strip()
-    
+
     # Handle "Cross-sector (X, Y, Z)" pattern
     import re
     cross_match = re.match(r"^Cross-sector\s*\((.+)\)$", s, re.IGNORECASE)
@@ -17,16 +17,16 @@ def normalize_sectors(sector_str):
         s = cross_match.group(1)
     else:
         s = re.sub(r"^Cross-sector\s*,\s*", "", s, flags=re.IGNORECASE)
-    
+
     sectors = [x.strip() for x in s.split(",") if x.strip()]
-    
+
     # Clean parenthetical qualifiers like "(debt)", "(impact)", "(govt)"
     cleaned = []
     for sec in sectors:
         sec_clean = re.sub(r"\s*\(.*?\)\s*$", "", sec).strip()
         if sec_clean:
             cleaned.append(sec_clean)
-    
+
     # Deduplicate while preserving order
     seen = set()
     unique = []
@@ -35,7 +35,7 @@ def normalize_sectors(sector_str):
         if key not in seen:
             seen.add(key)
             unique.append(sec)
-    
+
     return (unique[0], unique) if unique else (None, [])
 
 
@@ -52,17 +52,17 @@ def infer_lead_classification(company_name, designation, remarks, current_sector
             return "CLIENT", (current_sector or "Other")
 
     text = f"{company_name or ''} {designation or ''} {remarks or ''}".lower()
-    
+
     # 1. Determine Type - More specific investor types
     lead_type = "CLIENT"
     investor_keywords = [
-        "venture", "capital", "equity", "partners", "investor", "investment", "vc ", 
+        "venture", "capital", "equity", "partners", "investor", "investment", "vc ",
         "asset management", "family office", "private equity", "hedge fund", "mutual fund",
         "angel investor", "seed fund", "growth fund", "impact investor", "strategic investor"
     ]
     if any(x in text for x in investor_keywords):
         lead_type = "INVESTOR"
-    
+
     # 2. Investor-specific sectors (more detailed)
     investor_sectors = {
         "VC - Early Stage": ["seed", "pre-seed", "angel", "first check", "early stage", "series a", "pre-series"],
@@ -75,7 +75,7 @@ def infer_lead_classification(company_name, designation, remarks, current_sector
         "Wealth Manager": ["wealth manager", "wealth advisory", "private banking", "family wealth"],
         "Fund of Funds": ["fund of funds", "fo f", "multi strategy"]
     }
-    
+
     client_sectors = {
         "SaaS": ["saas", "software as a service", "subscription software", "cloud platform", "b2b software", "crm", "erp", "project management"],
         "FinTech": ["fintech", "payment", "banking", "finance", "wealthtech", "insurtech", "crypto", "blockchain", "wallet", "lending", "neobank"],
@@ -97,10 +97,10 @@ def infer_lead_classification(company_name, designation, remarks, current_sector
         "Cloud Infra": ["cloud", "infrastructure", "devops", "aws", "azure", "gcp", "hosting"],
         "Legal Tech": ["legal tech", "law", "contract", "compliance", "regtech"]
     }
-    
+
     # 3. Determine Sector
     sector = current_sector
-    
+
     if lead_type == "INVESTOR":
         for ind, tokens in investor_sectors.items():
             if any(t in text for t in tokens):
@@ -113,13 +113,13 @@ def infer_lead_classification(company_name, designation, remarks, current_sector
             if any(t in text for t in tokens):
                 sector = ind
                 break
-    
+
     # If sector has commas, extract primary sector
     if sector and "," in sector:
         primary, _ = normalize_sectors(sector)
         if primary:
             sector = primary
-    
+
     # Re-check against keyword lists with the primary sector
     if sector and sector.upper() not in ["INVESTOR", "CLIENT", "OTHER"]:
         text_with_sector = f"{text} {sector}".lower()
@@ -133,11 +133,11 @@ def infer_lead_classification(company_name, designation, remarks, current_sector
                 if any(t in text_with_sector for t in tokens):
                     sector = ind
                     break
-    
+
     # FINAL GUARD
     if sector and sector.upper() in ["INVESTOR", "CLIENT"]:
         sector = "Other"
     if not sector:
         sector = "Other"
-    
+
     return lead_type, sector

@@ -1,29 +1,31 @@
-import psycopg2
-import psycopg2.extras
-from app.database import get_db_connection
 import csv
 import io
 from datetime import datetime
 
+import psycopg2
+import psycopg2.extras
+from app.database import get_db_connection
+
+
 def get_all_family_offices(search_query=None, user_id=None):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
+
     # Offices are global, but lead counts are isolated
     leads_where = "AND l.user_id = %s" if user_id else "AND l.user_id IS NULL"
-    
+
     query_params = []
     if user_id:
         query_params.append(user_id)
-        
+
     where_clause = "WHERE 1=1"
     if search_query:
         where_clause += " AND (fo.name ILIKE %s OR fo.location ILIKE %s OR fo.category ILIKE %s)"
         s = f"%{search_query}%"
         query_params.extend([s, s, s])
-    
+
     query = f"""
-    SELECT fo.*, COUNT(l.id) as count 
+    SELECT fo.*, COUNT(l.id) as count
     FROM family_offices fo
     LEFT JOIN leads_raw l ON fo.name = l.family_office_name {leads_where}
     {where_clause}
@@ -39,17 +41,17 @@ def get_all_family_offices(search_query=None, user_id=None):
 def get_family_office_by_id(office_id, user_id=None):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
+
     # Office is global
     cur.execute("SELECT * FROM family_offices WHERE id = %s", (office_id,))
     row = cur.fetchone()
-    
+
     if row:
         row = dict(row)
         l_where = "WHERE family_office_name = %s AND user_id = %s" if user_id else "WHERE family_office_name = %s AND user_id IS NULL"
         cur.execute(f"SELECT COUNT(*) as count FROM leads_raw {l_where}", (row['name'], user_id) if user_id else (row['name'],))
         row['count'] = cur.fetchone()['count']
-        
+
     cur.close()
     conn.close()
     return row

@@ -1,40 +1,39 @@
-from fastapi import APIRouter, Header, UploadFile, File, HTTPException
-import shutil
-from pydantic import BaseModel
-import traceback
-from typing import Optional, List
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import base64
+import json
+import logging
 import os
 import re
-import base64
-
-from app.models.lead import get_lead_by_id
-from app.models.draft import insert_draft
-from app.database import get_db_connection
-from app.utils.signature_clean import clean_signature_markdown
-from app.services.llm_services import EmailGenerator
-from app.services.email_service import get_user_email_font, get_user_email_font_size, clean_display_filename
-from app.services.vision_service import analyze_template_screenshot
-import psycopg2.extras
-import logging
-import json
+import shutil
 import time
+import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import psycopg2.extras
+from app.database import get_db_connection
+from app.services.email_service import (
+    clean_display_filename,
+    get_user_email_font,
+    get_user_email_font_size,
+)
+from app.services.llm_services import EmailGenerator
+from app.services.vision_service import analyze_template_screenshot
+from app.utils.auth_helpers import is_admin_user
+from app.utils.signature_clean import clean_signature_markdown
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile
+from pydantic import BaseModel
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # --- REDIS CACHE INITIALIZATION ---
-import os
 redis_client = None
 redis_available = False
 
 try:
     import redis
+    from app.core.redis_pool import get_redis_pool
     REDIS_URL = os.getenv("REDIS_URL") or os.getenv("REDIS_TLS_URL") or "redis://localhost:6379"
-    redis_client = redis.Redis.from_url(
-        REDIS_URL,
-        decode_responses=True,
-    )
+    redis_client = redis.Redis(connection_pool=get_redis_pool())
     redis_client.ping()
     redis_available = True
     logger.info(f"SUCCESS: Connected to Redis Cache inside drafts.py at {REDIS_URL.split('@')[-1]}")
@@ -66,7 +65,7 @@ _LOGO_FORCED_STYLES = {
 }
 
 
-def _forced_logo_style(src: str) -> Optional[str]:
+def _forced_logo_style(src: str) -> str | None:
     """Return the forced inline style for a known logo asset URL, else None.
 
     Matches by filename (last path segment, ignoring query/hash), so both the
@@ -95,7 +94,7 @@ def _redis_delete_pattern(pattern: str):
         if deleted:
             logger.info(f"SUCCESS: Invalidated {deleted} cache keys for pattern: {pattern}")
     except Exception as ie:
-        logger.error(f"Failed to invalidate cache for pattern {pattern}: {ie}")
+        logger.exception(f"Failed to invalidate cache for pattern {pattern}: {ie}")
 
 
 def invalidate_pending_drafts_cache(user_id: str = "*"):
@@ -105,7 +104,7 @@ def invalidate_pending_drafts_cache(user_id: str = "*"):
 try:
     conn = get_db_connection()
     cur = conn.cursor()
-    
+
     # 1. Yashika AI Tech Template
     latest_description = "AI-Powered Hiring Infrastructure Platform fundraising draft ($1M)"
     latest_content = """Subject: AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |
@@ -883,11 +882,14 @@ Looking forward to hearing from you!"""
 
     cur.close()
     conn.close()
-    logger.info("🚀 Startup templates creation/verification completed successfully!")
+    logger.info("Startup templates creation/verification completed successfully!")
 except Exception as db_err:
-    logger.error(f"⚠️ Startup template creation failed: {db_err}")
+    logger.exception(f"Startup template creation failed: {db_err}")
 
-from app.utils.auth_helpers import normalize_user_id, check_daily_email_limit, get_daily_email_limit
+import contextlib
+
+from app.utils.auth_helpers import check_daily_email_limit, get_daily_email_limit, normalize_user_id
+
 
 def _mark_send_failed(cur, lead_id: int, err_msg: str, actor: str):
     """Mark a lead as FAILED after a failed send attempt.
@@ -915,16 +917,16 @@ def _mark_send_failed(cur, lead_id: int, err_msg: str, actor: str):
         )
         add_activity_log(lead_id, "EMAIL_SEND_FAILED", marker, actor)
     except Exception as mark_err:
-        logger.error(f"Failed to mark lead {lead_id} as FAILED: {mark_err}")
+        logger.exception(f"Failed to mark lead {lead_id} as FAILED: {mark_err}")
 
 
-def _extract_body_attachments(body: str, user_id: Optional[int] = None) -> tuple:
+def _extract_body_attachments(body: str, user_id: int | None = None) -> tuple:
     """Parse body for links pointing at uploaded files in /assets/ (both markdown and HTML forms).
-    
+
     Scans for:
       - Markdown: [text](url)
       - HTML: <a href="url">
-    
+
     Returns (attachments, url_replacements) where:
     - attachments: list of dicts with base64-encoded content for MIME inclusion
     - url_replacements: dict mapping original URLs -> Google Drive share links (or original if upload fails)
@@ -945,6 +947,11 @@ def _extract_body_attachments(body: str, user_id: Optional[int] = None) -> tuple
 
     # HTML links: <a href="url">
     for url in re.findall(r'<a[^>]*href="([^"]+)"[^>]*>', body):
+        if f"{backend_url}/assets/" in url or "/assets/" in url:
+            found_urls.add(url)
+
+    # HTML images: <img src="url">
+    for url in re.findall(r'<img[^>]*src="([^"]+)"[^>]*>', body, re.IGNORECASE):
         if f"{backend_url}/assets/" in url or "/assets/" in url:
             found_urls.add(url)
 
@@ -1048,6 +1055,16 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
     # Normalize newlines
     text = text.replace("\r\n", "\n")
 
+    # ── Extract editor line-height from data-lh wrapper ──
+    # The WYSIWYG editor embeds <div data-lh="X"> to persist user-selected line-height.
+    # Unwrap it and use the value for body/table line-heights instead of hardcoded defaults.
+    _body_line_height = "1.6"  # default for outer wrapper
+    _lh_match = re.match(r'<div\s+data-lh="([^"]+)">', text, re.IGNORECASE)
+    if _lh_match:
+        _body_line_height = _lh_match.group(1)
+        text = re.sub(r'^<div\s+data-lh="[^"]*">', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'</div>\s*$', '', text)
+
     # ── Strip SIG_START/SIG_END marker blocks (template signature markers) ──
     # The real signature is injected separately (inject_signature / followup sig), so
     # these markers must never leak into the rendered email. Apply here (before both
@@ -1116,7 +1133,7 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
             style = _forced_logo_style(src) or "width:100%;height:auto;display:block;"
         # Fallback: convert any unknown image markdown to an <img> tag
         return f'<img src="{src}" alt="{alt_text}" style="{style}" />'
-    
+
     # ── If text is already rich HTML, skip markdown processing ──
     if re.search(r'<(div|table|span|p|h[1-6]|ul|ol|li|br|img|a|strong|em|b|i|u|font)[\s>]', text, re.IGNORECASE) or '</' in text:
         text = re.sub(r'SIG_START.*?SIG_END', '', text, flags=re.DOTALL)
@@ -1148,7 +1165,7 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
                 _sig_style = "margin-top: 4px; border-top: 1px solid #f0f0f0; padding-top: 6px; line-height: 1.4;"
                 text = _head + f'<div style="{_sig_style}">' + _sig_marker + _sig.strip() + '</div>'
         # Wrap the entire HTML content in a styled div with font settings
-        text = f'<div style="font-family: {font_family}; font-size: {font_size}; line-height: 1.6; color: #333333;">{text}</div>'
+        text = f'<div style="font-family: {font_family}; font-size: {font_size}; line-height: {_body_line_height}; color: #333333;">{text}</div>'
         return _restore_rich(text)
 
     text = re.sub(r'!\[(.*?)\]\((.*?)\)', _inline_md_img, text)
@@ -1156,50 +1173,56 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
     # 1.5 Handle Global Bolding (catch any remaining **stars**)
     text = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong><em>\1</em></strong>', text)
     text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
-    
+
     # 1.6 Horizontal rule (--- on its own line)
     text = re.sub(r'^[-*_]{3,}\s*$', '<hr style="border: none; border-top: 2px solid #475569; margin: 16px 0;">', text, flags=re.MULTILINE)
 
     # 2. Handle Links (Markdown style [Text](URL))
     # Using a more specific regex to avoid catching already-converted HTML tags
     text = re.sub(r'(?<!href=")(?<!src=")\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', text)
-    
+
     # 2a. Convert bare URLs (not already inside <a> tag) to clickable links
     # Also skip URLs already inside src="..." (markdown images) so <img> srcs
     # don't get wrapped in an <a> tag.
     text = re.sub(r'(?<!href=")(?<!src=")(https?://[^\s<]+)', r'<a href="\1" style="color: #3b82f6; text-decoration: underline; font-weight: 600;">\1</a>', text)
-    
+
     # 2b. Headings (### / ## / # at start of a line)
     text = re.sub(r'^###\s+(.*?)$', r'<h3 style="margin:0 0 6px 0;font-size:' + font_size + ';font-weight:700;">\1</h3>', text, flags=re.MULTILINE)
     text = re.sub(r'^##\s+(.*?)$', r'<h2 style="margin:0 0 6px 0;font-size:' + font_size + ';font-weight:700;">\1</h2>', text, flags=re.MULTILINE)
     text = re.sub(r'^#\s+(.*?)$', r'<h1 style="margin:0 0 6px 0;font-size:' + font_size + ';font-weight:700;">\1</h1>', text, flags=re.MULTILINE)
-    
+
     # 2c. Single-* italic MUST be converted here (before the signature-block split
     # below at step 3) — signature lines are extracted into `signature_html` before
     # the step-5 markdown pass runs, so *italic* in a saved signature would leak
     # the literal asterisks into the rendered email otherwise. `***` and `**` are
     # already handled above (lines 1.5), so only bare single-* remains here.
     text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
-    
+
     # 3. Smart Signature Styling (Grey & Italic)
     signature_html = ""
-    sig_start_marker = "--"
-    
+
     # Only treat standalone "--" (on its own line, not inside table separators) as sig marker
     sig_split_marker = None
     lines = text.split("\n")
     for i, line in enumerate(lines):
         stripped = line.strip()
-        if stripped == "--" or stripped == "---" or stripped == "—":
+        if stripped in {"--", "---", "—"}:
             sig_split_marker = stripped
             sig_line_idx = i
             break
-    
+
     if sig_split_marker is not None:
+        # Idempotency: if the content is ALREADY rendered HTML (a previous
+        # markdown_to_html pass produced a signature block with the border-top
+        # divider), do NOT re-extract and re-wrap it — that multiplies signatures
+        # each time the same draft is re-rendered. Return the rendered HTML as-is.
+        if 'border-top: 1px solid #f0f0f0' in text:
+            return text
+
         all_lines = text.split("\n")
         main_text = "\n".join(all_lines[:sig_line_idx]).rstrip("\n")
         raw_sig = sig_split_marker + "\n" + "\n".join(all_lines[sig_line_idx+1:])
-        
+
         # Style the signature block line-by-line
         sig_lines = raw_sig.strip().split("\n")
         formatted_sig_lines = []
@@ -1208,11 +1231,11 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
             if not line:
                 formatted_sig_lines.append('<div style="height: 8px;"></div>' if gmail_style else '<div style="height: 3px;"></div>')
                 continue
-                
+
             disclaimer_text = "Important: This message and its attachments"
             is_legal = disclaimer_text in line or "quantum value strategic consulting" in line.lower() or "unauthorized dissemination" in line.lower()
             is_strictly_private = "strictly private" in line.lower()
-            
+
             if is_legal and not is_strictly_private:
                 # Standard legal disclaimer: tiny and grey
                 line = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', line)
@@ -1242,9 +1265,9 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
                 # Handle names/titles in signature (bold them if they are in ***)
                 line = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong>\1</strong>', line)
                 line = f'<span style="color: #666; font-style: italic; display: block; margin-bottom: 0px; font-size: {font_size};">{line}</span>'
-            
+
             formatted_sig_lines.append(line)
-        
+
         sig_container_style = "margin-top: 8px; border-top: 1px solid #f0f0f0; padding-top: 10px; line-height: 1.5;" if gmail_style else "margin-top: 4px; border-top: 1px solid #f0f0f0; padding-top: 6px; line-height: 1.4;"
         signature_html = f'<div style="{sig_container_style}">' + "".join(formatted_sig_lines) + '</div>'
         text = main_text.rstrip() + ("\n[[SIG_BLOCK_PLACEHOLDER]]" if gmail_style else "\n\n[[SIG_BLOCK_PLACEHOLDER]]")
@@ -1252,7 +1275,7 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
     # 4. Handle remaining keywords if they weren't in markdown format
     if "Website" in text and "<a" not in text:
         text = text.replace("Website", '<a href="https://qvscl.com" style="color: #0066cc; text-decoration: underline;">Website</a>')
-    
+
     # Skip "Click here to unsubscribe" conversion — `email_service.py` handles it.
 
     # 5. Standard Markdown
@@ -1269,11 +1292,11 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
     for p in paragraphs:
         p = p.strip()
         if not p: continue
-        
+
         if "[[SIG_BLOCK_PLACEHOLDER]]" in p:
             html_parts.append(signature_html)
             continue
-        
+
         lines = p.split("\n")
         # Bullet points with exact Indentation
         if any(re.match(r'^\s*[•\-\*]\s+', l) for l in lines):
@@ -1292,7 +1315,7 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
             # Check if this is a markdown table
             lines = p.split("\n")
             if len(lines) >= 2 and all(l.strip().startswith("|") and l.strip().endswith("|") for l in lines):
-                table_html = f"<table style='width:100%;border-collapse:collapse;margin-bottom:18px;font-family:{font_family};font-size:{font_size};'>"
+                table_html = f"<table style='width:100%;border-collapse:collapse;margin-bottom:18px;font-family:{font_family};font-size:{font_size};line-height:{_body_line_height};'>"
                 for i, line in enumerate(lines):
                     line = line.strip()
                     if not line: continue
@@ -1300,20 +1323,19 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
                     if all(re.match(r'^[-:\s]+$', c) for c in cells):
                         continue
                     tag = "th" if i == 0 else "td"
-                    style = "border:1px solid #000;padding:2px 6px;text-align:left;font-weight:bold;font-size:10px;" if tag == "th" else "border:1px solid #000;padding:1px 6px;text-align:left;font-size:10px;font-weight:bold;"
+                    style = f"border:1px solid #000;padding:2px 6px;text-align:left;font-weight:bold;font-size:10px;line-height:{_body_line_height};" if tag == "th" else f"border:1px solid #000;padding:1px 6px;text-align:left;font-size:10px;font-weight:bold;line-height:{_body_line_height};"
                     row_html = f"<{tag} style='{style}'>" + f"</{tag}><{tag} style='{style}'>".join(cells) + f"</{tag}>"
                     table_html += f"<tr>{row_html}</tr>"
                 table_html += "</table>"
                 html_parts.append(table_html)
+            # Check if this paragraph is already a block-level HTML (like div, img, or table)
+            elif p.strip().startswith("<div") or p.strip().startswith("<img") or p.strip().startswith("<table"):
+                html_parts.append(p.strip())
             else:
-                # Check if this paragraph is already a block-level HTML (like div, img, or table)
-                if p.strip().startswith("<div") or p.strip().startswith("<img") or p.strip().startswith("<table"):
-                    html_parts.append(p.strip())
-                else:
-                    content = p.replace("\n", "<br>")
-                    p_style = f"margin-top: 0; margin-bottom: 10px; line-height: 1.5; font-size: {font_size}; font-family: {font_family};" if gmail_style else f"margin-top: 0; margin-bottom: 6px; line-height: 1.4; font-size: {font_size}; font-family: {font_family};"
-                    html_parts.append(f"<p style='{p_style}'>{content}</p>")
-    
+                content = p.replace("\n", "<br>")
+                p_style = f"margin-top: 0; margin-bottom: 10px; line-height: 1.5; font-size: {font_size}; font-family: {font_family};" if gmail_style else f"margin-top: 0; margin-bottom: 6px; line-height: 1.4; font-size: {font_size}; font-family: {font_family};"
+                html_parts.append(f"<p style='{p_style}'>{content}</p>")
+
     result = "".join(html_parts)
 
     # Ensure all table cells have visible borders (handles HTML tables from DOCX/pasted HTML)
@@ -1361,63 +1383,63 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
 
 class DraftRequest(BaseModel):
     lead_id: int
-    template_type: Optional[str] = "standard"
+    template_type: str | None = "standard"
 
 
 
 class ApproveRequest(BaseModel):
-    approved_by: Optional[str] = "admin"
-    cc: Optional[str] = None
+    approved_by: str | None = "admin"
+    cc: str | None = None
 
 class RejectRequest(BaseModel):
-    rejected_reason: Optional[str] = ""
+    rejected_reason: str | None = ""
 
 class BulkDraftRequest(BaseModel):
-    lead_ids: List[int]
-    cc: Optional[str] = None
-    signature_id: Optional[int] = None
+    lead_ids: list[int]
+    cc: str | None = None
+    signature_id: int | None = None
 
 class BulkSendRequest(BaseModel):
-    lead_ids: List[int]
-    cc: Optional[str] = None
+    lead_ids: list[int]
+    cc: str | None = None
 
 class BulkActionRequest(BaseModel):
-    lead_ids: List[int]
+    lead_ids: list[int]
     action: str  # APPROVED, ARCHIVED, SENT, REJECTED
-    reason: Optional[str] = None
+    reason: str | None = None
 
 class ScheduleRequest(BaseModel):
     scheduled_at: str
 
 class BulkScheduleRequest(BaseModel):
-    lead_ids: List[int]
+    lead_ids: list[int]
     scheduled_at: str
 
 @router.post("/emails/bulk-action")
-def bulk_email_action(req: BulkActionRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def bulk_email_action(req: BulkActionRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
+
         if not req.lead_ids:
             return {"message": "No leads provided"}
-            
+
         format_strings = ','.join(['%s'] * len(req.lead_ids))
         where_params = tuple(req.lead_ids)
-        
+
         # User restriction
         user_clause = ""
         if user_id and user_id.lower() != "admin":
             user_clause = " AND user_id = %s"
             where_params += (user_id,)
-        elif user_id and user_id.lower() == "admin":
+        elif is_admin_user(user_id):
             pass
         else:
             user_clause = " AND user_id IS NULL"
 
         # Update status
         cur.execute(f"UPDATE leads_raw SET email_status = %s, updated_at = NOW() WHERE id IN ({format_strings}) {user_clause}", (req.action, *where_params))
-        
+
         # Log activity
         from app.models.lead import add_activity_log
         for lid in req.lead_ids:
@@ -1428,7 +1450,7 @@ def bulk_email_action(req: BulkActionRequest, user_id: Optional[str] = Header(No
         conn.close()
 
         invalidate_pending_drafts_cache(user_id)
-        
+
         return {"message": f"Successfully updated {len(req.lead_ids)} leads to {req.action}"}
     except Exception as e:
         traceback.print_exc()
@@ -1475,6 +1497,10 @@ def _extract_lead_name_from_payload(lead: dict) -> tuple:
     )
     if not payload_name:
         return ("", "")
+    # Discard names with no letters (numeric row IDs / phone numbers) so greetings
+    # fall back to 'there' instead of rendering a number.
+    if not any(c.isalpha() for c in str(payload_name)):
+        return ("", "")
     parts = str(payload_name).split(" ", 1)
     return (parts[0].strip(), parts[1].strip() if len(parts) > 1 else "")
 
@@ -1518,7 +1544,7 @@ def clean_first_name(lead: dict) -> str:
     return parts[0].capitalize() if parts else (raw_last.split()[0].capitalize() if raw_last else "there")
 
 
-def get_sender_profile(user_id: Optional[str]) -> dict:
+def get_sender_profile(user_id: str | None) -> dict:
     """Fetches the full sender profile for signature construction, using ID or falling back to defaults."""
     uid = normalize_user_id(user_id)
     try:
@@ -1546,20 +1572,20 @@ def get_sender_profile(user_id: Optional[str]) -> dict:
         cur.close()
         conn.close()
     except Exception as e:
-        logger.error(f"Error fetching sender profile: {e}")
-    
+        logger.exception(f"Error fetching sender profile: {e}")
+
     return {
-        "full_name": "System Admin", 
+        "full_name": "System Admin",
         "username": "admin",
-        "job_title": "ITTEAM", 
-        "phone": "8527083798", 
+        "job_title": "ITTEAM",
+        "phone": "8527083798",
         "linkedin_url": "https://linkedin.com",
         "signatures": [],
         "signature_font": "sans-serif",
         "signature_font_size": "13px"
     }
 
-def get_followup_signature_markdown(user_id: Optional[str]) -> str:
+def get_followup_signature_markdown(user_id: str | None) -> str:
     """Returns the user's saved FOLLOWUP signature (sig_type='followup') as markdown,
     with placeholders resolved. Returns '' if no followup signature is saved.
     This is what followup emails (preview / manual send / auto-pilot) append to the body."""
@@ -1593,7 +1619,7 @@ def get_followup_signature_markdown(user_id: Optional[str]) -> str:
         content = content.replace('{{Sender Phone}}', phone)
         return content.strip()
     except Exception as e:
-        logger.error(f"Error fetching followup signature for user {user_id}: {e}")
+        logger.exception(f"Error fetching followup signature for user {user_id}: {e}")
         return ""
 
 
@@ -1637,7 +1663,7 @@ def get_hardcoded_signature_markdown(profile: dict) -> str:
 *{phone}*"""
 
 @router.get("/signatures/default-hardcoded")
-def get_default_hardcoded_signature(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_default_hardcoded_signature(user_id: str | None = Header(None, alias="X-User-Id")):
     """Returns the hardcoded signature (from inject_signature() logic) as markdown
     for the current user. Used by the Signatures page as the default fallback."""
     profile = get_sender_profile(user_id)
@@ -1648,7 +1674,7 @@ def get_default_hardcoded_signature(user_id: Optional[str] = Header(None, alias=
     }
 
 @router.get("/assets/pdfs")
-def list_available_pdfs(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def list_available_pdfs(user_id: str | None = Header(None, alias="X-User-Id")):
     """List all files available for attachment selection.
     Shows shared system files + only this user's uploaded files (sig_{uid}_* prefix)."""
     asset_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets")
@@ -1675,13 +1701,13 @@ def list_available_pdfs(user_id: Optional[str] = Header(None, alias="X-User-Id")
                 })
         return files
     except Exception as e:
-        logger.error(f"Error listing assets: {e}")
+        logger.exception(f"Error listing assets: {e}")
         return []
 
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets")
 
 @router.post("/signatures/upload-attachment")
-def upload_signature_attachment(file: UploadFile = File(...), user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def upload_signature_attachment(file: UploadFile = File(...), user_id: str | None = Header(None, alias="X-User-Id")):
     """Upload any file type — saved with sig_{uid}_ prefix for per-user isolation."""
     import uuid
     uid = normalize_user_id(user_id) if user_id else "shared"
@@ -1698,11 +1724,11 @@ def upload_signature_attachment(file: UploadFile = File(...), user_id: Optional[
             shutil.copyfileobj(file.file, f)
         return {"filename": unique_name, "message": "Attachment uploaded successfully"}
     except Exception as e:
-        logger.error(f"Error uploading attachment: {e}")
+        logger.exception(f"Error uploading attachment: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/signatures/attachment/{filename}")
-def delete_signature_attachment(filename: str, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def delete_signature_attachment(filename: str, user_id: str | None = Header(None, alias="X-User-Id")):
     """Delete a signature attachment file — only if owned by the current user."""
     safe_name = os.path.basename(filename)
     uid = normalize_user_id(user_id) if user_id else None
@@ -1717,7 +1743,7 @@ def delete_signature_attachment(filename: str, user_id: Optional[str] = Header(N
         logger.info(f"🗑️ Deleted attachment: {safe_name}")
         return {"filename": safe_name, "message": "File deleted successfully"}
     except Exception as e:
-        logger.error(f"Error deleting attachment {safe_name}: {e}")
+        logger.exception(f"Error deleting attachment {safe_name}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ────────────────────────────────────────────────────────
@@ -1727,18 +1753,18 @@ def delete_signature_attachment(filename: str, user_id: Optional[str] = Header(N
 class SignatureCreateRequest(BaseModel):
     name: str = "My Signature"
     content: str
-    attachment_file: Optional[str] = None
-    sig_type: Optional[str] = "outreach"
+    attachment_file: str | None = None
+    sig_type: str | None = "outreach"
 
 class SignatureUpdateRequest(BaseModel):
-    name: Optional[str] = None
-    content: Optional[str] = None
-    is_default: Optional[bool] = None
-    attachment_file: Optional[str] = None
-    sig_type: Optional[str] = None
+    name: str | None = None
+    content: str | None = None
+    is_default: bool | None = None
+    attachment_file: str | None = None
+    sig_type: str | None = None
 
 @router.get("/signatures")
-def list_signatures(user_id: Optional[str] = Header(None, alias="X-User-Id"), type: Optional[str] = None):
+def list_signatures(user_id: str | None = Header(None, alias="X-User-Id"), type: str | None = None):
     """List all saved signatures for the current user.
     Pass ?type=followup to list followup-only signatures, ?type=outreach for main ones.
     Omitting type returns all signatures."""
@@ -1763,22 +1789,18 @@ def list_signatures(user_id: Optional[str] = Header(None, alias="X-User-Id"), ty
         rows = cur.fetchall()
         return [dict(r) for r in rows]
     except Exception as e:
-        logger.error(f"Error listing signatures: {e}")
+        logger.exception(f"Error listing signatures: {e}")
         return []
     finally:
         if cur:
-            try:
+            with contextlib.suppress(Exception):
                 cur.close()
-            except Exception:
-                pass
         if conn:
-            try:
+            with contextlib.suppress(Exception):
                 conn.close()
-            except Exception:
-                pass
 
 @router.post("/signatures")
-def create_signature(req: SignatureCreateRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def create_signature(req: SignatureCreateRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     """Create a new signature for the current user."""
     if not req.content or not req.content.strip():
         raise HTTPException(status_code=400, detail="Signature content cannot be empty")
@@ -1793,7 +1815,7 @@ def create_signature(req: SignatureCreateRequest, user_id: Optional[str] = Heade
         cur.execute("SELECT COUNT(*) FROM user_signatures WHERE user_id = %s AND sig_type = %s", (uid, sig_type))
         count = cur.fetchone()[0]
         is_default = (count == 0)
-        
+
         # Normalize any WYSIWYG HTML (<br>, <span>, &nbsp;, ...) to clean markdown
         # so the <br>-laden format can never be stored again.
         clean_content = clean_signature_markdown(req.content or "")
@@ -1806,14 +1828,14 @@ def create_signature(req: SignatureCreateRequest, user_id: Optional[str] = Heade
         return new_sig
     except Exception as e:
         conn.rollback()
-        logger.error(f"Error creating signature: {e}")
+        logger.exception(f"Error creating signature: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
         conn.close()
 
 @router.put("/signatures/{sig_id}")
-def update_signature(sig_id: int, req: SignatureUpdateRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def update_signature(sig_id: int, req: SignatureUpdateRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     """Update a signature's name, content, or default status."""
     uid = normalize_user_id(user_id)
     conn = get_db_connection()
@@ -1826,7 +1848,7 @@ def update_signature(sig_id: int, req: SignatureUpdateRequest, user_id: Optional
         if not row:
             raise HTTPException(status_code=404, detail="Signature not found")
         target_sig_type = row['sig_type'] if isinstance(row, dict) else row[0]
-        
+
         updates = []
         params = []
         if req.name is not None:
@@ -1849,12 +1871,12 @@ def update_signature(sig_id: int, req: SignatureUpdateRequest, user_id: Optional
                 sig_type = "outreach"
             updates.append("sig_type = %s")
             params.append(sig_type)
-        
+
         if not updates and req.attachment_file is None:
             return {"message": "No fields to update"}
-        
+
         updates.append("updated_at = NOW()")
-        
+
         if req.attachment_file is not None:
             # Empty string means "clear the attachment_file"
             if req.attachment_file == '':
@@ -1862,9 +1884,9 @@ def update_signature(sig_id: int, req: SignatureUpdateRequest, user_id: Optional
             else:
                 updates.append("attachment_file = %s")
                 params.append(req.attachment_file)
-        
+
         params.append(sig_id)  # Must be LAST — used by WHERE id = %s
-        
+
         cur.execute(
             f"UPDATE user_signatures SET {', '.join(updates)} WHERE id = %s RETURNING id, name, content, is_default, created_at, updated_at, attachment_file, sig_type",
             params
@@ -1876,14 +1898,14 @@ def update_signature(sig_id: int, req: SignatureUpdateRequest, user_id: Optional
         raise
     except Exception as e:
         conn.rollback()
-        logger.error(f"Error updating signature: {e}")
+        logger.exception(f"Error updating signature: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
         conn.close()
 
 @router.delete("/signatures/{sig_id}")
-def delete_signature(sig_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def delete_signature(sig_id: int, user_id: str | None = Header(None, alias="X-User-Id")):
     """Delete a signature."""
     uid = normalize_user_id(user_id)
     conn = get_db_connection()
@@ -1911,46 +1933,43 @@ def delete_signature(sig_id: int, user_id: Optional[str] = Header(None, alias="X
         raise
     except Exception as e:
         conn.rollback()
-        logger.error(f"Error deleting signature: {e}")
+        logger.exception(f"Error deleting signature: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
         conn.close()
 
-def heal_draft_content(email_draft: str, user_id: Optional[str], profile: Optional[dict] = None, template_name: Optional[str] = None) -> str:
+def heal_draft_content(email_draft: str, user_id: str | None, profile: dict | None = None, template_name: str | None = None) -> str:
     if not email_draft:
         return email_draft
-    
+
     # Resolve logged-in user details
     if profile is None:
         profile = get_sender_profile(user_id)
     sender_full_name = profile.get('full_name') or profile.get('username') or "Kajal Huria"
     sender_first_name = sender_full_name.split()[0] if sender_full_name else "Kajal"
     if sender_first_name.lower() in ["system", "admin", "team", "the", "test"]:
-        if sender_first_name.lower() == "test":
-            sender_first_name = "Test"
-        else:
-            sender_first_name = "Sravanthi"
+        sender_first_name = "Test" if sender_first_name.lower() == "test" else "Sravanthi"
     else:
         # Capitalize name nicely
         sender_first_name = sender_first_name.capitalize()
-        
+
     healed = email_draft
-    
+
     # 0. Resolve [[BACKEND_URL]] placeholder so images work during send flow
     backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
     healed = healed.replace("[[BACKEND_URL]]", backend_url)
-    
+
     # 0a. Protect image filenames from name replacement below
     healed = healed.replace("kajal.png", "[[KAJAL_IMG_PNG]]").replace("Kajal.png", "[[KAJAL_IMG_PNG]]")
-    
+
     # 1. Case-insensitively replace any occurrence of "Kajal" with the logged-in user's first name
     if "kajal" in healed.lower():
         healed = re.sub(r"\bKajal\b", sender_first_name, healed, flags=re.IGNORECASE)
-    
+
     # 0b. Restore protected image filenames
     healed = healed.replace("[[KAJAL_IMG_PNG]]", "kajal.png")
-    
+
     # 1b. Replace sender placeholders with logged-in user's info
     sender_title = profile.get('job_title') or profile.get('title') or ""
     sender_phone = profile.get('phone') or ""
@@ -1963,30 +1982,28 @@ def heal_draft_content(email_draft: str, user_id: Optional[str], profile: Option
     healed = healed.replace("{{Sender Phone}}", sender_phone)
     healed = healed.replace("{{Sender LinkedIn}}", sender_linkedin)
     healed = healed.replace("{{Sender Linkedin}}", sender_linkedin)
-    
+
     # 2. (Subject healing removed — all templates now have their own Subject: line in the content,
     #     extracted correctly by generate_email_internal() at lines 1430-1438.)
-    
+
     # 3. Hospital-specific healing: only for the actual Ayush hospital template
     #    Previously this used content fingerprinting which caused Yashika's emails
     #    (and others) to get the Ayush hospital banner + disclaimer injected when
     #    a lead's name or company happened to contain "ayush", "uttar pradesh", etc.
     is_hospital = (template_name or '').strip().lower() == 'ayush_hospital_draft'
-    
+
     if is_hospital:
         backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
         # We use a markdown image that the renderer will convert to a full-width banner
-        banner_md = f"![Investment Opportunity Banner]({backend_url}/assets/PHOTO-2026-05-25-10-33-35.jpg)"
         hospital_disclaimer = """<strong>Strictly Private and Confidential.</strong><br><br>The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments."""
-        
+
         # NUCLEAR REGEX: If it's a hospital draft, catch anything starting with "Important:" and replace it.
         # This prevents any residual "Thank you" or old text from being left behind.
-        old_disclaimer_regex = r"Important:.*$"
-        
+
         # First, try to replace the old disclaimer nuclear-style (multiline)
         if re.search(r"Important:", healed, flags=re.IGNORECASE):
             healed = re.sub(r"Important:.*$", hospital_disclaimer, healed, flags=re.DOTALL | re.IGNORECASE)
-        
+
         # Strip any existing banner image markdown — don't re-inject it
         healed = re.sub(
             r'!\[.*?\]\(.*?PHOTO-2026-05-25-10-33-35.*?\)\s*',
@@ -2001,7 +2018,7 @@ def heal_draft_content(email_draft: str, user_id: Optional[str], profile: Option
             healed,
             flags=re.IGNORECASE
         )
-                
+
     # Stored drafts may contain raw markdown signature remnants (appended by
     # inject_signature and stored pre-render). Convert the markers to HTML so
     # drafts display rendered everywhere. Newlines are left as-is here — callers
@@ -2034,6 +2051,19 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 
     # Remove trailing signature divs from previous inject calls
     body_text = re.sub(r'<div\s+style="color:\s*#666666;.*?</div>\s*$', '', body_text, flags=re.DOTALL | re.IGNORECASE)
+    # Idempotency: also strip the actual saved-signature block (border-top divider)
+    # and the fallback block, otherwise re-injecting an already-signed draft stacks
+    # another copy every render (generation -> preview -> send) -> 2x/3x signatures.
+    body_text = re.sub(
+        r'<div\s+style="[^"]*border-top:\s*1px\s+solid\s+#f0f0f0[^"]*">.*?</div>\s*',
+        '', body_text, flags=re.DOTALL | re.IGNORECASE
+    )
+    body_text = re.sub(
+        r'<div\s+style="color:\s*#000000;.*?</div>\s*',
+        '', body_text, flags=re.DOTALL | re.IGNORECASE
+    )
+    # Drop any standalone '--' / '—' signature separator left over from a prior render
+    body_text = re.sub(r'(?m)^\s*(?:--|—)\s*$', '', body_text)
     body_text = body_text.strip()
 
     # Strip from last -- only if followed by signature-like content
@@ -2132,23 +2162,23 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
 
 @router.post("/generate-draft")
 @router.post("/generate-email")
-def generate_draft_endpoint(req: DraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def generate_draft_endpoint(req: DraftRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     return generate_email_internal(req, user_id)
 
-def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
+def generate_email_internal(req: DraftRequest, user_id: str | None = None):
     conn = None
     try:
         uid = normalize_user_id(user_id)
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
+
         if user_id and user_id.lower() != "admin":
             cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (req.lead_id, user_id))
-        elif user_id and user_id.lower() == "admin":
+        elif is_admin_user(user_id):
             cur.execute("SELECT * FROM leads_raw WHERE id = %s", (req.lead_id,))
         else:
             cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (req.lead_id,))
-            
+
         lead = cur.fetchone()
 
         if not lead:
@@ -2171,7 +2201,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         profile = get_sender_profile(user_id)
         generator = EmailGenerator()
         is_yashika = False
-        
+
         # Select template
         if req.template_type == 'palak':
             cur.execute("SELECT content FROM prompts WHERE name = 'palak_mam_Draft_1' AND is_active = TRUE")
@@ -2205,11 +2235,11 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
             is_yashika = req.template_type.startswith('yashika_')
             cur.execute("SELECT content, subject, cc, description FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE", (req.template_type,))
             row_t = cur.fetchone()
-            
+
             if row_t:
                 template_body = row_t["content"]
                 template_subject = (row_t.get("subject") or "").strip()
-                template_cc = (row_t.get("cc") or "").strip()
+                (row_t.get("cc") or "").strip()
                 template_desc = (row_t.get("description") or "").strip()
 
                 f_name = clean_first_name(lead)
@@ -2258,14 +2288,14 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                     ("{{Sender Linkedin}}", sender_linkedin),
                     ("[[BACKEND_URL]]", os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")),
                 ]
-                
+
                 for placeholder, value in replacements:
                     reg = re.compile(re.escape(placeholder), re.IGNORECASE)
                     body = reg.sub(str(value or ""), body)
 
             else:
                 email_data = generator.generate_email(
-                    lead, 
+                    lead,
                     sender_name=profile.get('full_name') or profile.get('username'),
                     sender_linkedin=profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
                 )
@@ -2273,20 +2303,20 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 body = email_data.get("body")
         else:
             email_data = generator.generate_email(
-                lead, 
+                lead,
                 sender_name=profile.get('full_name') or profile.get('username'),
                 sender_linkedin=profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
             )
             subject = email_data.get("subject")
             body = email_data.get("body")
-        
+
         # Always inject the sender's own hardcoded signature
         body_with_sig = inject_signature(body, profile, req.lead_id)
 
         body_lines = body_with_sig.split("\n")
         subject_found = False
         new_body_lines = []
-        
+
         for line in body_lines:
             if not subject_found and line.lstrip().lower().startswith("subject:"):
                 if ":" in line:
@@ -2296,17 +2326,22 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
                 subject_found = True
             else:
                 new_body_lines.append(line)
-        
+
         if subject_found:
             body_with_sig = "\n".join(new_body_lines).strip()
-        
-        from app.services.email_service import get_user_email_font, get_user_email_font_size, get_user_image_width, get_user_image_height
+
+        from app.services.email_service import (
+            get_user_email_font,
+            get_user_email_font_size,
+            get_user_image_height,
+            get_user_image_width,
+        )
         html_body = markdown_to_html(body_with_sig, gmail_style=is_yashika, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id), image_width=get_user_image_width(user_id), image_height=get_user_image_height(user_id))
         # Store the RENDERED HTML (html_body) so drafts display correctly in every
         # view — the raw body_with_sig would bake markdown signature remnants
         # (***Name***, [Website](url)) into the stored draft as literal text.
         email_content = f"Subject: {subject}\n\n{html_body}"
-        
+
         old_gmail_id = lead.get('gmail_draft_id')
         uid_int = int(normalize_user_id(user_id))
         if old_gmail_id:
@@ -2324,12 +2359,16 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         if not draft_to_email:
             logger.warning(f"Skipping Gmail draft — lead {req.lead_id} has no email")
         try:
-            from app.services.google_service import get_gmail_service
             import base64
             from email.mime.text import MIMEText
+
+            from app.services.google_service import get_gmail_service
             service = get_gmail_service(uid_int)
             if service and draft_to_email:
-                from app.services.email_service import build_unsubscribe_footer, strip_old_unsubscribe_links
+                from app.services.email_service import (
+                    build_unsubscribe_footer,
+                    strip_old_unsubscribe_links,
+                )
                 html_body = strip_old_unsubscribe_links(html_body)
                 html_body += build_unsubscribe_footer(req.lead_id)
                 message = MIMEText(html_body, 'html')
@@ -2345,7 +2384,7 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
             gmail_draft_id = None
 
         cur.execute("""
-            UPDATE leads_raw 
+            UPDATE leads_raw
             SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW(), gmail_draft_id = %s, draft_template_used = %s
             WHERE id = %s
         """, (email_content, gmail_draft_id, req.template_type if req.template_type != 'standard' else None, req.lead_id))
@@ -2371,10 +2410,8 @@ def generate_email_internal(req: DraftRequest, user_id: Optional[str] = None):
         return {"error": str(e)}
     finally:
         if conn:
-            try:
+            with contextlib.suppress(Exception):
                 conn.close()
-            except Exception:
-                pass
 def _detect_campaign_key(template_name: str, content: str, description: str) -> str:
     name = template_name.lower()
     desc = description.lower() if description else ""
@@ -2433,7 +2470,7 @@ def _fill_hardcoded_followups(template: dict) -> dict:
 
 # --- List Custom Draft Templates (for template picker modal) ---
 @router.get("/custom-draft-templates")
-def list_custom_draft_templates(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def list_custom_draft_templates(user_id: str | None = Header(None, alias="X-User-Id")):
     """Returns CUSTOM_DRAFT type prompts filtered by the current user's ownership."""
     try:
         conn = get_db_connection()
@@ -2580,7 +2617,7 @@ Thanks & Regards,
 
 The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
 SIG_END"""
-        
+
         # Only refresh the placeholder sentinel (never clobber user edits).
         cur.execute("SELECT content FROM prompts WHERE name = 'yashika_draft_ai_tech'")
         row = cur.fetchone()
@@ -3027,22 +3064,22 @@ Thank you again for your consideration."""
         conn.close()
         result = [_fill_hardcoded_followups(dict(r)) for r in rows]
         return result
-    except Exception as e:
+    except Exception:
         traceback.print_exc()
         return []
 
 class TemplateDraftRequest(BaseModel):
     lead_id: int
     template_name: str  # e.g. "palak_mam_Draft_1"
-    signature_id: Optional[int] = None
+    signature_id: int | None = None
 
 @router.post("/generate-draft-from-template")
-def generate_draft_from_template(req: TemplateDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def generate_draft_from_template(req: TemplateDraftRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     """Generate a draft using a fixed custom template, replacing {{First Name}}, {{Company Name}} etc."""
     return _generate_template_draft_inner(req.lead_id, req.template_name, user_id, req.signature_id)
 
 
-def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Optional[str], signature_id: Optional[int] = None) -> dict:
+def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: str | None, signature_id: int | None = None) -> dict:
     """Core logic for generating a template draft. Used by single and bulk endpoints."""
     try:
         conn = get_db_connection()
@@ -3054,7 +3091,7 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
         # Fetch lead
         if user_id and user_id.lower() != "admin":
             cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (lead_id, uid))
-        elif user_id and user_id.lower() == "admin":
+        elif is_admin_user(user_id):
             cur.execute("SELECT * FROM leads_raw WHERE id = %s", (lead_id,))
         else:
             cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (lead_id,))
@@ -3204,7 +3241,7 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
         body_with_sig = inject_signature(final_body, profile, lead_id)
 
         # RE-GENERATE html_body AFTER deduplication
-        from app.services.email_service import get_user_image_width, get_user_image_height
+        from app.services.email_service import get_user_image_height, get_user_image_width
         html_body = markdown_to_html(body_with_sig, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id), image_width=get_user_image_width(user_id), image_height=get_user_image_height(user_id))
 
         # Full content for local DB storage
@@ -3230,14 +3267,17 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
         if not to_email:
             logger.warning(f"⚠️ Skipping Gmail draft — lead {lead_id} has no email")
         try:
-            from app.services.google_service import get_gmail_service
             import base64
             from email.mime.multipart import MIMEMultipart
-            from email.mime.application import MIMEApplication
             from email.mime.text import MIMEText
+
+            from app.services.google_service import get_gmail_service
             service = get_gmail_service(uid_t)
             if service and to_email:
-                from app.services.email_service import build_unsubscribe_footer, strip_old_unsubscribe_links
+                from app.services.email_service import (
+                    build_unsubscribe_footer,
+                    strip_old_unsubscribe_links,
+                )
                 html_body = strip_old_unsubscribe_links(html_body)
                 html_body += build_unsubscribe_footer(lead_id)
                 msg = MIMEMultipart('mixed')
@@ -3294,15 +3334,15 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: Op
 class BulkTemplateDraftRequest(BaseModel):
     lead_ids: list[int]
     template_name: str
-    signature_id: Optional[int] = None
+    signature_id: int | None = None
 
-import uuid as _uuid
 import threading as _threading
+import uuid as _uuid
 
 _bulk_template_progress: dict = {}
 
 @router.post("/bulk-generate-draft-from-template")
-def bulk_generate_draft_from_template(req: BulkTemplateDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def bulk_generate_draft_from_template(req: BulkTemplateDraftRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     """Generate drafts for multiple leads using a template, processed in parallel. Returns immediately with batch_id for progress polling."""
     if not req.lead_ids:
         return {"error": "No lead IDs provided", "batch_id": None}
@@ -3321,7 +3361,7 @@ def bulk_generate_draft_from_template(req: BulkTemplateDraftRequest, user_id: Op
             with ThreadPoolExecutor(max_workers=3) as executor:
                 futures = {executor.submit(_generate_template_draft_inner, lid, req.template_name, user_id, req.signature_id): lid for lid in req.lead_ids}
                 for future in as_completed(futures):
-                    lid = futures[future]
+                    futures[future]
                     try:
                         res = future.result()
                         p = _bulk_template_progress[batch_id]
@@ -3356,16 +3396,14 @@ def get_bulk_progress(batch_id: str):
 
 @router.get("/pending-drafts")
 @router.get("/emails")
-def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Optional[str] = None, geo: Optional[str] = None, company: Optional[str] = None, name: Optional[str] = None, per_page: int = 60, ids_only: Optional[str] = None, lead_id: Optional[int] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    # Import email service functions for font/image settings
-    from app.services.email_service import get_user_email_font, get_user_email_font_size, get_user_image_width, get_user_image_height
+def get_pending_drafts(page: int = 1, status: str | None = None, region: str | None = None, geo: str | None = None, company: str | None = None, name: str | None = None, per_page: int = 60, ids_only: str | None = None, lead_id: int | None = None, user_id: str | None = Header(None, alias="X-User-Id")):
     try:
         # Resolve user — non-admin users only see their own drafts
         resolved_uid = None
-        is_admin_user = False
+        is_admin = False
         if user_id and user_id.strip():
-            if str(user_id).lower() == 'admin':
-                is_admin_user = True
+            if is_admin_user(user_id):
+                is_admin = True
             else:
                 try:
                     conn_resolve = get_db_connection()
@@ -3398,7 +3436,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
 
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
+
         # Base condition
         # Unsubscribe guard: never show drafts for leads that opted out / were
         # suppressed — they can never be sent, so showing them in the review
@@ -3407,20 +3445,35 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
             WHERE email_draft IS NOT NULL
               AND (lr.email_opt_in IS NULL OR lr.email_opt_in = TRUE)
               AND (lr.is_unsubscribed IS NULL OR lr.is_unsubscribed = FALSE)
-              AND lr.email NOT IN (SELECT email FROM unsubscribe_list)
+              AND NOT EXISTS (SELECT 1 FROM unsubscribe_list us WHERE LOWER(us.email) = LOWER(lr.email))
         """
         params = []
-        
+
         # User isolation: non-admin → only their drafts; admin → all; unset → unassigned only
         if resolved_uid is not None:
             where_clause += " AND user_id = %s"
             params.append(resolved_uid)
-        elif not is_admin_user:
+        elif not is_admin:
             where_clause += " AND user_id IS NULL"
 
         if status:
-            where_clause += " AND email_status = %s"
-            params.append(status)
+            # The review-queue "Pending" view also surfaces auto-pilot SCHEDULED
+            # drafts, so a human can still see + manually act on them during
+            # normal scheduled dispatch (and during the startup cooldown they
+            # remain PENDING_APPROVAL anyway). The dedicated SCHEDULED tab still
+            # filters to only SCHEDULED.
+            if status == "PENDING_APPROVAL":
+                where_clause += " AND email_status IN ('PENDING_APPROVAL','SCHEDULED')"
+            else:
+                where_clause += " AND email_status = %s"
+                params.append(status)
+        else:
+            # Default review-queue view: show every draft still in flight
+            # (pending approval, approved, or scheduled by the auto-pilot sweep).
+            # Terminal states (SENT/REPLIED/CLOSED/ARCHIVED) are hidden so the
+            # queue only lists what a human can still review or manually send —
+            # during BOTH the startup cooldown and normal scheduled dispatch.
+            where_clause += " AND email_status IN ('PENDING_APPROVAL','APPROVED','SCHEDULED','DRAFT','pending')"
 
         if region:
             if region == 'US':
@@ -3500,14 +3553,71 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
 
         cur.execute(query, tuple(params))
         rows = cur.fetchall()
-        
-        # count total unique emails (after deduplication)
-        count_query = f"""
-            SELECT COUNT(DISTINCT LOWER(lr.email)) FROM leads_raw lr {where_clause}
-        """
-        cur.execute(count_query, tuple(params[:-2])) # exclude limit/offset
-        total = cur.fetchone()[0]
-        
+
+        # ── Duplicate monitoring (review queue only) ──
+        # Drafts are NOT blocked at generation time. Instead, when they land in the
+        # review queue we flag duplicates so a human reviewer can see + clean them
+        # up before sending:
+        #   1) same email appearing in >1 draft within the queue (the existing
+        #      DISTINCT-ON dedup collapses them, but we surface how many siblings
+        #      exist so the reviewer knows duplicates were generated).
+        #   2) same email already has a sent/contacted outreach → flag as duplicate
+        #      so we don't re-send to someone already in the pipeline.
+        _filter_params = list(params[:-2]) if len(params) >= 2 else list(params)
+        queue_dup_counts: dict = {}
+        _raw_total = 0
+        total = 0
+        try:
+            # Single query: dup counts + raw total + distinct count (was 3 separate scans)
+            cur.execute(f"""
+                SELECT LOWER(lr.email) AS em, COUNT(*) AS c,
+                       COUNT(*) OVER() AS raw_total,
+                       COUNT(DISTINCT LOWER(lr.email)) OVER() AS distinct_total
+                FROM leads_raw lr
+                {where_clause}
+                GROUP BY LOWER(lr.email)
+                HAVING COUNT(*) > 1
+            """, tuple(_filter_params))
+            dup_rows = cur.fetchall()
+            if dup_rows:
+                queue_dup_counts = {row['em']: row['c'] for row in dup_rows}
+                _raw_total = dup_rows[0]['raw_total']
+                total = dup_rows[0]['distinct_total']
+        except Exception as _de:
+            logger.warning(f"Duplicate monitoring (queue) failed: {_de}")
+
+        # If dup query returned 0 rows, the window functions didn't fire — get counts separately
+        if not _raw_total or not total:
+            try:
+                cur.execute(f"""
+                    SELECT COUNT(*) AS raw_total,
+                           COUNT(DISTINCT LOWER(lr.email)) AS distinct_total
+                    FROM leads_raw lr {where_clause}
+                """, tuple(_filter_params))
+                cnt_row = cur.fetchone()
+                _raw_total = cnt_row['raw_total'] if cnt_row else 0
+                total = cnt_row['distinct_total'] if cnt_row else 0
+            except Exception:
+                pass
+
+        # `total` is COUNT(DISTINCT LOWER(email)); the difference is how many draft
+        # rows were collapsed by the queue's dedup.
+        duplicates_in_queue = max(0, _raw_total - total)
+
+        _page_emails = [(r.get('email') or '').strip().lower() for r in rows if r.get('email')]
+        _contacted_emails = set()
+        if _page_emails:
+            try:
+                cur.execute(
+                    "SELECT DISTINCT LOWER(email) AS em FROM leads_raw "
+                    "WHERE LOWER(email) = ANY(%s) "
+                    "AND email_status IN ('SENT','REPLIED','CLOSED','ARCHIVED','APPROVED','SCHEDULED')",
+                    (list(dict.fromkeys(_page_emails)),)
+                )
+                _contacted_emails = {row['em'] for row in cur.fetchall()}
+            except Exception as _ce:
+                logger.warning(f"Duplicate monitoring (contacted) failed: {_ce}")
+
         cur.close()
         conn.close()
 
@@ -3536,7 +3646,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
             draft_content = heal_draft_content(draft_content, user_id, profile, template_name=template_name)
             # Normalize literal \\n to real newlines for consistent parsing
             draft_content = draft_content.replace("\\n", "\n").replace("\\r\\n", "\n")
-                
+
             subject = ""
             body = draft_content
             if "Subject: " in draft_content:
@@ -3545,7 +3655,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
                 # If no double newline, maybe it's just a single newline after Subject:
                 if len(parts) == 1:
                     parts = draft_content.split("\n", 1)
-                    
+
                 subject = parts[0].replace("Subject: ", "").strip()
                 if len(parts) > 1:
                     body = parts[1].strip()
@@ -3557,12 +3667,30 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
                 subject = parts[0].replace("Subject:", "").strip()
                 if len(parts) > 1:
                     body = parts[1].strip()
-                    
+
             # Only use the team member name for metadata, the actual lead name should come from the lead's profile.
-            team_member_name = r.get("team_member_name") or r.get("team_member_username")
-            lead_display_name = f"{r['first_name'] or ''} {r['last_name'] or ''}".strip()
+            r.get("team_member_name") or r.get("team_member_username")
+            _raw_lead_name = f"{r['first_name'] or ''} {r['last_name'] or ''}".strip()
+            if _raw_lead_name and any(c.isalpha() for c in _raw_lead_name):
+                lead_display_name = _raw_lead_name
+            else:
+                # Fall back to a cleaned email local-part (matches company-generation behavior)
+                # so the review queue never renders a bare number for numeric/empty names.
+                _ep = (r.get("email") or "").split('@')[0]
+                lead_display_name = _ep.replace(".", " ").replace("_", " ").replace("-", " ").title() if _ep else (r.get("company_name") or "Contact")
 
             body_replaced = body.replace("[[BACKEND_URL]]", backend_url)
+
+            # ── Duplicate monitoring flags (review queue) ──
+            _em = (r.get("email") or "").strip().lower()
+            _dup_in_queue = queue_dup_counts.get(_em, 0) > 1
+            _already_contacted = _em in _contacted_emails
+            _is_duplicate = _dup_in_queue or _already_contacted
+            _dup_reason = (
+                "same_email_multiple_drafts" if _dup_in_queue
+                else ("already_contacted" if _already_contacted else None)
+            )
+
             drafts.append({
                 "id": r["id"],
                 "lead_id": r["id"],
@@ -3573,7 +3701,7 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
                 "fit_score": r.get("fit_score", 0),
                 "subject": subject,
                 "body": body_replaced,
-                "html_body": markdown_to_html(body_replaced, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id), image_width=get_user_image_width(user_id), image_height=get_user_image_height(user_id)),
+                "html_body": "",
                 "attachments": [],
                 "draft_template_used": r.get("draft_template_used") or "",
                 "status": r["email_status"] or "PENDING_APPROVAL",
@@ -3581,7 +3709,11 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
                 "verifier": r.get("email_approved_by") or ("admin" if r["email_status"] in ["APPROVED", "SENT"] else None),
                 "updated_at": r.get("updated_at", "").isoformat() if r.get("updated_at") and hasattr(r.get("updated_at"), 'isoformat') else str(r.get("updated_at")) if r.get("updated_at") else "",
                 "scheduled_at": r.get("scheduled_at").isoformat() + "Z" if r.get("scheduled_at") and hasattr(r.get("scheduled_at"), 'isoformat') else str(r.get("scheduled_at")) if r.get("scheduled_at") else "",
-                "remarks": r.get("remarks") or ""
+                "remarks": r.get("remarks") or "",
+                "is_duplicate": _is_duplicate,
+                "duplicate_reason": _dup_reason,
+                "duplicate_count": queue_dup_counts.get(_em, 1),
+                "already_contacted": _already_contacted
             })
           except Exception as draft_err:
             logger.warning(f"Skipping corrupt draft for lead {r.get('id')}: {draft_err}")
@@ -3590,7 +3722,16 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
         result = {
             "drafts": drafts,
             "total": total,
-            "pages": (total + per_page - 1) // per_page
+            "pages": (total + per_page - 1) // per_page,
+            # ── Duplicate monitoring summary (review queue) ──
+            # Surfaces how many drafts were collapsed as same-email duplicates and
+            # how many draft rows on this page are flagged as duplicates (including
+            # those whose email was already contacted/sent previously).
+            "duplicate_summary": {
+                "duplicates_in_queue": duplicates_in_queue,
+                "duplicate_email_drafts": sum(1 for d in drafts if d.get("is_duplicate")),
+                "already_contacted_drafts": sum(1 for d in drafts if d.get("already_contacted"))
+            }
         }
 
         # Cache the result in Redis (short TTL of 10s for review queue)
@@ -3609,28 +3750,28 @@ def get_pending_drafts(page: int = 1, status: Optional[str] = None, region: Opti
 
 class RefineRequest(BaseModel):
     instruction: str
-    body: Optional[str] = None
-    subject: Optional[str] = None
+    body: str | None = None
+    subject: str | None = None
 
 @router.post("/refine-email/{draft_id}")
-def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     try:
         # Get lead info to provide context to LLM
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
+
         if user_id and user_id.lower() != "admin":
             cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (draft_id, user_id))
-        elif user_id and user_id.lower() == "admin":
+        elif is_admin_user(user_id):
             cur.execute("SELECT * FROM leads_raw WHERE id = %s", (draft_id,))
         else:
             cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id IS NULL", (draft_id,))
-            
+
         lead = cur.fetchone()
 
         if not lead:
             return {"error": "Lead not found"}
-            
+
         profile = get_sender_profile(user_id)
         generator = EmailGenerator()
         refined_data = generator.refine_email(req.subject, req.body, req.instruction)
@@ -3646,26 +3787,30 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[s
 
         # --- Update or Create Gmail Draft ---
         try:
-            from app.services.google_service import get_gmail_service
             import base64
             from email.mime.text import MIMEText
-            
+
+            from app.services.google_service import get_gmail_service
+
             uid = normalize_user_id(user_id)
             service = get_gmail_service(int(uid))
             if service:
-                from app.services.email_service import get_user_image_width, get_user_image_height
+                from app.services.email_service import get_user_image_height, get_user_image_width
                 html_body = markdown_to_html(full_body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid), image_width=get_user_image_width(uid), image_height=get_user_image_height(uid))
-                from app.services.email_service import build_unsubscribe_footer, strip_old_unsubscribe_links
+                from app.services.email_service import (
+                    build_unsubscribe_footer,
+                    strip_old_unsubscribe_links,
+                )
                 html_body = strip_old_unsubscribe_links(html_body)
                 html_body += build_unsubscribe_footer(draft_id)
                 message = MIMEText(html_body, 'html')
                 message['to'] = lead.get('email', '')
                 message['subject'] = refined_data['subject']
                 raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
-                
+
                 draft_body_payload = {'message': {'raw': raw_message}}
                 existing_draft_id = lead.get('gmail_draft_id')
-                
+
                 if existing_draft_id:
                     # Update existing Gmail draft
                     service.users().drafts().update(userId='me', id=existing_draft_id, body=draft_body_payload).execute()
@@ -3683,19 +3828,19 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: Optional[s
                     logger.info(f"✅ Created new Gmail draft {new_draft_id} for Lead {draft_id} during refinement")
         except Exception as ge:
             logger.warning(f"⚠️  Gmail draft update failed (non-blocking): {ge}")
-        
+
         return {
             "subject": refined_data["subject"],
             "body": full_body
         }
-        
+
     except Exception as e:
         traceback.print_exc()
         return {"error": str(e)}
 
 @router.post("/approve-draft/{draft_id}")
 @router.post("/approve-email/{draft_id}")
-def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def approve_draft(draft_id: int, req: ApproveRequest | None = None, user_id: str | None = Header(None, alias="X-User-Id")):
     try:
         if not check_daily_email_limit(user_id, 1):
             limit = get_daily_email_limit(user_id)
@@ -3703,18 +3848,18 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         from app.services.email_service import send_email
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
+
         # 1. Fetch/Prepare Draft FIRST to get lead owner's user_id
         cur.execute("SELECT first_name, last_name, email, email_draft, cc_email, draft_template_used, user_id FROM leads_raw WHERE id = %s", (draft_id,))
         lead = cur.fetchone()
         if not lead:
             raise HTTPException(status_code=404, detail="Lead not found")
-        
+
         # Resolve sender identity — use lead owner's profile if they have Gmail connected
         sender_email = None
         sender_name = "the team"
         uid = normalize_user_id(user_id)  # default: approver's ID
-        
+
         lead_owner_id = lead.get('user_id')
         if lead_owner_id:
             # Check if lead owner has Gmail connected
@@ -3725,7 +3870,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
                 sender_name = owner_u['full_name'] or owner_u['username'] or "the team"
                 uid = str(lead_owner_id)
                 logger.info(f"Using lead owner (user_id={lead_owner_id}) Gmail for dispatch: {sender_email}")
-        
+
         if not sender_email and user_id:
             # Fall back to approver's profile
             cur.execute("SELECT email, full_name, username FROM users WHERE id = %s", (normalize_user_id(user_id),))
@@ -3733,16 +3878,16 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             if u:
                 sender_email = u['email']
                 sender_name = u['full_name'] or u['username'] or "the team"
-        
+
         draft_content = lead.get('email_draft')
         template_name = lead.get('draft_template_used') if lead else None
         draft_content = heal_draft_content(draft_content, user_id, template_name=template_name)
         email = lead.get('email')
         stored_cc = lead.get('cc_email')
-        
+
         if not email:
             raise HTTPException(status_code=400, detail="Missing recipient email address for this lead.")
-        
+
         if not draft_content:
             from app.services.llm_services import EmailGenerator
             generator = EmailGenerator()
@@ -3750,12 +3895,12 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             subject = email_data.get("subject", "Following up")
             body = email_data.get("body", "Hello, we would love to connect.")
             draft_content = f"Subject: {subject}\n\n{body}"
-        
+
         # 3. Parse subject ONLY from the first line — never scan the body for 'Subject:'
         # This prevents a body that mentions 'Subject:' from overwriting the real subject.
         subject = "Following up"  # Default fallback
         body = draft_content
-        
+
         first_line = draft_content.split("\n")[0].strip()
         if first_line.startswith("Subject:"):
             subject = first_line[len("Subject:"):].strip()
@@ -3764,10 +3909,10 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             body = rest[1].lstrip("\n").strip() if len(rest) > 1 else ""
         else:
             body = draft_content.strip()
-        
+
         # Real Dispatch — Gmail API only (SMTP/Resend fallback removed)
         logging.info(f"Triggering real email dispatch for lead {draft_id} from {sender_email} (User: {uid})")
-        
+
         # Check if user has Gmail connected (so we can log correctly)
         has_gmail = False
         try:
@@ -3776,9 +3921,9 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             has_gmail = svc is not None
         except Exception:
             pass
-        
+
         cc_email = req.cc if (req and req.cc) else stored_cc
-        
+
         # Vismaya ke emails mein sirf rajesh.s@qvscl.com CC karo
         is_vismaya = (
             (template_name or '').lower() == 'vismaya_leadstream'
@@ -3787,20 +3932,20 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
         )
         if is_vismaya:
             cc_email = "rajesh.s@qvscl.com"
-        
+
         # --- Re-inject Signature of the user sending the email ---
         # Always uses the person's own hardcoded signature from inject_signature()
         # Use lead owner's profile if available, else fall back to current user
         sig_profile_user_id = uid if uid else normalize_user_id(user_id)
         profile = get_sender_profile(sig_profile_user_id)
         body = inject_signature(body, profile, draft_id)
-        
+
         user_id_int = int(uid) if uid else None
         body_attachments, url_replacements = _extract_body_attachments(body, user_id=user_id_int)
         # Replace asset URLs in body with Google Drive share links
         for old_url, new_url in url_replacements.items():
             body = body.replace(old_url, new_url)
-        from app.services.email_service import get_user_image_width, get_user_image_height
+        from app.services.email_service import get_user_image_height, get_user_image_width
         success, error_msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=email,
             subject=subject,
@@ -3813,7 +3958,7 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
             template_name=template_name,
             attachments=body_attachments
         )
-        
+
         dispatch_method = "Gmail API" if has_gmail else "NO DISPATCH (Gmail not connected)"
 
         if success:
@@ -3824,8 +3969,8 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
 
             # 4. Update Status and Initialize Follow-up Sequence
             cur.execute("""
-                UPDATE leads_raw 
-                SET email_status = 'SENT', 
+                UPDATE leads_raw
+                SET email_status = 'SENT',
                     email_approved_by = %s,
                     updated_at = NOW(),
                     last_outreach_at = NOW(),
@@ -3872,20 +4017,20 @@ def approve_draft(draft_id: int, req: Optional[ApproveRequest] = None, user_id: 
 
 
 @router.post("/reject-email/{draft_id}")
-def reject_draft(draft_id: int, req: Optional[RejectRequest] = None, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def reject_draft(draft_id: int, req: RejectRequest | None = None, user_id: str | None = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
-    
+
     if user_id and user_id.lower() != "admin":
         where_clause = "WHERE id = %s AND user_id = %s"
         params = (draft_id, user_id)
-    elif user_id and user_id.lower() == "admin":
+    elif is_admin_user(user_id):
         where_clause = "WHERE id = %s"
         params = (draft_id,)
     else:
         where_clause = "WHERE id = %s AND user_id IS NULL"
         params = (draft_id,)
-    
+
     cur.execute(
         f"UPDATE leads_raw SET email_status = 'REJECTED', updated_at = NOW() {where_clause}",
         params
@@ -3894,29 +4039,29 @@ def reject_draft(draft_id: int, req: Optional[RejectRequest] = None, user_id: Op
     conn.commit()
     cur.close()
     conn.close()
-    
+
     invalidate_pending_drafts_cache(user_id)
     from app.models.lead import add_activity_log
     add_activity_log(draft_id, "EMAIL_REJECTED", f"Reason: {req.rejected_reason if req else ''}", "admin")
-    
+
     return {"status": "rejected", "message": "Draft rejected"}
 
 @router.post("/schedule-email/{draft_id}")
-def schedule_email(draft_id: int, req: ScheduleRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def schedule_email(draft_id: int, req: ScheduleRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        
+
         user_clause = ""
         params = [req.scheduled_at, draft_id]
         if user_id and user_id.lower() != "admin":
             user_clause = " AND user_id = %s"
             params.append(user_id)
-        elif user_id and user_id.lower() == "admin":
+        elif is_admin_user(user_id):
             pass
         else:
             user_clause = " AND user_id IS NULL"
-            
+
         cur.execute(
             f"UPDATE leads_raw SET email_status = 'SCHEDULED', scheduled_at = %s, updated_at = NOW() WHERE id = %s {user_clause}",
             tuple(params)
@@ -3933,25 +4078,25 @@ def schedule_email(draft_id: int, req: ScheduleRequest, user_id: Optional[str] =
         return {"error": str(e)}
 
 @router.post("/emails/bulk-schedule")
-def bulk_schedule_emails(req: BulkScheduleRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def bulk_schedule_emails(req: BulkScheduleRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         if not req.lead_ids:
              return {"message": "No leads provided"}
-             
+
         format_strings = ','.join(['%s'] * len(req.lead_ids))
         where_params = [req.scheduled_at] + list(req.lead_ids)
-        
+
         user_clause = ""
         if user_id and user_id.lower() != "admin":
             user_clause = " AND user_id = %s"
             where_params.append(user_id)
-        elif user_id and user_id.lower() == "admin":
+        elif is_admin_user(user_id):
             pass
         else:
             user_clause = " AND user_id IS NULL"
-            
+
         cur.execute(
             f"UPDATE leads_raw SET email_status = 'SCHEDULED', scheduled_at = %s, updated_at = NOW() WHERE id IN ({format_strings}) {user_clause}",
             tuple(where_params)
@@ -3960,7 +4105,7 @@ def bulk_schedule_emails(req: BulkScheduleRequest, user_id: Optional[str] = Head
         from app.models.lead import add_activity_log
         for lid in req.lead_ids:
             add_activity_log(lid, "EMAIL_SCHEDULED", f"Email scheduled for {req.scheduled_at}", get_user_name(user_id))
-            
+
         cur.close()
         conn.close()
         return {"message": f"Successfully scheduled {len(req.lead_ids)} emails for {req.scheduled_at}"}
@@ -3969,29 +4114,29 @@ def bulk_schedule_emails(req: BulkScheduleRequest, user_id: Optional[str] = Head
         return {"error": str(e)}
 
 @router.post("/approve-bulk-domain-drafts")
-def approve_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def approve_bulk_domain_drafts(req: BulkDraftRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
+
         if not req.lead_ids:
             return {"message": "No leads provided"}
-            
+
         format_strings = ','.join(['%s'] * len(req.lead_ids))
         if user_id and user_id.lower() != "admin":
             where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s"
             params = tuple(req.lead_ids) + (uid,)
-        elif user_id and user_id.lower() == "admin":
+        elif is_admin_user(user_id):
             where_clause = f"WHERE id IN ({format_strings})"
             params = tuple(req.lead_ids)
         else:
             where_clause = f"WHERE id IN ({format_strings}) AND user_id IS NULL"
             params = tuple(req.lead_ids)
-        
+
         cur.execute(f"SELECT * FROM leads_raw {where_clause}", params)
 
         leads = cur.fetchall()
-        
+
         # Group leads
         groups = {}
         for row in leads:
@@ -4000,23 +4145,23 @@ def approve_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = H
             company = lead_dict.get('company_name')
             group_key = domain if domain else (company if company else str(lead_dict['id']))
             group_key = group_key.lower().strip()
-            
+
             if group_key not in groups:
                 groups[group_key] = []
             groups[group_key].append(lead_dict)
-            
+
         total_leads_updated = 0
         total_groups = len(groups)
-        
+
         from app.models.lead import add_activity_log
         from app.services.llm_services import EmailGenerator
         generator = EmailGenerator()
-        
+
         for key, group_leads in groups.items():
             first_lead = group_leads[0]
             group_ids = [l['id'] for l in group_leads]
             id_format = ','.join(['%s'] * len(group_ids))
-            
+
             # If ANY lead in group has no draft, ensure we have one to apply
             # Or if the first lead has no draft, generate it
             email_content = first_lead.get("email_draft")
@@ -4024,34 +4169,34 @@ def approve_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = H
                 email_data = generator.generate_email(normalize_lead(first_lead))
                 subject = email_data.get("subject", "Following up")
                 body = email_data.get("body", "Hello, we would love to connect.")
-                
+
                 lines = body.split('\n')
                 if lines and any(g in lines[0].lower() for g in ['hi ', 'hello ', 'dear ']):
                     lines = lines[1:]
                 clean_body = '\n'.join(lines).lstrip()
                 email_content = f"Subject: {subject}\n\nHi {{first_name}},\n\n{clean_body}"
-            
+
             cur.execute(f"""
-                UPDATE leads_raw 
-                SET email_draft = CASE 
+                UPDATE leads_raw
+                SET email_draft = CASE
                     WHEN email_draft IS NULL THEN REPLACE(%s, '{{first_name}}', COALESCE(NULLIF(first_name, ''), 'there'))
-                    ELSE email_draft 
+                    ELSE email_draft
                 END,
-                email_status = 'APPROVED', 
+                email_status = 'APPROVED',
                 cc_email = COALESCE(%s, cc_email),
-                updated_at = NOW() 
+                updated_at = NOW()
                 WHERE id IN ({id_format})
             """, (email_content, req.cc, *group_ids))
-            
+
             # Log one activity per group/domain
             add_activity_log(None, "BULK_DOMAIN_APPROVE", f"Approved drafts for domain/group {key} ({len(group_ids)} leads)", "admin")
-            
+
             total_leads_updated += len(group_ids)
-            
+
         conn.commit()
         cur.close()
         conn.close()
-        
+
         return {
             "message": f"Approved {total_groups} distinct domain draft groups ({total_leads_updated} leads).",
             "groups_processed": total_groups,
@@ -4062,13 +4207,13 @@ def approve_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = H
         return {"error": str(e)}
 
 @router.post("/send-approved-batch")
-def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    from app.services.email_service import send_email
+def send_approved_batch(user_id: str | None = Header(None, alias="X-User-Id")):
     from app.api.drafts import heal_draft_content
     from app.models.lead import add_activity_log
+    from app.services.email_service import send_email
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
+
     # 1. Fetch User Data for Sender Identity
     sender_email = None
     sender_name = "the team"
@@ -4089,7 +4234,10 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     # 2. Get all approved + review-queue (PENDING_APPROVAL) leads for THIS user.
     #    PENDING_APPROVAL drafts sit in the review queue waiting for dispatch —
     #    "Send All" should pick them up too (previously they were silently skipped).
-    where_clause = "WHERE email_status IN ('APPROVED', 'PENDING_APPROVAL')"
+    #    SCHEDULED is included so a human can manually send a draft that the
+    #    auto-pilot has already queued — the send flips it to SENT, so the
+    #    auto-send later finds nothing left (no duplicate).
+    where_clause = "WHERE email_status IN ('APPROVED', 'PENDING_APPROVAL', 'SCHEDULED')"
     # Safety guards (same rules as the follow-up engine + manual approve): never
     # dispatch to leads that have replied or unsubscribed/opted out.
     where_clause += """
@@ -4104,31 +4252,31 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     if user_id and user_id.lower() != "admin":
         where_clause += " AND user_id = %s"
         params.append(user_id)
-    elif user_id and user_id.lower() == "admin":
+    elif is_admin_user(user_id):
         pass
     else:
         where_clause += " AND user_id IS NULL"
-    
+
     cur.execute(f"SELECT id, email, email_draft, cc_email, draft_template_used, gmail_draft_id FROM leads_raw {where_clause}", params)
     leads_to_send = cur.fetchall()
-    
+
     if leads_to_send and not check_daily_email_limit(user_id, len(leads_to_send)):
         cur.close()
         conn.close()
         limit = get_daily_email_limit(user_id)
         raise HTTPException(status_code=400, detail=f"Daily Limit Exceeded: Sending this batch would exceed your daily limit of {limit} emails. Please wait for the daily reset.")
-    
+
     sent_count = 0
     import time
     for i, lead in enumerate(leads_to_send):
         if i > 0:
             time.sleep(2.0)
-        
+
         try:
             draft_content = lead['email_draft'] or ""
             template_name = lead.get('draft_template_used')
             draft_content = heal_draft_content(draft_content, user_id, profile, template_name=template_name)
-            
+
             subject = "Following up"
             body = draft_content
             if "Subject: " in draft_content:
@@ -4157,7 +4305,7 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
             body = inject_signature(body, batch_profile, lead['id'])
 
             uid_val = normalize_user_id(user_id)
-            from app.services.email_service import get_user_image_width, get_user_image_height
+            from app.services.email_service import get_user_image_height, get_user_image_width
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=lead['email'],
                 subject=subject,
@@ -4173,8 +4321,8 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
 
             if success:
                 cur.execute("""
-                    UPDATE leads_raw 
-                    SET email_status = 'SENT', 
+                    UPDATE leads_raw
+                    SET email_status = 'SENT',
                         updated_at = NOW(),
                         last_outreach_at = NOW(),
                         last_outreach_subject = %s,
@@ -4207,7 +4355,7 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
                 # silently remain PENDING_APPROVAL in the review queue.
                 _mark_send_failed(cur, lead['id'], error_msg, sender_name)
         except Exception as e:
-            logger.error(f"Batch dispatch error for lead {lead['id']}: {str(e)}")
+            logger.exception(f"Batch dispatch error for lead {lead['id']}: {str(e)}")
             _mark_send_failed(cur, lead['id'], str(e), sender_name)
 
     conn.commit()
@@ -4215,19 +4363,19 @@ def send_approved_batch(user_id: Optional[str] = Header(None, alias="X-User-Id")
     conn.close()
 
     invalidate_pending_drafts_cache(user_id)
-    
+
     return {"message": f"Successfully sent {sent_count} approved emails via Gmail API."}
 
 
 class BulkSendRequest(BaseModel):
     lead_ids: list
-    cc: Optional[str] = None
+    cc: str | None = None
 
 class LeadStatusBatchRequest(BaseModel):
     lead_ids: list
 
 @router.post("/leads/status-batch")
-def leads_status_batch(req: LeadStatusBatchRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def leads_status_batch(req: LeadStatusBatchRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     """Returns the current email_status for a batch of lead IDs. Used by the
     frontend to reconcile actual send results when a bulk-send HTTP request
     times out but the backend still completes the sends in the background."""
@@ -4247,11 +4395,11 @@ def leads_status_batch(req: LeadStatusBatchRequest, user_id: Optional[str] = Hea
         conn.close()
 
 @router.post("/send-selected-batch")
-def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def send_selected_batch(req: BulkSendRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     """Send emails for a specific list of lead IDs via the logged-in user's Gmail account."""
-    from app.services.email_service import send_email
     from app.api.drafts import heal_draft_content
     from app.models.lead import add_activity_log
+    from app.services.email_service import send_email
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
@@ -4271,9 +4419,11 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
     profile = get_sender_profile(user_id)
 
     # 2. Fetch the requested leads.
-    #    Only leads explicitly queued for dispatch (PENDING_APPROVAL / APPROVED)
-    #    are sendable via this endpoint — the UI only offers "Send" for those
-    #    statuses. Reply/unsubscribe flags are deliberately NOT checked here: an
+    #    Only leads explicitly queued for dispatch (PENDING_APPROVAL / APPROVED /
+    #    SCHEDULED) are sendable via this endpoint — the UI only offers "Send" for
+    #    those statuses. SCHEDULED is included so a human can manually send a draft
+    #    the auto-pilot already queued (it flips to SENT, preventing a duplicate
+    #    auto-send). Reply/unsubscribe flags are deliberately NOT checked here: an
     #    admin who sets a draft to PENDING_APPROVAL wants it dispatched even if
     #    the lead previously replied/unsubscribed (they can inspect per-lead
     #    before selecting). Final delivery safety is still enforced by
@@ -4283,12 +4433,12 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
         SELECT id, email, email_draft, gmail_draft_id, cc_email, draft_template_used, user_id
         FROM leads_raw
         WHERE id = ANY(%s)
-          AND email_status IN ('PENDING_APPROVAL', 'APPROVED')
+          AND email_status IN ('PENDING_APPROVAL', 'APPROVED', 'SCHEDULED')
         """,
         (req.lead_ids,)
     )
     leads_to_send = cur.fetchall()
-    
+
     if leads_to_send and not check_daily_email_limit(user_id, len(leads_to_send)):
         cur.close()
         conn.close()
@@ -4324,7 +4474,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
             draft_content = lead['email_draft'] or ""
             template_name = lead.get('draft_template_used')
             draft_content = heal_draft_content(draft_content, user_id, profile, template_name=template_name)
-            
+
             subject = "Following up"
             body = draft_content
             if "Subject: " in draft_content:
@@ -4332,7 +4482,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
                 subject = parts[0].replace("Subject: ", "").strip()
                 body = parts[1].strip() if len(parts) > 1 else ""
 
-            from app.services.email_service import get_user_image_width, get_user_image_height
+            from app.services.email_service import get_user_image_height, get_user_image_width
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=lead['email'],
                 subject=subject,
@@ -4347,8 +4497,8 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
 
             if success:
                 cur.execute("""
-                    UPDATE leads_raw 
-                    SET email_status = 'SENT', 
+                    UPDATE leads_raw
+                    SET email_status = 'SENT',
                         email_approved_by = %s,
                         updated_at = NOW(),
                         last_outreach_at = NOW(),
@@ -4365,13 +4515,13 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
                     WHERE id = %s
                 """, (sender_name, subject, subject, new_thread_id, new_rfc_message_id, lead['id']))
                 add_activity_log(lead['id'], "EMAIL_SENT", f"Email dispatched via Gmail API from {sender_email} — Appears in Gmail Sent folder", sender_name)
-                
+
                 if lead.get('gmail_draft_id'):
                     try:
                         from app.services.google_service import delete_gmail_draft
                         delete_gmail_draft(int(uid), lead['gmail_draft_id'])
                     except Exception as de:
-                        logger.error(f"Failed to delete draft {lead['gmail_draft_id']}: {de}")
+                        logger.exception(f"Failed to delete draft {lead['gmail_draft_id']}: {de}")
 
                 sent_count += 1
                 results.append({"id": lead['id'], "email": lead['email'], "status": "sent"})
@@ -4383,7 +4533,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
                 # email status changes from PENDING_APPROVAL to FAILED.
                 _mark_send_failed(cur, lead['id'], error_msg, sender_name)
         except Exception as e:
-            logger.error(f"Bulk send error for lead {lead['id']}: {str(e)}")
+            logger.exception(f"Bulk send error for lead {lead['id']}: {str(e)}")
             failed_count += 1
             results.append({"id": lead['id'], "email": lead['email'], "status": "failed", "error": str(e)})
             _mark_send_failed(cur, lead['id'], str(e), sender_name)
@@ -4403,7 +4553,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: Optional[str] = Header(No
 
 
 @router.post("/generate-bulk-domain-drafts")
-def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     conn = None
     cur = None
     try:
@@ -4411,15 +4561,15 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
         uid = normalize_user_id(user_id)
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
+
         if not req.lead_ids:
             return {"message": "No leads provided"}
-            
+
         format_strings = ','.join(['%s'] * len(req.lead_ids))
         if user_id and user_id.lower() != "admin":
             where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s"
             params = tuple(req.lead_ids) + (uid,)
-        elif user_id and user_id.lower() == "admin":
+        elif is_admin_user(user_id):
             where_clause = f"WHERE id IN ({format_strings})"
             params = tuple(req.lead_ids)
         else:
@@ -4429,7 +4579,7 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
         cur.execute(f"SELECT * FROM leads_raw {where_clause}", params)
 
         leads = cur.fetchall()
-        
+
         # Group leads
         groups = {}
         for row in leads:
@@ -4438,11 +4588,11 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
             company = lead_dict.get('company_name')
             group_key = domain if domain else (company if company else str(lead_dict['id']))
             group_key = group_key.lower().strip()
-            
+
             if group_key not in groups:
                 groups[group_key] = []
             groups[group_key].append(lead_dict)
-            
+
         # ── Load sender profile and resolve signature ──
         profile = get_sender_profile(user_id)
         if req.signature_id:
@@ -4459,11 +4609,11 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
                     logger.info(f"✅ Overrode profile signature with user_signatures id={req.signature_id}")
             except Exception as sig_err:
                 logger.warning(f"Failed to fetch signature_id={req.signature_id}: {sig_err}")
-        
+
         generator = EmailGenerator()
         total_leads_updated = 0
         total_groups = len(groups)
-        
+
         def process_group(group_key, group_leads):
             first_lead = group_leads[0]
             try:
@@ -4475,24 +4625,25 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
                 print(f"Error generating email for {group_key}: {e}")
                 subject = "Following up"
                 body = "Hello, we would love to connect to discuss potential synergies."
-                
+
             lines = body.split('\n')
             if lines and any(g in lines[0].lower() for g in ['hi ', 'hello ', 'dear ']):
                 lines = lines[1:]
             clean_body = '\n'.join(lines).lstrip()
             return f"Subject: {subject}\n\nHi {{first_name}},\n\n{clean_body}", group_leads
-            
+
         results = []
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = [executor.submit(process_group, k, v) for k, v in groups.items()]
             for future in as_completed(futures):
                 res = future.result()
                 if res: results.append(res)
-                
-        from app.services.google_service import get_gmail_service
+
         import base64
         from email.mime.text import MIMEText
-        
+
+        from app.services.google_service import get_gmail_service
+
         uid_t = normalize_user_id(user_id)
         service = None
         try:
@@ -4508,7 +4659,7 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
                 # Resolve content for THIS specific lead
                 first_name = (lead_item.get('first_name') or '').strip() or 'there'
                 resolved_content = email_content.replace('{{first_name}}', first_name)
-                
+
                 # Parse subject and body
                 subject = "Following up"
                 body = resolved_content
@@ -4537,9 +4688,15 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
                                 logger.warning(f"⚠️ Could not delete old draft {old_gmail_id}: {de}")
 
                         # Use HTML for better consistency with individual drafts
-                        from app.services.email_service import get_user_image_width, get_user_image_height
+                        from app.services.email_service import (
+                            get_user_image_height,
+                            get_user_image_width,
+                        )
                         html_body = markdown_to_html(body, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id), image_width=get_user_image_width(user_id), image_height=get_user_image_height(user_id))
-                        from app.services.email_service import build_unsubscribe_footer, strip_old_unsubscribe_links
+                        from app.services.email_service import (
+                            build_unsubscribe_footer,
+                            strip_old_unsubscribe_links,
+                        )
                         html_body = strip_old_unsubscribe_links(html_body)
                         html_body += build_unsubscribe_footer(lead_item['id'])
                         message = MIMEText(html_body, 'html')
@@ -4555,17 +4712,17 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
 
                 # Update DB
                 cur.execute("""
-                    UPDATE leads_raw 
-                    SET email_draft = %s, 
-                        email_status = 'PENDING_APPROVAL', 
+                    UPDATE leads_raw
+                    SET email_draft = %s,
+                        email_status = 'PENDING_APPROVAL',
                         cc_email = COALESCE(%s, cc_email),
                         updated_at = NOW(),
                         gmail_draft_id = %s
                     WHERE id = %s
                 """, (resolved_content, req.cc, gmail_draft_id, lead_item['id']))
-                
+
                 total_leads_updated += 1
-            
+
         conn.commit()
         cur.close()
         conn.close()
@@ -4579,7 +4736,7 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
             add_activity_log(None, "BULK_DRAFT_GENERATE", f"Generated domain-wise drafts for {total_leads_updated} leads across {total_groups} groups", "admin")
         except Exception:
             pass
-        
+
         return {
             "message": f"Generated {total_groups} distinct domain drafts and applied to {total_leads_updated} leads.",
             "groups_processed": total_groups,
@@ -4598,27 +4755,27 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: Optional[str] = 
             pass
 
 @router.post("/send-bulk-domain-emails")
-def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def send_bulk_domain_emails(req: BulkSendRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     from app.services.email_service import send_email
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
+
         if not req.lead_ids:
             return {"message": "No leads provided"}
-            
+
         if not check_daily_email_limit(user_id, len(req.lead_ids)):        cur.close()
         conn.close()
         raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily outreach limit. Please wait for the daily reset.")
-    
+
         # 1. Fetch User Data
         uid = normalize_user_id(user_id)
         cur.execute("SELECT email, full_name, username, job_title, phone, linkedin_url FROM users WHERE id = %s", (uid,))
         u = cur.fetchone()
-        
+
         sender_email = u['email'] if u else None
         sender_name = (u['full_name'] or u['username']) if u else "the team"
-        
+
         profile = {
             "full_name": sender_name,
             "job_title": (u['job_title'] if u else None) or "Analyst",
@@ -4627,7 +4784,7 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
         }
 
         format_strings = ','.join(['%s'] * len(req.lead_ids))
-        if str(user_id).lower() == "admin":
+        if is_admin_user(user_id):
             where_clause = f"WHERE id IN ({format_strings})"
             params = tuple(req.lead_ids)
         elif uid:
@@ -4637,20 +4794,21 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
             where_clause = f"WHERE id IN ({format_strings}) AND user_id IS NULL"
             params = tuple(req.lead_ids)
 
-        cur.execute(f"SELECT id, first_name, email, email_draft, domain, company_name, cc_email, draft_template_used FROM leads_raw {where_clause}", params)
+        cur.execute(f"SELECT id, first_name, email, email_draft, domain, company_name, cc_email, draft_template_used, gmail_draft_id FROM leads_raw {where_clause}", params)
         leads = cur.fetchall()
-        
+
         sent_count = 0
+        import time
+
         from app.models.lead import add_activity_log
         from app.services.llm_services import EmailGenerator
-        import time
         generator = EmailGenerator()
 
         for i, lead in enumerate(leads):
             # Delay between sends to respect Gmail rate limits (2s = 30 emails/min max)
             if i > 0:
                 time.sleep(2.0)
-            
+
             try:
                 # If draft already exists, use it. Otherwise generate.
                 email_content = lead.get("email_draft")
@@ -4662,7 +4820,7 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                 else:
                     template_name = lead.get('draft_template_used')
                     email_content = heal_draft_content(email_content, user_id, profile, template_name=template_name)
-                
+
                 # Parse Subject and Body
                 subject = "Following up"
                 body = email_content
@@ -4670,12 +4828,12 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                     parts = email_content.split("\n\n", 1)
                     subject = parts[0].replace("Subject: ", "").strip()
                     body = parts[1].strip() if len(parts) > 1 else ""
-                
+
                 # RE-INJECT Signature of the CURRENT user
                 final_body = inject_signature(body, profile, lead['id'])
 
                 # Real Dispatch
-                from app.services.email_service import get_user_image_width, get_user_image_height
+                from app.services.email_service import get_user_image_height, get_user_image_width
                 success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                     to_email=lead['email'],
                     subject=subject,
@@ -4691,9 +4849,9 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
 
                 if success:
                     cur.execute("""
-                        UPDATE leads_raw 
-                        SET email_draft = %s, 
-                            email_status = 'SENT', 
+                        UPDATE leads_raw
+                        SET email_draft = %s,
+                            email_status = 'SENT',
                             updated_at = NOW(),
                             last_outreach_at = NOW(),
                             last_outreach_subject = %s,
@@ -4709,6 +4867,15 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
                     """, (email_content, subject, subject, new_thread_id, new_rfc_message_id, lead['id']))
                     add_activity_log(lead['id'], "EMAIL_SENT", f"Bulk domain email dispatched via Gmail API from {sender_email}", "system")
                     sent_count += 1
+                    # Remove the now-sent Gmail draft so it doesn't linger as an orphan.
+                    gmail_draft_id = lead.get('gmail_draft_id')
+                    if gmail_draft_id:
+                        try:
+                            from app.services.google_service import delete_gmail_draft
+                            delete_gmail_draft(int(uid), gmail_draft_id)
+                            cur.execute("UPDATE leads_raw SET gmail_draft_id = NULL WHERE id = %s", (lead['id'],))
+                        except Exception as ge:
+                            logger.warning(f"Could not delete Gmail draft {gmail_draft_id} after bulk send: {ge}")
                 else:
                     # Send failed — mark FAILED so the lead doesn't stay silently
                     # in the review queue with no trace of what went wrong.
@@ -4722,7 +4889,7 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
         conn.close()
 
         invalidate_pending_drafts_cache(user_id)
-        
+
         return {
             "message": f"Successfully sent {sent_count} emails via Resend.",
             "leads_processed": len(leads),
@@ -4737,34 +4904,34 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: Optional[str] = Heade
 # Screenshot-based Template Creator
 # ---------------------------------------------------------------------------
 @router.post("/analyze-template-screenshot")
-async def analyze_screenshot(files: List[UploadFile] = File(..., description="Upload 1-5 screenshots of email templates. AI analyzes each and merges them into one template.")):
+async def analyze_screenshot(files: list[UploadFile] = File(..., description="Upload 1-5 screenshots of email templates. AI analyzes each and merges them into one template.")):
     """Upload up to 5 screenshots of an email template. AI analyzes each and merges them into one complete template."""
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
-    
+
     if len(files) > 5:
         raise HTTPException(status_code=400, detail="Maximum 5 images allowed")
-    
+
     for f in files:
         if not f.content_type.startswith("image/"):
             raise HTTPException(status_code=400, detail=f"'{f.filename}' is not an image file")
-    
+
     merged_subject = ""
     merged_body_parts = []
     merged_notes = []
-    
+
     for file in files:
         contents = await file.read()
         image_base64 = base64.b64encode(contents).decode("utf-8")
         result = analyze_template_screenshot(image_base64)
-        
+
         if result.get("subject") and not merged_subject:
             merged_subject = result["subject"]
         if result.get("body"):
             merged_body_parts.append(result["body"])
         if result.get("formatting_notes"):
             merged_notes.append(result["formatting_notes"])
-    
+
     return {
         "subject": merged_subject,
         "body": "\n\n".join(merged_body_parts) if len(merged_body_parts) > 1 else (merged_body_parts[0] if merged_body_parts else ""),

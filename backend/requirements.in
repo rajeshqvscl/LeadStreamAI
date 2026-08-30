@@ -1,0 +1,40 @@
+# LeadStreamAI backend dependencies (editable list)
+# Compile a locked file with:  pip-compile requirements.in -o requirements.lock
+# Or generate from current env: pip freeze > requirements.lock
+
+fastapi
+uvicorn[standard]
+pydantic-settings
+psycopg2-binary
+python-dotenv
+requests
+httpx
+anthropic
+structlog
+gunicorn
+resend
+google-api-python-client>=2.120
+google-auth-oauthlib
+google-auth
+google-cloud-pubsub
+google-generativeai==0.8.3
+google-ai-generativelanguage==0.6.10
+markdown
+groq
+redis
+python-multipart
+bcrypt
+python-json-logger
+prometheus_client
+rq
+jinja2
+croniter
+python-dateutil
+six
+PyJWT
+xlsxwriter
+opencv-python-headless
+numpy
+pandas
+Pillow
+numpy

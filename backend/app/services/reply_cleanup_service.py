@@ -20,10 +20,9 @@ Responsibilities
 
 import html
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import psycopg2.extras
-
 from app.database import get_db_connection
 from app.models.lead import add_activity_log
 
@@ -150,7 +149,7 @@ def cleanup_replied_leads(scope_user_id=None, dry_run: bool = False) -> dict:
             except Exception as e:
                 stats["errors"] += 1
                 conn.rollback()
-                logger.error(f"Cleanup failed for lead {lead_id}: {e}")
+                logger.exception(f"Cleanup failed for lead {lead_id}: {e}")
 
         logger.info(
             "Reply cleanup %s: %d replied leads matched, %d follow-ups deleted, %d errors",
@@ -181,7 +180,7 @@ def _get_last_report_at() -> datetime:
                 return datetime.fromisoformat(row[0])
             except ValueError:
                 pass
-        return datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
+        return datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=24)
     finally:
         cur.close()
         conn.close()
@@ -253,7 +252,7 @@ def _format_ist(dt) -> str:
         if dt is None:
             return "-"
         if getattr(dt, "tzinfo", None) is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         return dt.astimezone(IST).strftime("%d %b %I:%M %p")
     except Exception:
         return "-"
@@ -351,7 +350,7 @@ def _send_report_emails(replies: list, cleanup_stats: dict, run_label: str) -> i
                 sent += 1
                 logger.info(f"Reply report email sent to {admin['email']}")
         except Exception as e:
-            logger.error(f"Reply report email failed for {admin.get('email')}: {e}")
+            logger.exception(f"Reply report email failed for {admin.get('email')}: {e}")
     return sent
 
 
@@ -390,7 +389,7 @@ def _create_report_reminders(replies: list, cleanup_stats: dict, run_label: str)
             lines.append("No new replies received.")
 
         description = "\n".join(lines)
-        due_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        due_at = datetime.now(UTC).replace(tzinfo=None)
 
         for admin in _get_admin_users():
             try:
@@ -405,7 +404,7 @@ def _create_report_reminders(replies: list, cleanup_stats: dict, run_label: str)
                 created += 1
             except Exception as e:
                 conn.rollback()
-                logger.error(f"Reply report reminder failed for admin {admin.get('id')}: {e}")
+                logger.exception(f"Reply report reminder failed for admin {admin.get('id')}: {e}")
         return created
     finally:
         cur.close()
@@ -438,7 +437,7 @@ def run_daily_reply_cleanup_and_report(
     try:
         cleanup_stats = cleanup_replied_leads(dry_run=dry_run)
     except Exception as e:
-        logger.error(f"Reply cleanup failed: {e}")
+        logger.exception(f"Reply cleanup failed: {e}")
 
     replies = []
     try:
@@ -447,9 +446,9 @@ def run_daily_reply_cleanup_and_report(
         last_report_at = _get_last_report_at()
         replies = get_replies_since(last_report_at)
         if not dry_run:
-            _set_last_report_at(datetime.now(timezone.utc).replace(tzinfo=None))
+            _set_last_report_at(datetime.now(UTC).replace(tzinfo=None))
     except Exception as e:
-        logger.error(f"Reply report data gathering failed: {e}")
+        logger.exception(f"Reply report data gathering failed: {e}")
 
     email_sent = 0
     notifications_created = 0

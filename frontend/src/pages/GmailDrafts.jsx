@@ -229,7 +229,17 @@ const GmailDrafts = () => {
     const _u = JSON.parse(localStorage.getItem('user') || '{}');
     const _ff = _u.email_font || 'sans-serif';
     const _fs = _u.email_font_size || '13px';
-    return `<div style="font-family:${_ff};font-size:${_fs};line-height:1.6;">${finalHtml}</div>`;
+    // Keep only the last signature block so the preview never shows it 3x
+    const _sigRe = /<div[^>]*border-top:[^>]*>/i;
+    let _out = finalHtml;
+    const _first = _out.search(_sigRe);
+    if (_first !== -1) {
+      let _last = _first; let _m;
+      const _g = new RegExp(_sigRe.source, 'gi');
+      while ((_m = _g.exec(_out)) !== null) _last = _m.index;
+      if (_last !== _first) _out = _out.slice(0, _first) + _out.slice(_last);
+    }
+    return `<div style="font-family:${_ff};font-size:${_fs};line-height:1.6;">${_out}</div>`;
   };
 
   const filteredDrafts = drafts.filter(d => 

@@ -11,7 +11,6 @@ Responsibilities:
 
 import logging
 import re
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +43,7 @@ DECLINE_PATTERNS = [
 ]
 
 
-def detect_decline_phrase(text: Optional[str]) -> Optional[str]:
+def detect_decline_phrase(text: str | None) -> str | None:
     """
     Returns the readable label of the first decline phrase found in the reply text,
     or None if the text contains no known decline phrase.

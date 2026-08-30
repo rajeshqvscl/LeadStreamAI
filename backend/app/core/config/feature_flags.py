@@ -1,4 +1,5 @@
 from functools import lru_cache
+
 from pydantic_settings import BaseSettings
 
 
@@ -19,6 +20,6 @@ class FeatureFlags(BaseSettings):
         case_sensitive = False
 
 
-@lru_cache()
+@lru_cache
 def get_feature_flags() -> FeatureFlags:
     return FeatureFlags()

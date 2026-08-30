@@ -1,34 +1,33 @@
-from fastapi import APIRouter, HTTPException, Header
-from pydantic import BaseModel
-from typing import Optional
-import structlog
 
-from app.services.rocketreach_service import search_leads
+import structlog
 from app.models.lead import insert_lead
+from app.services.rocketreach_service import search_leads
+from fastapi import APIRouter, Header, HTTPException
+from pydantic import BaseModel
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 class LeadRequest(BaseModel):
     # Company search fields
-    company: Optional[str] = None
-    title: Optional[str] = None
-    location: Optional[str] = None
-    count: Optional[int] = 20
-    
+    company: str | None = None
+    title: str | None = None
+    location: str | None = None
+    count: int | None = 20
+
     # Bulk search fields
-    bulk_title: Optional[str] = None
-    bulk_location: Optional[str] = None
-    industry: Optional[str] = None
-    keyword: Optional[str] = None
-    exclude: Optional[str] = None
-    source_type: Optional[str] = "direct"
-    
+    bulk_title: str | None = None
+    bulk_location: str | None = None
+    industry: str | None = None
+    keyword: str | None = None
+    exclude: str | None = None
+    source_type: str | None = "direct"
+
     # New Lookup Modes
-    mode: Optional[str] = "search" # search, email, name, url
-    email: Optional[str] = None
-    name: Optional[str] = None
-    linkedin_url: Optional[str] = None
+    mode: str | None = "search" # search, email, name, url
+    email: str | None = None
+    name: str | None = None
+    linkedin_url: str | None = None
 
 def categorize_lead(payload):
     """Classifies a lead by persona and assigns a deterministic, keyword-based fit score.
@@ -38,14 +37,14 @@ def categorize_lead(payload):
     noise that used to fake 'AI classification' metrics).
     """
     title = str(payload.get("current_title", "")).lower()
-    
+
     # Skip pure engineering roles (no leadership indicator)
     engineer_keywords = ["software engineer", "senior engineer", "developer", "programmer", "coder", "data analyst"]
     leadership_override = any(x in title for x in ["cto", "vp", "head", "director", "chief", "lead engineer"])
     is_pure_engineer = any(x in title for x in engineer_keywords)
     if is_pure_engineer and not leadership_override:
         return "OTHER", 20
-        
+
     # FOUNDER — top-level founders, CEOs, managing directors, C-suite execs
     founder_keywords = [
         "founder", "co-founder", "cofounder", "co finder",
@@ -59,14 +58,14 @@ def categorize_lead(payload):
     ]
     if any(x in title for x in founder_keywords):
         return "FOUNDER", 95
-    
+
     # INVESTOR — vc, capital, equity, investors
     investor_keywords = [
         "investor", "venture", "vc", "capital", "equity", "investment"
     ]
     if any(x in title for x in investor_keywords):
         return "INVESTOR", 90
-        
+
     # PARTNER — partner roles, VP
     partner_keywords = [
         "partner", "general partner", "managing partner",
@@ -74,16 +73,15 @@ def categorize_lead(payload):
     ]
     if any(x in title for x in partner_keywords):
         return "PARTNER", 85
-    
+
     # Other — default deterministic score
     return "OTHER", 50
 
 @router.post("/ingest-leads")
-def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    from app.services.rocketreach_service import search_leads, lookup_by_email, lookup_by_name
-    from app.database import get_db_connection
+def ingest_leads(req: LeadRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     import psycopg2.extras
-    from fastapi import HTTPException
+    from app.database import get_db_connection
+    from app.services.rocketreach_service import lookup_by_email, lookup_by_name
 
     # --- AUTHORIZATION & CREDIT GATE ---
     if not user_id:
@@ -100,28 +98,28 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
 
         if not user_record:
             raise HTTPException(status_code=401, detail="User account not found.")
-        
+
         # Strictly enforce discovery approval for ALL users (including admins if requested)
         if not user_record['is_active']:
             raise HTTPException(status_code=403, detail="Your account is deactivated.")
         if not user_record['is_approved']:
             raise HTTPException(status_code=403, detail="Discovery access pending approval.")
-        
+
         user_name = user_record['full_name'] or user_record['username'] or "User"
-        
+
         # Enforce Credit Limit (Strict 200 leads as requested)
         # Even admins are now capped to ensure usage visibility
         current_usage = user_record['credits_used'] or 0
         limit = user_record['c_limit'] or 200
-        
+
         if current_usage >= limit:
             raise HTTPException(
-                status_code=402, 
+                status_code=402,
                 detail=f"RocketReach Discovery Limit Reached ({current_usage}/{limit}). Please contact the system administrator to reset your search quota."
             )
     except HTTPException: raise
     except Exception as e:
-        logger.error("auth_check_failed", error=str(e))
+        logger.exception("auth_check_failed", error=str(e))
         raise HTTPException(status_code=500, detail="Authorization service unavailable.")
     # Log search activity before processing
     try:
@@ -168,10 +166,10 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
         # Process and insert leads
         inserted = 0
         errors = 0
-        
+
         for lead in leads:
             if not lead: continue
-                
+
             try:
                 persona, fit_score = categorize_lead(lead.get("payload", {}))
                 insert_lead(
@@ -191,7 +189,7 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
                 )
                 inserted += 1
             except Exception as e:
-                logger.error("lead_insertion_failed", error=str(e), lead_email=lead.get("email"))
+                logger.exception("lead_insertion_failed", error=str(e), lead_email=lead.get("email"))
                 errors += 1
                 continue
 
@@ -214,7 +212,7 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
                 c_conn.close()
                 logger.info("credits_incremented", user_id=user_id, count=len(leads))
             except Exception as metric_err:
-                logger.error("rocketreach_credits_metric_failed", error=str(metric_err))
+                logger.exception("rocketreach_credits_metric_failed", error=str(metric_err))
 
         return {
             "success": True,
@@ -225,6 +223,6 @@ def ingest_leads(req: LeadRequest, user_id: Optional[str] = Header(None, alias="
 
     except HTTPException: raise
     except Exception as e:
-        logger.error("ingest_leads_critical_error", error=str(e))
+        logger.exception("ingest_leads_critical_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 

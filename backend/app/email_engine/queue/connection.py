@@ -3,15 +3,16 @@ Redis Connection Pool for Email Engine
 Singleton pattern for connection reuse.
 """
 
-import redis
-from typing import Optional
-from app.core.config import get_email_engine_settings
 import logging
+
+import redis
+
+from app.core.config import get_email_engine_settings
 
 logger = logging.getLogger(__name__)
 
-_pool: Optional[redis.ConnectionPool] = None
-_client: Optional[redis.Redis] = None
+_pool: redis.ConnectionPool | None = None
+_client: redis.Redis | None = None
 
 
 def get_redis_pool() -> redis.ConnectionPool:
@@ -22,7 +23,7 @@ def get_redis_pool() -> redis.ConnectionPool:
         _pool = redis.ConnectionPool.from_url(
             settings.redis_url,
             decode_responses=True,
-            max_connections=20,
+            max_connections=5,
         )
         logger.info(f"Created Redis connection pool: {settings.redis_url}")
     return _pool

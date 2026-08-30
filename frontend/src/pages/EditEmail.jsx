@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ChevronLeft, Sparkles, Loader2, Save, Wand2, Type, Briefcase, BarChart3, Smile, CheckCircle2, AlertCircle, Send, Link as LinkIcon, FileText, List, RotateCcw, Bold, Italic, Heading, Image, Paperclip, Palette, Pen } from 'lucide-react';
 import DatePicker from 'react-datepicker';
@@ -9,7 +9,7 @@ import { applyForcedLogoStyles } from '../utils/logoSize';
 import SignatureEditor from '../components/SignatureEditor';
 import ToolbarTextarea from '../components/ToolbarTextarea';
 
-const mdToHtml = (md) => {
+const mdToHtml = (md, imgW = '400px', imgH = 'auto') => {
   if (!md) return '';
   // If already contains only HTML block-level tags, return as-is
   if (/^<[a-z][^>]*>/i.test(md.trim()) && /<\/[a-z]+>\s*$/i.test(md.trim())) return md;
@@ -41,8 +41,7 @@ const mdToHtml = (md) => {
     return `<em>${inner}</em>`;
   });
   html = html.replace(/!\[(.*?)\]\((.*?)\)/g, (m, alt, src) => {
-    const isBase64 = src.startsWith('data:image/');
-    return `<img src="${src}" alt="${alt}" style="${isBase64 ? 'width:400px' : 'max-width:200px'};height:auto;">`;
+    return `<img src="${src}" alt="${alt}" style="width:${imgW};height:${imgH};display:block;">`;
   });
   html = html.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>');
   html = html.replace(/^###\s+(.*?)$/gm, '<h3>$1</h3>');
@@ -92,10 +91,10 @@ const isHtml = (str) => /<[a-z][\s\S]*>/i.test(str);
 // ***Name*** / [Website](url) / '--' separator / \n line breaks — would
 // otherwise show as literal text or collapsed lines. Convert them in the editor
 // and the preview so both match the rendered email.
-const convertHtmlMarkdownRemnants = (html) => {
+const convertHtmlMarkdownRemnants = (html, imgW = '400px', imgH = 'auto') => {
   if (!html) return html;
   const converted = html
-    .replace(/!\[(.*?)\]\((.*?)\)/g, (m, alt, src) => `<img src="${src}" alt="${alt}" style="max-width:200px;height:auto;">`)
+    .replace(/!\[(.*?)\]\((.*?)\)/g, (m, alt, src) => `<img src="${src}" alt="${alt}" style="width:${imgW};height:${imgH};display:block;">`)
     .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*([^*\n]+)\*/g, (m, inner) => {
@@ -138,13 +137,20 @@ const EditEmail = () => {
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const userId = user.id || 'admin';
 
+  // Memoized: read image width/height from localStorage (Settings page is the ONLY source)
+  // Falls back to backend defaults ('400px' / 'auto') if localStorage is empty
+  const getImgSizes = (() => {
+    const u = JSON.parse(localStorage.getItem('user') || localStorage.getItem('user_admin') || '{}');
+    return [u?.image_width || '400px', u?.image_height || 'auto'];
+  })();
+
   const handleInsertSignature = () => {
     if (!userSignature) {
       alert('No custom signature set. Go to Templates to create one.');
       return;
     }
     // Render signature as HTML for WYSIWYG mode
-    const sigHtml = mdToHtml(userSignature);
+    const sigHtml = mdToHtml(userSignature, ...getImgSizes);
     const sigBlock = `<br><br>--<br>${sigHtml}`;
     if (isHtml(body)) {
       // Strip any existing signature block (everything from last -- separator onwards)
@@ -174,18 +180,28 @@ const EditEmail = () => {
   const renderEmailPreview = (text) => {
     if (!text) return 'Generate AI draft to begin...';
 
+    const [imgW, imgH] = getImgSizes;
+
     // Resolve [[BACKEND_URL]] so images show in preview
     const backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
     text = text.replace(/\[\[BACKEND_URL\]\]/g, backendUrl);
 
     // If body already has HTML tags (WYSIWYG mode), render directly — no markdown processing!
     // This ensures fonts, sizes, colors, tables, etc look EXACTLY like in the editor.
-    // Strip ALL font-size from inline styles so wrapper 18px cascades to everything
+    // Apply Settings image_width/height to ALL images so preview matches the setting.
     if (/<[a-z][\s\S]*>/i.test(text)) {
       let html = text
-        .replace(/<img\s+[^>]*src="data:image\/[^"]*"[^>]*>/gi, (m) => {
-          if (/style\s*=\s*"/i.test(m)) return m.replace(/style\s*=\s*"([^"]*)"/i, 'style="width:400px;height:auto;display:block;"');
-          return m.replace('<img', '<img style="width:400px;height:auto;display:block;"');
+        .replace(/<img\b[^>]*>/gi, (m) => {
+          m = m.replace(/\s+width="[^"]*"/gi, '').replace(/\s+height="[^"]*"/gi, '');
+          m = m.replace(/\s+width='[^']*'/gi, '').replace(/\s+height='[^']*'/gi, '');
+          if (/style\s*=\s*["']/i.test(m)) {
+            return m.replace(/style\s*=\s*["']([^"']*)["']/i, (sm, existing) => {
+              let cleaned = existing.replace(/width\s*:\s*[^;]+;?/gi, '').replace(/height\s*:\s*[^;]+;?/gi, '').replace(/max-width\s*:\s*[^;]+;?/gi, '').replace(/;\s*;/g, ';').trim();
+              if (cleaned && !cleaned.endsWith(';')) cleaned += ';';
+              return `style="${cleaned}width:${imgW};height:${imgH};display:block;"`;
+            });
+          }
+          return m.replace('<img', `<img style="width:${imgW};height:${imgH};display:block;"`);
         })
         .replace(/background(?:-color)?\s*:\s*[^;]+;?\s*/gi, '')
         .replace(/bgcolor\s*=\s*["'][^"']*["']\s*/gi, '')
@@ -219,7 +235,7 @@ const EditEmail = () => {
       // A markdown signature is appended raw to the body (inject_signature). When
       // the body is HTML we land here, so convert any markdown remnants or they'd
       // show as literal text / collapsed lines in the preview.
-      html = convertHtmlMarkdownRemnants(html);
+      html = convertHtmlMarkdownRemnants(html, ...getImgSizes);
       return `<div style="font-family:${user.email_font || 'sans-serif'};font-size:${user.email_font_size || '13px'};color:#cbd5e1;line-height:1.6;">${html}</div>`;
     }
 
@@ -255,9 +271,9 @@ const EditEmail = () => {
             const url = trimmed.replace('SIG_LINK:', '').trim();
             sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:2px;">LinkedIn</a>`;
           } else if (trimmed.startsWith('<img') || trimmed.startsWith('<div')) {
-            sigHtml += trimmed.replace(/<img\s+[^>]*src="data:image\/[^"]*"[^>]*>/gi, (m) => {
-              if (/style\s*=\s*"/i.test(m)) return m.replace(/style\s*=\s*"([^"]*)"/i, 'style="width:400px;height:auto;display:block;"');
-              return m.replace('<img', '<img style="width:400px;height:auto;display:block;"');
+            sigHtml += trimmed.replace(/<img\b[^>]*>/gi, (m) => {
+              if (/style\s*=\s*"/i.test(m)) return m.replace(/style\s*=\s*"([^"]*)"/i, `style="width:${imgW};height:${imgH};display:block;"`);
+              return m.replace('<img', `<img style="width:${imgW};height:${imgH};display:block;"`);
             });
           } else if (trimmed) {
             // Apply inline markdown to signature lines too
@@ -267,8 +283,7 @@ const EditEmail = () => {
               .replace(/_(.*?)_/g, '<em>$1</em>')
               .replace(/\*(.*?)\*/g, '<em>$1</em>')
               .replace(/!\[(.*?)\]\((.*?)\)/g, (m, alt, src) => {
-                const w = src.startsWith('data:image/') ? '800px' : '120px';
-                return `<img src="${src}" alt="${alt}" style="width:${w};height:auto;display:block;margin-top:8px;" />`;
+                return `<img src="${src}" alt="${alt}" style="width:${imgW};height:${imgH};display:block;margin-top:8px;" />`;
               })
               .replace(/\[(.*?)\]\((.*?)\)/g, `<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>`);
 
@@ -291,13 +306,13 @@ const EditEmail = () => {
             const label = colonIdx !== -1 ? rest.substring(0, colonIdx).trim() : 'LinkedIn';
             const url = colonIdx !== -1 ? rest.substring(colonIdx + 1).trim() : rest;
             sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:2px;">${label}</a>`;
-          } else if (trimmed.startsWith('SIG_LINK:')) {
+} else if (trimmed.startsWith('SIG_LINK:')) {
             const url = trimmed.replace('SIG_LINK:', '').trim();
             sigHtml += `<a href="${url}" target="_blank" style="color:#3b82f6; font-weight:700; text-decoration:underline; display:block; margin-top:2px;">LinkedIn</a>`;
           } else if (trimmed.startsWith('<img') || trimmed.startsWith('<div')) {
-            sigHtml += trimmed.replace(/<img\s+[^>]*src="data:image\/[^"]*"[^>]*>/gi, (m) => {
-              if (/style\s*=\s*"/i.test(m)) return m.replace(/style\s*=\s*"([^"]*)"/i, 'style="width:400px;height:auto;display:block;"');
-              return m.replace('<img', '<img style="width:400px;height:auto;display:block;"');
+            sigHtml += trimmed.replace(/<img\b[^>]*>/gi, (m) => {
+              if (/style\s*=\s*"/i.test(m)) return m.replace(/style\s*=\s*"([^"]*)"/i, `style="width:${imgW};height:${imgH};display:block;"`);
+              return m.replace('<img', `<img style="width:${imgW};height:${imgH};display:block;"`);
             });
           } else if (trimmed) {
             let lineHtml = trimmed
@@ -306,8 +321,7 @@ const EditEmail = () => {
               .replace(/_(.*?)_/g, '<em>$1</em>')
               .replace(/\*(.*?)\*/g, '<em>$1</em>')
               .replace(/!\[(.*?)\]\((.*?)\)/g, (m, alt, src) => {
-                const w = src.startsWith('data:image/') ? '800px' : '120px';
-                return `<img src="${src}" alt="${alt}" style="width:${w};height:auto;display:block;margin-top:8px;" />`;
+                return `<img src="${src}" alt="${alt}" style="width:${imgW};height:${imgH};display:block;margin-top:8px;" />`;
               })
               .replace(/\[(.*?)\]\((.*?)\)/g, `<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>`);
 
@@ -469,7 +483,7 @@ const EditEmail = () => {
       setUserSignature(sigUser.signature || '');
 
       // Convert markdown body to HTML for WYSIWYG editor
-      let finalBody = isHtml(bd) ? convertHtmlMarkdownRemnants(bd) : mdToHtml(bd);
+      let finalBody = isHtml(bd) ? convertHtmlMarkdownRemnants(bd, ...getImgSizes) : mdToHtml(bd, ...getImgSizes);
 
       // ── Auto-insert concise table from template if body doesn't already have one ──
       const templateName = lead.draft_template_used;
@@ -496,7 +510,7 @@ const EditEmail = () => {
             }
             if (pipeLines.length >= 2) {
               tableHtml = pipeLines.join('\n');
-              tableHtml = isHtml(tableHtml) ? tableHtml : mdToHtml(tableHtml);
+              tableHtml = isHtml(tableHtml) ? tableHtml : mdToHtml(tableHtml, ...getImgSizes);
             }
           }
 
@@ -599,7 +613,7 @@ const EditEmail = () => {
         }));
         setSubject(response.data.subject || '');
         const refinedBody = response.data.body || '';
-        setBody(isHtml(refinedBody) ? refinedBody : mdToHtml(refinedBody));
+        setBody(isHtml(refinedBody) ? refinedBody : mdToHtml(refinedBody, ...getImgSizes));
         setAiInstruction('');
       }
     } catch {

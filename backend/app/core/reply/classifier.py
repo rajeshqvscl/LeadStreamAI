@@ -3,10 +3,11 @@ Reply Classifier
 Combines deterministic decline phrase detection with LLM classification.
 """
 
-from typing import Optional, Dict, Any
 from dataclasses import dataclass
-from app.core.reply.decline_phrases import detect_decline_phrase
+from typing import Any
+
 from app.core.config import get_llm_settings
+from app.core.reply.decline_phrases import detect_decline_phrase
 
 
 @dataclass
@@ -15,10 +16,10 @@ class ClassificationResult:
     source: str  # DECLINE_PHRASE, LLM, FALLBACK
     sentiment_score: int = 0
     urgency_level: str = "MEDIUM"
-    deal_size: Optional[str] = None
-    rejection_reason: Optional[str] = None
+    deal_size: str | None = None
+    rejection_reason: str | None = None
     confidence: float = 1.0
-    raw_llm_output: Optional[Dict[str, Any]] = None
+    raw_llm_output: dict[str, Any] | None = None
 
 
 # JSON Schema for structured LLM output
@@ -65,15 +66,15 @@ class ReplyClassifier:
     Classifies lead replies into intent categories.
     Uses deterministic decline phrases as first-pass, then LLM as fallback.
     """
-    
+
     def __init__(self, llm_client=None):
         self.llm_client = llm_client
         self._llm_available = llm_client is not None
-    
+
     def classify(self, body: str) -> ClassificationResult:
         """
         Classify a reply body.
-        
+
         Priority:
         1. Deterministic decline phrase detection (100% confidence)
         2. LLM classification with structured output
@@ -89,7 +90,7 @@ class ReplyClassifier:
                 sentiment_score=10,
                 confidence=1.0,
             )
-        
+
         # 2. LLM classification
         if self._llm_available:
             try:
@@ -98,7 +99,7 @@ class ReplyClassifier:
                 # Log and fall through to fallback
                 import logging
                 logging.getLogger(__name__).warning(f"LLM classification failed: {e}")
-        
+
         # 3. Safe fallback - UNKNOWN intent keeps sequence ACTIVE for manual review
         return ClassificationResult(
             intent=None,  # Maps to ACTIVE in workflow
@@ -106,15 +107,15 @@ class ReplyClassifier:
             sentiment_score=50,
             confidence=0.0,
         )
-    
+
     def _classify_with_llm(self, body: str) -> ClassificationResult:
         """Call LLM with structured output"""
         prompt = REPLY_CLASSIFICATION_PROMPT.format(reply_text=body)
-        
+
         # This will be implemented when LLM client is wired up
         # For now, return fallback
         settings = get_llm_settings()
-        
+
         # Try Groq first
         if settings.groq_api_key:
             try:
@@ -132,7 +133,7 @@ class ReplyClassifier:
                 return self._parse_llm_result(result, body)
             except Exception:
                 pass
-        
+
         # Try Gemini
         if settings.gemini_api_key:
             try:
@@ -145,7 +146,7 @@ class ReplyClassifier:
                 return self._parse_llm_result(result, body)
             except Exception:
                 pass
-        
+
         # Try Anthropic
         if settings.anthropic_api_key:
             try:
@@ -162,7 +163,7 @@ class ReplyClassifier:
                 return self._parse_llm_result(result, body)
             except Exception:
                 pass
-        
+
         # All LLMs failed
         return ClassificationResult(
             intent=None,
@@ -170,21 +171,21 @@ class ReplyClassifier:
             sentiment_score=50,
             confidence=0.0,
         )
-    
+
     def _parse_llm_result(self, result: dict, body: str) -> ClassificationResult:
         """Parse and validate LLM result"""
         intent = result.get("intent")
-        
+
         # Validate intent
         valid_intents = ["MEETING_REQUESTED", "INTERESTED", "NEEDS_MORE_INFO", "NOT_INTERESTED"]
         if intent not in valid_intents:
             intent = None
-        
+
         # Extract fields with defaults
         sentiment = result.get("sentiment_score", 50)
         if not isinstance(sentiment, int):
             sentiment = 50
-        
+
         return ClassificationResult(
             intent=intent,
             source="LLM",
@@ -198,7 +199,7 @@ class ReplyClassifier:
 
 
 # Singleton
-_classifier: Optional[ReplyClassifier] = None
+_classifier: ReplyClassifier | None = None
 
 
 def get_reply_classifier() -> ReplyClassifier:

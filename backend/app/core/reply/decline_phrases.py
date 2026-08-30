@@ -5,11 +5,10 @@ If any pattern matches, intent = NOT_INTERESTED regardless of LLM output.
 """
 
 import re
-from typing import Optional, List, Tuple
 
 # Pattern: (regex, human_readable_label)
 # Ordered by specificity - more specific patterns first
-DECLINE_PATTERNS: List[Tuple[str, str]] = [
+DECLINE_PATTERNS: list[tuple[str, str]] = [
     (r"\bwe\s+will\s+pass\s+on\s+this\s+opportunity\b", "We will pass on this opportunity"),
     (r"\bpass\s+on\s+this\s+opportunity\b", "Pass on this opportunity"),
     (r"\bwe\s+only\s+invest\s+in\b", "We only invest in"),
@@ -35,26 +34,26 @@ DECLINE_PATTERNS: List[Tuple[str, str]] = [
 _COMPILED_PATTERNS = [(re.compile(pattern, re.IGNORECASE), label) for pattern, label in DECLINE_PATTERNS]
 
 
-def detect_decline_phrase(text: Optional[str]) -> Optional[str]:
+def detect_decline_phrase(text: str | None) -> str | None:
     """
     Returns the readable label of the first decline phrase found in the reply text,
     or None if the text contains no known decline phrase.
-    
+
     Matching is case-insensitive and robust to extra whitespace/punctuation.
     """
     if not text:
         return None
-    
+
     # Normalize whitespace
     normalized = re.sub(r"\s+", " ", text).strip().lower()
-    
+
     for pattern, label in _COMPILED_PATTERNS:
         if pattern.search(normalized):
             return label
-    
+
     return None
 
 
-def get_all_decline_patterns() -> List[Tuple[str, str]]:
+def get_all_decline_patterns() -> list[tuple[str, str]]:
     """Return all patterns for testing/inspection"""
     return DECLINE_PATTERNS.copy()

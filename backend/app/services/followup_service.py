@@ -1,23 +1,18 @@
+import contextlib
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import List, Optional
-import json
-import psycopg2.extras
 import re
 
-from app.database import get_db_connection
-from app.services.email_service import get_user_email_font, get_user_email_font_size
-from app.api.drafts import markdown_to_html, get_followup_signature_markdown
-from app.models.lead import add_activity_log
-from app.core.followup.engine import get_followup_engine, FollowUpAction
+import psycopg2.extras
+from app.api.drafts import get_followup_signature_markdown
+from app.core.followup.engine import get_followup_engine
 from app.core.pipeline.claims import LeadClaimer
-from app.core.pipeline.state_machine import get_pipeline
+from app.database import get_db_connection
 from app.email_engine.producer import get_email_producer
 
 logger = logging.getLogger(__name__)
 
 
-def is_generic_followup(body: Optional[str]) -> bool:
+def is_generic_followup(body: str | None) -> bool:
     """Detects legacy, standard, or HTML-wrapped default placeholder follow-ups to allow dynamic healing."""
     if not body:
         return True
@@ -25,13 +20,13 @@ def is_generic_followup(body: Optional[str]) -> bool:
     cleaned = re.sub(r'<[^>]+>', '', body).strip().lower()
     if not cleaned:
         return True
-    
+
     # Check if this is an original email draft (has Subject: line or is too long)
     if "subject:" in cleaned:
         return True
     if len(cleaned) > 500:
         return True
-    
+
     # Check for known generic fallback variations
     if "just following up on my previous email" in cleaned:
         return True
@@ -41,10 +36,39 @@ def is_generic_followup(body: Optional[str]) -> bool:
         return True
     if len(cleaned) < 120 and "following up" in cleaned and ("questions" in cleaned or "previous email" in cleaned):
         return True
-    if "just following up on the climate agritech platform opportunity shared earlier" in cleaned:
-        return True
-    
-    return False
+    return "just following up on the climate agritech platform opportunity shared earlier" in cleaned
+
+
+def get_template_followup(lead: dict, stage: int) -> str:
+    """Return a follow-up email BODY (markdown string) for the given lead + stage.
+
+    Reuses the same campaign/template resolution as FollowUpEngine so the body
+    matches what the engine would send. Falls back to a generic follow-up string
+    if resolution fails for any reason.
+    """
+    from app.core.followup.campaign_resolver import CampaignResolver, LeadData
+
+    lead_data = LeadData(
+        id=lead.get("id", 0),
+        draft_template_used=lead.get("draft_template_used", "") or "",
+        original_subject=lead.get("last_outreach_subject", "") or lead.get("first_outreach_subject", "") or "",
+        email_draft=lead.get("email_draft", "") or "",
+        persona=lead.get("persona", "") or "",
+        sector=lead.get("sector", "") or "",
+        sender_name=lead.get("sender_name", "") or lead.get("full_name", "") or "",
+        sender_email=lead.get("sender_email", "") or "",
+        lead_type=lead.get("lead_type", "INVESTOR") or "INVESTOR",
+    )
+    try:
+        campaign = CampaignResolver.resolve(lead_data)
+        template = CampaignResolver.get_template(campaign, stage)
+        name = (lead.get("first_name") or "").strip() or "there"
+        return template.format(name=name)
+    except Exception as e:
+        logger.warning(f"get_template_followup falling back to generic template: {e}")
+        return "Hi {name},\n\nJust following up on my previous email. Let me know if you have any questions!\n\nBest regards,".format(
+            name=(lead.get("first_name") or "there")
+        )
 
 
 def process_outreach_sequences():
@@ -52,22 +76,16 @@ def process_outreach_sequences():
     Background worker that identifies leads due for follow-ups.
     Uses FollowUpEngine for evaluation and EmailProducer for queueing.
     """
-    from app.core.followup.engine import get_followup_engine
-    from app.email_engine.producer import get_email_producer
     from app.core.pipeline.scheduler import get_scheduler_config
-    from app.core.pipeline.state_machine import get_pipeline
-    from app.database import get_db_connection
-    import psycopg2.extras
-    
+
     config = get_scheduler_config()
-    pipeline = get_pipeline()
     engine = get_followup_engine()
     producer = get_email_producer()
-    
+
     if not config.is_working_hours_now():
         logger.info("Outreach paused: Outside working hours")
         return
-    
+
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
@@ -115,46 +133,57 @@ def process_outreach_sequences():
 
             sent_count = 0
             max_per_cycle = config.followup_settings.max_auto_sends_per_cycle if hasattr(config, 'followup_settings') else 200
-            
+
             for lead in group:
                 if sent_count >= max_per_cycle:
                     logger.info(f"Per-cycle cap ({max_per_cycle}) reached for user {uid} — remaining leads picked up next cycle.")
                     break
 
+                # BUG 1: permissive gate — only skip terminal pipeline states.
+                TERMINAL = {'COMPLETED', 'STOPPED', 'CLOSED', 'REPLIED'}
+                if lead.get('pipeline_state') in TERMINAL:
+                    continue
+
                 try:
                     # Evaluate if lead is due for follow-up
                     action = engine.evaluate(lead)
-                    
+
                     if not action.should_send:
                         continue
-                    
-                    # Check pipeline state transition
-                    lead_obj = type('Lead', (), lead)()
-                    lead_obj.pipeline_state = lead.get('pipeline_state', 'FOLLOWUP_ACTIVE')
-                    lead_obj.followup_stage = lead.get('followup_stage', 0)
-                    lead_obj.lead_type = action.lead_type
-                    lead_obj.auto_followup = lead.get('auto_followup', True)
-                    lead_obj.google_refresh_token = lead.get('google_refresh_token')
-                    
-                    if not pipeline.can_transition(lead_obj.pipeline_state, 'FOLLOWUP_ACTIVE', lead_obj):
-                        logger.info(f"Lead {lead['id']} cannot transition to FOLLOWUP_ACTIVE")
+
+                    # BUG 2: atomically claim the lead before enqueueing so the
+                    # stage advances exactly once (prevents duplicate sends).
+                    current_stage = lead.get('followup_stage', 0) or 0
+                    next_stage = action.stage
+                    claimed = LeadClaimer.claim_for_followup(
+                        lead['id'],
+                        expected_stage=current_stage,
+                        new_stage=next_stage,
+                        subject=action.subject,
+                        new_status='COMPLETED' if next_stage >= action.max_stage else 'ACTIVE',
+                    )
+                    if not claimed:
+                        logger.info(f"Lead {lead['id']} already advanced by another worker; skipping")
                         continue
-                    
+
                     # Build email content with signature
                     followup_sig = get_followup_signature_markdown(str(uid))
                     body_with_sig = action.body
                     if followup_sig:
                         body_with_sig = body_with_sig.rstrip() + f"\n\n{followup_sig}"
-                    
+
                     # Convert to HTML
                     from app.api.drafts import markdown_to_html
-                    from app.services.email_service import get_user_image_width, get_user_image_height
+                    from app.services.email_service import (
+                        get_user_image_height,
+                        get_user_image_width,
+                    )
                     email_font = lead.get('email_font') or 'sans-serif'
                     email_font_size = lead.get('email_font_size') or '15px'
                     image_width = get_user_image_width(uid)
                     image_height = get_user_image_height(uid)
                     html_content = markdown_to_html(body_with_sig, font_family=email_font, font_size=email_font_size, image_width=image_width, image_height=image_height)
-                    
+
                     # Enqueue via producer
                     job_id = producer.send_followup(
                         lead_id=lead['id'],
@@ -169,16 +198,14 @@ def process_outreach_sequences():
                         in_reply_to=lead.get('gmail_message_id'),
                         template_name=action.campaign,
                     )
-                    
+
                     logger.info(f"Enqueued followup for lead {lead['id']}: job_id={job_id}")
                     sent_count += 1
-                    
+
                 except Exception as e:
-                    logger.error(f"Error processing followup for lead {lead.get('id')}: {e}")
+                    logger.exception(f"Error processing followup for lead {lead.get('id')}: {e}")
     except Exception as e:
-        logger.error(f"Error in process_outreach_sequences: {e}")
+        logger.exception(f"Error in process_outreach_sequences: {e}")
     finally:
-        try:
+        with contextlib.suppress(Exception):
             conn.close()
-        except Exception:
-            pass

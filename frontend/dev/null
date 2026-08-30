@@ -1,0 +1,770 @@
+"use strict";
+import { Fragment, jsx, jsxs } from "react/jsx-runtime";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Plus, Loader2, CheckCircle2, AlertCircle, Trash2, ChevronDown, ChevronUp, Save, Upload, Paperclip, AtSign, FileText, Eye } from "lucide-react";
+import api from "../services/api";
+import ToolbarTextarea from "../components/ToolbarTextarea";
+import { applyForcedLogoStyles } from "../utils/logoSize";
+import { getPdfJs } from "../utils/pdfWorker";
+let mammothModule = null;
+async function getMammoth() {
+  if (mammothModule) return mammothModule;
+  try {
+    mammothModule = await import("mammoth");
+    return mammothModule;
+  } catch (e) {
+    console.error("Failed to load mammoth:", e);
+    throw new Error("mammoth module not available");
+  }
+}
+const Prompts = () => {
+  const [prompts, setPrompts] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(null);
+  const [saveSuccess, setSaveSuccess] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+  const [deleting, setDeleting] = useState(null);
+  const [preview, setPreview] = useState({ show: false, content: "", label: "", subject: "", isFollowup: false });
+  const [attaching, setAttaching] = useState(null);
+  const fileInputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const [form, setForm] = useState({ name: "", content: "", description: "", followup_1: "", followup_2: "", followup_3: "", subject: "", cc: "", followup_count: 3 });
+  const [showBodyPreview, setShowBodyPreview] = useState(false);
+  const [expandedBodyPreview, setExpandedBodyPreview] = useState({});
+  const [creating, setCreating] = useState(false);
+  const [saveField, setSaveField] = useState({ id: null, field: null });
+  const [saveFieldSuccess, setSaveFieldSuccess] = useState({ id: null, field: null });
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState("");
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const [userTeam, setUserTeam] = useState("CLIENT");
+  const isAdmin = user.role === "ADMIN";
+  const userId = user.id || "admin";
+  const userSenderName = user.name || user.full_name || user.username || "Your Name";
+  const userTitle = user.job_title || user.designation || "Analyst";
+  const userPhone = user.phone || "+91-9876543210";
+  const userLinkedin = user.linkedin_url || "https://www.linkedin.com/company/qvscl/";
+  const getFollowupLabel = (index) => {
+    const scheduleMap = {
+      CLIENT: { 1: "2H", 2: "4H" },
+      INVESTOR: { 1: "2H", 2: "5H", 3: "8H" }
+    };
+    const labels = scheduleMap[userTeam] || scheduleMap.CLIENT;
+    const timing = labels[index] || `${index}H`;
+    return `Follow-up ${index} (${timing})`;
+  };
+  const handleFollowupFileUpload = async (e, followupKey) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      let html = "";
+      if (file.name.endsWith(".docx")) {
+        const mammoth = await getMammoth();
+        const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
+        html = result.value;
+      } else if (file.name.endsWith(".pdf")) {
+        const pdfjsLib = await getPdfJs();
+        const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+        const pages = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const text = content.items.map((item) => item.str).join(" ");
+          pages.push(text);
+        }
+        html = pages.join("\n\n");
+      }
+      if (html) {
+        setForm((prev) => ({ ...prev, [followupKey]: (prev[followupKey] ? prev[followupKey] + "\n\n" : "") + html }));
+      }
+    } catch (err) {
+      console.error("Follow-up file upload error:", err);
+      alert("Failed to read file. Make sure it is a valid .docx or .pdf.");
+    } finally {
+      setUploading(false);
+      if (e.target) e.target.value = "";
+    }
+  };
+  const fetchPrompts = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await api.get("/api/custom-draft-templates", { headers: { "X-User-Id": userId } });
+      setPrompts(res.data || []);
+    } catch (err) {
+      console.error("Failed to fetch prompts", err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [userId]);
+  useEffect(() => {
+    fetchPrompts();
+  }, [fetchPrompts]);
+  useEffect(() => {
+    const storedUser = JSON.parse(localStorage.getItem("user") || "{}");
+    if (storedUser.team) {
+      setUserTeam(storedUser.team.toUpperCase());
+    } else {
+      api.get("/api/auth/me", { headers: { "X-User-Id": storedUser.id || "1" } }).then((res) => {
+        const team = (res.data.team || "CLIENT").toUpperCase();
+        setUserTeam(team);
+        storedUser.team = team;
+        localStorage.setItem("user", JSON.stringify(storedUser));
+      }).catch(() => {
+      });
+    }
+  }, []);
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      let html = "";
+      if (file.name.endsWith(".docx")) {
+        const mammoth = await getMammoth();
+        const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
+        html = result.value;
+      } else if (file.name.endsWith(".pdf")) {
+        const pdfjsLib = await getPdfJs();
+        const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+        const pages = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const text = content.items.map((item) => item.str).join(" ");
+          pages.push(text);
+        }
+        html = pages.join("\n\n");
+      }
+      if (html) {
+        setForm((prev) => ({ ...prev, content: (prev.content ? prev.content + "\n\n" : "") + html }));
+      }
+    } catch (err) {
+      console.error("File upload error:", err);
+      alert("Failed to read file. Make sure it is a valid .docx or .pdf.");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+  const handleCreate = async () => {
+    if (!form.name.trim() || !form.content.trim()) return alert("Name and Body are required");
+    if (creating) return;
+    setCreating(true);
+    try {
+      await api.post("/api/custom-draft-templates", form, { headers: { "X-User-Id": userId } });
+      setForm({ name: "", content: "", description: "", followup_1: "", followup_2: "", followup_3: "", subject: "", cc: "", followup_count: 3 });
+      setShowForm(false);
+      fetchPrompts();
+    } catch (_err) {
+      alert("Failed to create template");
+    } finally {
+      setCreating(false);
+    }
+  };
+  const handleUpdate = async (id, data) => {
+    setIsSaving(id);
+    try {
+      await api.put(`/api/prompts/${id}`, data);
+      setSaveSuccess(id);
+      setTimeout(() => setSaveSuccess(null), 3e3);
+      fetchPrompts();
+    } catch (_err) {
+      alert("Failed to save");
+    } finally {
+      setIsSaving(null);
+    }
+  };
+  const handleFieldSave = async (id, field, value) => {
+    setSaveField({ id, field });
+    try {
+      await api.put(`/api/prompts/${id}`, { [field]: value });
+      setSaveFieldSuccess({ id, field });
+      setTimeout(() => setSaveFieldSuccess({ id: null, field: null }), 2e3);
+      fetchPrompts();
+    } catch (_err) {
+      alert("Failed to save");
+    } finally {
+      setSaveField({ id: null, field: null });
+    }
+  };
+  const handleFollowupFileUploadExisting = async (e, tplId, followupKey) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      let html = "";
+      if (file.name.endsWith(".docx")) {
+        const mammoth = await getMammoth();
+        const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
+        html = result.value;
+      } else if (file.name.endsWith(".pdf")) {
+        const pdfjsLib = await getPdfJs();
+        const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+        const pages = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const text = content.items.map((item) => item.str).join(" ");
+          pages.push(text);
+        }
+        html = pages.join("\n\n");
+      }
+      if (html) {
+        const updated = [...prompts];
+        const idx = updated.findIndex((p) => p.id === tplId);
+        if (idx !== -1) {
+          const existing = updated[idx][followupKey] || "";
+          updated[idx] = { ...updated[idx], [followupKey]: existing ? existing + "\n\n" + html : html };
+          setPrompts(updated);
+        }
+      }
+    } catch (err) {
+      console.error("Follow-up file upload error:", err);
+      alert("Failed to read file.");
+    } finally {
+      setUploading(false);
+      if (e.target) e.target.value = "";
+    }
+  };
+  const handleAttachment = async (id, file) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".pdf")) return alert("Only PDF files are allowed");
+    setAttaching(id);
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      await api.post(`/api/prompts/${id}/attachment`, formData);
+      fetchPrompts();
+    } catch (_err) {
+      alert("Failed to upload attachment");
+    } finally {
+      setAttaching(null);
+    }
+  };
+  const handleDelete = async (id) => {
+    if (!window.confirm("Delete this template permanently?")) return;
+    setDeleting(id);
+    try {
+      await api.delete(`/api/prompts/${id}`, { headers: { "X-User-Id": userId } });
+      fetchPrompts();
+    } catch (_err) {
+      alert("Failed to delete");
+    } finally {
+      setDeleting(null);
+    }
+  };
+  const renderEmailPreview = (text, _showSigDisc = true, isFollowup = false) => {
+    if (!text) return '<p class="text-slate-500 italic">(empty)</p>';
+    const _backendUrl = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+    const firstName = userSenderName.split(" ")[0] || userSenderName;
+    text = text.replace(/\{\{Sender Name\}\}/g, userSenderName);
+    text = text.replace(/\{\{Sender First Name\}\}/g, firstName);
+    text = text.replace(/\{\{Sender Title\}\}/g, userTitle);
+    text = text.replace(/\{\{Sender LinkedIn\}\}/g, userLinkedin);
+    text = text.replace(/\{\{Sender Phone\}\}/g, userPhone);
+    if (/<[a-z][\s\S]*>/i.test(text)) {
+      let html = text.replace(/^SIG_START\n?/gm, "").replace(/\n?SIG_END\n?/gm, "").replace(/<img\s+[^>]*src="data:image\/[^"]*"[^>]*>/gi, (m) => {
+        m = m.replace(/\s+width="[^"]*"/gi, "").replace(/\s+height="[^"]*"/gi, "");
+        m = m.replace(/\s+width='[^']*'/gi, "").replace(/\s+height='[^']*'/gi, "");
+        if (/style\s*=\s*["']/i.test(m)) {
+          return m.replace(/style\s*=\s*["']([^"']*)["']/i, (sm, existing) => {
+            let cleaned = existing.replace(/width\s*:\s*[^;]+;?/gi, "").replace(/height\s*:\s*[^;]+;?/gi, "").replace(/max-width\s*:\s*[^;]+;?/gi, "").replace(/;\s*;/g, ";").trim();
+            if (cleaned && !cleaned.endsWith(";")) cleaned += ";";
+            return `style="${cleaned}width:400px;height:auto;display:block;"`;
+          });
+        }
+        return m.replace("<img", '<img style="width:400px;height:auto;display:block;"');
+      }).replace(/background(?:-color)?\s*:\s*[^;]+;?\s*/gi, "").replace(/bgcolor\s*=\s*["'][^"']*["']\s*/gi, "").replace(/<table(\s[^>]*)?>/gi, (m) => {
+        if (m.includes('style="')) return m.replace(/style="([^"]*)"/, 'style="border-collapse:collapse;$1"');
+        return '<table style="border-collapse:collapse;">';
+      }).replace(/<th(\s[^>]*)?>/gi, (m) => {
+        if (m.includes('style="')) {
+          let s = m.replace(/style="([^"]*)"/, (_, existing) => {
+            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, "");
+            return `style="${clean};padding:2px 4px;"`;
+          });
+          return s;
+        }
+        return '<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;">';
+      }).replace(/<td(\s[^>]*)?>/gi, (m) => {
+        if (m.includes('style="')) {
+          let s = m.replace(/style="([^"]*)"/, (_, existing) => {
+            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, "");
+            return `style="${clean};padding:1px 4px;"`;
+          });
+          return s;
+        }
+        return '<td style="padding:1px 4px;border:1px solid #475569;text-align:left;">';
+      });
+      html = applyForcedLogoStyles(html);
+      html = html.replace(/<ul(\s[^>]*)?>/gi, (m) => {
+        if (m.includes('style="')) return m.replace(/style="([^"]*)"/, 'style="margin:0.8em 0;padding-left:1.5em;list-style-type:disc;$1"');
+        return '<ul style="margin:0.8em 0;padding-left:1.5em;list-style-type:disc;">';
+      });
+      html = html.replace(/<li(\s[^>]*)?>/gi, (m) => {
+        if (m.includes('style="')) return m.replace(/style="([^"]*)"/, 'style="margin-bottom:0.4em;line-height:1.5;$1"');
+        return '<li style="margin-bottom:0.4em;line-height:1.5;">';
+      });
+      return `<div style="color:#cbd5e1;line-height:1.5;">${html}</div>`;
+    }
+    if (!isFollowup) {
+      text = text.replace(/^SIG_START\n?/gm, "");
+      text = text.replace(/\n?SIG_END\n?/gm, "");
+    } else {
+      const sigStartIdx = text.indexOf("SIG_START");
+      if (sigStartIdx !== -1) {
+        const sigEndIdx = text.indexOf("SIG_END", sigStartIdx);
+        if (sigEndIdx !== -1) {
+          text = text.substring(0, sigStartIdx) + text.substring(sigEndIdx + 7);
+        }
+      }
+    }
+    text = text.replace(/•/g, "*");
+    const paragraphs = text.split("\n\n");
+    let htmlParts = [];
+    paragraphs.forEach((p) => {
+      const trimmed = p.trim();
+      if (!trimmed) return;
+      if (/^[-*_]{3,}\s*$/.test(trimmed)) {
+        htmlParts.push('<hr style="border: none; border-top: 2px solid #475569; margin: 16px 0;">');
+        return;
+      }
+      const lines = trimmed.split("\n");
+      const isUnordered = lines.some((l) => /^\s*[*\-•]\s+/.test(l));
+      const isOrdered = lines.some((l) => /^\s*\d+\.\s+/.test(l));
+      if (isUnordered) {
+        let listHtml = '<ul style="margin: 0.8em 0; padding-left: 1.5em; list-style-type: disc;">';
+        lines.forEach((l) => {
+          const match = l.trim().match(/^[*\-•]\s+(.*)/);
+          if (match) listHtml += `<li style="margin-bottom: 0.4em; line-height: 1.5; color: #cbd5e1;">${match[1].trim()}</li>`;
+          else if (l.trim()) listHtml += ` ${l.trim()}`;
+        });
+        listHtml += "</ul>";
+        htmlParts.push(listHtml);
+      } else if (isOrdered) {
+        let listHtml = '<ol style="margin: 1em 0; padding-left: 1.5em; list-style-type: decimal;">';
+        lines.forEach((l) => {
+          const match = l.trim().match(/^\d+\.\s+(.*)/);
+          if (match) listHtml += `<li style="margin-bottom: 0.5em; color: #cbd5e1;">${match[1].trim()}</li>`;
+          else if (l.trim()) listHtml += ` ${l.trim()}`;
+        });
+        listHtml += "</ol>";
+        htmlParts.push(listHtml);
+      } else if (lines.length >= 2 && lines.every((l) => !l.trim() || l.trim().startsWith("|") && l.trim().endsWith("|"))) {
+        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-family:Georgia,serif;">';
+        const dataLines = lines.filter((l) => l.trim() && !l.trim().match(/^\|[-:\s]+\|$/));
+        dataLines.forEach((line, i) => {
+          const cells = line.trim().split("|").slice(1, -1).map((c) => c.trim());
+          const tag = i === 0 ? "th" : "td";
+          const cellStyle = tag === "th" ? "border:1px solid #475569;padding:2px 4px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;" : "border:1px solid #475569;padding:1px 4px;text-align:left;color:#cbd5e1;";
+          const cellHtml = cells.map((c) => `<${tag} style="${cellStyle}">${c}</${tag}>`).join("");
+          tableHtml += `<tr>${cellHtml}</tr>`;
+        });
+        tableHtml += "</table>";
+        htmlParts.push(tableHtml);
+      } else {
+        let content = trimmed.replace(/\n/g, "<br />");
+        content = content.replace(/\*\*\*(.*?)\*\*\*/g, "<strong><em>$1</em></strong>").replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+        content = content.replace(/\*([^*]+)\*/g, (m, inner) => {
+          if (inner.startsWith(" ") || inner.endsWith(" ")) return m;
+          return `<em>${inner}</em>`;
+        });
+        content = content.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0;" />');
+        content = content.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>');
+        htmlParts.push(`<p style="margin-bottom: 1em; color: #cbd5e1;">${content}</p>`);
+      }
+    });
+    let autoSigHtml = "";
+    if (isFollowup) {
+      autoSigHtml = `
+        <div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px; font-family: sans-serif;">
+          <div style="color: #475569; margin-bottom: 2px;">--</div>
+          <div style="color: #e2e8f0; font-weight: 700; margin-top: 2px;">Regards,</div>
+          <div style="color: #e2e8f0; font-weight: 700;">${userSenderName}</div>
+        </div>`;
+    }
+    let finalHtml = htmlParts.join("") + autoSigHtml;
+    finalHtml = finalHtml.replace(/\*\*\*(.*?)\*\*\*/g, "<strong><em>$1</em></strong>").replace(/\*\*(.*?)\*\*/g, '<strong style="color: white; font-weight: 800;">$1</strong>').replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color: #60a5fa; text-decoration: underline; font-weight: 700;">$1</a>');
+    finalHtml = finalHtml.replace(/\*([^*]+)\*/g, (m, inner) => {
+      if (inner.startsWith(" ") || inner.endsWith(" ")) return m;
+      return `<em>${inner}</em>`;
+    });
+    finalHtml = applyForcedLogoStyles(finalHtml);
+    finalHtml = finalHtml.replace(/<table(\s[^>]*)?>/gi, (m) => {
+      if (m.includes('style="')) {
+        return m.replace(/style="([^"]*)"/, (_, existing) => {
+          let clean = existing.replace(/\bfont-size[^;]*;?/gi, "");
+          return `style="border-collapse:collapse;${clean}"`;
+        });
+      }
+      return '<table style="border-collapse:collapse;">';
+    }).replace(/<th(\s[^>]*)?>/gi, (m) => {
+      if (m.includes('style="')) {
+        return m.replace(/style="([^"]*)"/, (_, existing) => {
+          let clean = existing.replace(/\bpadding\b[^;]*;?/gi, "").replace(/\btext-transform[^;]*;?/gi, "").replace(/\bfont-size[^;]*;?/gi, "");
+          return `style="${clean};padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;"`;
+        });
+      }
+      return '<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;">';
+    }).replace(/<td(\s[^>]*)?>/gi, (m) => {
+      if (m.includes('style="')) {
+        return m.replace(/style="([^"]*)"/, (_, existing) => {
+          let clean = existing.replace(/\bpadding\b[^;]*;?/gi, "").replace(/\bfont-size[^;]*;?/gi, "");
+          return `style="${clean};padding:1px 4px;border:1px solid #475569;text-align:left;color:#cbd5e1;"`;
+        });
+      }
+      return '<td style="padding:1px 4px;border:1px solid #475569;text-align:left;color:#cbd5e1;">';
+    });
+    const _ff = user.email_font || "sans-serif";
+    const _fs = user.email_font_size || "13px";
+    return `<div style="font-family:${_ff};font-size:${_fs};line-height:1.6;">${finalHtml}</div>`;
+  };
+  return /* @__PURE__ */ jsxs("div", { className: "max-w-[1200px] mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700", children: [
+    /* @__PURE__ */ jsxs("div", { className: "flex justify-between items-start mb-10", children: [
+      /* @__PURE__ */ jsxs("div", { children: [
+        /* @__PURE__ */ jsx("h1", { className: "text-[28px] font-black text-white tracking-tight", children: "Template" }),
+        /* @__PURE__ */ jsx("p", { className: "text-slate-400 text-sm mt-1 font-medium italic", children: "Create and manage your own draft templates with follow-ups" })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
+        !isAdmin && /* @__PURE__ */ jsxs("div", { className: "flex bg-slate-900/80 p-0.5 rounded-xl border border-white/10", children: [
+          /* @__PURE__ */ jsx(
+            "button",
+            {
+              onClick: async () => {
+                setUserTeam("CLIENT");
+                const storedUser = JSON.parse(localStorage.getItem("user") || "{}");
+                storedUser.team = "CLIENT";
+                localStorage.setItem("user", JSON.stringify(storedUser));
+                try {
+                  await api.put("/api/auth/team", { team: "CLIENT" }, { headers: {} });
+                } catch {
+                }
+              },
+              className: `px-4 py-2 rounded-lg text-[12px] font-bold transition-all ${userTeam === "CLIENT" ? "bg-emerald-600 text-white shadow-[0_0_12px_rgba(16,185,129,0.3)]" : "text-slate-400 hover:text-white"}`,
+              children: "Client"
+            }
+          ),
+          /* @__PURE__ */ jsx(
+            "button",
+            {
+              onClick: async () => {
+                setUserTeam("INVESTOR");
+                const storedUser = JSON.parse(localStorage.getItem("user") || "{}");
+                storedUser.team = "INVESTOR";
+                localStorage.setItem("user", JSON.stringify(storedUser));
+                try {
+                  await api.put("/api/auth/team", { team: "INVESTOR" }, { headers: {} });
+                } catch {
+                }
+              },
+              className: `px-4 py-2 rounded-lg text-[12px] font-bold transition-all ${userTeam === "INVESTOR" ? "bg-violet-600 text-white shadow-[0_0_12px_rgba(139,92,246,0.3)]" : "text-slate-400 hover:text-white"}`,
+              children: "Investor"
+            }
+          )
+        ] }),
+        /* @__PURE__ */ jsxs("button", { onClick: () => setShowForm(!showForm), className: "btn bg-blue-600 hover:bg-blue-500 text-white border-none py-2.5 px-6 rounded-xl flex items-center gap-2 shadow-[0_0_20px_rgba(37,99,235,0.3)] transition-all hover:scale-105 active:scale-95", children: [
+          /* @__PURE__ */ jsx(Plus, { className: "w-4 h-4" }),
+          /* @__PURE__ */ jsx("span", { className: "text-[13px] font-bold", children: showForm ? "Cancel" : "New Template" })
+        ] })
+      ] })
+    ] }),
+    showForm && /* @__PURE__ */ jsxs("div", { className: "mb-10 bg-[#0f121b] border border-white/5 rounded-[24px] p-8", children: [
+      /* @__PURE__ */ jsx("h2", { className: "text-lg font-black text-white mb-6", children: "Create Custom Template" }),
+      /* @__PURE__ */ jsxs("div", { className: "space-y-4", children: [
+        /* @__PURE__ */ jsxs("div", { children: [
+          /* @__PURE__ */ jsx("label", { className: "text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block", children: "Template Name" }),
+          /* @__PURE__ */ jsx("input", { value: form.name, onChange: (e) => setForm({ ...form, name: e.target.value }), placeholder: "e.g. My Custom Draft", className: "w-full bg-black/40 border border-white/5 rounded-xl p-4 text-sm text-white focus:border-blue-500/50 outline-none" })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { children: [
+          /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between mb-2", children: [
+            /* @__PURE__ */ jsx("label", { className: "text-[11px] font-bold text-slate-400 uppercase tracking-widest", children: "Email Body" }),
+            /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+              /* @__PURE__ */ jsx("input", { ref: fileInputRef, type: "file", accept: ".docx,.pdf", onChange: handleFileUpload, className: "hidden" }),
+              /* @__PURE__ */ jsxs(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => fileInputRef.current?.click(),
+                  disabled: uploading,
+                  className: "flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-600/20 border border-blue-500/30 text-blue-400 hover:bg-blue-600/30 text-[10px] font-bold uppercase tracking-wider transition-all disabled:opacity-50",
+                  children: [
+                    uploading ? /* @__PURE__ */ jsx(Loader2, { className: "w-3 h-3 animate-spin" }) : /* @__PURE__ */ jsx(FileText, { className: "w-3 h-3" }),
+                    uploading ? "Reading..." : "Upload .docx / .pdf"
+                  ]
+                }
+              )
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxs("p", { className: "text-[10px] text-slate-600 mb-2", children: [
+            "Use placeholders: ",
+            "{{First Name}}",
+            ", ",
+            "{{Company Name}}",
+            ", ",
+            "{{Sender Name}}"
+          ] }),
+          /* @__PURE__ */ jsx(ToolbarTextarea, { value: form.content, onChange: (e) => setForm({ ...form, content: e.target.value }), rows: 8, placeholder: "Write your email body here...", fontSizeOptions: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22] }),
+          /* @__PURE__ */ jsxs(
+            "button",
+            {
+              type: "button",
+              onClick: () => setShowBodyPreview(!showBodyPreview),
+              className: `mt-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${showBodyPreview ? "bg-blue-600/20 text-blue-400 border-blue-500/30" : "bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 border-white/10"}`,
+              children: [
+                /* @__PURE__ */ jsx(Eye, { className: "w-3 h-3" }),
+                showBodyPreview ? "Hide Live Preview" : "Show Live Preview"
+              ]
+            }
+          ),
+          showBodyPreview && /* @__PURE__ */ jsx("div", { className: "mt-3 bg-[#0a0d14] border border-white/5 rounded-xl p-5 max-h-[500px] overflow-y-auto", children: /* @__PURE__ */ jsx("div", { className: "email-preview text-[14px] leading-relaxed", dangerouslySetInnerHTML: { __html: form.content ? renderEmailPreview(form.content, true, false) : '<p class="text-slate-500 italic text-[12px]">Type something to see preview...</p>' } }) })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { children: [
+          /* @__PURE__ */ jsx("label", { className: "text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block", children: "Subject (optional)" }),
+          /* @__PURE__ */ jsx("input", { value: form.subject, onChange: (e) => setForm({ ...form, subject: e.target.value }), placeholder: "e.g. Strategic Partnership Opportunity \u2013 JV & Investment", className: "w-full bg-black/40 border border-white/5 rounded-xl p-4 text-sm text-white focus:border-blue-500/50 outline-none" })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { children: [
+          /* @__PURE__ */ jsx("label", { className: "text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block", children: "CC Email (optional)" }),
+          /* @__PURE__ */ jsx("input", { value: form.cc, onChange: (e) => setForm({ ...form, cc: e.target.value }), placeholder: "e.g. team@qvscl.com", className: "w-full bg-black/40 border border-white/5 rounded-xl p-4 text-sm text-white focus:border-blue-500/50 outline-none" })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { children: [
+          /* @__PURE__ */ jsx("label", { className: "text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block", children: "Description (optional)" }),
+          /* @__PURE__ */ jsx("input", { value: form.description, onChange: (e) => setForm({ ...form, description: e.target.value }), placeholder: "Brief description", className: "w-full bg-black/40 border border-white/5 rounded-xl p-4 text-sm text-white focus:border-blue-500/50 outline-none" })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { className: "border-t border-white/5 pt-6", children: [
+          /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between mb-4", children: [
+            /* @__PURE__ */ jsx("h3", { className: "text-sm font-bold text-white", children: "Follow-up Emails" }),
+            /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+              /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-slate-500 uppercase tracking-widest", children: "Count:" }),
+              [1, 2, 3].map((n) => /* @__PURE__ */ jsx("button", { onClick: () => setForm({ ...form, followup_count: n }), className: `px-3 py-1 rounded-lg text-[11px] font-bold border transition-all ${form.followup_count === n ? "bg-blue-600 text-white border-blue-500" : "bg-white/5 text-slate-400 border-white/10 hover:text-white"}`, children: n }, n))
+            ] })
+          ] }),
+          /* @__PURE__ */ jsx("p", { className: "text-[10px] text-slate-600 mb-4", children: "Write your own follow-ups. Same placeholders work here too." }),
+          Array.from({ length: form.followup_count || 3 }, (_, i) => i + 1).map((i) => {
+            const followupKey = `followup_${i}`;
+            const fuploading = uploading;
+            return /* @__PURE__ */ jsxs("div", { className: "mb-3", children: [
+              /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block", children: getFollowupLabel(i) }),
+              /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
+                /* @__PURE__ */ jsx(ToolbarTextarea, { value: form[followupKey], onChange: (e) => setForm({ ...form, [followupKey]: e.target.value }), rows: 3, placeholder: `Follow-up ${i} content...`, fontSizeOptions: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22] }),
+                /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-1.5", children: [
+                  /* @__PURE__ */ jsx("button", { onClick: () => setPreview({ show: true, content: form[followupKey], label: followupKey, isFollowup: true }), className: "px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-[10px] font-bold border border-blue-500/20 whitespace-nowrap transition-all", children: "Preview" }),
+                  /* @__PURE__ */ jsxs("label", { className: `flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-white/10 text-slate-400 hover:text-white hover:border-blue-500/50 cursor-pointer transition-all text-[10px] font-bold ${fuploading ? "opacity-50" : ""}`, children: [
+                    fuploading ? /* @__PURE__ */ jsx(Loader2, { className: "w-3 h-3 animate-spin" }) : /* @__PURE__ */ jsx(Upload, { className: "w-3 h-3" }),
+                    fuploading ? "" : "Draft",
+                    /* @__PURE__ */ jsx("input", { type: "file", accept: ".docx,.pdf", className: "hidden", disabled: fuploading, onChange: (e) => handleFollowupFileUpload(e, followupKey) })
+                  ] }),
+                  form[followupKey] && /* @__PURE__ */ jsx("button", { onClick: () => setForm((prev) => ({ ...prev, [followupKey]: "" })), className: "px-3 py-2 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 text-[10px] font-bold whitespace-nowrap transition-all", children: /* @__PURE__ */ jsx(Trash2, { className: "w-3 h-3" }) })
+                ] })
+              ] })
+            ] }, i);
+          })
+        ] }),
+        /* @__PURE__ */ jsx("button", { onClick: handleCreate, disabled: creating, className: "btn bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3 px-8 rounded-xl text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed", children: creating ? /* @__PURE__ */ jsxs(Fragment, { children: [
+          /* @__PURE__ */ jsx(Loader2, { className: "w-4 h-4 animate-spin" }),
+          " Saving..."
+        ] }) : "Save Template" })
+      ] })
+    ] }),
+    isLoading ? /* @__PURE__ */ jsxs("div", { className: "py-20 flex flex-col items-center justify-center", children: [
+      /* @__PURE__ */ jsx(Loader2, { className: "w-10 h-10 text-blue-500 animate-spin mb-4" }),
+      /* @__PURE__ */ jsx("p", { className: "text-slate-500 font-bold uppercase tracking-widest text-[10px]", children: "Loading..." })
+    ] }) : prompts.length === 0 ? /* @__PURE__ */ jsxs("div", { className: "py-20 text-center border-2 border-dashed border-white/5 rounded-[32px] bg-white/[0.02]", children: [
+      /* @__PURE__ */ jsx(AlertCircle, { className: "w-12 h-12 text-slate-700 mx-auto mb-4" }),
+      /* @__PURE__ */ jsx("p", { className: "text-slate-500 font-medium", children: "No custom templates yet." }),
+      /* @__PURE__ */ jsx("button", { onClick: () => setShowForm(true), className: "mt-4 text-blue-400 text-sm font-bold hover:text-blue-300", children: "Create your first template" })
+    ] }) : /* @__PURE__ */ jsx("div", { className: "space-y-4", children: prompts.map((tpl) => {
+      const isExpanded = expandedId === tpl.id;
+      return /* @__PURE__ */ jsxs("div", { className: "bg-[#0f121b] border border-white/5 rounded-[20px] overflow-hidden group", children: [
+        /* @__PURE__ */ jsxs("div", { className: "p-6 flex items-center justify-between cursor-pointer", onClick: () => setExpandedId(isExpanded ? null : tpl.id), children: [
+          /* @__PURE__ */ jsxs("div", { className: "flex-1", children: [
+            /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
+              renamingId === tpl.id ? /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", onClick: (e) => e.stopPropagation(), children: [
+                /* @__PURE__ */ jsx(
+                  "input",
+                  {
+                    value: renameValue,
+                    onChange: (e) => setRenameValue(e.target.value),
+                    onKeyDown: (e) => {
+                      if (e.key === "Enter") {
+                        e.currentTarget.blur();
+                      } else if (e.key === "Escape") {
+                        setRenamingId(null);
+                      }
+                    },
+                    onBlur: () => {
+                      if (renameValue.trim() && renameValue !== tpl.name) {
+                        handleFieldSave(tpl.id, "name", renameValue.trim());
+                      }
+                      setRenamingId(null);
+                    },
+                    autoFocus: true,
+                    className: "bg-black/60 border border-blue-500/50 rounded-lg px-3 py-1.5 text-base font-bold text-white outline-none w-64"
+                  }
+                ),
+                saveField.id === tpl.id && saveField.field === "name" ? /* @__PURE__ */ jsx(Loader2, { className: "w-4 h-4 text-blue-400 animate-spin" }) : saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === "name" ? /* @__PURE__ */ jsx(CheckCircle2, { className: "w-4 h-4 text-emerald-400" }) : null
+              ] }) : /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 cursor-pointer group", onClick: (e) => {
+                e.stopPropagation();
+                setRenamingId(tpl.id);
+                setRenameValue(tpl.name);
+              }, children: [
+                /* @__PURE__ */ jsx("h3", { className: "text-base font-bold text-white group-hover:text-blue-400 transition-colors", children: tpl.name }),
+                saveField.id === tpl.id && saveField.field === "name" ? /* @__PURE__ */ jsx(Loader2, { className: "w-4 h-4 text-blue-400 animate-spin" }) : saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === "name" ? /* @__PURE__ */ jsx(CheckCircle2, { className: "w-4 h-4 text-emerald-400" }) : null,
+                /* @__PURE__ */ jsx("span", { className: "opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-slate-500 font-medium", children: "click to rename" })
+              ] }),
+              /* @__PURE__ */ jsx("span", { className: "px-2 py-0.5 rounded text-[9px] font-black tracking-[1px] border uppercase bg-purple-500/10 text-purple-500 border-purple-500/20", children: "Custom Draft" })
+            ] }),
+            tpl.description && /* @__PURE__ */ jsx("p", { className: "text-xs text-slate-500 mt-1", children: tpl.description })
+          ] }),
+          /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
+            /* @__PURE__ */ jsx("button", { onClick: (e) => {
+              e.stopPropagation();
+              handleDelete(tpl.id);
+            }, disabled: deleting === tpl.id, className: "p-2 rounded-lg hover:bg-red-500/10 text-slate-600 hover:text-red-400 transition-all", children: deleting === tpl.id ? /* @__PURE__ */ jsx(Loader2, { className: "w-4 h-4 animate-spin" }) : /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }) }),
+            isExpanded ? /* @__PURE__ */ jsx(ChevronUp, { className: "w-5 h-5 text-slate-500" }) : /* @__PURE__ */ jsx(ChevronDown, { className: "w-5 h-5 text-slate-500" })
+          ] })
+        ] }),
+        isExpanded && /* @__PURE__ */ jsxs("div", { className: "px-6 pb-6 border-t border-white/5 pt-4 space-y-4", children: [
+          /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-4", children: [
+            /* @__PURE__ */ jsxs("div", { children: [
+              /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1", children: "Subject" }),
+              /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
+                /* @__PURE__ */ jsx("input", { value: tpl.subject || "", onChange: (e) => {
+                  const updated = [...prompts];
+                  const idx = updated.findIndex((p) => p.id === tpl.id);
+                  updated[idx] = { ...updated[idx], subject: e.target.value };
+                  setPrompts(updated);
+                }, placeholder: "Email subject line...", className: "flex-1 bg-black/40 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-blue-500/50 outline-none" }),
+                /* @__PURE__ */ jsx("button", { onClick: () => handleFieldSave(tpl.id, "subject", tpl.subject || ""), disabled: saveField.id === tpl.id && saveField.field === "subject", className: `px-3 py-2 rounded-xl text-[10px] font-bold border border-white/10 whitespace-nowrap transition-all ${saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === "subject" ? "bg-emerald-600/20 text-emerald-400 border-emerald-500/30" : "bg-white/5 text-slate-400 hover:text-white hover:bg-white/10"}`, children: saveField.id === tpl.id && saveField.field === "subject" ? /* @__PURE__ */ jsx(Loader2, { className: "w-3 h-3 animate-spin" }) : saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === "subject" ? /* @__PURE__ */ jsx(CheckCircle2, { className: "w-3 h-3" }) : "Save" })
+              ] })
+            ] }),
+            /* @__PURE__ */ jsxs("div", { children: [
+              /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1", children: "CC Email" }),
+              /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
+                /* @__PURE__ */ jsx("input", { value: tpl.cc || "", onChange: (e) => {
+                  const updated = [...prompts];
+                  const idx = updated.findIndex((p) => p.id === tpl.id);
+                  updated[idx] = { ...updated[idx], cc: e.target.value };
+                  setPrompts(updated);
+                }, placeholder: "cc@email.com", className: "flex-1 bg-black/40 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-blue-500/50 outline-none" }),
+                /* @__PURE__ */ jsx("button", { onClick: () => handleFieldSave(tpl.id, "cc", tpl.cc || ""), disabled: saveField.id === tpl.id && saveField.field === "cc", className: `px-3 py-2 rounded-xl text-[10px] font-bold border border-white/10 whitespace-nowrap transition-all ${saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === "cc" ? "bg-emerald-600/20 text-emerald-400 border-emerald-500/30" : "bg-white/5 text-slate-400 hover:text-white hover:bg-white/10"}`, children: saveField.id === tpl.id && saveField.field === "cc" ? /* @__PURE__ */ jsx(Loader2, { className: "w-3 h-3 animate-spin" }) : saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === "cc" ? /* @__PURE__ */ jsx(CheckCircle2, { className: "w-3 h-3" }) : "Save" })
+              ] })
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxs("div", { children: [
+            /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1", children: "Body" }),
+            /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
+              /* @__PURE__ */ jsx(ToolbarTextarea, { value: tpl.content, onChange: (e) => {
+                const updated = [...prompts];
+                const idx = updated.findIndex((p) => p.id === tpl.id);
+                updated[idx] = { ...updated[idx], content: e.target.value };
+                setPrompts(updated);
+              }, rows: 6, placeholder: "Email body...", fontSizeOptions: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22] }),
+              /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2", children: [
+                /* @__PURE__ */ jsx("button", { onClick: () => setPreview({ show: true, content: tpl.content, label: "Body", subject: tpl.subject, attachment: tpl.attachment_file }), className: "px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-[10px] font-bold border border-blue-500/20 whitespace-nowrap transition-all", children: "Preview" }),
+                /* @__PURE__ */ jsx("button", { onClick: () => handleFieldSave(tpl.id, "content", tpl.content), disabled: saveField.id === tpl.id && saveField.field === "content", className: `px-3 py-2 rounded-lg text-[10px] font-bold border whitespace-nowrap transition-all ${saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === "content" ? "bg-emerald-600/20 text-emerald-400 border-emerald-500/30" : "bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 border-white/10"}`, children: saveField.id === tpl.id && saveField.field === "content" ? /* @__PURE__ */ jsx(Loader2, { className: "w-3 h-3 animate-spin" }) : saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === "content" ? /* @__PURE__ */ jsx(CheckCircle2, { className: "w-3 h-3" }) : "Save" })
+              ] })
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between", children: [
+            /* @__PURE__ */ jsx("h4", { className: "text-[12px] font-bold text-white", children: "Follow-ups" }),
+            /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+              /* @__PURE__ */ jsx("label", { className: "text-[9px] font-bold text-slate-500 uppercase tracking-widest", children: "Count:" }),
+              [1, 2, 3].map((n) => /* @__PURE__ */ jsx("button", { onClick: () => {
+                handleFieldSave(tpl.id, "followup_count", n);
+                const updated = [...prompts];
+                const idx = updated.findIndex((p) => p.id === tpl.id);
+                updated[idx] = { ...updated[idx], followup_count: n };
+                setPrompts(updated);
+              }, className: `px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all ${(tpl.followup_count || 3) === n ? "bg-blue-600 text-white border-blue-500" : "bg-white/5 text-slate-400 border-white/10 hover:text-white"}`, children: n }, n))
+            ] })
+          ] }),
+          Array.from({ length: tpl.followup_count || 3 }, (_, i) => i + 1).map((i) => {
+            const fkey = `followup_${i}`;
+            return /* @__PURE__ */ jsxs("div", { children: [
+              /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1", children: getFollowupLabel(i) }),
+              /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
+                /* @__PURE__ */ jsx(ToolbarTextarea, { value: tpl[fkey] || "", onChange: (e) => {
+                  const updated = [...prompts];
+                  const idx = updated.findIndex((p) => p.id === tpl.id);
+                  updated[idx] = { ...updated[idx], [fkey]: e.target.value };
+                  setPrompts(updated);
+                }, rows: 2, placeholder: "(empty)", fontSizeOptions: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22] }),
+                /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-1.5", children: [
+                  /* @__PURE__ */ jsx("button", { onClick: () => setPreview({ show: true, content: tpl[fkey] || "", label: fkey, subject: tpl.subject, isFollowup: true }), className: "px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-[10px] font-bold border border-blue-500/20 whitespace-nowrap transition-all", children: "Preview" }),
+                  /* @__PURE__ */ jsx("button", { onClick: () => handleFieldSave(tpl.id, fkey, tpl[fkey] || ""), disabled: saveField.id === tpl.id && saveField.field === fkey, className: `px-3 py-2 rounded-lg text-[10px] font-bold border whitespace-nowrap transition-all ${saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === fkey ? "bg-emerald-600/20 text-emerald-400 border-emerald-500/30" : "bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 border-white/10"}`, children: saveField.id === tpl.id && saveField.field === fkey ? /* @__PURE__ */ jsx(Loader2, { className: "w-3 h-3 animate-spin" }) : saveFieldSuccess.id === tpl.id && saveFieldSuccess.field === fkey ? /* @__PURE__ */ jsx(CheckCircle2, { className: "w-3 h-3" }) : "Save" }),
+                  /* @__PURE__ */ jsxs("label", { className: `flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-white/10 text-slate-400 hover:text-white hover:border-blue-500/50 cursor-pointer transition-all text-[10px] font-bold ${uploading ? "opacity-50" : ""}`, children: [
+                    uploading ? /* @__PURE__ */ jsx(Loader2, { className: "w-3 h-3 animate-spin" }) : /* @__PURE__ */ jsx(Upload, { className: "w-3 h-3" }),
+                    uploading ? "" : "Draft",
+                    /* @__PURE__ */ jsx("input", { type: "file", accept: ".docx,.pdf", className: "hidden", disabled: uploading, onChange: (e) => handleFollowupFileUploadExisting(e, tpl.id, fkey) })
+                  ] }),
+                  tpl[fkey] && /* @__PURE__ */ jsx("button", { onClick: () => {
+                    const updated = [...prompts];
+                    const idx = updated.findIndex((p) => p.id === tpl.id);
+                    updated[idx] = { ...updated[idx], [fkey]: "" };
+                    setPrompts(updated);
+                    handleFieldSave(tpl.id, fkey, "");
+                  }, className: "px-3 py-2 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 text-[10px] font-bold whitespace-nowrap transition-all", children: /* @__PURE__ */ jsx(Trash2, { className: "w-3 h-3" }) })
+                ] })
+              ] })
+            ] }, i);
+          }),
+          /* @__PURE__ */ jsxs("div", { className: "border-t border-white/5 pt-4", children: [
+            /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2", children: "Attachment" }),
+            /* @__PURE__ */ jsx("div", { className: "flex items-center gap-3", children: tpl.attachment_file ? /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-xs text-slate-400 bg-black/30 px-3 py-1.5 rounded-lg border border-white/5", children: [
+              /* @__PURE__ */ jsx(Paperclip, { className: "w-3.5 h-3.5 text-blue-400" }),
+              /* @__PURE__ */ jsx("span", { children: tpl.attachment_file }),
+              /* @__PURE__ */ jsx("button", { onClick: () => {
+                const updated = [...prompts];
+                const idx = updated.findIndex((p) => p.id === tpl.id);
+                updated[idx] = { ...updated[idx], attachment_file: null };
+                setPrompts(updated);
+              }, className: "text-red-400 hover:text-red-300 ml-1", children: "\xD7" })
+            ] }) : /* @__PURE__ */ jsxs("label", { className: `flex items-center gap-2 px-3 py-1.5 rounded-lg border border-dashed border-white/10 text-xs text-slate-400 hover:text-white hover:border-blue-500/50 cursor-pointer transition-all ${attaching === tpl.id ? "opacity-50" : ""}`, children: [
+              attaching === tpl.id ? /* @__PURE__ */ jsx(Loader2, { className: "w-3.5 h-3.5 animate-spin" }) : /* @__PURE__ */ jsx(Upload, { className: "w-3.5 h-3.5" }),
+              attaching === tpl.id ? "Uploading..." : "Attach PDF",
+              /* @__PURE__ */ jsx("input", { type: "file", accept: ".pdf", className: "hidden", disabled: attaching === tpl.id, onChange: (e) => {
+                const f = e.target.files[0];
+                if (f) handleAttachment(tpl.id, f);
+                e.target.value = "";
+              } })
+            ] }) })
+          ] }),
+          /* @__PURE__ */ jsx("div", { className: "flex justify-end pt-2", children: /* @__PURE__ */ jsx("button", { onClick: () => handleUpdate(tpl.id, { subject: tpl.subject || null, cc: tpl.cc || null, content: tpl.content, followup_1: tpl.followup_1, followup_2: tpl.followup_2, followup_3: tpl.followup_3, followup_count: tpl.followup_count || 3 }), disabled: isSaving === tpl.id, className: `btn h-auto py-2.5 px-8 rounded-xl text-[12px] font-black transition-all flex items-center gap-2 border-none shadow-lg ${saveSuccess === tpl.id ? "bg-emerald-600 text-white" : "bg-blue-600 hover:bg-blue-500 text-white"}`, children: isSaving === tpl.id ? /* @__PURE__ */ jsx(Loader2, { className: "w-4 h-4 animate-spin" }) : saveSuccess === tpl.id ? /* @__PURE__ */ jsxs(Fragment, { children: [
+            /* @__PURE__ */ jsx(CheckCircle2, { className: "w-4 h-4" }),
+            " SAVED"
+          ] }) : /* @__PURE__ */ jsxs(Fragment, { children: [
+            /* @__PURE__ */ jsx(Save, { className: "w-4 h-4" }),
+            " SAVE ALL"
+          ] }) }) })
+        ] })
+      ] }, tpl.id);
+    }) }),
+    preview.show && /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm", onClick: () => setPreview({ show: false, content: "", label: "" }), children: /* @__PURE__ */ jsxs("div", { className: "bg-[#0a0d14] border border-white/10 rounded-[24px] w-full max-w-3xl max-h-[85vh] overflow-hidden shadow-2xl", onClick: (e) => e.stopPropagation(), children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between px-6 py-4 border-b border-white/5", children: [
+        /* @__PURE__ */ jsxs("h3", { className: "text-sm font-bold text-white", children: [
+          "Preview \u2014 ",
+          preview.label
+        ] }),
+        /* @__PURE__ */ jsx("button", { onClick: () => setPreview({ show: false, content: "", label: "" }), className: "text-slate-500 hover:text-white text-lg leading-none", children: "\xD7" })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "p-6 overflow-y-auto max-h-[75vh]", children: [
+        preview.subject && /* @__PURE__ */ jsxs("div", { className: "mb-4 px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-xs", children: [
+          /* @__PURE__ */ jsx("span", { className: "text-slate-500 font-bold uppercase tracking-wider", children: "Subject: " }),
+          /* @__PURE__ */ jsx("span", { className: "text-blue-300 font-medium", children: preview.subject })
+        ] }),
+        preview.attachment && /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 mb-4 px-3 py-2 bg-blue-500/10 border border-blue-500/20 rounded-lg text-xs text-blue-300", children: [
+          /* @__PURE__ */ jsx(Paperclip, { className: "w-3.5 h-3.5" }),
+          /* @__PURE__ */ jsx("span", { className: "font-medium", children: preview.attachment }),
+          /* @__PURE__ */ jsx("span", { className: "text-blue-400/50 ml-auto", children: "attached" })
+        ] }),
+        /* @__PURE__ */ jsx("div", { className: "email-preview text-slate-300 text-[14px] leading-relaxed", dangerouslySetInnerHTML: { __html: renderEmailPreview(preview.content, true, preview.isFollowup) } })
+      ] })
+    ] }) })
+  ] });
+};
+export default Prompts;

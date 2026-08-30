@@ -1,0 +1,11 @@
+{
+  "/api/dashboard/stats":            { "method": "GET", "auth": true,  "type": "object", "required_keys": [] },
+  "/api/gmail/inbox":                { "method": "GET", "auth": true,  "type": "object", "required_keys": ["messages", "connected"] },
+  "/api/reminders/due":              { "method": "GET", "auth": true,  "type": "array" },
+  "/api/reminders/urgent-actions":   { "method": "GET", "auth": true,  "type": "object", "required_keys": ["pending_followups", "pending_drafts"] },
+  "/api/metrics":                    { "method": "GET", "auth": true,  "params": { "period": "all" }, "type": "object", "required_keys": ["report"] },
+  "/api/users/pilot-settings":       { "method": "GET", "auth": true,  "type": "object", "required_keys": ["auto_pilot_drafts"] },
+  "/api/leads":                      { "method": "GET", "auth": true,  "type": "object", "required_keys": [] },
+  "/api/companies":                  { "method": "GET", "auth": true,  "type": "object", "required_keys": [] },
+  "/api/health/redis":               { "method": "GET", "auth": false, "type": "object", "required_keys": ["status", "configured"] }
+}

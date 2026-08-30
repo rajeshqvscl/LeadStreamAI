@@ -1,14 +1,14 @@
-from fastapi import APIRouter, HTTPException, Header
-from app.database import get_db_connection
-import psycopg2.extras
-from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
-import json
 import csv
-import io
+import json
 import re
 import sys
+from typing import Any
+
 import httpx
+import psycopg2.extras
+from app.database import get_db_connection
+from fastapi import APIRouter, Header, HTTPException
+from pydantic import BaseModel
 
 # Dynamically raise the CSV field size limit to the maximum possible for this platform
 # to prevent _csv.Error: field larger than field limit (131072) on large GSheets
@@ -20,16 +20,17 @@ while True:
     except OverflowError:
         max_limit = int(max_limit / 10)
 
-from app.models.lead import insert_lead, save_email_draft
-from app.services.llm_services import EmailGenerator
-from psycopg2.extras import execute_values
-import time
-from concurrent.futures import ThreadPoolExecutor
-from app.utils.auth_helpers import normalize_user_id, check_daily_email_limit, get_daily_email_limit
+import contextlib
+import logging
 
 # --- REDIS CACHE INITIALIZATION ---
 import os
-import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+from app.models.lead import insert_lead
+from app.utils.auth_helpers import check_daily_email_limit, get_daily_email_limit, normalize_user_id
+from psycopg2.extras import execute_values
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +39,9 @@ redis_available = False
 
 try:
     import redis
+    from app.core.redis_pool import get_redis_pool
     REDIS_URL = os.getenv("REDIS_URL") or os.getenv("REDIS_TLS_URL") or "redis://localhost:6379"
-    redis_client = redis.Redis.from_url(
-        REDIS_URL,
-        decode_responses=True,
-    )
+    redis_client = redis.Redis(connection_pool=get_redis_pool())
     redis_client.ping()
     redis_available = True
     logger.info(f"SUCCESS: Connected to Redis Cache inside companies.py at {REDIS_URL.split('@')[-1]}")
@@ -69,7 +68,7 @@ def _redis_delete_pattern(pattern: str):
         if deleted:
             logger.info(f"SUCCESS: Invalidated {deleted} cache keys for pattern: {pattern}")
     except Exception as ie:
-        logger.error(f"Failed to invalidate cache for pattern {pattern}: {ie}")
+        logger.exception(f"Failed to invalidate cache for pattern {pattern}: {ie}")
 
 
 def invalidate_companies_cache(user_id: str = "*"):
@@ -79,20 +78,22 @@ def invalidate_companies_cache(user_id: str = "*"):
 
 
 router = APIRouter()
-@router.get("/companies")
+from app.core.responses import JsonObject
+
+@router.get("/companies", response_model=JsonObject)
 def list_companies(
-    page: int = 1, 
-    limit: int = 100, 
-    search: Optional[str] = None,
-    filters: Optional[str] = None, # JSON string of key-value filters
-    user_id: Optional[str] = Header(None, alias="X-User-Id")
+    page: int = 1,
+    limit: int = 100,
+    search: str | None = None,
+    filters: str | None = None, # JSON string of key-value filters
+    user_id: str | None = Header(None, alias="X-User-Id")
 ):
     """Returns company profiles from the internal company registry database with pagination and global search."""
     uid = normalize_user_id(user_id)
-    
+
     # Build unique composite cache key for companies list queries
     cache_key = f"companies:{uid}:{page}:{limit}:{search}:{filters}"
-    
+
     if redis_available and redis_client:
         try:
             cached = redis_client.get(cache_key)
@@ -101,15 +102,15 @@ def list_companies(
                 return json.loads(cached)
         except Exception as ce:
             logger.warning(f"WARNING: Redis companies cache read error: {ce}")
-            
+
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     offset = (page - 1) * limit
-    
+
     # Base query construction - strictly separate data per user
     base_where = ""
     params = []
-    
+
     conditions = []
     if uid:
         conditions.append("user_id = %s")
@@ -117,15 +118,15 @@ def list_companies(
             params.append(int(uid))
         except Exception:
             params.append(uid)
-        
+
     # Apply Global Search — split into individual terms so each can match in different fields
     if search:
         terms = search.strip().split()
         for term in terms:
             search_term = f"%{term}%"
-            conditions.append(f"row_data::text ILIKE %s")
+            conditions.append("row_data::text ILIKE %s")
             params.append(search_term)
-        
+
     # Apply Column Filters
     if filters:
         try:
@@ -139,11 +140,11 @@ def list_companies(
                             conditions.append("_is_generated = FALSE")
                     else:
                         safe_key = re.sub(r'[^\w\s\-]', '', key)
-                        conditions.append(f"row_data->>%s ILIKE %s")
+                        conditions.append("row_data->>%s ILIKE %s")
                         params.extend([safe_key, f"%{value}%"])
         except Exception:
             pass
-    
+
     base_where = ""
     if conditions:
         base_where = "WHERE " + " AND ".join(conditions)
@@ -153,20 +154,20 @@ def list_companies(
         count_query = f"SELECT COUNT(*) FROM company_registry {base_where}"
         cur.execute(count_query, params)
         total = cur.fetchone()[0]
-        
+
         # Fetch with pagination
         fetch_params = params + [limit, offset]
         fetch_query = f"""
-            SELECT id, row_data, _is_generated 
-            FROM company_registry 
-            {base_where} 
-            ORDER BY id ASC 
+            SELECT id, row_data, _is_generated
+            FROM company_registry
+            {base_where}
+            ORDER BY id ASC
             LIMIT %s OFFSET %s
         """
 
         cur.execute(fetch_query, fetch_params)
         rows = cur.fetchall()
-        
+
         companies = []
         for r in rows:
             data = r['row_data']
@@ -181,14 +182,14 @@ def list_companies(
             "limit": limit,
             "pages": (total + limit - 1) // limit
         }
-        
+
         if redis_available and redis_client:
             try:
                 redis_client.setex(cache_key, 60, json.dumps(result))
                 logger.info(f"INFO: Cached companies query for user {uid} on page {page}")
             except Exception as ce:
                 logger.warning(f"WARNING: Redis companies cache write error: {ce}")
-                
+
         return result
     except Exception as e:
         import traceback
@@ -199,7 +200,7 @@ def list_companies(
         conn.close()
 
 @router.get("/companies/unique-tabs")
-def get_unique_tabs(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_unique_tabs(user_id: str | None = Header(None, alias="X-User-Id")):
     """Returns a list of unique _source_tab values present in the registry."""
     uid = normalize_user_id(user_id)
 
@@ -223,10 +224,10 @@ def get_unique_tabs(user_id: Optional[str] = Header(None, alias="X-User-Id")):
             pass
 
     conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
     uid = normalize_user_id(user_id)
-    
+
     conditions = []
     params = []
     if uid:
@@ -237,7 +238,7 @@ def get_unique_tabs(user_id: Optional[str] = Header(None, alias="X-User-Id")):
             params.append(uid)
     conditions.append("row_data->>'_source_tab' IS NOT NULL")
     where_clause = "WHERE " + " AND ".join(conditions)
-        
+
     try:
         query = f"SELECT DISTINCT row_data->>'_source_tab' AS tab_name FROM company_registry {where_clause}"
         cur.execute(query, params)
@@ -245,23 +246,21 @@ def get_unique_tabs(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         result = {"tabs": tabs}
         mc_set(f"ctabs:{uid}", result, 60)
         if redis_available and redis_client:
-            try:
+            with contextlib.suppress(Exception):
                 redis_client.setex(cache_key, 60, json.dumps(result))
-            except Exception:
-                pass
         return result
     except Exception as e:
-        logger.error(f"Error fetching unique tabs: {str(e)}")
+        logger.exception(f"Error fetching unique tabs: {str(e)}")
         return {"tabs": []}
     finally:
         cur.close()
         conn.close()
 
 @router.post("/companies/import")
-def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def import_companies(rows: list[dict[str, Any]], user_id: str | None = Header(None, alias="X-User-Id")):
     """Imports a batch of data, automatically enriching missing fields. Uses upsert to preserve existing data."""
     uid = normalize_user_id(user_id)
-    
+
     # --- AUTOMATION: Enrich rows before insertion ---
     try:
         processed_rows = process_and_enrich_rows(rows)
@@ -270,33 +269,33 @@ def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Import failed during enrichment: {str(enrich_err)}")
-    
+
     if not processed_rows:
         return {"success": True, "count": 0, "message": "No valid rows to import"}
-    
+
     print(f"DEBUG: import_companies started for user {uid} with {len(processed_rows)} processed rows")
     if processed_rows:
         print(f"DEBUG: First processed row keys: {list(processed_rows[0].keys())}")
         print(f"DEBUG: First processed row sample: {processed_rows[0]}")
         print(f"DEBUG: Source tab for first row: {processed_rows[0].get('_source_tab')}")
-    
+
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
+
     try:
         # Fetch existing lead emails for this user to preserve "Generated" status
         cur.execute("SELECT email FROM leads_raw WHERE user_id = %s", (uid,))
         existing_emails = {r[0].lower() for r in cur.fetchall() if r[0]}
-        
+
         # Fetch existing company registry emails to preserve _is_generated status
         cur.execute("SELECT row_data->>'Email' as email, _is_generated FROM company_registry WHERE user_id = %s", (uid,))
         existing_registry = {r['email'].lower(): r['_is_generated'] for r in cur.fetchall() if r['email']}
-        
+
         upsert_data = []
         insert_count = 0
         update_count = 0
         match_count = 0
-        
+
         for row in processed_rows:
             # Robust email detection across all fields (case-insensitive)
             row_email = None
@@ -304,25 +303,25 @@ def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header
                 if isinstance(val, str) and '@' in val and '.' in val:
                     row_email = val.strip().lower()
                     break
-            
+
             # Determine _is_generated: preserve existing if present, else check against leads_raw
             if row_email and row_email in existing_registry:
                 is_generated = existing_registry[row_email]
             else:
                 is_generated = row_email in existing_emails if row_email else False
-            
-            if is_generated: 
+
+            if is_generated:
                 match_count += 1
-            
+
             upsert_data.append((json.dumps(row), uid, is_generated, row_email))
-            
+
             if row_email and row_email in existing_registry:
                 update_count += 1
             else:
                 insert_count += 1
-        
+
         print(f"DEBUG: Upserting {insert_count} new, {update_count} existing rows. Marked {match_count} as Generated")
-        
+
         # Deduplicate by the EXACT constrained value (row_data->>'Email') to prevent
         # ON CONFLICT "cannot affect row a second time". The old logic scanned any
         # '@' value in the row, which can differ from the indexed "Email" field.
@@ -340,10 +339,10 @@ def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header
                 seen_constrained.add(constrained_email)
             deduped_upsert_data.append(row)
         deduped_upsert_data.reverse()
-        
+
         if len(deduped_upsert_data) < len(upsert_data):
             print(f"DEBUG: Deduplicated {len(upsert_data)} rows to {len(deduped_upsert_data)} by email")
-        
+
         # Upsert using ON CONFLICT on the unique index (user_id, email)
         # We need to extract email from row_data for the conflict target
         upsert_query = """
@@ -354,10 +353,10 @@ def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header
                 _is_generated = EXCLUDED._is_generated,
                 updated_at = NOW()
         """
-        
+
         # Prepare data without email for execute_values (email is in row_data)
         insert_values = [(row[0], row[1], row[2]) for row in deduped_upsert_data]
-        
+
         # Use ::jsonb cast so psycopg2 text values are accepted by the JSONB column
         execute_values(cur, upsert_query, insert_values, template="(%s::jsonb, %s, %s)")
         conn.commit()
@@ -374,12 +373,12 @@ def import_companies(rows: List[Dict[str, Any]], user_id: Optional[str] = Header
         conn.close()
 
 @router.patch("/companies/{row_id}")
-def update_company(row_id: int, row_data: Dict[str, Any], user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def update_company(row_id: int, row_data: dict[str, Any], user_id: str | None = Header(None, alias="X-User-Id")):
     """Updates a specific row in the company registry."""
     uid = normalize_user_id(user_id)
     conn = get_db_connection()
     cur = conn.cursor()
-    
+
     try:
         cur.execute(
             "UPDATE company_registry SET row_data = %s, updated_at = NOW() WHERE id = %s AND user_id = %s",
@@ -396,7 +395,7 @@ def update_company(row_id: int, row_data: Dict[str, Any], user_id: Optional[str]
         conn.close()
 
 @router.delete("/companies/clear")
-def clear_companies(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def clear_companies(user_id: str | None = Header(None, alias="X-User-Id")):
     """Wipes the entire company registry."""
     uid = normalize_user_id(user_id)
     conn = get_db_connection()
@@ -411,12 +410,12 @@ def clear_companies(user_id: Optional[str] = Header(None, alias="X-User-Id")):
         conn.close()
 
 @router.post("/companies/request-access")
-def request_db_access(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def request_db_access(user_id: str | None = Header(None, alias="X-User-Id")):
     """Submits access request (Legacy - keeping for route compatibility if needed)."""
     return {"message": "Access restriction removed. You have full system clearance."}
 
 @router.delete("/companies/{row_id}")
-def delete_company_row(row_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def delete_company_row(row_id: int, user_id: str | None = Header(None, alias="X-User-Id")):
     """Deletes a single company registry row (user-scoped)."""
     uid = normalize_user_id(user_id)
     conn = get_db_connection()
@@ -438,12 +437,12 @@ def delete_company_row(row_id: int, user_id: Optional[str] = Header(None, alias=
         cur.close()
         conn.close()
 
-def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def process_and_enrich_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Cleans and auto-enriches a list of rows in parallel, ensuring critical columns exist."""
     # Strip control chars (incl. NUL \x00) — PostgreSQL jsonb rejects them with a 500
     import re as _re_ctrl
     ctrl_chars = _re_ctrl.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
-    
+
     # Process all rows: clean keys and values synchronously (very fast, <0.05s for 10k rows)
     cleaned_rows = []
     for row in rows:
@@ -493,7 +492,7 @@ def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         # Use dynamic max_workers based on task count up to 10 to avoid thread pool context-switching overhead
         with ThreadPoolExecutor(max_workers=min(10, len(rows_to_enrich))) as executor:
             enriched_results = list(executor.map(enrich_single_row, rows_to_enrich))
-            
+
         for idx, row in enriched_results:
             cleaned_rows[idx] = row
 
@@ -527,13 +526,13 @@ def process_and_enrich_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     return cleaned_rows
 
-async def discover_gsheet_tabs(doc_id: str) -> List[Dict[str, str]]:
+async def discover_gsheet_tabs(doc_id: str) -> list[dict[str, str]]:
     """
     Discovers sheet tabs - returns sheet NAMES with gid=None (import uses name-based GViz fallback which works).
     Order: XLSX (Anyone with link) -> GViz (Anyone with link) -> HTML (Publish to web, returns real GID)
     """
     import re
-    
+
     # Method 1: XLSX export - works with "Anyone with link", returns sheet names (gid=None)
     print(f"DEBUG: Trying XLSX discovery for doc_id={doc_id}")
     tabs = await discover_gsheet_tabs_xlsx(doc_id)
@@ -542,14 +541,14 @@ async def discover_gsheet_tabs(doc_id: str) -> List[Dict[str, str]]:
             tab['gid'] = None  # XLSX sheetId != CSV GID
         print(f"DEBUG: Discovered {len(tabs)} tabs via XLSX: {[t['name'] for t in tabs]}")
         return tabs
-    
+
     # Method 2: GViz API - works with "Anyone with link", returns sheet names (gid=None, it's index not GID)
     print(f"DEBUG: Trying GViz discovery for doc_id={doc_id}")
     tabs = await discover_gsheet_tabs_gviz(doc_id)
     if tabs:
         print(f"DEBUG: Discovered {len(tabs)} tabs via GViz: {[t['name'] for t in tabs]}")
         return tabs
-    
+
     # Method 3: HTML scraping - requires "Publish to web", returns REAL GID
     print(f"DEBUG: Trying HTML discovery for doc_id={doc_id}")
     try:
@@ -571,60 +570,59 @@ async def discover_gsheet_tabs(doc_id: str) -> List[Dict[str, str]]:
                 r'{"name":"([^"]+)"[^}]*"id":(\d+)',
                 r'sheets\[\d+\].*?gid["\']?\s*[:=]\s*["\']?(\d+)["\']?.*?title["\']?\s*[:=]\s*["\']([^"\']+)',
             ]
-            
+
             tabs_map = {}
             for pattern in patterns:
                 matches = re.findall(pattern, html)
                 for name, gid in matches:
                     if name not in tabs_map:
                         tabs_map[name] = str(gid)
-            
+
             tabs = [{"name": name, "gid": gid} for name, gid in tabs_map.items()]
             if tabs:
                 print(f"DEBUG: Discovered {len(tabs)} tabs via HTML (real GIDs): {[t['name'] for t in tabs]}")
                 return tabs
     except Exception as e:
         print(f"DEBUG: Tab Discovery HTML Error: {str(e)}")
-    
+
     print("DEBUG: All tab discovery methods failed")
     return []
 
-async def discover_gsheet_tabs_xlsx(doc_id: str) -> List[Dict[str, str]]:
+async def discover_gsheet_tabs_xlsx(doc_id: str) -> list[dict[str, str]]:
     """Fallback method using XLSX structure."""
     try:
-        import zipfile
-        import xml.etree.ElementTree as ET
         import io
-        
+        import xml.etree.ElementTree as ET
+        import zipfile
+
         xlsx_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=xlsx"
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
             resp = await client.get(xlsx_url)
         print(f"DEBUG: XLSX export status: {resp.status_code}, content-length: {len(resp.content)}")
-        if resp.status_code != 200: 
+        if resp.status_code != 200:
             print(f"DEBUG: XLSX failed - status {resp.status_code}")
             return []
-            
-        with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
-            with z.open('xl/workbook.xml') as f:
-                tree = ET.parse(f)
-                root = tree.getroot()
-                ns = {'ns': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
-                sheets = root.find('ns:sheets', ns)
-                
-                tabs = []
-                if sheets is not None:
-                    for i, s in enumerate(sheets.findall('ns:sheet', ns)):
-                        tabs.append({
-                            "name": s.get('name'),
-                            "gid": s.get('sheetId') or str(i)
-                        })
-                print(f"DEBUG: XLSX found tabs: {tabs}")
-                return tabs
+
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as z, z.open('xl/workbook.xml') as f:
+            tree = ET.parse(f)
+            root = tree.getroot()
+            ns = {'ns': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+            sheets = root.find('ns:sheets', ns)
+
+            tabs = []
+            if sheets is not None:
+                for i, s in enumerate(sheets.findall('ns:sheet', ns)):
+                    tabs.append({
+                        "name": s.get('name'),
+                        "gid": s.get('sheetId') or str(i)
+                    })
+            print(f"DEBUG: XLSX found tabs: {tabs}")
+            return tabs
     except Exception as e:
         print(f"DEBUG: XLSX discovery error: {e}")
         return []
 
-async def discover_gsheet_tabs_gviz(doc_id: str) -> List[Dict[str, str]]:
+async def discover_gsheet_tabs_gviz(doc_id: str) -> list[dict[str, str]]:
     """Discover tabs using the Google Visualization API - returns sheet names (gid will be set to None by caller)."""
     try:
         import json as json_lib
@@ -663,7 +661,7 @@ async def discover_gsheet_tabs_gviz(doc_id: str) -> List[Dict[str, str]]:
 
 
 @router.post("/companies/gsheet-tabs")
-async def get_gsheet_tabs(req: Dict[str, str]):
+async def get_gsheet_tabs(req: dict[str, str]):
     """Fetches the list of sheet tabs/names from a Google Sheet.
     Requires: File > Share > 'Anyone with link' (Viewer) minimum.
     For best results: File > Share > Publish to web.
@@ -687,26 +685,27 @@ async def get_gsheet_tabs(req: Dict[str, str]):
     if tabs:
         result = {"tabs": tabs}
         if redis_available and redis_client:
-            try:
+            with contextlib.suppress(Exception):
                 redis_client.setex(cache_key, 300, json.dumps(result))
-            except Exception:
-                pass
         return result
     raise HTTPException(
-        status_code=400, 
+        status_code=400,
         detail="Could not discover sheet tabs. Fix: Open Google Sheet > Share > 'Anyone with link' (Viewer) > Done. For best results: File > Share > Publish to web > Entire Document > Publish."
     )
 
 @router.post("/companies/import-gsheet")
-async def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = Header(None, alias="X-User-Id")):
+async def import_companies_gsheet(req: dict[str, Any], user_id: str | None = Header(None, alias="X-User-Id")):
     """Syncs a public Google Sheet into the company registry. Supports specific tabs or all tabs."""
     url = req.get("url")
     sheet_name = req.get("sheet_name")  # Optional: specific tab name or "ALL_TABS"
-    
+
+    if not url or not isinstance(url, str):
+        raise HTTPException(status_code=400, detail="Missing or invalid 'url' in request body.")
+
     raw_url = url.strip()
     if "/d/" not in raw_url:
         raise HTTPException(status_code=400, detail="Invalid Google Sheet URL format.")
-    
+
     doc_id = raw_url.split("/d/")[1].split("/")[0]
     gid_match = re.search(r"[?&#]gid=(\d+)", raw_url)
     default_gid = gid_match.group(1) if gid_match else "0"
@@ -786,7 +785,7 @@ async def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = 
                         if not any(kw in v.lower() for kw in company_kw + designation_kw):
                             name_hits += 1
             # Detect long descriptive text (notes/descriptions, not company names)
-            long_text_hits = sum(1 for v in values if len(v.split()) >= 4 and not any(kw in v.lower() for kw in company_kw))
+            sum(1 for v in values if len(v.split()) >= 4 and not any(kw in v.lower() for kw in company_kw))
             avg_word_count = sum(len(v.split()) for v in values) / n if n else 0
             if designation_hits > n * 0.4:
                 inferred.append('Designation')
@@ -815,8 +814,8 @@ async def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = 
 
     async def process_single_tab(tab):
         try:
-            import sys
             import csv
+            import sys
             import urllib.parse
             max_limit = sys.maxsize
             while True:
@@ -829,17 +828,17 @@ async def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = 
             gid = tab.get('gid')
             sheet_name_encoded = urllib.parse.quote(tab['name'])
             csv_data = ""
-            
+
             # Try GID-based CSV export first (only if we have a valid numeric GID)
             if gid and str(gid).isdigit():
                 export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv&gid={gid}"
                 print(f"DEBUG: Syncing tab '{tab['name']}' via GID CSV export (GID: {gid})")
-                
+
                 async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                     resp = await client.get(export_url)
                 if resp.status_code == 200:
                     csv_data = resp.text
-            
+
             # Fallback to GViz JSON by sheet name (works without GID)
             if not csv_data or len(csv_data) < 10:
                 print(f"DEBUG: Falling back to GViz JSON by sheet name for '{tab['name']}'")
@@ -847,7 +846,8 @@ async def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = 
                 async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                     resp = await client.get(export_url)
                 if resp.status_code == 200:
-                    import json, io
+                    import io
+                    import json
                     match = re.search(r'google\.visualization\.Query\.setResponse\((.*)\);', resp.text)
                     if match:
                         try:
@@ -862,7 +862,7 @@ async def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = 
                             csv_data = output.getvalue()
                         except Exception as e:
                             print(f"ERROR processing GViz JSON: {e}")
-                            
+
             if not csv_data or len(csv_data) < 5:
                 print(f"ERROR: Sync failed for tab '{tab['name']}'. Skipping.")
                 return
@@ -882,7 +882,7 @@ async def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = 
                 if not has_fragment and matches >= 2 and not has_long_number and not has_real_email:
                     header_index = i
                     break
-            
+
             tab_rows = []
             if header_index != -1:
                 cleaned_csv = "\n".join(lines[header_index:])
@@ -942,7 +942,7 @@ async def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = 
                     row_dict[key] = val
                 row_dict["_source_tab"] = tab["name"]
                 tab_rows.append(row_dict)
-            
+
             with all_rows_lock:
                 all_rows.extend(tab_rows)
         except Exception as e:
@@ -958,12 +958,12 @@ async def import_companies_gsheet(req: Dict[str, Any], user_id: Optional[str] = 
 
     return import_companies(all_rows, user_id)
 
-def enrich_row_data_internal(data: Dict[str, Any]) -> Dict[str, Any]:
+def enrich_row_data_internal(data: dict[str, Any]) -> dict[str, Any]:
     """Helper to enrich a single row's data using AI."""
     try:
         company_name = data.get("Company Name") or data.get("company") or data.get("Company") or data.get("name")
         if not company_name: return data
-        
+
         prompt = f"""
         Find professional contact details for: "{company_name}".
         Person: "{data.get('Person Name') or data.get('person') or ''}"
@@ -972,11 +972,11 @@ def enrich_row_data_internal(data: Dict[str, Any]) -> Dict[str, Any]:
         from app.services.llm_services import LLMService
         llm = LLMService()
         ai_response = llm.generate_response(prompt)
-        
+
         json_str = ai_response.strip()
         if "```json" in json_str: json_str = json_str.split("```json")[1].split("```")[0].strip()
         elif "```" in json_str: json_str = json_str.split("```")[1].split("```")[0].strip()
-        
+
         enrichment = json.loads(json_str)
         field_map = {
             "email": ["Email", "Email Address", "Work Email"],
@@ -986,37 +986,37 @@ def enrich_row_data_internal(data: Dict[str, Any]) -> Dict[str, Any]:
             "industry": ["Industry", "Sector"],
             "phone": ["Mobile", "Phone", "Contact Number", "Phone Number"]
         }
-        
+
         for ai_key, ui_candidates in field_map.items():
             ai_val = enrichment.get(ai_key)
             if not ai_val: continue
-            
+
             # Check for existing column matching one of our candidates
             target_key = None
             for cand in ui_candidates:
                 cand_clean = cand.lower().replace(" ","")
-                for k in data.keys():
+                for k in data:
                     if k.lower().replace(" ","") == cand_clean:
                         target_key = k
                         break
                 if target_key: break
-            
+
             # Only update if the column EXISTS in the sheet
             if target_key and not data.get(target_key):
                 data[target_key] = ai_val
-            
+
         return data
     except Exception:
         return data
 
 @router.post("/companies/{row_id}/generate-draft")
-def generate_company_draft(row_id: int, template_name: Optional[str] = None, auto_schedule: bool = True, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def generate_company_draft(row_id: int, template_name: str | None = None, auto_schedule: bool = False, user_id: str | None = Header(None, alias="X-User-Id")):
     """Converts a company registry record to a lead and generates an email draft."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
+
     uid = normalize_user_id(user_id)
-    
+
     try:
         # Secure Admin Check
         is_admin = False
@@ -1035,67 +1035,78 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, aut
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Company record not found")
-            
+
         data = row['row_data']
         if isinstance(data, str):
             data = json.loads(data)
-            
+
         # Normalize keys for mapping
         norm = {str(k).lower().replace(" ", "").replace("-", "").replace("_", ""): v for k, v in data.items() if v}
-        
+
         # 1. Smart Email Detection
         email = (
-            norm.get("email") or norm.get("emailaddress") or 
+            norm.get("email") or norm.get("emailaddress") or
             norm.get("workemail") or norm.get("primaryemail")
         )
-        
+
         # Fallback: scan all values for @ if no explicit email header
         if not email:
-            for k, v in data.items():
+            for _k, v in data.items():
                 val = str(v).strip()
                 if "@" in val and "." in val and len(val) > 5 and " " not in val:
                     email = val
                     break
-                    
+
         if not email:
             raise HTTPException(status_code=400, detail="Cannot generate draft: no email address found in this record. Add an email column (e.g. 'Email', 'Email Address') to your spreadsheet and re-import, or use the Edit button to add one.")
-            
+
         # 2. Smart Name Detection
-        name = (
-            norm.get("name") or norm.get("fullname") or 
-            norm.get("leadname") or norm.get("contactname") or norm.get("contact") or
-            norm.get("investor") or norm.get("person") or norm.get("personname") or
-            f"{norm.get('firstname', '')} {norm.get('lastname', '')}".strip()
-        )
-        
-        # URL Safety Check: If name looks like a URL, discard it
-        if name and ("http://" in name.lower() or "https://" in name.lower() or "linkedin.com" in name.lower()):
-            name = ""
-            
-        if not name or name.strip() == "":
+        # Walk the candidate fields IN ORDER and pick the FIRST value that actually
+        # looks like a person name: it must contain at least one letter and must not
+        # be a URL. This skips numeric row IDs / phone numbers stored in 'name' so a
+        # real contact name in 'contact'/'person' is used instead of a bare number.
+        _name_candidates = [
+            norm.get("name"), norm.get("fullname"),
+            norm.get("leadname"), norm.get("contactname"), norm.get("contact"),
+            norm.get("investor"), norm.get("person"), norm.get("personname"),
+            f"{norm.get('firstname', '')} {norm.get('lastname', '')}".strip(),
+        ]
+        name = ""
+        for _cand in _name_candidates:
+            _cand = (_cand or "").strip()
+            if not _cand:
+                continue
+            if "http://" in _cand.lower() or "https://" in _cand.lower() or "linkedin.com" in _cand.lower():
+                continue
+            if not any(ch.isalpha() for ch in _cand):
+                continue
+            name = _cand
+            break
+
+        if not name:
             # Try to guess from email prefix
             email_prefix = email.split('@')[0]
             name = email_prefix.replace(".", " ").replace("_", " ").replace("-", " ").title()
-            
+
         # 3. Smart Company Detection
         company = (
-            norm.get("companyname") or norm.get("company") or 
-            norm.get("investorname") or norm.get("org") or 
+            norm.get("companyname") or norm.get("company") or
+            norm.get("investorname") or norm.get("org") or
             norm.get("firm") or norm.get("account") or norm.get("organization")
         )
         if not company:
             company = None
-        
+
         parts = name.split(" ", 1)
         f_name = parts[0]
         l_name = parts[1] if len(parts) > 1 else ""
-        
+
         sender_name = "the team"
         if uid:
             cur.execute("SELECT full_name, username FROM users WHERE id = %s", (uid,))
             u = cur.fetchone()
             if u: sender_name = u['full_name'] or u['username']
-            
+
         # Remove from unsubscribe_list if present — user explicitly chose to generate
         # a draft for this contact, so treat as an opt-back-in.
         cur.execute("DELETE FROM unsubscribe_list WHERE LOWER(email) = LOWER(%s)", (email,))
@@ -1114,12 +1125,12 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, aut
         lead_row = cur.fetchone()
         if not lead_row:
              raise HTTPException(status_code=500, detail="Lead synchronization fault: Record failed to propagate to pipeline.")
-        
+
         lead_id = lead_row['id'] if isinstance(lead_row, dict) else lead_row[0]
-        
+
         try:
             # --- NEW: Reuse universal generator logic ---
-            from app.api.drafts import generate_email_internal, DraftRequest
+            from app.api.drafts import DraftRequest, generate_email_internal
             req = DraftRequest(lead_id=lead_id, template_type=template_name or 'standard')
             res = generate_email_internal(req, user_id)
             # Mark as generated in company registry
@@ -1140,14 +1151,14 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, aut
                         logger.info(f"AUTO-DRIP: lead {lead_id} scheduled (single generate)")
                         res["scheduled_info"] = sched_info
                 except Exception as sched_err:
-                    logger.error(f"AUTO-DRIP scheduling failed for lead {lead_id}: {sched_err}")
+                    logger.exception(f"AUTO-DRIP scheduling failed for lead {lead_id}: {sched_err}")
 
             return res
         except Exception as e:
             import logging
-            logging.getLogger(__name__).error(f"Draft Generation Error for lead {lead_id}: {e}")
+            logging.getLogger(__name__).exception(f"Draft Generation Error for lead {lead_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Generation pipeline error: {str(e)}")
-        
+
         subject = res.get("subject")
         body = res.get("body")
         gmail_draft_id = res.get("gmail_draft_id")
@@ -1158,25 +1169,26 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, aut
         conn.commit()
 
         return {"success": True, "lead_id": lead_id, "message": "Draft generated and moved to Lead Pipeline."}
-        
+
         # --- Step 1: Create Gmail Draft FIRST (so we have the ID) ---
         gmail_draft_id = None
         try:
-            from app.services.google_service import get_gmail_service
             import base64
             from email.mime.text import MIMEText
+
             from app.api.drafts import markdown_to_html
-            
+            from app.services.google_service import get_gmail_service
+
             service = get_gmail_service(int(uid))
             if service:
                 # Use HTML for better consistency
-                from app.services.email_service import get_user_email_font, get_user_email_font_size
-                html_body = markdown_to_html(body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid))
+                from app.services.email_service import get_user_email_font, get_user_email_font_size, get_user_image_width, get_user_image_height
+                html_body = markdown_to_html(body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid), image_width=get_user_image_width(uid), image_height=get_user_image_height(uid))
                 message = MIMEText(html_body, 'html')
                 message['to'] = email
                 message['subject'] = subject
                 raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
-                
+
                 # Create Gmail Draft
                 draft_body = {'message': {'raw': raw_message}}
                 created_draft = service.users().drafts().create(userId='me', body=draft_body).execute()
@@ -1187,10 +1199,10 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, aut
 
         # --- Step 2: Save to DB with gmail_draft_id ---
         cur.execute("""
-            UPDATE leads_raw 
-            SET email_draft = %s, 
-                email_status = 'PENDING_APPROVAL', 
-                updated_at = NOW(), 
+            UPDATE leads_raw
+            SET email_draft = %s,
+                email_status = 'PENDING_APPROVAL',
+                updated_at = NOW(),
                 gmail_draft_id = %s
             WHERE id = %s
         """, (email_content, gmail_draft_id, lead_id))
@@ -1212,9 +1224,9 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, aut
             add_activity_log(lead_id, "DRAFT_GENERATED", f"Draft generated from Intelligence Grid {'(Gmail synced ✅)' if gmail_draft_id else ''}", sender_name)
         except Exception:
             pass
-        
+
         return {"success": True, "lead_id": lead_id, "message": "Draft generated and moved to Lead Pipeline."}
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -1223,16 +1235,16 @@ def generate_company_draft(row_id: int, template_name: Optional[str] = None, aut
 
 class BulkCompanyDraftRequest(BaseModel):
     row_ids: list[int]
-    template_name: Optional[str] = None
-    signature_id: Optional[int] = None
+    template_name: str | None = None
+    signature_id: int | None = None
 
-import uuid as _uuid
 import threading as _threading
+import uuid as _uuid
 
 _bulk_company_progress: dict = {}
 
 @router.post("/companies/bulk-generate-drafts")
-def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     """Bulk template draft generation for company registry records with parallel processing. Returns immediately with batch_id."""
     if not req.row_ids:
         return {"error": "No company IDs provided", "batch_id": None}
@@ -1244,16 +1256,18 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: Optional
     }
 
     def _run():
+        import json
+        import logging
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        from app.api.drafts import generate_email_internal, DraftRequest
-        import logging, json
+
+        from app.api.drafts import DraftRequest, generate_email_internal
         logger = logging.getLogger(__name__)
         uid = normalize_user_id(user_id)
 
         try:
             conn = get_db_connection()
             cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-            
+
             # Secure Admin Check
             is_admin = False
             if uid:
@@ -1292,7 +1306,7 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: Optional
                     norm.get("workemail") or norm.get("primaryemail")
                 )
                 if not email:
-                    for k, v in data.items():
+                    for _k, v in data.items():
                         val = str(v).strip()
                         if "@" in val and "." in val and len(val) > 5 and " " not in val:
                             email = val; break
@@ -1301,15 +1315,24 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: Optional
                     _bulk_company_progress[batch_id]["failed"] += 1
                     continue
 
-                name = (
-                    norm.get("name") or norm.get("fullname") or
-                    norm.get("leadname") or norm.get("contactname") or norm.get("contact") or
-                    norm.get("investor") or norm.get("person") or norm.get("personname") or
-                    f"{norm.get('firstname', '')} {norm.get('lastname', '')}".strip()
-                )
-                if name and ("http://" in name.lower() or "https://" in name.lower() or "linkedin.com" in name.lower()):
-                    name = ""
-                if not name or name.strip() == "":
+                _name_candidates = [
+                    norm.get("name"), norm.get("fullname"),
+                    norm.get("leadname"), norm.get("contactname"), norm.get("contact"),
+                    norm.get("investor"), norm.get("person"), norm.get("personname"),
+                    f"{norm.get('firstname', '')} {norm.get('lastname', '')}".strip(),
+                ]
+                name = ""
+                for _cand in _name_candidates:
+                    _cand = (_cand or "").strip()
+                    if not _cand:
+                        continue
+                    if "http://" in _cand.lower() or "https://" in _cand.lower() or "linkedin.com" in _cand.lower():
+                        continue
+                    if not any(ch.isalpha() for ch in _cand):
+                        continue
+                    name = _cand
+                    break
+                if not name:
                     email_prefix = email.split('@')[0]
                     name = email_prefix.replace(".", " ").replace("_", " ").replace("-", " ").title()
 
@@ -1405,17 +1428,27 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: Optional
 
             invalidate_companies_cache(str(uid))
 
-            # AUTO-DRIP: successfully generated drafts go straight into the
-            # drip queue (30-min grace, 1/min pacing, working-hours aware).
+            # AUTO-DRIP: only drip-schedule if the user has auto-pilot enabled.
+            # Non-auto-pilot users keep their drafts in PENDING_APPROVAL for
+            # manual review in the queue (otherwise they silently leave Pending).
             successful_lead_ids = [r["lead_id"] for r in lead_results if r["ok"] and r.get("lead_id")]
             if successful_lead_ids:
                 try:
-                    from app.services.email_service import schedule_drip_batch
-                    sched_info = schedule_drip_batch(successful_lead_ids, uid)
-                    logger.info(f"AUTO-DRIP: {sched_info['scheduled']}/{len(successful_lead_ids)} drafts drip-scheduled for user {uid}")
-                    _bulk_company_progress[batch_id]["scheduled_info"] = sched_info
-                except Exception as sched_err:
-                    logger.error(f"AUTO-DRIP scheduling failed for batch {batch_id}: {sched_err}")
+                    cur.execute("SELECT auto_pilot_drafts FROM users WHERE id = %s", (uid,))
+                    ap_row = cur.fetchone()
+                    auto_pilot = bool(ap_row['auto_pilot_drafts']) if ap_row else False
+                except Exception:
+                    auto_pilot = False
+                if auto_pilot:
+                    try:
+                        from app.services.email_service import schedule_drip_batch
+                        sched_info = schedule_drip_batch(successful_lead_ids, uid)
+                        logger.info(f"AUTO-DRIP: {sched_info['scheduled']}/{len(successful_lead_ids)} drafts drip-scheduled for user {uid}")
+                        _bulk_company_progress[batch_id]["scheduled_info"] = sched_info
+                    except Exception as sched_err:
+                        logger.exception(f"AUTO-DRIP scheduling failed for batch {batch_id}: {sched_err}")
+                else:
+                    logger.info(f"AUTO-DRIP skipped: user {uid} has auto_pilot_drafts disabled — drafts stay PENDING_APPROVAL")
 
             _bulk_company_progress[batch_id]["status"] = "done"
         except Exception as e:
@@ -1435,27 +1468,27 @@ def get_bulk_company_progress(batch_id: str):
     return prog
 
 @router.post("/companies/{row_id}/send")
-def send_company_email(row_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def send_company_email(row_id: int, user_id: str | None = Header(None, alias="X-User-Id")):
     """Generates and actually dispatches an email for a company record."""
     uid = normalize_user_id(user_id)
     if not check_daily_email_limit(user_id, 1):
         limit = get_daily_email_limit(user_id)
         raise HTTPException(status_code=400, detail=f"Daily Limit Exceeded: Sending this email would exceed your daily limit of {limit} emails. Please wait for the daily reset.")
-        
-    from app.services.email_service import send_email
+
     from app.api.drafts import markdown_to_html
-    
+    from app.services.email_service import send_email
+
     # 1. Generate the draft and lead record (no auto-scheduling — we send immediately)
     res = generate_company_draft(row_id, user_id=user_id, auto_schedule=False)
     lead_id = res["lead_id"]
-    
+
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
         # 2. Fetch the Lead and Draft for sending
         cur.execute("SELECT email, email_draft FROM leads_raw WHERE id = %s", (lead_id,))
         lead = cur.fetchone()
-        
+
         # 3. Fetch Sender Identity
         sender_email = None
         sender_name = "the team"
@@ -1476,21 +1509,21 @@ def send_company_email(row_id: int, user_id: Optional[str] = Header(None, alias=
             body = parts[1].strip() if len(parts) > 1 else ""
 
         # 5. Real Dispatch
-        from app.services.email_service import get_user_email_font, get_user_email_font_size
+        from app.services.email_service import get_user_email_font, get_user_email_font_size, get_user_image_width, get_user_image_height
         success, error_msg, new_thread_id, new_rfc_message_id = send_email(
             to_email=lead['email'],
             subject=subject,
-            html_content=markdown_to_html(body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid)),
+            html_content=markdown_to_html(body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid), image_width=get_user_image_width(uid), image_height=get_user_image_height(uid)),
             from_email=sender_email,
             from_name=sender_name,
             lead_id=lead_id,
             user_id=uid
         )
-        
+
         if success:
             cur.execute("""
-                UPDATE leads_raw 
-                SET email_status = 'SENT', 
+                UPDATE leads_raw
+                SET email_status = 'SENT',
                     last_outreach_at = NOW(),
                     last_outreach_subject = %s,
                     first_outreach_subject = COALESCE(first_outreach_subject, %s),
@@ -1517,22 +1550,22 @@ def send_company_email(row_id: int, user_id: Optional[str] = Header(None, alias=
         conn.close()
 
 @router.post("/companies/{row_id}/enrich")
-def enrich_company_data(row_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def enrich_company_data(row_id: int, user_id: str | None = Header(None, alias="X-User-Id")):
     """Uses AI to fetch missing details (LinkedIn, Domain, etc.) for a company record."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     uid = normalize_user_id(user_id)
-    
+
     try:
         cur.execute("SELECT row_data FROM company_registry WHERE id = %s AND user_id = %s", (row_id, uid))
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Company record not found")
-            
+
         data = row['row_data']
         if isinstance(data, str):
             data = json.loads(data)
-            
+
         # Get company name
         company_name = data.get("Company Name") or data.get("company") or data.get("Company") or data.get("name")
         if not company_name:
@@ -1542,21 +1575,21 @@ def enrich_company_data(row_id: int, user_id: Optional[str] = Header(None, alias
         prompt = f"""
         Find the following professional contact details for the company: "{company_name}".
         Target Person: "{data.get('Person Name') or data.get('person') or ''}"
-        
+
         Required Details (JSON format):
         - domain: (e.g. apple.com)
         - linkedin_url: (official LinkedIn profile URL for the company or person)
         - email: (likely professional email address)
         - designation: (the person's role in the company)
         - industry: (e.g. Healthcare, Technology, Finance)
-        
+
         Return ONLY valid JSON.
         """
-        
+
         from app.services.llm_services import LLMService
         llm = LLMService()
         ai_response = llm.generate_response(prompt)
-        
+
         # Parse AI response
         try:
             json_str = ai_response.strip()
@@ -1564,16 +1597,16 @@ def enrich_company_data(row_id: int, user_id: Optional[str] = Header(None, alias
                 json_str = json_str.split("```json")[1].split("```")[0].strip()
             elif "```" in json_str:
                 json_str = json_str.split("```")[1].split("```")[0].strip()
-            
+
             enrichment = json.loads(json_str)
-            
+
             # Update data with enriched fields using case-insensitive fuzzy matching
             updated = False
-            
+
             # Helper to find existing key in data (case-insensitive)
             def find_key(search_key):
                 search_key_norm = search_key.lower().replace(" ", "").replace("_", "")
-                for k in data.keys():
+                for k in data:
                     if k.lower().replace(" ", "").replace("_", "") == search_key_norm:
                         return k
                 return None
@@ -1586,11 +1619,11 @@ def enrich_company_data(row_id: int, user_id: Optional[str] = Header(None, alias
                 "domain": ["Domain", "Website", "Official Website"],
                 "industry": ["Industry", "Sector"]
             }
-            
+
             for ai_key, ui_candidates in field_map.items():
                 ai_val = enrichment.get(ai_key)
                 if not ai_val: continue
-                
+
                 # Check if we already have a value for any candidate key
                 existing_key = None
                 has_value = False
@@ -1601,13 +1634,13 @@ def enrich_company_data(row_id: int, user_id: Optional[str] = Header(None, alias
                         if data.get(k):
                             has_value = True
                             break
-                
+
                 # If no value, update it
                 if not has_value:
                     target_key = existing_key or ui_candidates[0]
                     data[target_key] = ai_val
                     updated = True
-            
+
             if updated:
                 cur.execute(
                     "UPDATE company_registry SET row_data = %s, updated_at = NOW() WHERE id = %s",
@@ -1617,7 +1650,7 @@ def enrich_company_data(row_id: int, user_id: Optional[str] = Header(None, alias
                 return {"success": True, "enriched": enrichment}
             else:
                 return {"success": True, "message": "Metadata already synchronized."}
-                
+
         except Exception as parse_err:
             print(f"AI Parse Error: {parse_err} | Response: {ai_response}")
             raise HTTPException(status_code=500, detail="AI returned malformed data.")

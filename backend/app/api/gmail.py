@@ -1,23 +1,27 @@
-from fastapi import APIRouter, Request, HTTPException, Header, Body
-from pydantic import BaseModel
-from typing import Optional, List
 import base64
+import contextlib
+import datetime
 import json
+import logging
 import os
+
 import psycopg2.extras
+from app.api.drafts import markdown_to_html
 from app.database import get_db_connection
+from app.services.email_service import send_email
 from app.services.google_service import (
-    get_gmail_service, create_calendar_event, list_gmail_drafts, 
-    list_gmail_sent, update_gmail_draft, send_gmail_draft
+    create_calendar_event,
+    get_gmail_service,
+    list_gmail_drafts,
+    list_gmail_sent,
+    send_gmail_draft,
+    update_gmail_draft,
 )
 from app.services.llm_services import EmailGenerator
-from app.services.email_service import send_email
-from app.api.drafts import markdown_to_html
-from app.utils.auth_helpers import normalize_user_id
-import datetime
-import urllib3
-import logging
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+from app.utils.auth_helpers import normalize_user_id, is_admin_user
+from fastapi import APIRouter, Body, Header, HTTPException, Request
+from pydantic import BaseModel
+
 
 class DateTimeEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -37,11 +41,9 @@ redis_available = False
 
 try:
     import redis
+    from app.core.redis_pool import get_redis_pool
     REDIS_URL = os.getenv("REDIS_URL") or os.getenv("REDIS_TLS_URL") or "redis://localhost:6379"
-    redis_client = redis.Redis.from_url(
-        REDIS_URL,
-        decode_responses=True,
-    )
+    redis_client = redis.Redis(connection_pool=get_redis_pool())
     redis_client.ping()
     redis_available = True
     logger.info(f"SUCCESS: Connected to Redis Cache at {REDIS_URL.split('@')[-1]}")
@@ -67,7 +69,7 @@ def _redis_delete_pattern(pattern: str):
         if deleted:
             logger.info(f"SUCCESS: Invalidated {deleted} cache keys for pattern: {pattern}")
     except Exception as ie:
-        logger.error(f"Failed to invalidate cache for pattern {pattern}: {ie}")
+        logger.exception(f"Failed to invalidate cache for pattern {pattern}: {ie}")
 
 
 def invalidate_inbound_deals_cache(user_id: str):
@@ -98,15 +100,15 @@ async def gmail_pubsub_push(request: Request):
 
         data_json = base64.b64decode(data_b64).decode("utf-8")
         data = json.loads(data_json)
-        
+
         email_address = data.get("emailAddress")
         history_id = data.get("historyId")
-        
+
         if not email_address or not history_id:
             return {"status": "ok"}
 
         print(f"DEBUG: Received Gmail push for {email_address} with historyId {history_id}")
-        
+
         # 1. Find the user associated with this email
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -116,27 +118,52 @@ async def gmail_pubsub_push(request: Request):
             if not user:
                 print(f"DEBUG: No local user found for {email_address}")
                 return {"status": "ok"}
-            
+
             user_id = user['id']
             last_history_id = user['last_gmail_history_id']
-            
+
             # 2. Fetch changes since last history ID
             process_gmail_history(user_id, last_history_id)
-            
+
             # 3. Update last history ID
             cur.execute("UPDATE users SET last_gmail_history_id = %s WHERE id = %s", (history_id, user_id))
             conn.commit()
-            
+
         finally:
             cur.close()
             conn.close()
-            
+
         return {"status": "ok"}
-        
+
     except Exception as e:
-        print(f"Error processing Pub/Sub push: {e}")
+        error_msg = str(e)
+        print(f"Error processing Pub/Sub push: {error_msg}")
+        # Handle invalid_grant specifically - mark user's Gmail as disconnected
+        if 'invalid_grant' in error_msg.lower() and 'user_id' in locals():
+            logger.warning(f"Invalid grant for user {user_id}, marking Gmail as disconnected")
+            try:
+                invalidate_conn = get_db_connection()
+                invalidate_cur = invalidate_conn.cursor()
+                invalidate_cur.execute("""
+                    UPDATE users SET 
+                        google_access_token = NULL, 
+                        google_refresh_token = NULL, 
+                        google_token_expiry = NULL,
+                        google_linked_at = NULL,
+                        google_email = NULL
+                    WHERE id = %s
+                """, (user_id,))
+                invalidate_conn.commit()
+                invalidate_cur.close()
+                invalidate_conn.close()
+                # Invalidate cached Gmail service
+                from app.services.google_service import invalidate_gmail_service_cache
+                invalidate_gmail_service_cache(user_id)
+                logger.info(f"Marked user {user_id} Gmail as disconnected due to invalid_grant")
+            except Exception as inv_err:
+                logger.error(f"Failed to invalidate Gmail for user {user_id}: {inv_err}")
         # Return 200/ok so Google doesn't keep retrying exponentially if it's a code error
-        return {"status": "ok", "error": str(e)}
+        return {"status": "ok", "error": error_msg}
 
 def process_gmail_history(user_id: int, start_history_id: str):
     """List history changes and identify new messages in tracked threads."""
@@ -150,7 +177,7 @@ def process_gmail_history(user_id: int, start_history_id: str):
             return
 
         history = service.users().history().list(userId='me', startHistoryId=start_history_id, historyTypes=['messageAdded']).execute()
-        
+
         changes = history.get('history', [])
         for change in changes:
             messages_added = change.get('messagesAdded', [])
@@ -158,11 +185,11 @@ def process_gmail_history(user_id: int, start_history_id: str):
                 message = msg_item.get('message', {})
                 thread_id = message.get('threadId')
                 msg_id = message.get('id')
-                
+
                 # Check labels - we only care about INBOX (replies)
                 full_msg = service.users().messages().get(userId='me', id=msg_id).execute()
                 labels = full_msg.get('labelIds', [])
-                
+
                 if 'INBOX' in labels and 'SENT' not in labels:
                     # Dedup: skip if already processed via polling
                     from app.database import get_db_connection as _get_db
@@ -178,6 +205,21 @@ def process_gmail_history(user_id: int, start_history_id: str):
 
                     # Potential reply! Detect if it matches any of our leads
                     handle_potential_reply(user_id, thread_id, full_msg)
+
+                    # Record this message as processed so the poller (poll_all_users_for_replies)
+                    # doesn't double-process a reply that arrived via the push path.
+                    try:
+                        _proc_conn = _get_db()
+                        _proc_cur = _proc_conn.cursor()
+                        _proc_cur.execute(
+                            "INSERT INTO gmail_processed_messages (message_id, user_id) VALUES (%s, %s) ON CONFLICT (message_id) DO NOTHING",
+                            (msg_id, user_id)
+                        )
+                        _proc_conn.commit()
+                        _proc_cur.close()
+                        _proc_conn.close()
+                    except Exception as proc_err:
+                        print(f"Error recording processed message {msg_id}: {proc_err}")
 
     except Exception as e:
         print(f"Error listing history for user {user_id}: {e}")
@@ -202,17 +244,21 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         # Extract sender email from headers
         headers = message_data.get('payload', {}).get('headers', [])
         sender = next((h['value'] for h in headers if h['name'].lower() == 'from'), "")
-        
+
         # Clean sender email
         import re
         match = re.search(r'[\w\.-]+@[\w\.-]+', sender)
         sender_email = match.group(0) if match else sender
 
         # Extract message body
-        from app.services.google_service import extract_message_body, extract_attachments, get_gmail_service
+        from app.services.google_service import (
+            extract_attachments,
+            extract_message_body,
+            get_gmail_service,
+        )
         payload = message_data.get('payload', {})
         full_body = extract_message_body(payload)
-        
+
         # Clean HTML tags first if it looks like HTML content to prevent HTML leaks
         if full_body and "<" in full_body and ">" in full_body:
             import re as _re
@@ -238,13 +284,13 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         pattern = r'(?mi)(?:On\s+.*wrote:|\bOn\s+.*\b(?:at\b)?\s*\d{1,2}:\d{2}.*?:|On\s+\d{1,2}\s+[a-z]+\s+\d{4},?\s+at\s+\d{1,2}:\d{2}|On\s+[a-z]+,?\s+[a-z]+\s+\d{1,2},?\s+\d{4}|\bFrom:\s+.*@.*|^---+\s*Original\s+Message\s*---+|----------\s*Forwarded\s+message\s*----------)'
         parts = re.split(pattern, full_body)
         body = parts[0].strip() if parts else full_body.strip()
-        
+
         # 0. SENDER CHECK: Abort if this message was actually sent by the user (sent folder bleed-over)
         cur_user = conn.cursor()
         cur_user.execute("SELECT email FROM users WHERE id = %s", (user_id,))
         user_record = cur_user.fetchone()
         cur_user.close()
-        
+
         if user_record and user_record['email'].lower() == sender_email.lower():
             print(f"DEBUG: Skipping {sender_email} — this is a sent message, not a reply.")
             return
@@ -264,49 +310,74 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         # --- STRICT OUTREACH-ONLY FILTER ---
         # ONLY process replies from leads we actually emailed through this platform.
         # Skip all random inbox emails (marketing, newsletters, unknown senders, etc.)
+        # BOUNCED is included so a genuine later reply to a (soft-)bounced lead is
+        # still detected and re-marked correctly (BUG 4).
+        _outreach_statuses = ('SENT', 'OPENED', 'CLICKED', 'REPLIED', 'CLOSED', 'SCHEDULED', 'BOUNCED')
         cur.execute(
-            "SELECT id, user_id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND user_id = %s AND email_status IN ('SENT', 'OPENED', 'CLICKED', 'REPLIED', 'CLOSED', 'SCHEDULED')",
-            (sender_email, user_id)
+            "SELECT id, user_id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND user_id = %s AND email_status IN %s",
+            (sender_email, user_id, _outreach_statuses)
         )
         lead_exists = cur.fetchone()
-        
+
         if not lead_exists:
-            # Cross-account fallback: search for this email under any user
+            # Alias / plus-addressing fallback: same domain, same user
+            # (e.g. a+tag@b.com or john.smith@corp.com vs john@corp.com). (BUG 3)
             cur.execute(
-                "SELECT id, user_id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND email_status IN ('SENT', 'OPENED', 'CLICKED', 'REPLIED', 'CLOSED', 'SCHEDULED') AND is_responded = FALSE LIMIT 1",
-                (sender_email,)
+                "SELECT id, user_id FROM leads_raw WHERE LOWER(split_part(email, '@', 2)) = LOWER(split_part(%s, '@', 2)) AND user_id = %s AND is_responded = FALSE AND email_status IN %s LIMIT 1",
+                (sender_email, user_id, _outreach_statuses)
             )
-            cross_lead = cur.fetchone()
-            if cross_lead:
-                user_id = cross_lead['user_id']
-                lead_exists = cross_lead
-                print(f"DEBUG: Cross-account reply — retargeted to user {user_id}")
+            domain_lead = cur.fetchone()
+            if domain_lead:
+                lead_exists = domain_lead
+                print(f"DEBUG: Same-domain (alias) reply — matched {sender_email} to lead {domain_lead['id']}")
             else:
-                print(f"DEBUG: Skipping {sender_email} — not a lead we contacted through this platform.")
-                return  # Hard stop — don't process random inbox mail
-        
+                # Cross-account fallback: search for this email under any user
+                cur.execute(
+                    "SELECT id, user_id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND email_status IN %s AND is_responded = FALSE LIMIT 1",
+                    (sender_email, _outreach_statuses)
+                )
+                cross_lead = cur.fetchone()
+                if cross_lead:
+                    user_id = cross_lead['user_id']
+                    lead_exists = cross_lead
+                    print(f"DEBUG: Cross-account reply — retargeted to user {user_id}")
+                else:
+                    # Cross-account domain fallback: same domain under any user
+                    cur.execute(
+                        "SELECT id, user_id FROM leads_raw WHERE LOWER(split_part(email, '@', 2)) = LOWER(split_part(%s, '@', 2)) AND is_responded = FALSE AND email_status IN %s LIMIT 1",
+                        (sender_email, _outreach_statuses)
+                    )
+                    domain_cross = cur.fetchone()
+                    if domain_cross:
+                        user_id = domain_cross['user_id']
+                        lead_exists = domain_cross
+                        print(f"DEBUG: Cross-account same-domain reply — retargeted to user {user_id}")
+                    else:
+                        print(f"DEBUG: Skipping {sender_email} — not a lead we contacted through this platform.")
+                        return  # Hard stop — don't process random inbox mail
+
         lead_id = lead_exists['id']
-        
+
         # Step 1: AI Intent Classification using new ReplyClassifier
         from app.core.reply.classifier import get_reply_classifier
         from app.core.reply.workflow import get_reply_workflow
-        
+
         classifier = get_reply_classifier()
         workflow = get_reply_workflow()
-        
+
         print(f"DEBUG: Classifying reply from {sender_email}...")
         classification = classifier.classify(body)
-        
+
         print(f"DEBUG: Classification result: intent={classification.intent}, source={classification.source}, confidence={classification.confidence}")
-        
+
         # Step 2: Apply workflow to get lead updates
         lead_update = workflow.apply(classification)
-        
+
         # Extract check size / ticket size from the reply text
         check_size = classification.deal_size
         deal_size = classification.deal_size
         pitch_deck_url = None
-        
+
         # If we got an actual PDF attachment, upload to Google Drive
         if pdf_attachment:
             from app.services.google_service import upload_to_drive
@@ -325,60 +396,54 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                     f.write(pdf_attachment['data'])
                 base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
                 pitch_deck_url = f"{base_url}/{file_path}"
-            
+
         print(f"DEBUG: AI detected intent: {classification.intent}, body_size_estimation: {classification.deal_size}, deck: {pitch_deck_url}")
-        
+
         # --- STRICT RAG ENHANCEMENT (STABLE SESSION) ---
         rag_advice = None
         rag_category = None
         rag_intel = None
         try:
-            import requests
-            from requests.adapters import HTTPAdapter
-            from urllib3.util.retry import Retry
-            
-            s = requests.Session()
-            retries = Retry(total=3, backoff_factor=1, status_forcelist=[502, 503, 504])
-            s.mount('https://', HTTPAdapter(max_retries=retries))
-            
+            import io
+
+            from app.core.http_client import get, post, post_multipart
+
             # 0. Wake-Up Check
-            try:
-                s.get(RAG_URL, timeout=60, verify=False)
-            except Exception:
-                pass
+            with contextlib.suppress(Exception):
+                get(RAG_URL, timeout=60)
 
             # 1. RAG Processing (PDF vs Text)
             if pdf_attachment:
                 files = {'file': (pdf_attachment['filename'], pdf_attachment['data'])}
-                process_res = s.post(f"{RAG_URL}/process", files=files, timeout=300, verify=False)
+                process_res = post_multipart(f"{RAG_URL}/process", files=files, timeout=300)
                 if process_res.status_code == 200:
                     rag_data = process_res.json()
                     rag_item_id = rag_data.get('id')
-                    
+
                     if rag_item_id:
                         import time
                         max_polls = 30
-                        for poll in range(max_polls):
-                            status_res = s.get(f"{RAG_URL}/status/{rag_item_id}", timeout=60, verify=False)
+                        for _poll in range(max_polls):
+                            status_res = get(f"{RAG_URL}/status/{rag_item_id}", timeout=60)
                             if status_res.status_code == 200:
                                 status_data = status_res.json()
                                 current_status = status_data.get('status', '').lower()
-                                if current_status == 'completed' or current_status == 'success':
+                                if current_status in {'completed', 'success'}:
                                     insights = status_data.get('insights', {})
                                     if insights:
                                         # Capture FULL "A to Z" Data from RAG
                                         rag_advice = f"### RAG VERDICT\n{insights.get('verdict', 'N/A')}\n\n"
-                                        
+
                                         # USER REQUEST: Populate deal_size ONLY from PDF insights
                                         if insights.get('actuals'):
                                             actuals = insights.get('actuals', {})
                                             deal_size = actuals.get('revenue') or actuals.get('deal_size')
-                                            
+
                                             rag_advice += "### ACTUALS & METRICS\n"
                                             for k, v in actuals.items():
                                                 rag_advice += f"- {k.replace('_', ' ').title()}: {v}\n"
                                             rag_advice += "\n"
-                                            
+
                                         if insights.get('strategy'):
                                             rag_advice += "### STRATEGY RECOMMENDATION\n"
                                             strat = insights.get('strategy', {})
@@ -386,7 +451,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                                             rag_advice += f"- Approach: {strat.get('approach', 'N/A')}\n\n"
 
                                         rag_category = (insights.get('type') or insights.get('category') or 'INVESTOR').upper()
-                                        
+
                                         rag_intel = {
                                             "answer": rag_advice,
                                             "category": rag_category,
@@ -399,32 +464,31 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                                 time.sleep(10)
             else:
                 # Non-PDF replies get generic advice, but deal_size remains None
-                import io
                 files = {'file': ('email_reply.txt', io.StringIO(body).getvalue())}
-                s.post(f"{RAG_URL}/ingest", files=files, timeout=60, verify=False)
+                post_multipart(f"{RAG_URL}/ingest", files=files, timeout=60)
                 query_msg = f"Reply body: {body[:300]}"
-                query_res = s.post(f"{RAG_URL}/ask", params={"question": query_msg}, timeout=120, verify=False)
+                query_res = post(f"{RAG_URL}/ask", params={"question": query_msg}, timeout=120)
                 if query_res.status_code == 200:
                     rag_data = query_res.json()
                     rag_advice = rag_data.get("answer") or rag_data.get("response")
                     rag_intel = rag_data
         except Exception as rag_err:
             print(f"Warning: RAG error: {rag_err}")
- 
+
         # Step 2: Update Lead Status using workflow
         lead_update = lead_update
 
         final_status = lead_update.email_status
-        
+
         # Allow deal_size to be populated from the LLM-extracted value if not already set by PDF analysis
         if not deal_size:
             deal_size = classification.deal_size
-        
+
         rag_intel_json = json.dumps(rag_intel) if rag_intel else None
         rejection_reason = classification.rejection_reason
-        
+
         cur.execute("""
-            UPDATE leads_raw 
+            UPDATE leads_raw
             SET is_responded = TRUE,
                 replied_at = COALESCE(replied_at, NOW()),
                 email_status = %s,
@@ -442,13 +506,13 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 followup_status = %s,
                 pipeline_state = %s,
                 updated_at = NOW()
-            WHERE LOWER(email) = LOWER(%s) AND user_id = %s
+            WHERE id = %s
             RETURNING id, first_name, last_name, user_id
-        """, (final_status, classification.intent, check_size, deal_size, pitch_deck_url, rag_advice, rag_intel_json, rag_category, classification.sentiment_score, classification.urgency_level, body, rejection_reason, lead_update.followup_status, lead_update.pipeline_state.value, sender_email, user_id))
+        """, (final_status, classification.intent, check_size, deal_size, pitch_deck_url, rag_advice, rag_intel_json, rag_category, classification.sentiment_score, classification.urgency_level, body, rejection_reason, lead_update.followup_status, lead_update.pipeline_state.value, lead_id))
 
-        
+
         lead = cur.fetchone()
-        
+
         if lead:
             lead_id = lead['id']
             lead_name = f"{lead['first_name'] or ''} {lead['last_name'] or ''}".strip() or "Lead"
@@ -484,9 +548,9 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 if company_name_clean and _is_valid_company_name(company_name_clean):
                     cur.execute("""
                         SELECT id, first_name, last_name, email FROM leads_raw
-                        WHERE company_name ILIKE %s AND id != %s AND user_id = %s
+                        WHERE company_name ILIKE %s AND id != %s
                         AND followup_status = 'ACTIVE' AND is_responded = FALSE
-                    """, (company_name, lead_id, user_id))
+                    """, (company_name, lead_id))
                 else:
                     # Fallback: exact domain match only (e.g. merakventure.com matches merakventure.com, not merakventure.in)
                     # Skip common personal email domains to avoid stopping unrelated leads
@@ -496,10 +560,10 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                         if full_domain not in personal_domains:
                             cur.execute("""
                                 SELECT id, first_name, last_name, email FROM leads_raw
-                                WHERE id != %s AND user_id = %s
+                                WHERE id != %s
                                 AND followup_status = 'ACTIVE' AND is_responded = FALSE
                                 AND LOWER(split_part(email, '@', 2)) = %s
-                            """, (lead_id, user_id, full_domain))
+                            """, (lead_id, full_domain))
                         else:
                             cur.execute("SELECT id, first_name, last_name, email FROM leads_raw WHERE FALSE", ())
                     else:
@@ -509,9 +573,14 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                     sc_id = sc_lead['id']
                     sc_name = f"{sc_lead['first_name'] or ''} {sc_lead['last_name'] or ''}".strip() or sc_lead['email']
                     cur.execute("""
-                        UPDATE leads_raw SET followup_status = 'STOPPED', updated_at = NOW()
+                        UPDATE leads_raw
+                        SET is_responded = TRUE,
+                            email_status = %s,
+                            reply_intent = %s,
+                            followup_status = 'STOPPED',
+                            updated_at = NOW()
                         WHERE id = %s
-                    """, (sc_id,))
+                    """, (final_status, classification.intent, sc_id))
                     from app.models.lead import add_activity_log
                     add_activity_log(sc_id, 'FOLLOWUP_STOPPED', f'Reply received from {lead_name} ({sender_email}) at same company — auto-stopped', 'system')
                     logger.info(f"Stopped followup for {sc_name} ({sc_lead['email']}) — same company as {lead_name} who replied")
@@ -551,7 +620,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             if intent == 'MEETING_REQUESTED':
                 proposed_text = ai_data.get('proposed_meeting_text') or body[:200]
                 proposed_date_str = ai_data.get('proposed_meeting_date')
-                default_due = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)
+                default_due = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=1)
                 if proposed_date_str:
                     try:
                         due_at = datetime.datetime.fromisoformat(proposed_date_str)
@@ -578,11 +647,11 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             # Step 4: Auto-Scheduling (Disabled - User will schedule manually)
             if False: # intent in ["INTERESTED", "MEETING_REQUESTED"]:
                 # Schedule for 3 days from now at 10 AM UTC
-                meeting_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=3)
+                meeting_time = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=3)
                 meeting_time = meeting_time.replace(hour=10, minute=0, second=0, microsecond=0)
-                
+
                 print(f"DEBUG: Triggering auto-scheduling for {sender_email} at {meeting_time}")
-                
+
                 event_data = create_calendar_event(
                     user_id=user_id,
                     lead_email=sender_email,
@@ -590,65 +659,70 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                     description=f"Automated meeting scheduled based on your interest. \n\nThread: https://mail.google.com/mail/u/0/#inbox/{thread_id}",
                     start_time=meeting_time
                 )
-                
+
                 if event_data:
                     # Update database with meeting info
                     cur.execute("""
-                        UPDATE leads_raw 
+                        UPDATE leads_raw
                         SET meeting_link = %s,
-                            meeting_time = %s 
+                            meeting_time = %s
                         WHERE id = %s
                     """, (event_data['meet_link'], event_data['start_time'], lead_id))
                     conn.commit()
-                    
+
                     # Step 4: Send Confirmation Emails
                     # To Lead
                     lead_confirm_body = f"""
                     Hi {lead['first_name'] or 'there'},
-                    
+
                     Thank you for your interest! I've provisionally scheduled an introductory meeting for us on {meeting_time.strftime('%A, %B %d at %I:%M %p UTC')}.
-                    
+
                     You can join via Google Meet here: {event_data['meet_link']}
-                    
+
                     If this time doesn't work for you, just let me know and we can reschedule.
-                    
+
                     Looking forward to it!
                     """
-                    
+
                     # Get sender details from DB
                     cur.execute("SELECT email, full_name FROM users WHERE id = %s", (user_id,))
                     sender_user = cur.fetchone()
-                    
-                    from app.services.email_service import get_user_email_font, get_user_email_font_size
+
+                    from app.services.email_service import (
+                        get_user_email_font,
+                        get_user_email_font_size,
+                        get_user_image_width,
+                        get_user_image_height,
+                    )
                     send_email(
                         to_email=sender_email,
                         subject=f"Meeting Scheduled: {lead_name} x LeadStream",
-                        html_content=markdown_to_html(lead_confirm_body, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id)),
+                        html_content=markdown_to_html(lead_confirm_body, font_family=get_user_email_font(user_id), font_size=get_user_email_font_size(user_id), image_width=get_user_image_width(user_id), image_height=get_user_image_height(user_id)),
                         from_email=sender_user['email'],
                         from_name=sender_user['full_name'],
                         is_system_email=True
                     )
-                    
+
                     print(f"SUCCESS: Auto-scheduled meeting and sent confirmation to {sender_email}")
-            
+
     except Exception as e:
         print(f"Error handling potential reply for user {user_id}: {e}")
-        raise e
+        raise
     finally:
         cur.close()
         conn.close()
 
 @router.get("/gmail/inbound-deals")
 def get_inbound_deals(
-    page: int = 1, 
+    page: int = 1,
     per_page: int = 10,
-    user_id: Optional[str] = Header(None, alias="X-User-Id")
+    user_id: str | None = Header(None, alias="X-User-Id")
 ):
     """Fetches leads who have responded inbound, prioritizing those reached through the site."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     uid = normalize_user_id(user_id)
-    
+
     # Attempt to read from Redis cache first
     cache_key = f"inbound_deals:{uid}:{page}:{per_page}"
     if redis_available and redis_client:
@@ -659,28 +733,28 @@ def get_inbound_deals(
                 return json.loads(cached)
         except Exception as ce:
             logger.warning(f"WARNING: Redis cache read error: {ce}")
-            
+
     offset = (page - 1) * per_page
     try:
         # Total Bypass: If a meeting exists, it must show up. Otherwise, show replied leads.
         print(f"DEBUG: Fetching inbound deals for uid: {uid} (Original X-User-Id: {user_id})")
-        if user_id == "admin":
-            count_query = """SELECT COUNT(*) FROM leads_raw WHERE meeting_time IS NOT NULL 
+        if is_admin_user(user_id):
+            count_query = """SELECT COUNT(*) FROM leads_raw WHERE meeting_time IS NOT NULL
                  OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED'))
                  OR reply_intent IN ('INTERESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED')
                  OR email_status IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED', 'NOT_INTERESTED')"""
             cur.execute(count_query)
             count_result = cur.fetchone()
             total = count_result['count'] if count_result else 0
-            
+
             query = """
                 SELECT id, first_name, last_name, email, company_name, persona, fit_score,
                        email_status, is_responded, reply_intent, deal_size, check_size, pitch_deck_url,
                        meeting_time, meeting_link, updated_at, created_at,
                        rag_intelligence, remarks, phone, linkedin_url, source, user_id,
                        sentiment_score, sector, designation
-                FROM leads_raw 
-                WHERE meeting_time IS NOT NULL 
+                FROM leads_raw
+                WHERE meeting_time IS NOT NULL
                 OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED'))
                  OR reply_intent IN ('INTERESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED')
                  OR email_status IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED', 'NOT_INTERESTED')
@@ -689,22 +763,22 @@ def get_inbound_deals(
             cur.execute(query, (per_page, offset))
             leads = cur.fetchall()
         else:
-            count_query = """SELECT COUNT(*) FROM leads_raw WHERE user_id = %s AND (meeting_time IS NOT NULL 
+            count_query = """SELECT COUNT(*) FROM leads_raw WHERE user_id = %s AND (meeting_time IS NOT NULL
                  OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED'))
                  OR reply_intent IN ('INTERESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED')
                  OR email_status IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED', 'NOT_INTERESTED'))"""
             cur.execute(count_query, (uid,))
             count_result = cur.fetchone()
             total = count_result['count'] if count_result else 0
-            
+
             query = """
                 SELECT id, first_name, last_name, email, company_name, persona, fit_score,
                        email_status, is_responded, reply_intent, deal_size, check_size, pitch_deck_url,
                        meeting_time, meeting_link, updated_at, created_at,
                        rag_intelligence, remarks, phone, linkedin_url, source, user_id,
                        sentiment_score, sector, designation
-                FROM leads_raw 
-                WHERE user_id = %s 
+                FROM leads_raw
+                WHERE user_id = %s
                 AND (meeting_time IS NOT NULL OR (is_responded = TRUE AND email_status IN ('SENT', 'REPLIED', 'CLOSED'))
                  OR reply_intent IN ('INTERESTED', 'MEETING_SCHEDULED', 'NOT_INTERESTED')
                  OR email_status IN ('REPLIED', 'INTERESTED', 'MEETING SCHEDULED', 'NOT_INTERESTED'))
@@ -712,11 +786,11 @@ def get_inbound_deals(
             """
             cur.execute(query, (uid, per_page, offset))
             leads = cur.fetchall()
-        
+
         # PROACTIVE FILENAME RECOVERY for historical leads (Cleaned)
         import re
         INTERNAL_PDFS = ['profile.pdf', 'intro.pdf', 'deck.pdf', 'onepager.pdf', 'company_profile.pdf', 'teaser.pdf']
-        
+
         def extract_pdf_name(text):
             if not text: return None
             # Scan for patterns like <Name.pdf> or Name_Deck.pdf
@@ -735,7 +809,7 @@ def get_inbound_deals(
             if isinstance(intel, str):
                 try: intel = json.loads(intel)
                 except Exception: intel = {}
-            
+
             if not intel: intel = {}
 
             # If filename is missing, try to recover it from other fields
@@ -746,18 +820,18 @@ def get_inbound_deals(
                 if recovered:
                     intel['filename'] = recovered
                     lead_dict['rag_intelligence'] = intel
-            
+
             processed_leads.append(lead_dict)
 
         print(f"DEBUG: Found {len(processed_leads)} leads for uid {uid}. Total count in DB: {total}")
-        
+
         result = {
             "leads": processed_leads,
             "total": total,
             "page": page,
             "per_page": per_page
         }
-        
+
         if redis_available and redis_client:
             try:
                 # Cache results for 15 seconds so pagination & reloads are instant, but fresh data is fetched frequently
@@ -765,7 +839,7 @@ def get_inbound_deals(
                 logger.info(f"INFO: Cached inbound deals for user {uid} on page {page}")
             except Exception as ce:
                 logger.warning(f"WARNING: Redis cache write error: {ce}")
-                
+
         return result
     except Exception as e:
         print(f"Error fetching inbound deals: {e}")
@@ -776,15 +850,15 @@ def get_inbound_deals(
 
 
 @router.post("/gmail/sync-inbound")
-def force_sync_inbound(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def force_sync_inbound(user_id: str | None = Header(None, alias="X-User-Id")):
     """Manually triggers a scan of the user's Inbox for lead replies."""
     from app.services.google_service import get_gmail_service
     uid = normalize_user_id(user_id)
     service = get_gmail_service(int(uid))
-    
+
     if not service:
         raise HTTPException(status_code=400, detail="Google account not linked")
-        
+
     try:
         # Search Inbox for messages that look like replies or deal-related
         # Queries for: replies (Re:), forwards (Fwd:), or keywords like pitch, deck, interested, not interested, meeting
@@ -793,32 +867,32 @@ def force_sync_inbound(user_id: Optional[str] = Header(None, alias="X-User-Id"))
             results = service.users().messages().list(userId='me', q=search_query, maxResults=50).execute()
         except Exception as q_err:
             if "Metadata scope" in str(q_err):
-                logger.error(f"Metadata scope restriction detected for user {uid}")
+                logger.exception(f"Metadata scope restriction detected for user {uid}")
                 raise HTTPException(
-                    status_code=403, 
+                    status_code=403,
                     detail="Restricted Permissions: Your Gmail connection is currently in 'Metadata-Only' mode. Please Disconnect and Re-connect your Gmail in the Dashboard to grant full search permissions."
                 )
-            raise q_err
-            
+            raise
+
         messages = results.get('messages', [])
         found_count = 0
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
+
         try:
             for m_meta in messages:
                 m_id = m_meta['id']
-                
+
                 # PERSISTENT DEDUPLICATION: Skip if already processed in DB
                 cur.execute("SELECT 1 FROM gmail_processed_messages WHERE message_id = %s", (m_id,))
                 if cur.fetchone():
                     continue
-                
+
                 # Full Scan: Always process incoming inbox messages to detect deals
                 try:
                     full_msg = service.users().messages().get(userId='me', id=m_id, format='full').execute()
                     handle_potential_reply(int(uid), m_id, full_msg)
-                    
+
                     # Mark as processed in DB
                     cur.execute("INSERT INTO gmail_processed_messages (message_id, user_id) VALUES (%s, %s)", (m_id, int(uid)))
                     conn.commit()
@@ -826,7 +900,7 @@ def force_sync_inbound(user_id: Optional[str] = Header(None, alias="X-User-Id"))
                 except Exception as msg_err:
                     print(f"Error processing message {m_id}: {msg_err}")
                     continue
-            
+
             invalidate_inbound_deals_cache(str(uid))
             return {"status": "success", "processed": len(messages), "detected": found_count}
         finally:
@@ -837,7 +911,7 @@ def force_sync_inbound(user_id: Optional[str] = Header(None, alias="X-User-Id"))
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/gmail/sync-drafts")
-def get_gmail_sync_drafts(user_id: Optional[str] = Header(None, alias="X-User-Id"), refresh: bool = False):
+def get_gmail_sync_drafts(user_id: str | None = Header(None, alias="X-User-Id"), refresh: bool = False):
     """Fetches real-time drafts directly from the user's Gmail account.
     Results are cached for 2 minutes; pass ?refresh=true to force a fresh fetch."""
     uid = normalize_user_id(user_id)
@@ -852,7 +926,7 @@ def get_gmail_sync_drafts(user_id: Optional[str] = Header(None, alias="X-User-Id
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/gmail/sync-sent")
-def get_gmail_sync_sent(user_id: Optional[str] = Header(None, alias="X-User-Id"), refresh: bool = False):
+def get_gmail_sync_sent(user_id: str | None = Header(None, alias="X-User-Id"), refresh: bool = False):
     """Fetches real-time sent messages directly from the user's Gmail account.
     Results are cached for 2 minutes; pass ?refresh=true to force a fresh fetch."""
     uid = normalize_user_id(user_id)
@@ -871,7 +945,7 @@ class UpdateDraftRequest(BaseModel):
     body: str
 
 @router.post("/gmail/update-draft/{draft_id}")
-def post_update_gmail_draft(draft_id: str, req: UpdateDraftRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def post_update_gmail_draft(draft_id: str, req: UpdateDraftRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     """Updates a draft directly on Gmail."""
     uid = normalize_user_id(user_id)
     try:
@@ -884,7 +958,7 @@ def post_update_gmail_draft(draft_id: str, req: UpdateDraftRequest, user_id: Opt
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/gmail/send-draft/{draft_id}")
-def post_send_gmail_draft(draft_id: str, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def post_send_gmail_draft(draft_id: str, user_id: str | None = Header(None, alias="X-User-Id")):
     """Sends a draft directly from Gmail."""
     uid = normalize_user_id(user_id)
     try:
@@ -907,18 +981,18 @@ def ai_refine_draft(req: AIRefineRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/gmail/meetings")
-def get_scheduled_meetings(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_scheduled_meetings(user_id: str | None = Header(None, alias="X-User-Id")):
     """Fetches all leads with scheduled meetings for the Calendar view."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     uid = normalize_user_id(user_id)
-    
+
     try:
-        if user_id == "admin":
+        if is_admin_user(user_id):
             query = """
-                SELECT id, 
-                       COALESCE(first_name, '') || ' ' || COALESCE(last_name, '') as lead_name, 
-                       email as lead_email, 
+                SELECT id,
+                       COALESCE(first_name, '') || ' ' || COALESCE(last_name, '') as lead_name,
+                       email as lead_email,
                        company_name, meeting_time, meeting_link,
                        linkedin_url, phone, persona
                 FROM leads_raw
@@ -928,9 +1002,9 @@ def get_scheduled_meetings(user_id: Optional[str] = Header(None, alias="X-User-I
             cur.execute(query)
         else:
             query = """
-                SELECT id, 
-                       COALESCE(first_name, '') || ' ' || COALESCE(last_name, '') as lead_name, 
-                       email as lead_email, 
+                SELECT id,
+                       COALESCE(first_name, '') || ' ' || COALESCE(last_name, '') as lead_name,
+                       email as lead_email,
                        company_name, meeting_time, meeting_link,
                        linkedin_url, phone, persona
                 FROM leads_raw
@@ -938,7 +1012,7 @@ def get_scheduled_meetings(user_id: Optional[str] = Header(None, alias="X-User-I
                 ORDER BY meeting_time ASC
             """
             cur.execute(query, (uid,))
-            
+
         meetings = []
         for m in cur.fetchall():
             d = dict(m)
@@ -955,37 +1029,38 @@ def get_scheduled_meetings(user_id: Optional[str] = Header(None, alias="X-User-I
         conn.close()
 
 @router.post("/gmail/schedule-meeting/{lead_id}")
-def schedule_manual_meeting(lead_id: int, data: dict = Body(...), user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def schedule_manual_meeting(lead_id: int, data: dict = Body(...), user_id: str | None = Header(None, alias="X-User-Id")):
     """Manually triggers a calendar event creation for a specific lead with a chosen time."""
-    from app.services.google_service import create_calendar_event
-    from app.services.email_service import send_email
     import datetime
+
+    from app.services.email_service import send_email
+    from app.services.google_service import create_calendar_event
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     uid = normalize_user_id(user_id)
-    
+
     # Extract custom time from body if provided
     custom_time_str = data.get('meeting_time')
-    
+
     try:
         # Fetch lead details — scoped to owner unless admin (prevents cross-account meetings)
-        if user_id == "admin":
+        if is_admin_user(user_id):
             cur.execute("SELECT id, first_name, last_name, email FROM leads_raw WHERE id = %s", (lead_id,))
         else:
             cur.execute("SELECT id, first_name, last_name, email FROM leads_raw WHERE id = %s AND user_id = %s", (lead_id, uid))
         lead = cur.fetchone()
         if not lead:
             raise HTTPException(status_code=404, detail="Lead not found or access denied")
-            
+
         if custom_time_str:
             meeting_time = datetime.datetime.fromisoformat(custom_time_str.replace('Z', '+00:00'))
         else:
             # Fallback: Schedule for 2 days from now at 2 PM UTC
-            meeting_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=2)
+            meeting_time = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=2)
             meeting_time = meeting_time.replace(hour=14, minute=0, second=0, microsecond=0)
-        
+
         lead_name = f"{lead['first_name'] or ''} {lead['last_name'] or ''}".strip() or "Lead"
-        
+
         event_data = create_calendar_event(
             user_id=uid,
             lead_email=lead['email'],
@@ -993,41 +1068,41 @@ def schedule_manual_meeting(lead_id: int, data: dict = Body(...), user_id: Optio
             description=f"Introductory call to discuss personalized solutions. \n\nLead: {lead['email']}",
             start_time=meeting_time
         )
-        
+
         if not event_data:
             raise HTTPException(status_code=500, detail="Failed to create Google Calendar event")
-            
+
         # Update database
         cur.execute("""
-            UPDATE leads_raw 
+            UPDATE leads_raw
             SET meeting_link = %s,
-                meeting_time = %s 
+                meeting_time = %s
             WHERE id = %s
         """, (event_data['meet_link'], event_data['start_time'], lead_id))
         conn.commit()
-        
+
         # Send confirmation email
         cur.execute("SELECT email, full_name FROM users WHERE id = %s", (uid,))
         sender_user = cur.fetchone()
-        
+
         confirm_body = f"Hi {lead['first_name'] or 'there'},\n\nI've scheduled our strategy session for {meeting_time.strftime('%A, %B %d at %I:%M %p UTC')}.\n\nYou can join via Google Meet here: {event_data['meet_link']}\n\nLooking forward to it!"
-        
+
         # Final Dispatch: Prefer Gmail API for personalized scheduling
-        from app.services.email_service import get_user_email_font, get_user_email_font_size
+        from app.services.email_service import get_user_email_font, get_user_email_font_size, get_user_image_width, get_user_image_height
         res = send_email(
             to_email=lead['email'],
             subject=f"Meeting Scheduled: {lead_name} x LeadStream",
-            html_content=markdown_to_html(confirm_body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid)),
+            html_content=markdown_to_html(confirm_body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid), image_width=get_user_image_width(uid), image_height=get_user_image_height(uid)),
             from_email=sender_user['email'],
             from_name=sender_user['full_name'],
             is_system_email=False,
             user_id=uid
         )
         success = res[0] if isinstance(res, tuple) else res
-        
+
         invalidate_inbound_deals_cache(str(uid))
         return {"status": "success", "event": event_data, "email_sent": success}
-        
+
     except Exception as e:
         print(f"Error manual scheduling: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1039,25 +1114,25 @@ class RescheduleRequest(BaseModel):
     new_time: str
 
 class BulkMeetingActionRequest(BaseModel):
-    lead_ids: List[int]
+    lead_ids: list[int]
 
 @router.post("/gmail/reschedule/{lead_id}")
-def reschedule_meeting(lead_id: int, payload: RescheduleRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def reschedule_meeting(lead_id: int, payload: RescheduleRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     """Updates the meeting time for an existing scheduled meeting."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     uid = normalize_user_id(user_id)
-    
+
     try:
-        if user_id == "admin":
+        if is_admin_user(user_id):
             cur.execute("UPDATE leads_raw SET meeting_time = %s WHERE id = %s RETURNING id, first_name, email, meeting_link", (payload.new_time, lead_id))
         else:
             cur.execute("UPDATE leads_raw SET meeting_time = %s WHERE id = %s AND user_id = %s RETURNING id, first_name, email, meeting_link", (payload.new_time, lead_id, uid))
-            
+
         updated_lead = cur.fetchone()
         if not updated_lead:
             raise HTTPException(status_code=404, detail="Meeting not found or unauthorized")
-            
+
         conn.commit()
 
         # Send confirmation email
@@ -1091,15 +1166,15 @@ Looking forward to our conversation.
 
 Best regards,
 
-**{sender_user['full_name'] if sender_user else 'LeadStream Team'}**  
+**{sender_user['full_name'] if sender_user else 'LeadStream Team'}**
 LeadStream Strategy Division
             """
 
-            from app.services.email_service import get_user_email_font, get_user_email_font_size
+            from app.services.email_service import get_user_email_font, get_user_email_font_size, get_user_image_width, get_user_image_height
             send_email(
                 to_email=updated_lead['email'],
                 subject=f"Confirmed: Rescheduled Strategy Session - {updated_lead['first_name'] or ''}",
-                html_content=markdown_to_html(reschedule_body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid)),
+                html_content=markdown_to_html(reschedule_body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid), image_width=get_user_image_width(uid), image_height=get_user_image_height(uid)),
                 from_email=sender_email,
                 from_name=sender_user['full_name'] if sender_user else "LeadStream Team",
                 is_system_email=False,
@@ -1116,21 +1191,21 @@ LeadStream Strategy Division
         conn.close()
 
 @router.post("/gmail/meetings/bulk-cancel")
-def bulk_cancel_meetings(req: BulkMeetingActionRequest, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def bulk_cancel_meetings(req: BulkMeetingActionRequest, user_id: str | None = Header(None, alias="X-User-Id")):
     """Clears meeting time and link for multiple leads."""
     conn = get_db_connection()
     cur = conn.cursor()
     uid = normalize_user_id(user_id)
-    
+
     try:
         format_strings = ','.join(['%s'] * len(req.lead_ids))
-        if user_id == "admin":
+        if is_admin_user(user_id):
             query = f"UPDATE leads_raw SET meeting_time = NULL, meeting_link = NULL WHERE id IN ({format_strings})"
             cur.execute(query, tuple(req.lead_ids))
         else:
             query = f"UPDATE leads_raw SET meeting_time = NULL, meeting_link = NULL WHERE id IN ({format_strings}) AND user_id = %s"
             cur.execute(query, (*req.lead_ids, uid))
-            
+
         conn.commit()
         return {"success": True, "message": f"Successfully cancelled {cur.rowcount} meetings"}
     except Exception as e:
@@ -1144,17 +1219,19 @@ def bulk_cancel_meetings(req: BulkMeetingActionRequest, user_id: Optional[str] =
 INBOX_CACHE = {}
 CACHE_EXPIRY = 60 # seconds
 
-@router.get("/gmail/inbox")
-def get_unified_inbox(user_id: Optional[str] = Header(None, alias="X-User-Id"), refresh: bool = False):
+from app.core.responses import JsonObject
+
+@router.get("/gmail/inbox", response_model=JsonObject)
+def get_unified_inbox(user_id: str | None = Header(None, alias="X-User-Id"), refresh: bool = False):
     """Fetches a list of the latest replies/messages with 60s caching for speed.
     Pass ?refresh=true to bypass cache and force a fresh fetch."""
     from app.services.google_service import get_gmail_service
     uid = normalize_user_id(user_id)
-    
+
     # Bypass cache if refresh requested
     if refresh:
         INBOX_CACHE.pop(uid, None)
-    
+
     # Check Cache
     now = datetime.datetime.now()
     if uid in INBOX_CACHE:
@@ -1165,7 +1242,7 @@ def get_unified_inbox(user_id: Optional[str] = Header(None, alias="X-User-Id"), 
     service = get_gmail_service(int(uid))
     if not service:
         return {"messages": [], "connected": False}
-    
+
     try:
         # Attempt to search for latest 25 INCOMING messages
         try:
@@ -1176,20 +1253,20 @@ def get_unified_inbox(user_id: Optional[str] = Header(None, alias="X-User-Id"), 
                 # Fallback to simple list without 'q' filter if scope is restricted
                 results = service.users().messages().list(userId='me', maxResults=25).execute()
             else:
-                raise list_err
-        
+                raise
+
         messages_meta = results.get('messages', [])
-        
+
         full_messages = []
         for meta in messages_meta:
             # Switch to 'metadata' format to get headers even on restricted tokens
             msg = service.users().messages().get(userId='me', id=meta['id'], format='metadata').execute()
-            
+
             headers = msg.get('payload', {}).get('headers', [])
             sender = next((h['value'] for h in headers if h['name'].lower() == 'from'), "Unknown")
             subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), "No Subject")
             date = next((h['value'] for h in headers if h['name'].lower() == 'date'), "")
-            
+
             # Clean Snippet: Strip "Subject:" from the start of the snippet if Gmail included it
             raw_snippet = msg.get('snippet', '')
             clean_snippet = raw_snippet
@@ -1199,7 +1276,7 @@ def get_unified_inbox(user_id: Optional[str] = Header(None, alias="X-User-Id"), 
                 # We'll try to find where the subject might end (looking for common body starts or just skipping the length)
                 # For safety, we'll just remove the "Subject:" prefix and let it be
                 clean_snippet = raw_snippet.replace("Subject: ", "", 1).replace("subject: ", "", 1)
-            
+
             full_messages.append({
                 'id': msg['id'],
                 'threadId': msg['threadId'],
@@ -1209,7 +1286,7 @@ def get_unified_inbox(user_id: Optional[str] = Header(None, alias="X-User-Id"), 
                 'snippet': clean_snippet,
                 'is_read': 'UNREAD' not in msg.get('labelIds', [])
             })
-        
+
         # Update Cache
         INBOX_CACHE[uid] = (full_messages, now)
         return {"messages": full_messages, "connected": True}
@@ -1218,11 +1295,11 @@ def get_unified_inbox(user_id: Optional[str] = Header(None, alias="X-User-Id"), 
         return {"messages": [], "error": str(e), "connected": True}
 
 @router.get("/gmail/message/{message_id}")
-def get_message_detail(message_id: str, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_message_detail(message_id: str, user_id: str | None = Header(None, alias="X-User-Id")):
     """Fetches full details including body for a specific Gmail message."""
     from app.services.google_service import get_gmail_message
     uid = normalize_user_id(user_id)
-    
+
     try:
         msg = get_gmail_message(int(uid), message_id)
         if not msg:
@@ -1234,52 +1311,53 @@ def get_message_detail(message_id: str, user_id: Optional[str] = Header(None, al
 
 def poll_all_users_for_replies():
     """Manually iterate through active users and check for lead replies."""
-    from app.services.google_service import get_gmail_service
-    from app.database import get_db_connection
-    import psycopg2.extras
     import re
-    
+
+    import psycopg2.extras
+    from app.database import get_db_connection
+    from app.services.google_service import get_gmail_service
+
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
+
     try:
         # Find all users with Google credentials
         cur.execute("SELECT id FROM users WHERE google_refresh_token IS NOT NULL")
         users = cur.fetchall()
-        
+
         for user in users:
             uid = user['id']
             service = get_gmail_service(uid)
             if not service: continue
-            
+
             # Check for latest 50 messages for comprehensive reply detection
             try:
                 # Exclude messages sent by the user to focus on incoming replies
                 results = service.users().messages().list(userId='me', q='label:INBOX -from:me', maxResults=50).execute()
                 messages = results.get('messages', [])
-                
+
                 for msg_meta in messages:
                     m_id = msg_meta['id']
-                    
+
                     # PERSISTENT DEDUPLICATION: Skip immediately if already processed in DB
                     cur.execute("SELECT 1 FROM gmail_processed_messages WHERE message_id = %s", (m_id,))
                     if cur.fetchone():
                         continue
-                    
+
                     try:
                         # Check if this thread/message is from a lead
                         msg = service.users().messages().get(userId='me', id=m_id, format='metadata').execute()
-                        
+
                         # Skip if the message is sent BY the user
                         labels = msg.get('labelIds', [])
                         if 'SENT' in labels:
                             cur.execute("INSERT INTO gmail_processed_messages (message_id, user_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (m_id, uid))
                             conn.commit()
                             continue
-                            
+
                         headers = msg.get('payload', {}).get('headers', [])
                         sender = next((h['value'] for h in headers if h['name'].lower() == 'from'), "")
-                        
+
                         # Extract pure email from "Name <email@site.com>"
                         email_match = re.search(r'[\w.+-]+@[\w.-]+', sender)
                         if email_match:
@@ -1295,21 +1373,21 @@ def poll_all_users_for_replies():
                                     snippet = msg.get('snippet', '')
                                     failed_email_raw = re.search(r'[\w.+-]+@[\w.-]+', snippet)
                                     bounce_reason = "Mail server rejected the message (Undeliverable)"
-                                    
+
                                     # Fetch full message to get more details and extract recipient more reliably
                                     full_bounce = service.users().messages().get(userId='me', id=m_id, format='full').execute()
                                     from app.services.google_service import extract_message_body
                                     body_text = extract_message_body(full_bounce.get('payload', {}))
-                                    
+
                                     if body_text:
                                         # Strip HTML before parsing so text patterns match properly
                                         clean_body = re.sub(r'<[^>]+>', ' ', body_text)
                                         clean_body = re.sub(r'\s+', ' ', clean_body)
-                                        
+
                                         # Extract failed recipient from body if snippet failed
                                         if not failed_email_raw:
                                             failed_email_raw = re.search(r'[\w.+-]+@[\w.-]+', clean_body)
-                                        
+
                                         # Map common SMTP error codes to simple human-readable reasons
                                         raw_reason = ""
                                         reason_match = re.search(r'(?:response from the remote server was:|Diagnostic-Code:|Remote Server returned)\s*[\s:]*\s*(.*?)(?:\s{2,}|$)', clean_body, re.IGNORECASE)
@@ -1362,27 +1440,27 @@ def poll_all_users_for_replies():
                             # This prevents cross-account contamination where replies intended for
                             # one user show up in another user's inbound deals.
                             cur.execute("""
-                                SELECT id, user_id FROM leads_raw 
+                                SELECT id, user_id FROM leads_raw
                                 WHERE LOWER(email) = LOWER(%s) AND user_id = %s AND is_responded = FALSE
                                 LIMIT 1
                             """, (sender_email, uid))
-                            
+
                             found_lead = cur.fetchone()
-                            
+
                             # Cross-account fallback: if not found under this user, search across all users
                             if not found_lead:
                                 cur.execute("""
-                                    SELECT id, user_id FROM leads_raw 
+                                    SELECT id, user_id FROM leads_raw
                                     WHERE LOWER(email) = LOWER(%s) AND is_responded = FALSE
                                     LIMIT 1
                                 """, (sender_email,))
                                 found_lead = cur.fetchone()
                                 if found_lead:
                                     logger.info(f"Cross-account reply: {sender_email} found under user {found_lead['user_id']}, not current user {uid}")
-                            
+
                             if found_lead:
                                 target_uid = found_lead['user_id'] or uid
-                                
+
                                 # Fetch full message data for classification
                                 try:
                                     full_msg_data = service.users().messages().get(userId='me', id=m_id, format='full').execute()
@@ -1391,7 +1469,7 @@ def poll_all_users_for_replies():
                                 except Exception as fetch_err:
                                     print(f"Error fetching/processing message {m_id} for lead: {fetch_err}")
                                     continue
-                        
+
                         # Mark as processed in DB
                         cur.execute("INSERT INTO gmail_processed_messages (message_id, user_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (m_id, uid))
                         conn.commit()
@@ -1433,8 +1511,33 @@ def poll_all_users_for_replies():
                 # ── End Mailto Unsubscribe Detection ──────────────────────
 
             except Exception as e:
-                print(f"Error polling for user {uid}: {e}")
-                
+                error_msg = str(e)
+                print(f"Error polling for user {uid}: {error_msg}")
+                # Handle invalid_grant specifically - mark user's Gmail as disconnected
+                if 'invalid_grant' in error_msg.lower():
+                    logger.warning(f"Invalid grant for user {uid}, marking Gmail as disconnected")
+                    try:
+                        invalidate_conn = get_db_connection()
+                        invalidate_cur = invalidate_conn.cursor()
+                        invalidate_cur.execute("""
+                            UPDATE users SET 
+                                google_access_token = NULL, 
+                                google_refresh_token = NULL, 
+                                google_token_expiry = NULL,
+                                google_linked_at = NULL,
+                                google_email = NULL
+                            WHERE id = %s
+                        """, (uid,))
+                        invalidate_conn.commit()
+                        invalidate_cur.close()
+                        invalidate_conn.close()
+                        # Invalidate cached Gmail service
+                        from app.services.google_service import invalidate_gmail_service_cache
+                        invalidate_gmail_service_cache(uid)
+                        logger.info(f"Marked user {uid} Gmail as disconnected due to invalid_grant")
+                    except Exception as inv_err:
+                        logger.error(f"Failed to invalidate Gmail for user {uid}: {inv_err}")
+
     except Exception as e:
         print(f"Global polling error: {e}")
     finally:
@@ -1442,76 +1545,77 @@ def poll_all_users_for_replies():
         conn.close()
 
 @router.post("/gmail/retro-sync-pdfs")
-def retro_sync_pdfs(request: Request, x_user_id: Optional[str] = Header(None)):
+def retro_sync_pdfs(request: Request, x_user_id: str | None = Header(None)):
     user_id = normalize_user_id(x_user_id)
-    
+
     try:
-        from app.services.google_service import get_gmail_service, extract_attachments
-        import requests
-        import psycopg2.extras
         import json
-        import re
         import os
-        
+        import re
+
+        import psycopg2.extras
+        from app.services.google_service import extract_attachments, get_gmail_service
+
         service = get_gmail_service(int(user_id))
         if not service:
             return {"success": False, "error": "Gmail service not initialized for this user"}
-            
+
         # Scan Gmail for PDFs (all messages, not just Inbox)
         results = service.users().messages().list(userId='me', q='has:attachment filename:pdf', maxResults=50).execute()
         messages = results.get('messages', [])
-        
+
         count = 0
         rag_url = "https://rag-sys-gz59.onrender.com"
-        
+
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
+
         try:
             for msg in messages:
                 try:
                     msg_data = service.users().messages().get(userId='me', id=msg['id'], format='full').execute()
                     headers = msg_data.get('payload', {}).get('headers', [])
                     sender = next((h['value'] for h in headers if h['name'].lower() == 'from'), "")
-                    
+
                     match = re.search(r'[\w.+-]+@[\w.-]+', sender)
                     sender_email = match.group(0).lower() if match else sender.lower()
-                    
+
                     payload = msg_data.get('payload', {})
                     attachments = extract_attachments(service, msg['id'], payload)
                     pdf_attachment = next((att for att in attachments if att['filename'].lower().endswith('.pdf')), None)
-                    
+
                     if pdf_attachment:
                         # Skip QVSCL's own PDFs (company profile, huria profile) — not sent by lead
                         filename_lower = pdf_attachment['filename'].lower()
                         if any(x in filename_lower for x in ['qvscl company profile', 'lalit_huria_profile']):
                             pdf_attachment = None
-                    
+
                     if pdf_attachment:
                         os.makedirs("static/pitch_decks", exist_ok=True)
                         safe_filename = "".join(c for c in pdf_attachment['filename'] if c.isalnum() or c in "._-").replace(" ", "_")
                         file_path = f"static/pitch_decks/{msg['id']}_{safe_filename}"
                         with open(file_path, "wb") as f:
                             f.write(pdf_attachment['data'])
-                        
+
                         base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
                         pitch_deck_url = f"{base_url}/{file_path}"
-                        
+
                         rag_category = None
                         rag_advice = None
                         rag_intel = None
-                        
+
                         try:
+                            from app.core.http_client import get, post_multipart
                             files = {'file': (pdf_attachment['filename'], pdf_attachment['data'])}
                             # Send to RAG
-                            rag_res = requests.post(f"{rag_url}/process", files=files, timeout=300, verify=False)
+                            rag_res = post_multipart(f"{rag_url}/process", files=files, timeout=300)
                             if rag_res.status_code == 200:
                                 rag_data = rag_res.json()
                                 rag_item_id = rag_data.get('id')
                                 if rag_item_id:
                                     import time
                                     for _ in range(30):
-                                        st_res = requests.get(f"{rag_url}/status/{rag_item_id}", timeout=60, verify=False)
+                                        st_res = get(f"{rag_url}/status/{rag_item_id}", timeout=60)
                                         if st_res.status_code == 200:
                                             st_data = st_res.json()
                                             if st_data.get('status', '').lower() in ['completed', 'success']:
@@ -1531,11 +1635,11 @@ def retro_sync_pdfs(request: Request, x_user_id: Optional[str] = Header(None)):
                                         time.sleep(10)
                         except Exception as e:
                             print(f"RAG Retro Error for {sender_email}: {e}")
-     
+
                         # Fetch lead data first for draft generation
                         cur.execute("SELECT * FROM leads_raw WHERE LOWER(email) = LOWER(%s)", (sender_email,))
                         lead_row = cur.fetchone()
-                        
+
                         fresh_draft_body = None
                         if lead_row and rag_advice:
                             try:
@@ -1548,22 +1652,22 @@ def retro_sync_pdfs(request: Request, x_user_id: Optional[str] = Header(None)):
                                     if rag_intel: rag_intel["draft"] = fresh_draft_body
                             except Exception as draft_err:
                                 print(f"Failed to generate retro draft for {sender_email}: {draft_err}")
-     
+
                         cur.execute("""
-                            UPDATE leads_raw 
+                            UPDATE leads_raw
                             SET pitch_deck_url = %s,
                                 sector = COALESCE(%s, sector),
                                 rag_advice = %s,
                                 rag_intelligence = %s,
                                 email_draft = COALESCE(%s, email_draft)
-                            WHERE LOWER(email) = LOWER(%s) 
+                            WHERE LOWER(email) = LOWER(%s)
                             AND (pitch_deck_url IS NULL OR pitch_deck_url = '' OR pitch_deck_url LIKE 'Attached PDF:%%' OR rag_advice IS NULL)
                         """, (pitch_deck_url, rag_category, rag_advice, json.dumps(rag_intel) if rag_intel else None, fresh_draft_body, sender_email))
                         conn.commit()
                         count += 1
                 except Exception as e:
                     print(f"Error retro syncing message {msg['id']}: {e}")
-            
+
             return {"success": True, "updated_deals": count, "message": f"Retro-sync complete. {count} pitch decks processed and classified."}
         finally:
             cur.close()
@@ -1574,7 +1678,7 @@ def retro_sync_pdfs(request: Request, x_user_id: Optional[str] = Header(None)):
 
 
 @router.post("/gmail/heal-threads")
-def heal_gmail_threads(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def heal_gmail_threads(user_id: str | None = Header(None, alias="X-User-Id")):
     """
     Retroactively heals Gmail thread IDs for all SENT leads with missing gmail_thread_id.
     Scans the Gmail Sent folder, matches emails by recipient address, and populates
@@ -1683,7 +1787,7 @@ def heal_gmail_threads(user_id: Optional[str] = Header(None, alias="X-User-Id"))
         }
 
     except Exception as e:
-        logger.error(f"heal_gmail_threads error: {e}")
+        logger.exception(f"heal_gmail_threads error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()

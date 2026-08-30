@@ -308,6 +308,11 @@ const Signatures = () => {
   };
 
   const mdToPreviewHtml = (text) => {
+    // Read image width/height fresh from localStorage so a Settings change applies
+    // to the preview without remounting the component.
+    const _su = JSON.parse(localStorage.getItem('user') || localStorage.getItem('user_admin') || '{}');
+    const _imgW = _su?.image_width || '400px';
+    const _imgH = _su?.image_height || 'auto';
     let html = text;
     // Protect ALL URLs first so the _ and * italic rules can't corrupt them
     // (e.g. upload_123_456.jpg -> upload<em>123</em>456.jpg) — applies to both
@@ -320,7 +325,7 @@ const Signatures = () => {
       return `@@LSURL${urls.length - 1}@@`;
     });
     // Convert markdown images FIRST (their URLs are now safe placeholders)
-    html = html.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width:100%;height:auto;border-radius:8px;" />');
+    html = html.replace(/!\[(.*?)\]\((.*?)\)/g, `<img src="$2" alt="$1" style="width:${_imgW};height:${_imgH};border-radius:8px;" />`);
     // Protect ALL <img> tags (pre-existing HTML + markdown-converted) so the
     // _ and * italic rules can't corrupt src URLs (e.g. upload_123_456.jpg)
     const imgTags = [];
@@ -344,10 +349,22 @@ const Signatures = () => {
     html = html.replace(/@@LSIMG(\d+)@@/g, (m, i) => imgTags[parseInt(i, 10)] || m);
     // Restore URLs (data:image URIs are untouched and handled below)
     html = html.replace(/@@LSURL(\d+)@@/g, (m, i) => urls[parseInt(i, 10)] || m);
-    // Legacy data-URI images already in content get a fixed width
-    html = html.replace(/<img\s+[^>]*src="data:image\/[^"]*"[^>]*>/gi, (m) => {
-      if (/style\s*=\s*"/i.test(m)) return m.replace(/style\s*=\s*"([^"]*)"/i, 'style="width:400px;height:auto;display:block;"');
-      return m.replace('<img', '<img style="width:400px;height:auto;display:block;"');
+    // Apply Settings image_width/height to ALL <img> tags so preview matches
+    html = html.replace(/<img\b[^>]*>/gi, (m) => {
+      // Strip any HTML width/height attributes (they override CSS)
+      m = m.replace(/\s+width="[^"]*"/gi, '');
+      m = m.replace(/\s+height="[^"]*"/gi, '');
+      m = m.replace(/\s+width='[^']*'/gi, '');
+      m = m.replace(/\s+height='[^']*'/gi, '');
+      // Strip existing width/height/max-width from style attribute, then set our values
+      if (/style\s*=\s*["']/i.test(m)) {
+        return m.replace(/style\s*=\s*["']([^"']*)["']/i, (sm, existing) => {
+          let cleaned = existing.replace(/width\s*:\s*[^;]+;?/gi, '').replace(/height\s*:\s*[^;]+;?/gi, '').replace(/max-width\s*:\s*[^;]+;?/gi, '').replace(/;\s*;/g, ';').trim();
+          if (cleaned && !cleaned.endsWith(';')) cleaned += ';';
+          return `style="${cleaned}width:${_imgW};height:${_imgH};display:block;"`;
+        });
+      }
+      return m.replace('<img', `<img style="width:${_imgW};height:${_imgH};display:block;"`);
     });
     // Palak's logo (stored as markdown after editor re-save) must preview at
     // 150x150 — same forced size the backend applies to sent emails.

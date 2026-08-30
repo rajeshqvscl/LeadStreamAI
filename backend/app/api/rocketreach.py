@@ -1,14 +1,14 @@
-import os
 import logging
-import requests
-from fastapi import APIRouter, HTTPException, Header, Query
-from pydantic import BaseModel
-from typing import Optional
-from dotenv import load_dotenv
+import os
 from pathlib import Path
+
 import psycopg2.extras
+import requests
 from app.database import get_db_connection
 from app.utils.auth_helpers import normalize_user_id
+from dotenv import load_dotenv
+from fastapi import APIRouter, Header, HTTPException, Query
+from pydantic import BaseModel
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 logger = logging.getLogger(__name__)
@@ -19,24 +19,24 @@ RR_BASE = "https://api.rocketreach.co/api/v2"
 
 
 class AddLeadRequest(BaseModel):
-    rr_id: Optional[int] = None
+    rr_id: int | None = None
     first_name: str
-    last_name: Optional[str] = ""
-    email: Optional[str] = ""
-    company_name: Optional[str] = ""
-    persona: Optional[str] = "UNKNOWN"
-    validation_status: Optional[str] = "VALID"
+    last_name: str | None = ""
+    email: str | None = ""
+    company_name: str | None = ""
+    persona: str | None = "UNKNOWN"
+    validation_status: str | None = "VALID"
 
 
 @router.get("/rocketreach/search")
 def search_rocketreach(
-    name: Optional[str] = Query(None),
-    title: Optional[str] = Query(None),
-    company: Optional[str] = Query(None),
-    location: Optional[str] = Query(None),
-    industry: Optional[str] = Query(None),
+    name: str | None = Query(None),
+    title: str | None = Query(None),
+    company: str | None = Query(None),
+    location: str | None = Query(None),
+    industry: str | None = Query(None),
     page: int = Query(1, ge=1),
-    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    user_id: str | None = Header(None, alias="X-User-Id"),
 ):
     """Free lookup search — no credits consumed. Searches for people profiles."""
     if not ROCKETREACH_API_KEY:
@@ -91,12 +91,12 @@ def search_rocketreach(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"RocketReach Search Error: {str(e)}")
+        logger.exception(f"RocketReach Search Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/rocketreach/credits")
-def get_credit_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def get_credit_stats(user_id: str | None = Header(None, alias="X-User-Id")):
     """Returns the number of credits used and remaining for the current user."""
     uid = normalize_user_id(user_id)
     conn = get_db_connection()
@@ -109,7 +109,7 @@ def get_credit_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
             limit = row['credits_limit']
             return {"used": used, "remaining": max(0, limit - used), "limit": limit}
         return {"used": 0, "remaining": 200, "limit": 200}
-    except Exception as e:
+    except Exception:
         return {"used": 0, "remaining": 200, "limit": 200}
     finally:
         cur.close()
@@ -119,7 +119,7 @@ def get_credit_stats(user_id: Optional[str] = Header(None, alias="X-User-Id")):
 @router.post("/rocketreach/add-lead")
 def add_rocketreach_lead(
     req: AddLeadRequest,
-    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    user_id: str | None = Header(None, alias="X-User-Id"),
 ):
     """Adds a searched profile directly to the Lead Pipeline (no credit spent)."""
     uid = normalize_user_id(user_id)
@@ -167,7 +167,7 @@ def add_rocketreach_lead(
         raise
     except Exception as e:
         conn.rollback()
-        logger.error(f"Add RocketReach lead error: {str(e)}")
+        logger.exception(f"Add RocketReach lead error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()

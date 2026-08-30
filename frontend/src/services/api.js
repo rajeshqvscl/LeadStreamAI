@@ -81,7 +81,7 @@ api.interceptors.response.use(
           throw new Error('No user ID available for token refresh');
         }
         
-        const response = await axios.post(`${API_BASE_URL}/api/auth/refresh`, {}, {
+        const response = await api.post('/api/auth/refresh', {}, {
           headers: {
             'X-User-Id': userId,
             'Authorization': `Bearer ${localStorage.getItem('token') || localStorage.getItem('token_admin')}`
@@ -91,9 +91,11 @@ api.interceptors.response.use(
         const newToken = response.data.access_token;
         localStorage.setItem('token', newToken);
         
-        // Update user data if returned
+        // Update user data if returned — MERGE with existing to preserve
+        // fields like image_width/image_height that the refresh endpoint omits
         if (response.data.user) {
-          localStorage.setItem('user', JSON.stringify(response.data.user));
+          const existing = JSON.parse(localStorage.getItem('user') || '{}');
+          localStorage.setItem('user', JSON.stringify({ ...existing, ...response.data.user }));
         }
         
         api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;

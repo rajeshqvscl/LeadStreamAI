@@ -15,6 +15,7 @@ export default defineConfig({
     exclude: ['pdfjs-dist', 'xlsx', 'mammoth', 'dompurify', 'papaparse'],
   },
   build: {
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       external: ['pdfjs-dist/build/pdf.worker.min.mjs'],
       output: {

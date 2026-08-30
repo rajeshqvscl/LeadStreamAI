@@ -3,11 +3,11 @@ Follow-up Engine
 Pure logic: given lead + config → returns (should_send, subject, body, stage, campaign)
 """
 
-from typing import Optional, NamedTuple
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta, timezone
+
 from app.core.config import get_followup_settings, get_scheduler_config
-from app.core.followup.campaign_resolver import CampaignResolver, LeadData, get_campaign_for_lead
+from app.core.followup.campaign_resolver import CampaignResolver, LeadData
 
 
 @dataclass
@@ -30,12 +30,12 @@ class FollowUpEngine:
     Evaluates whether a lead is due for follow-up and prepares the email content.
     No side effects - pure function suitable for testing.
     """
-    
+
     def __init__(self):
         self.followup_settings = get_followup_settings()
         self.scheduler_config = get_scheduler_config()
         self.campaign_resolver = CampaignResolver()
-    
+
     def _get_lead_config(self, lead_type: str) -> dict:
         """Get max_stage and intervals for lead type"""
         if lead_type == "CLIENT":
@@ -51,7 +51,7 @@ class FollowUpEngine:
                 item.split(":") for item in self.followup_settings.investor_intervals.split(",")
             ),
         }
-    
+
     def _is_defence(self, lead: LeadData) -> bool:
         """Check if lead is defence/deeptech (user requested no followups)"""
         defence_keywords = ["defence", "deeptech", "idex"]
@@ -59,20 +59,20 @@ class FollowUpEngine:
             if field and any(kw in field.lower() for kw in defence_keywords):
                 return True
         return False
-    
-    def _get_last_outreach_ist(self, lead: dict) -> Optional[datetime]:
+
+    def _get_last_outreach_ist(self, lead: dict) -> datetime | None:
         """Convert last_outreach_at to IST naive datetime"""
         last_sent = lead.get("last_outreach_at")
         if not last_sent:
             return None
-        
+
         IST = timezone(timedelta(hours=5, minutes=30))
         if last_sent.tzinfo:
             return last_sent.astimezone(IST).replace(tzinfo=None)
         else:
             # Assume UTC if no timezone
-            return last_sent.replace(tzinfo=timezone.utc).astimezone(IST).replace(tzinfo=None)
-    
+            return last_sent.replace(tzinfo=UTC).astimezone(IST).replace(tzinfo=None)
+
     def evaluate(self, lead: dict) -> FollowUpAction:
         """
         Evaluate if lead is due for follow-up.
@@ -90,7 +90,7 @@ class FollowUpEngine:
             sender_email=lead.get("sender_email", "") or "",
             lead_type=lead.get("lead_type", "INVESTOR") or "INVESTOR",
         )
-        
+
         # 1. Working hours guard
         if not self.scheduler_config.is_working_hours_now():
             return FollowUpAction(
@@ -98,11 +98,11 @@ class FollowUpEngine:
                 reason="Outside working hours",
                 lead_type=lead_data.lead_type,
             )
-        
+
         # 2. Stage limit check
         cfg = self._get_lead_config(lead_data.lead_type)
         current_stage = lead.get("followup_stage", 0) or 0
-        
+
         if current_stage >= cfg["max_stage"]:
             return FollowUpAction(
                 should_send=False,
@@ -111,7 +111,7 @@ class FollowUpEngine:
                 max_stage=cfg["max_stage"],
                 stage=current_stage,
             )
-        
+
         # 3. Interval check
         last_sent_ist = self._get_last_outreach_ist(lead)
         if not last_sent_ist:
@@ -121,10 +121,10 @@ class FollowUpEngine:
                 lead_type=lead_data.lead_type,
                 stage=current_stage,
             )
-        
+
         now = datetime.now(timezone(timedelta(hours=5, minutes=30))).replace(tzinfo=None)
         days_since_last = (now - last_sent_ist).days
-        
+
         interval_days = cfg["intervals"].get(str(current_stage))
         if interval_days is None:
             return FollowUpAction(
@@ -133,9 +133,9 @@ class FollowUpEngine:
                 lead_type=lead_data.lead_type,
                 stage=current_stage,
             )
-        
+
         interval_days = int(interval_days)
-        
+
         if days_since_last < interval_days:
             return FollowUpAction(
                 should_send=False,
@@ -145,7 +145,7 @@ class FollowUpEngine:
                 days_since_last=days_since_last,
                 interval_required=interval_days,
             )
-        
+
         # 4. Defence skip
         if self._is_defence(lead_data):
             return FollowUpAction(
@@ -154,16 +154,16 @@ class FollowUpEngine:
                 lead_type=lead_data.lead_type,
                 stage=current_stage,
             )
-        
+
         # 5. Build email content
         next_stage = current_stage + 1
         campaign = self.campaign_resolver.resolve(lead_data)
         template = CampaignResolver.get_template(campaign, next_stage)
-        
+
         lead_name = (lead.get("first_name") or "").strip() or "there"
         body = template.format(name=lead_name)
         subject = f"Re: {lead.get('last_outreach_subject', 'Following up')}"
-        
+
         return FollowUpAction(
             should_send=True,
             reason="Ready to send",
@@ -176,7 +176,7 @@ class FollowUpEngine:
             days_since_last=days_since_last,
             interval_required=interval_days,
         )
-    
+
     def evaluate_legacy(self, lead: dict) -> FollowUpAction:
         """Legacy compatibility wrapper for dict-based leads"""
         # Convert dict to include computed fields
@@ -185,7 +185,7 @@ class FollowUpEngine:
 
 
 # Singleton
-_engine: Optional[FollowUpEngine] = None
+_engine: FollowUpEngine | None = None
 
 
 def get_followup_engine() -> FollowUpEngine:

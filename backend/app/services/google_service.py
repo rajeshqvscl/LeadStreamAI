@@ -1,21 +1,20 @@
-import os
 import datetime
-import json
-from typing import Optional, Dict, Any
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import Flow
-from google.auth.transport.requests import Request, AuthorizedSession
-import ssl
-from googleapiclient.discovery import build
+import logging
+import os
+from typing import Any
+
 import psycopg2.extras
 from app.database import get_db_connection
-import logging
+from google.auth.transport.requests import AuthorizedSession, Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
 
 logger = logging.getLogger(__name__)
 
 # Module-level cache for Gmail/Calendar service instances to avoid rebuilding on every call
-_gmail_service_cache: Dict[int, Any] = {}
-_calendar_service_cache: Dict[int, Any] = {}
+_gmail_service_cache: dict[int, Any] = {}
+_calendar_service_cache: dict[int, Any] = {}
 
 # Scopes required for the application
 SCOPES = [
@@ -28,13 +27,13 @@ SCOPES = [
     'openid'
 ]
 
-def get_google_flow(redirect_uri: Optional[str] = None):
+def get_google_flow(redirect_uri: str | None = None):
     client_id = os.getenv("GOOGLE_CLIENT_ID")
     client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
-    
+
     # Use the provided redirect_uri or fall back to the one in .env
     final_redirect_uri = redirect_uri or os.getenv("GOOGLE_REDIRECT_URI")
-    
+
     client_config = {
         "web": {
             "client_id": client_id,
@@ -46,27 +45,27 @@ def get_google_flow(redirect_uri: Optional[str] = None):
             "redirect_uris": [final_redirect_uri]
         }
     }
-    
+
     return Flow.from_client_config(
         client_config,
         scopes=SCOPES,
         redirect_uri=final_redirect_uri
     )
 
-def get_user_credentials(user_id: int) -> Optional[Credentials]:
+def get_user_credentials(user_id: int) -> Credentials | None:
     """Retrieves and refreshes Google OAuth credentials for a user."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
         cur.execute("""
-            SELECT google_access_token, google_refresh_token, google_token_expiry 
+            SELECT google_access_token, google_refresh_token, google_token_expiry
             FROM users WHERE id = %s
         """, (user_id,))
         user = cur.fetchone()
-        
+
         if not user or not user['google_refresh_token']:
             return None
-            
+
         creds = Credentials(
             token=user['google_access_token'],
             refresh_token=user['google_refresh_token'],
@@ -75,31 +74,49 @@ def get_user_credentials(user_id: int) -> Optional[Credentials]:
             client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
             scopes=SCOPES
         )
-        
-        # Check if expired and refresh if necessary
-        if creds.expired or (creds.expiry and creds.expiry < datetime.datetime.now(datetime.timezone.utc)):
+
+# Check if expired and refresh if necessary
+        if creds.expired or (creds.expiry and creds.expiry < datetime.datetime.now(datetime.UTC)):
             try:
                 creds.refresh(Request())
             except Exception as e:
+                error_msg = str(e)
                 # Invalidate cached services so stale tokens aren't reused
                 invalidate_gmail_service_cache(user_id)
-                # If refresh fails due to scope mismatch (invalid_scope), try refreshing with 
+                # If refresh fails due to scope mismatch (invalid_scope), try refreshing with
                 # a minimal scope set that we know they likely have
-                if "invalid_scope" in str(e).lower():
+                if "invalid_scope" in error_msg.lower():
                     print(f"CRITICAL: Scope mismatch for user {user_id}. Re-authentication required.")
-                    raise e
+                    raise
+                # Handle invalid_grant - token is invalid/expired/revoked, clean up user's tokens
+                elif "invalid_grant" in error_msg.lower():
+                    logger.warning(f"Invalid grant for user {user_id}, cleaning up tokens")
+                    try:
+                        cur.execute("""
+                            UPDATE users SET
+                                google_access_token = NULL,
+                                google_refresh_token = NULL,
+                                google_token_expiry = NULL,
+                                google_linked_at = NULL,
+                                google_email = NULL
+                            WHERE id = %s
+                        """, (user_id,))
+                        conn.commit()
+                    except Exception as clean_err:
+                        logger.error(f"Failed to clean up tokens for user {user_id}: {clean_err}")
+                    raise
                 else:
-                    raise e
+                    raise
 
-            # Save new tokens
-            cur.execute("""
-                UPDATE users 
-                SET google_access_token = %s, 
-                    google_token_expiry = %s 
-                WHERE id = %s
-            """, (creds.token, creds.expiry, user_id))
-            conn.commit()
-            
+        # Save new tokens
+        cur.execute("""
+            UPDATE users
+            SET google_access_token = %s,
+                google_token_expiry = %s
+            WHERE id = %s
+        """, (creds.token, creds.expiry, user_id))
+        conn.commit()
+
         return creds
     finally:
         cur.close()
@@ -156,12 +173,12 @@ def register_gmail_watch(user_id: int):
     if not service:
         print(f"Watch failed: No credentials for user {user_id}")
         return None
-        
+
     topic_name = os.getenv("GMAIL_WATCH_TOPIC")
     if not topic_name:
         print("Watch failed: GMAIL_WATCH_TOPIC not set in .env")
         return None
-        
+
     try:
         request = {
             'labelIds': ['INBOX'],
@@ -174,13 +191,13 @@ def register_gmail_watch(user_id: int):
         print(f"Error registering Gmail watch for user {user_id}: {e}")
         return None
 
-def extract_message_body(payload: Dict[str, Any]) -> str:
+def extract_message_body(payload: dict[str, Any]) -> str:
     """
     Recursively extracts the body text from a Gmail message payload.
     Handles base64 padding and prioritizes plain text or HTML.
     """
     import base64
-    
+
     def get_data(body):
         data = body.get('data', '')
         if not data: return ""
@@ -205,12 +222,12 @@ def extract_message_body(payload: Dict[str, Any]) -> str:
         for p in p_list:
             mtype = p.get('mimeType')
             content = get_data(p.get('body', {}))
-            
+
             if mtype == 'text/plain' and not plain:
                 plain = content
             elif mtype == 'text/html' and not html:
                 html = content
-            
+
             if 'parts' in p:
                 walk(p['parts'])
 
@@ -224,14 +241,14 @@ def extract_attachments(service, message_id: str, payload: dict) -> list:
     """
     import base64
     attachments = []
-    
+
     def walk_parts(parts):
         for part in parts:
             filename = part.get('filename')
             mime_type = part.get('mimeType')
             body = part.get('body', {})
             att_id = body.get('attachmentId')
-            
+
             if filename and att_id:
                 try:
                     att = service.users().messages().attachments().get(
@@ -245,7 +262,7 @@ def extract_attachments(service, message_id: str, payload: dict) -> list:
                     })
                 except Exception as e:
                     print(f"Failed to download attachment {filename}: {e}")
-            
+
             if 'parts' in part:
                 walk_parts(part['parts'])
 
@@ -257,19 +274,19 @@ def fetch_thread_messages(user_id: int, thread_id: str):
     """Fetches full conversation history from Gmail for a thread."""
     service = get_gmail_service(user_id)
     if not service: return []
-    
+
     try:
         thread = service.users().threads().get(userId='me', id=thread_id, format='full').execute()
         messages = []
         for msg in thread.get('messages', []):
             payload = msg.get('payload', {})
             body = extract_message_body(payload)
-            
+
             headers = msg.get('payload', {}).get('headers', [])
             from_email = next((h['value'] for h in headers if h['name'].lower() == 'from'), "Unknown")
             subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), "No Subject")
             date = next((h['value'] for h in headers if h['name'].lower() == 'date'), "")
-            
+
             messages.append({
                 'id': msg['id'],
                 'from': from_email,
@@ -299,11 +316,11 @@ def list_gmail_drafts(user_id: int):
     service = get_gmail_service(user_id)
     if not service:
         return []
-    
+
     try:
         results = service.users().drafts().list(userId='me').execute()
         drafts_list = results.get('drafts', [])
-        
+
         full_drafts = []
         for d in drafts_list:
             try:
@@ -316,7 +333,7 @@ def list_gmail_drafts(user_id: int):
                 draft_obj = service.users().drafts().get(userId='me', id=d['id'], format='metadata').execute()
                 msg = draft_obj.get('message', {})
                 headers = msg.get('payload', {}).get('headers', [])
-                
+
                 subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), "No Subject")
                 to_email = next((h['value'] for h in headers if h['name'].lower() == 'to'), "No Recipient")
                 date = next((h['value'] for h in headers if h['name'].lower() == 'date'), "")
@@ -333,7 +350,7 @@ def list_gmail_drafts(user_id: int):
             except Exception as inner_e:
                 print(f"Error fetching detail for draft {d['id']} (user {user_id}): {inner_e}")
                 continue
-        
+
         _drafts_cache[user_id] = {'data': full_drafts, 'ts': now}
         return full_drafts
     except Exception as e:
@@ -355,22 +372,22 @@ def list_gmail_sent(user_id: int):
     service = get_gmail_service(user_id)
     if not service:
         return []
-    
+
     try:
         results = service.users().messages().list(userId='me', labelIds=['SENT']).execute()
         messages_list = results.get('messages', [])
-        
+
         full_messages = []
         for m in messages_list[:30]:
             try:
                 msg = service.users().messages().get(userId='me', id=m['id'], format='metadata', metadataHeaders=['To', 'Subject', 'Date']).execute()
                 payload = msg.get('payload', {})
                 headers = payload.get('headers', [])
-                
+
                 subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), "No Subject")
                 to_email = next((h['value'] for h in headers if h['name'].lower() == 'to'), "No Recipient")
                 date = next((h['value'] for h in headers if h['name'].lower() == 'date'), "")
-                
+
                 full_messages.append({
                     'id': m['id'],
                     'subject': subject,
@@ -382,7 +399,7 @@ def list_gmail_sent(user_id: int):
             except Exception as inner_e:
                 print(f"Error fetching detail for message {m['id']}: {inner_e}")
                 continue
-        
+
         _sent_cache[user_id] = {'data': full_messages, 'ts': now}
         return full_messages
     except Exception as e:
@@ -394,7 +411,7 @@ def get_gmail_message(user_id: int, message_id: str):
     service = get_gmail_service(user_id)
     if not service:
         return None
-        
+
     try:
         # 1. Try FULL format
         try:
@@ -402,7 +419,7 @@ def get_gmail_message(user_id: int, message_id: str):
             payload = msg.get('payload', {})
             headers = payload.get('headers', [])
             body = extract_message_body(payload)
-            
+
             # If body is still empty, try to get 'raw' data as a nuclear backup
             if not body:
                 raw_msg = service.users().messages().get(userId='me', id=message_id, format='raw').execute()
@@ -433,7 +450,7 @@ def get_gmail_message(user_id: int, message_id: str):
             }
         except Exception as full_e:
             print(f"CRITICAL: Full message fetch failed for {message_id}: {full_e}")
-            
+
             # Try to at least get RAW data if FULL failed (sometimes scopes allow raw but not full)
             try:
                 raw_msg = service.users().messages().get(userId='me', id=message_id, format='raw').execute()
@@ -475,24 +492,24 @@ def update_gmail_draft(user_id: int, draft_id: str, subject: str, body: str):
     import base64
     import re
     from email.mime.text import MIMEText
-    
+
     service = get_gmail_service(user_id)
     if not service: return None
-    
+
     try:
         # Convert Markdown to HTML for professional Gmail rendering
         body = body.replace("\r\n", "\n")
         html_body = body
-        
+
         # 1. Bold: **text** -> <strong>text</strong>
         html_body = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', html_body)
-        
+
         # 2. Italic: _text_ -> <em>text</em>
         html_body = re.sub(r'_(.*?)_', r'<em>\1</em>', html_body)
-        
+
         # 2.5 Links: [text](url) -> <a href="url">text</a>
         html_body = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2" target="_blank">\1</a>', html_body)
-        
+
         # 3. Lists: * item -> <li>item</li>
         # Split into paragraphs to handle lists properly
         paragraphs = html_body.split('\n\n')
@@ -522,25 +539,24 @@ def update_gmail_draft(user_id: int, draft_id: str, subject: str, body: str):
                     match = re.match(r'^\s*[\*\-•]\s+(.*)', l)
                     if match:
                         list_items.append(f"<li>{match.group(1).strip()}</li>")
-                    else:
-                        if list_items:
-                            list_items[-1] = list_items[-1].replace("</li>", f" {l.strip()}</li>")
+                    elif list_items:
+                        list_items[-1] = list_items[-1].replace("</li>", f" {l.strip()}</li>")
                 processed_paragraphs.append(f"<ul>{''.join(list_items)}</ul>")
             else:
                 processed_paragraphs.append(f"<p>{p.replace(chr(10), '<br>')}</p>")
-        
+
         html_body = "".join(processed_paragraphs)
-        
+
         # Create a new message structure
         # Always use HTML if we did any conversion, otherwise fallback
         message = MIMEText(html_body, 'html')
         message['subject'] = subject
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
-        
+
         # Update the draft
         updated_draft = service.users().drafts().update(
-            userId='me', 
-            id=draft_id, 
+            userId='me',
+            id=draft_id,
             body={'message': {'raw': raw}}
         ).execute()
         return updated_draft
@@ -552,10 +568,10 @@ def send_gmail_draft(user_id: int, draft_id: str):
     """Sends an existing Gmail draft."""
     service = get_gmail_service(user_id)
     if not service: return None
-    
+
     try:
         sent_msg = service.users().drafts().send(
-            userId='me', 
+            userId='me',
             body={'id': draft_id}
         ).execute()
         return sent_msg
@@ -567,10 +583,10 @@ def delete_gmail_draft(user_id: int, draft_id: str):
     """Deletes an existing Gmail draft."""
     service = get_gmail_service(user_id)
     if not service: return False
-    
+
     try:
         service.users().drafts().delete(
-            userId='me', 
+            userId='me',
             id=draft_id
         ).execute()
         return True
@@ -585,9 +601,9 @@ def create_calendar_event(user_id: int, lead_email: str, summary: str, descripti
     if not service:
         print(f"Calendar failed: No credentials for user {user_id}")
         return None
-        
+
     end_time = start_time + datetime.timedelta(minutes=duration_minutes)
-    
+
     event = {
         'summary': summary,
         'description': description,
@@ -612,14 +628,14 @@ def create_calendar_event(user_id: int, lead_email: str, summary: str, descripti
             'useDefault': True,
         },
     }
-    
+
     try:
         created_event = service.events().insert(
             calendarId='primary',
             body=event,
             conferenceDataVersion=1
         ).execute()
-        
+
         print(f"Google Calendar event created: {created_event.get('htmlLink')}")
         return {
             'event_id': created_event.get('id'),
@@ -636,40 +652,41 @@ def upload_to_drive(user_id: int, filename: str, content: bytes, folder_name: st
     service = get_drive_service(user_id)
     if not service:
         return None
-        
+
     try:
         # 1. Find or Create Folder
         query = f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
         results = service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
         folders = results.get('files', [])
-        
+
         if not folders:
             folder_metadata = {'name': folder_name, 'mimeType': 'application/vnd.google-apps.folder'}
             folder = service.files().create(body=folder_metadata, fields='id').execute()
             folder_id = folder.get('id')
         else:
             folder_id = folders[0].get('id')
-            
+
         # 2. Upload File
-        from googleapiclient.http import MediaIoBaseUpload
         import io
-        
+
+        from googleapiclient.http import MediaIoBaseUpload
+
         file_metadata = {'name': filename, 'parents': [folder_id]}
         media = MediaIoBaseUpload(io.BytesIO(content), mimetype='application/pdf', resumable=True)
-        
+
         file = service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
         file_id = file.get('id')
-        
+
         # 3. Make file accessible (anyone with the link)
         service.permissions().create(
             fileId=file_id,
             body={'type': 'anyone', 'role': 'viewer'}
         ).execute()
-        
+
         # Get the webViewLink
         updated_file = service.files().get(fileId=file_id, fields='webViewLink').execute()
         return updated_file.get('webViewLink')
-        
+
     except Exception as e:
         print(f"Error uploading to Drive for user {user_id}: {e}")
         return None

@@ -18,6 +18,9 @@ const FONTS = [
 
 const FONT_SIZES = Array.from({ length: 17 }, (_, i) => i + 6).map(n => `${n}px`);
 
+const IMAGE_WIDTH_OPTIONS = ['100px', '150px', '200px', '250px', '300px', '350px', '400px', '500px', '600px', 'auto'];
+const IMAGE_HEIGHT_OPTIONS = ['auto', '100px', '150px', '200px', '250px', '300px', '350px', '400px', '500px', '600px'];
+
 const SAMPLE_TEXT = "Dear John,\n\nThank you for your time today. I wanted to follow up on our conversation about the partnership opportunity.\n\nBest regards,\nYour Name\nYour Title\nCompany Name\n+1 (555) 123-4567";
 
 const FontSizeDropdown = ({ value, onChange, options }) => {
@@ -253,24 +256,20 @@ const Settings = () => {
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
                 Signature Image Width
               </label>
-              <input
-                type="text"
+              <FontSizeDropdown
                 value={prefs.image_width}
-                onChange={e => handleChange('image_width', e.target.value)}
-                placeholder="400px"
-                className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:border-purple-500/50 outline-none"
+                onChange={s => handleChange('image_width', s)}
+                options={IMAGE_WIDTH_OPTIONS}
               />
             </div>
             <div className="flex-1">
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
                 Signature Image Height
               </label>
-              <input
-                type="text"
+              <FontSizeDropdown
                 value={prefs.image_height}
-                onChange={e => handleChange('image_height', e.target.value)}
-                placeholder="auto"
-                className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:border-purple-500/50 outline-none"
+                onChange={s => handleChange('image_height', s)}
+                options={IMAGE_HEIGHT_OPTIONS}
               />
             </div>
           </div>

@@ -1,10 +1,12 @@
+import contextlib
+import logging
 import os
 import re
-import logging
 import threading
+
 import psycopg2
 import psycopg2.pool
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import DictCursor
 
 logger = logging.getLogger(__name__)
 
@@ -52,12 +54,14 @@ class _PooledConnection:
         conn = object.__getattribute__(self, '_conn')
         pool = object.__getattribute__(self, '_pool')
         try:
-            pool.putconn(conn)
+            # Don't return a known-dead connection back into the pool.
+            if getattr(conn, "closed", 1) or getattr(conn, "status", 0) == 6:
+                pool.putconn(conn, close=True)
+            else:
+                pool.putconn(conn)
         except Exception:
-            try:
+            with contextlib.suppress(Exception):
                 conn.close()
-            except Exception:
-                pass
 
     def cursor(self, *args, **kwargs):
         return object.__getattribute__(self, '_conn').cursor(*args, **kwargs)
@@ -81,10 +85,27 @@ def _get_pool():
                 )
                 _db_pool = psycopg2.pool.ThreadedConnectionPool(
                     minconn, maxconn, DATABASE_URL,
-                    cursor_factory=RealDictCursor,
+                    cursor_factory=DictCursor,
                     connect_timeout=10
                 )
     return _db_pool
+
+
+def _conn_is_alive(conn):
+    """Cheap liveness check. A connection whose SSL socket was silently
+    closed by the server/proxy still reports open until you actually try to
+    use it, so we run a trivial query to be sure."""
+    if conn is None:
+        return False
+    if getattr(conn, "closed", 1):
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+        return True
+    except Exception:
+        return False
 
 
 def get_db_connection():
@@ -96,13 +117,23 @@ def get_db_connection():
     try:
         pool = _get_pool()
         raw = pool.getconn()
+        # Validate: replace dead connections instead of returning them.
+        if not _conn_is_alive(raw):
+            logger.warning("DB pool returned a dead connection — discarding and retrying.")
+            with contextlib.suppress(Exception):
+                pool.putconn(raw, close=True)
+            raw = pool.getconn()
+            if not _conn_is_alive(raw):
+                with contextlib.suppress(Exception):
+                    pool.putconn(raw, close=True)
+                raise Exception("Could not obtain a live database connection from the pool.")
         return _PooledConnection(raw, pool)
     except Exception as pool_err:
-        logger.error("DB pool get failed: %s — falling back to direct connect", pool_err)
+        logger.exception("DB pool get failed: %s — falling back to direct connect", pool_err)
         try:
             return psycopg2.connect(
                 DATABASE_URL,
-                cursor_factory=RealDictCursor,
+                cursor_factory=DictCursor,
                 connect_timeout=10
             )
         except psycopg2.OperationalError as e:
@@ -510,6 +541,9 @@ def create_tables():
         has_db_access BOOLEAN DEFAULT FALSE,
         google_id TEXT,
         credits_used INTEGER DEFAULT 0,
+        job_title TEXT,
+        phone TEXT,
+        linkedin_url TEXT,
         created_at TIMESTAMP DEFAULT NOW()
     );
     """)
@@ -540,6 +574,9 @@ def create_tables():
         ("signature_font_size", "TEXT DEFAULT '13px'"),
         ("image_width", "TEXT DEFAULT '400px'"),
         ("image_height", "TEXT DEFAULT 'auto'"),
+        ("job_title", "TEXT"),
+        ("phone", "TEXT"),
+        ("linkedin_url", "TEXT"),
     ]
     # Skip users ALTER TABLEs if all columns exist
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'users'")
@@ -668,22 +705,22 @@ def create_tables():
     cur.execute("SELECT COUNT(*) FROM prompts")
     if cur.fetchone()['count'] == 0:
         default_prompts = [
-            ("Default Classification Prompt", "CLASSIFICATION", 
+            ("Default Classification Prompt", "CLASSIFICATION",
              "You are a lead classification expert. Analyze the following lead information and classify them.\n\nLead Information:\n- Name: {{name}}\n- Email: {{email}}\n- Designation/Title: {{designation}}\n- Company: {{company_name}}\n- Industry: {{industry}}\n- LinkedIn: {{linkedin}}",
              "Default prompt for classifying leads by persona and company type."),
-            
+
             ("Default Email Generation Prompt", "EMAIL_GENERATION",
              "- Tone: {{tone}}\n- Sector Context: {{context}}\n- Be concise (under 200 words for body)\n\nRespond in valid JSON format:\n{\n  \"subject\": \"email subject line\",\n  \"body\": \"full email body in plain text\"\n}",
              "Default prompt for generating outreach emails."),
-            
+
             ("Default Strategy Prompt", "STRATEGY",
              "Focus on building genuine connections. Lead with value, not sales pitch. Mention specific industry trends when possible. Keep the tone consultative.",
              "Default strategy guidelines for email generation."),
-            
+
             ("Default Context Prompt", "CONTEXT",
              "We are a technology company that helps businesses automate their workflows and improve operational efficiency through AI-powered solutions.",
              "Default company context for emails."),
-            
+
             ("Default Follow-up Prompt", "FOLLOWUP_GENERATION",
              "You are an AI assistant writing a gentle, professional follow-up email. \n\nOriginal Email Context: {original_content}\nRecipient: {lead_name}\n\nGuidelines:\n1. Be extremely brief and respectful of their time.\n2. Do NOT hard-sell. Instead, ask if they had any questions about the previous message.\n3. Keep the tone helpful and consultative.\n4. DO NOT include any signature. The system will append it.\n\nWrite the follow-up nudge now:",
              "Default prompt for generating Day 2 and Day 4 follow-up emails.")
@@ -695,19 +732,21 @@ def create_tables():
             """, (name, p_type, content, desc))
 
     # Seed default admin if missing
-    cur.execute("SELECT COUNT(*) FROM users WHERE username = %s", (os.getenv("ADMIN_USERNAME", "admin"),))
+    admin_username = os.getenv("ADMIN_USERNAME", "admin")
+    admin_password = os.getenv("ADMIN_PASSWORD")
+    if not admin_password:
+        raise RuntimeError("ADMIN_PASSWORD environment variable must be set. No default password allowed.")
+
+    cur.execute("SELECT COUNT(*) FROM users WHERE username = %s", (admin_username,))
     if cur.fetchone()['count'] == 0:
         import bcrypt
-        # Default credentials for first setup
-        default_username = os.getenv("ADMIN_USERNAME", "admin")
-        default_password = os.getenv("ADMIN_PASSWORD", "admin123")
-        password_hash = bcrypt.hashpw(default_password.encode(), bcrypt.gensalt()).decode()
-        
+        password_hash = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt()).decode()
+
         cur.execute("""
             INSERT INTO users (username, email, full_name, password_hash, role)
             VALUES (%s, %s, %s, %s, %s)
-        """, (default_username, "admin@leadstreamai.com", "System Administrator", password_hash, "ADMIN"))
-    
+        """, (admin_username, "admin@leadstreamai.com", "System Administrator", password_hash, "ADMIN"))
+
 
     # Reminders Table
     cur.execute("""
@@ -897,6 +936,6 @@ def create_tables():
                 if response.ok:
                     from app.models.family_office import sync_from_csv
                     sync_from_csv(response.text)
-                    logger.info(f"Auto-synced family offices from Google Sheets.")
+                    logger.info("Auto-synced family offices from Google Sheets.")
     except Exception as e:
         logger.warning(f"Could not auto-sync family offices: {e}")

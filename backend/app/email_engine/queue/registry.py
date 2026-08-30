@@ -2,13 +2,14 @@
 Queue Registry and Priority Management
 """
 
-import rq
+import logging
 from datetime import datetime
-from typing import Optional
+
+import rq
+
+from app.core.config import get_email_engine_settings
 from app.email_engine.queue.connection import get_redis_client
 from app.email_engine.queue.job import EmailPriority
-from app.core.config import get_email_engine_settings
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -16,11 +17,11 @@ logger = logging.getLogger(__name__)
 _queues: dict = {}
 
 
-def get_queue(name: Optional[str] = None) -> rq.Queue:
+def get_queue(name: str | None = None) -> rq.Queue:
     """Get or create RQ queue by name"""
     settings = get_email_engine_settings()
     queue_name = name or settings.queue_name
-    
+
     if queue_name not in _queues:
         _queues[queue_name] = rq.Queue(
             queue_name,
@@ -28,7 +29,7 @@ def get_queue(name: Optional[str] = None) -> rq.Queue:
             default_timeout=300,  # 5 min job timeout
         )
         logger.info(f"Created queue: {queue_name}")
-    
+
     return _queues[queue_name]
 
 
@@ -67,13 +68,12 @@ def get_priority_queue(priority: EmailPriority) -> rq.Queue:
     return get_queue(name)
 
 
-def enqueue_job(job, queue: Optional[rq.Queue] = None) -> str:
+def enqueue_job(job, queue: rq.Queue | None = None) -> str:
     """Enqueue a job and return job ID"""
-    from app.email_engine.queue.job import EmailJob
-    
+
     if queue is None:
         queue = get_priority_queue(job.priority)
-    
+
     # Use RQ's built-in job ID generation
     rq_job = queue.enqueue(
         'app.email_engine.worker.sender.send_email_job',
@@ -86,15 +86,14 @@ def enqueue_job(job, queue: Optional[rq.Queue] = None) -> str:
 
 def enqueue_scheduled(job, scheduled_at: datetime) -> str:
     """Enqueue job for future execution"""
-    from app.email_engine.queue.job import EmailJob
-    
+
     queue = get_scheduled_queue()
     delay = (scheduled_at - datetime.utcnow()).total_seconds()
-    
+
     if delay <= 0:
         # Already due, enqueue immediately
         return enqueue_job(job)
-    
+
     rq_job = queue.enqueue_in(
         delay,
         'app.email_engine.worker.sender.send_email_job',

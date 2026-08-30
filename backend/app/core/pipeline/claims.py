@@ -3,17 +3,17 @@ Atomic Claim Logic for Follow-up Sending
 Prevents duplicate sends via atomic UPDATE ... WHERE stage = expected
 """
 
-from typing import Optional, Tuple
-from datetime import datetime
-from app.database import get_db_connection
 import logging
+from datetime import datetime
+
+from app.database import get_db_connection
 
 logger = logging.getLogger(__name__)
 
 
 class LeadClaimer:
     """Handles atomic claim-before-send for follow-ups"""
-    
+
     @staticmethod
     def claim_for_followup(
         lead_id: int,
@@ -37,8 +37,8 @@ class LeadClaimer:
                     last_outreach_subject = %s,
                     email_status = 'SENT',
                     updated_at = NOW()
-                WHERE id = %s 
-                  AND followup_stage = %s 
+                WHERE id = %s
+                  AND followup_stage = %s
                   AND followup_status = 'ACTIVE'
             """, (new_stage, new_status, subject, lead_id, expected_stage))
             conn.commit()
@@ -50,18 +50,18 @@ class LeadClaimer:
             return claimed
         except Exception as e:
             conn.rollback()
-            logger.error(f"Claim failed for lead {lead_id}: {e}")
+            logger.exception(f"Claim failed for lead {lead_id}: {e}")
             raise
         finally:
             cur.close()
             conn.close()
-    
+
     @staticmethod
     def rollback_claim(
         lead_id: int,
         old_stage: int,
-        old_last_outreach_at: Optional[datetime],
-        old_last_subject: Optional[str]
+        old_last_outreach_at: datetime | None,
+        old_last_subject: str | None
     ) -> bool:
         """
         Rollback a failed send - restore previous stage and timer.
@@ -85,12 +85,12 @@ class LeadClaimer:
             return rolled_back
         except Exception as e:
             conn.rollback()
-            logger.error(f"Rollback failed for lead {lead_id}: {e}")
+            logger.exception(f"Rollback failed for lead {lead_id}: {e}")
             raise
         finally:
             cur.close()
             conn.close()
-    
+
     @staticmethod
     def complete_sequence(lead_id: int) -> bool:
         """Mark follow-up sequence as completed"""
@@ -110,14 +110,14 @@ class LeadClaimer:
             return completed
         except Exception as e:
             conn.rollback()
-            logger.error(f"Complete sequence failed for lead {lead_id}: {e}")
+            logger.exception(f"Complete sequence failed for lead {lead_id}: {e}")
             raise
         finally:
             cur.close()
             conn.close()
-    
+
     @staticmethod
-    def save_thread_ids(lead_id: int, thread_id: Optional[str], message_id: Optional[str]) -> bool:
+    def save_thread_ids(lead_id: int, thread_id: str | None, message_id: str | None) -> bool:
         """Save Gmail thread/message IDs after successful send"""
         if not thread_id and not message_id:
             return True
@@ -135,14 +135,14 @@ class LeadClaimer:
             return True
         except Exception as e:
             conn.rollback()
-            logger.error(f"Failed to save thread IDs for lead {lead_id}: {e}")
+            logger.exception(f"Failed to save thread IDs for lead {lead_id}: {e}")
             return False
         finally:
             cur.close()
             conn.close()
-    
+
     @staticmethod
-    def log_activity(lead_id: int, action: str, details: str, performed_by: str = "system", user_id: Optional[int] = None):
+    def log_activity(lead_id: int, action: str, details: str, performed_by: str = "system", user_id: int | None = None):
         """Log activity for audit trail"""
         from app.models.lead import add_activity_log
         try:

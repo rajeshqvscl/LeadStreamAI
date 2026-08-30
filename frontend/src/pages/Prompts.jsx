@@ -271,6 +271,10 @@ const Prompts = () => {
 
   const renderEmailPreview = (text, _showSigDisc = true, isFollowup = false) => {
     if (!text) return '<p class="text-slate-500 italic">(empty)</p>';
+    // Read image dimensions fresh from localStorage so Settings changes apply
+    const _su = JSON.parse(localStorage.getItem('user') || localStorage.getItem('user_admin') || '{}');
+    const _imgW = _su?.image_width || '400px';
+    const _imgH = _su?.image_height || 'auto';
     const _backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
     // Resolve sender placeholders (needed regardless of HTML/markdown)
     const firstName = userSenderName.split(' ')[0] || userSenderName;
@@ -287,8 +291,16 @@ const Prompts = () => {
         .replace(/^SIG_START\n?/gm, '')
         .replace(/\n?SIG_END\n?/gm, '')
         .replace(/<img\s+[^>]*src="data:image\/[^"]*"[^>]*>/gi, (m) => {
-          if (/style\s*=\s*"/i.test(m)) return m.replace(/style\s*=\s*"([^"]*)"/i, 'style="width:400px;height:auto;display:block;"');
-          return m.replace('<img', '<img style="width:400px;height:auto;display:block;"');
+          m = m.replace(/\s+width="[^"]*"/gi, '').replace(/\s+height="[^"]*"/gi, '');
+          m = m.replace(/\s+width='[^']*'/gi, '').replace(/\s+height='[^']*'/gi, '');
+          if (/style\s*=\s*["']/i.test(m)) {
+            return m.replace(/style\s*=\s*["']([^"']*)["']/i, (sm, existing) => {
+              let cleaned = existing.replace(/width\s*:\s*[^;]+;?/gi, '').replace(/height\s*:\s*[^;]+;?/gi, '').replace(/max-width\s*:\s*[^;]+;?/gi, '').replace(/;\s*;/g, ';').trim();
+              if (cleaned && !cleaned.endsWith(';')) cleaned += ';';
+              return `style="${cleaned}width:${_imgW};height:${_imgH};display:block;"`;
+            });
+          }
+          return m.replace('<img', `<img style="width:${_imgW};height:${_imgH};display:block;"`);
         })
         .replace(/background(?:-color)?\s*:\s*[^;]+;?\s*/gi, '')
         .replace(/bgcolor\s*=\s*["'][^"']*["']\s*/gi, '')
@@ -401,7 +413,7 @@ const Prompts = () => {
           return `<em>${inner}</em>`;
         });
         // Handle markdown images ![alt](url) and links [text](url)
-        content = content.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0;" />');
+        content = content.replace(/!\[(.*?)\]\((.*?)\)/g, `<img src="$2" alt="$1" style="width:${_imgW};height:${_imgH};border-radius:8px;margin:8px 0;" />`);
         content = content.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color:#3b82f6; text-decoration:underline;">$1</a>');
         htmlParts.push(`<p style="margin-bottom: 1em; color: #cbd5e1;">${content}</p>`);
       }

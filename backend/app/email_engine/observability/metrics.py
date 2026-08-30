@@ -3,17 +3,17 @@ Metrics Export and Collection
 Re-exports worker metrics and adds email-engine specific metrics
 """
 
+# Email engine specific metrics
+from prometheus_client import CollectorRegistry, Counter, Histogram
+
 from app.email_engine.worker.metrics import (
     MetricsCollector,
-    timed_operation,
-    jobs_enqueued,
     jobs_completed,
+    jobs_enqueued,
     jobs_failed,
     send_duration,
+    timed_operation,
 )
-
-# Email engine specific metrics
-from prometheus_client import Counter, Histogram, Gauge, CollectorRegistry
 
 email_engine_registry = CollectorRegistry()
 

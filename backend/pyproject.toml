@@ -1,0 +1,153 @@
+[project]
+name = "leadstreamai-backend"
+version = "1.0.0"
+description = "LeadStreamAI Backend API"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic-settings",
+    "psycopg2-binary",
+    "python-dotenv",
+    "requests",
+    "httpx",
+    "anthropic",
+    "structlog",
+    "gunicorn",
+    "resend",
+    "google-api-python-client>=2.120",
+    "google-auth-oauthlib",
+    "google-auth",
+    "google-cloud-pubsub",
+    "google-generativeai==0.8.3",
+    "google-ai-generativelanguage==0.6.10",
+    "markdown",
+    "groq",
+    "redis",
+    "python-multipart",
+    "bcrypt",
+    "certifi",
+    "alembic",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=5.0.0",
+    "pytest-mock>=3.12.0",
+    "httpx>=0.27.0",
+    "faker>=25.0.0",
+    "ruff>=0.5.0",
+    "mypy>=1.10.0",
+    "types-requests>=2.31.0",
+    "types-python-dotenv>=0.15.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["app"]
+exclude = ["migrations", "scripts", "scratch", "assets", "static", "__pycache__", ".venv", "venv"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "UP",
+    "B",
+    "C4",
+    "SIM",
+    "T20",
+    "ARG",
+    "PTH",
+    "ERA",
+    "PL",
+    "TRY",
+]
+ignore = [
+    "E501",
+    "B008",
+    "SIM113",
+    "T201",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["T201", "S101"]
+"scratch/*" = ["T201", "S101"]
+"tests/*" = ["S101", "T201"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+strict_optional = true
+ignore_missing_imports = true
+follow_imports = "skip"
+exclude = ["migrations", "scripts", "scratch", "tests"]
+
+[[tool.mypy.overrides]]
+modules = [
+    "pydantic*",
+    "fastapi*",
+    "psycopg2*",
+    "google*",
+    "anthropic*",
+    "groq*",
+    "redis*",
+    "structlog*",
+    "httpx*",
+    "requests*",
+    "certifi*",
+    "alembic*",
+    "bcrypt*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow tests",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "*/migrations/*",
+    "*/scripts/*",
+    "*/scratch/*",
+    "*/tests/*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]

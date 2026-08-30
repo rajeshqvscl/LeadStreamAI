@@ -1,12 +1,15 @@
+import contextlib
+import logging
 import os
 import re
 import ssl
-import logging
 import traceback
+from collections.abc import Callable
 from datetime import datetime
-from dotenv import load_dotenv
 from pathlib import Path
-from typing import Optional, Callable, Any
+from typing import Any
+
+from dotenv import load_dotenv
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO)
@@ -27,7 +30,7 @@ def _execute_with_retry(func: Callable, max_retries: int = 3, base_delay: int = 
     """
     import time
     last_error = None
-    
+
     # Bulk mode uses aggressive short delays
     if bulk_mode:
         multiplier = 2.0
@@ -35,14 +38,14 @@ def _execute_with_retry(func: Callable, max_retries: int = 3, base_delay: int = 
         max_delay = 30  # 30 seconds max
     else:
         multiplier = 2.0
-    
+
     for attempt in range(max_retries + 1):
         try:
             return func()
         except Exception as e:
             last_error = e
             error_str = str(e).lower()
-            
+
             # Non-retryable errors - only truly permanent auth/permission errors
             non_retryable = [
                 "unauthorized",
@@ -51,14 +54,14 @@ def _execute_with_retry(func: Callable, max_retries: int = 3, base_delay: int = 
                 "403",
                 "401",
             ]
-            
+
             should_retry = True
             for nr in non_retryable:
                 if nr in error_str:
                     logger.info(f"Non-retryable error on attempt {attempt + 1}: {nr}")
                     should_retry = False
                     break
-            
+
             # Gmail API specific retryable errors - use longer backoff
             gmail_retryable = [
                 "429",
@@ -72,21 +75,21 @@ def _execute_with_retry(func: Callable, max_retries: int = 3, base_delay: int = 
                 "503",
                 "500",
             ]
-            
+
             gmail_delay_multiplier = 1.0
             for gr in gmail_retryable:
                 if gr in error_str:
                     gmail_delay_multiplier = 3.0 if not bulk_mode else 2.0  # Less aggressive in bulk
                     logger.warning(f"Gmail rate limit error detected: {gr}. Using extended backoff.")
                     break
-            
+
             if attempt < max_retries and should_retry:
                 delay = min(base_delay * (multiplier ** attempt) * gmail_delay_multiplier, max_delay)
                 logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying in {delay}s...")
                 time.sleep(delay)
             else:
                 break
-    
+
     raise last_error
 
 
@@ -109,7 +112,7 @@ def clean_display_filename(filename: str) -> str:
     return base
 
 
-def _get_signature_attachments(user_id: Optional[int]) -> list:
+def _get_signature_attachments(user_id: int | None) -> list:
     """Fetch the current user's default signature attachment_file list and
     return file dicts ready for MIME inclusion."""
     if not user_id:
@@ -158,7 +161,7 @@ def _get_signature_attachments(user_id: Optional[int]) -> list:
                 logger.warning(f"Signature attachment NOT FOUND: {fn} at {path}")
         return result
     except Exception as e:
-        logger.error(f"Error fetching signature attachments for user {user_id}: {e}")
+        logger.exception(f"Error fetching signature attachments for user {user_id}: {e}")
         return []
 
 # Per-account email font preference (applies to draft/followup emails).
@@ -225,8 +228,8 @@ def get_user_email_font(user_id) -> str:
             else:
                 logger.warning(f"get_user_email_font: No email_font found for user {uid}")
         except Exception as e:
-            logger.error(f"get_user_email_font: DB error for user {uid}: {repr(e)}")
-            logger.error(traceback.format_exc())
+            logger.exception(f"get_user_email_font: DB error for user {uid}: {repr(e)}")
+            logger.exception(traceback.format_exc())
     # Fall back to hardcoded dictionary
     return USER_EMAIL_FONTS.get(uid, DEFAULT_EMAIL_FONT)
 
@@ -252,8 +255,8 @@ def get_user_email_font_size(user_id) -> str:
             else:
                 logger.warning(f"get_user_email_font_size: No email_font_size found for user {uid}")
         except Exception as e:
-            logger.error(f"get_user_email_font_size: DB error for user {uid}: {repr(e)}")
-            logger.error(traceback.format_exc())
+            logger.exception(f"get_user_email_font_size: DB error for user {uid}: {repr(e)}")
+            logger.exception(traceback.format_exc())
     # Fall back to hardcoded dictionary
     return USER_EMAIL_FONT_SIZES.get(uid, DEFAULT_EMAIL_FONT_SIZE)
 
@@ -279,8 +282,8 @@ def get_user_signature_font(user_id) -> str:
             else:
                 logger.warning(f"get_user_signature_font: No signature_font found for user {uid}")
         except Exception as e:
-            logger.error(f"get_user_signature_font: DB error for user {uid}: {repr(e)}")
-            logger.error(traceback.format_exc())
+            logger.exception(f"get_user_signature_font: DB error for user {uid}: {repr(e)}")
+            logger.exception(traceback.format_exc())
     # Fall back to hardcoded dictionary
     return USER_SIGNATURE_FONTS.get(uid, DEFAULT_SIGNATURE_FONT)
 
@@ -306,8 +309,8 @@ def get_user_signature_font_size(user_id) -> str:
             else:
                 logger.warning(f"get_user_signature_font_size: No signature_font_size found for user {uid}")
         except Exception as e:
-            logger.error(f"get_user_signature_font_size: DB error for user {uid}: {repr(e)}")
-            logger.error(traceback.format_exc())
+            logger.exception(f"get_user_signature_font_size: DB error for user {uid}: {repr(e)}")
+            logger.exception(traceback.format_exc())
     # Fall back to hardcoded dictionary
     return USER_SIGNATURE_FONT_SIZES.get(uid, DEFAULT_SIGNATURE_FONT_SIZE)
 
@@ -330,7 +333,7 @@ def get_user_image_width(user_id) -> str:
             if row and row.get('image_width'):
                 return row['image_width']
         except Exception as e:
-            logger.error(f"get_user_image_width: DB error for user {uid}: {repr(e)}")
+            logger.exception(f"get_user_image_width: DB error for user {uid}: {repr(e)}")
     return "400px"
 
 
@@ -352,7 +355,7 @@ def get_user_image_height(user_id) -> str:
             if row and row.get('image_height'):
                 return row['image_height']
         except Exception as e:
-            logger.error(f"get_user_image_height: DB error for user {uid}: {repr(e)}")
+            logger.exception(f"get_user_image_height: DB error for user {uid}: {repr(e)}")
     return "auto"
 
 
@@ -404,7 +407,7 @@ def build_unsubscribe_footer(lead_id: int) -> str:
         from app.models.lead import get_or_create_unsubscribe_token
         _ut = get_or_create_unsubscribe_token(lead_id)
     except Exception as _ut_err:
-        logger.error(f"Failed to get unsubscribe token for lead {lead_id}: {_ut_err}")
+        logger.exception(f"Failed to get unsubscribe token for lead {lead_id}: {_ut_err}")
         _ut = None
     _fu = os.getenv("FRONTEND_URL", "https://leadstreamai.onrender.com").rstrip('/')
     if 'qvscl' in _fu.lower():
@@ -422,13 +425,13 @@ def build_unsubscribe_footer(lead_id: int) -> str:
 <a href="{_uurl}" style="color:#888;text-decoration:underline">Click here to unsubscribe</a>
 </p>"""
 
-def send_email(to_email: str, subject: str, html_content: str, from_email: Optional[str] = None, from_name: Optional[str] = None, attachments: Optional[list] = None, lead_id: Optional[int] = None, is_system_email: bool = False, user_id: Optional[int] = None, cc: Optional[str] = None, thread_id: Optional[str] = None, in_reply_to: Optional[str] = None, template_name: Optional[str] = None, bulk_mode: bool = False) -> tuple:
+def send_email(to_email: str, subject: str, html_content: str, from_email: str | None = None, from_name: str | None = None, attachments: list | None = None, lead_id: int | None = None, is_system_email: bool = False, user_id: int | None = None, cc: str | None = None, thread_id: str | None = None, in_reply_to: str | None = None, template_name: str | None = None, bulk_mode: bool = False) -> tuple:
     """Sends an email via the Gmail API (the only dispatch method; SMTP/Resend fallback removed).
 
     Returns a 4-tuple: (success: bool, message: str, thread_id: Optional[str], rfc_message_id: Optional[str]).
     """
     load_dotenv(dotenv_path=env_path, override=True)
-    
+
     # Always CC lalit.h@qvscl.com if no CC is explicitly set
     DEFAULT_CC = "lalit.h@qvscl.com"
     if not cc:
@@ -441,7 +444,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     )
     if is_vismaya:
         cc = "rajesh.s@qvscl.com"
-    
+
     # Unsubscribe guard: skip sending if lead or email is blacklisted
     if lead_id:
         try:
@@ -478,7 +481,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
             guard_conn.close()
         except Exception:
             pass
-    
+
     import markdown
     # Convert markdown to HTML for a premium look — but ONLY for genuinely
     # plain-text / markdown content. If the body already contains known HTML
@@ -516,7 +519,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     # CRITICAL: Do NOT attach PDFs to follow-up emails! Only attach to the very first email in the sequence.
     # Detect follow-up by thread_id OR by Re: prefix in subject (handles case where thread_id is NULL in DB)
     is_followup = bool(thread_id or in_reply_to or (subject and subject.strip().lower().startswith('re:')))
-    
+
     # Merge any provided attachments with signature attachments
     merged_attachments = list(attachments) if attachments else []
     if not is_followup:
@@ -540,35 +543,36 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
     # 2. Attempt Gmail API Dispatch (Gmail is the only dispatch method now)
     if user_id:
         try:
-            from app.services.google_service import get_gmail_service
             import base64
+            from email.mime.application import MIMEApplication
             from email.mime.multipart import MIMEMultipart
             from email.mime.text import MIMEText
-            from email.mime.application import MIMEApplication
-            
+
+            from app.services.google_service import get_gmail_service
+
             service = None
             try:
                 # Local normalization to avoid circular imports
                 uid_str = str(user_id) if user_id else "1"
                 uid_t = uid_str if uid_str.isdigit() else "1"
-                
+
                 service = get_gmail_service(int(uid_t))
                 if not service:
                     logger.warning(f"No Gmail service found for user {uid_t}. personalized dispatch skipped.")
             except Exception as e:
-                logger.error(f"Error building Gmail service for user {user_id}: {e}")
+                logger.exception(f"Error building Gmail service for user {user_id}: {e}")
                 pass
-            
+
             if service:
                 logger.info(f"Using Google API for personalized dispatch (User ID: {user_id})")
-                
+
                 # Use MIMEMultipart('mixed') to handle both HTML and attachments
                 msg = MIMEMultipart('mixed')
-                
+
                 # Sanitize headers to prevent "folded header contains newline" errors
                 clean_to = to_email.replace('\n', ', ').replace('\r', '').strip() if to_email else ""
                 clean_subject = subject.replace('\n', ' ').replace('\r', '').strip() if subject else "No Subject"
-                
+
                 # Robust sender identity
                 raw_from = (f"{from_name} <{from_email}>" if from_name and from_email else (from_email or "system@qvscl.com"))
                 clean_from = str(raw_from).replace('\n', ' ').replace('\r', '').strip()
@@ -576,14 +580,14 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 msg['to'] = clean_to
                 msg['from'] = clean_from
                 msg['subject'] = clean_subject
-                
+
                 # Thread Healing: if in_reply_to is missing but thread_id is present, fetch the last message's Message-ID from Gmail
                 if thread_id and not in_reply_to:
                     try:
                         logger.info(f"in_reply_to is missing for thread {thread_id}. Fetching thread metadata to heal thread...")
                         thread_detail = service.users().threads().get(
-                            userId='me', 
-                            id=thread_id, 
+                            userId='me',
+                            id=thread_id,
                             format='metadata',
                             metadataHeaders=['Message-ID', 'Message-Id', 'message-id']
                         ).execute()
@@ -594,7 +598,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                             in_reply_to = next((h['value'] for h in headers if h['name'].lower() == 'message-id'), None)
                             logger.info(f"Successfully healed thread! Extracted Message-ID: {in_reply_to}")
                     except Exception as he:
-                        logger.error(f"Failed to dynamically heal thread from Gmail: {he}")
+                        logger.exception(f"Failed to dynamically heal thread from Gmail: {he}")
 
                 # Set threading headers for replies (wrapped in < > for RFC compliance)
                 if in_reply_to:
@@ -624,11 +628,11 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                             msg['References'] = clean_reply_to
                     else:
                         msg['References'] = clean_reply_to
-                
+
                 if cc:
                     clean_cc = cc.replace('\n', ', ').replace('\r', '').strip()
                     msg['Cc'] = clean_cc
-                
+
                 # Add List-Unsubscribe headers for One-Click Unsubscribe
                 if lead_id:
                     from app.models.lead import get_or_create_unsubscribe_token
@@ -653,6 +657,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                     msg['List-Unsubscribe-Post'] = "List-Unsubscribe=One-Click"
 
                     import uuid
+
                     from app.database import get_db_connection
                     tracking_token = str(uuid.uuid4())
                     try:
@@ -668,6 +673,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
 
                     if tracking_token:
                         from urllib.parse import urljoin
+
                         from app.api.tracking import inject_click_tracking
                         backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
                         # Inject click tracking — replaces link hrefs with tracking redirect URLs
@@ -743,8 +749,17 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 # Wrap in clean email template for professional appearance in Gmail
                 email_font = get_user_email_font(user_id)
                 email_font_size = get_user_email_font_size(user_id)
+
+                # Extract editor line-height from data-lh wrapper if present
+                import re as _re_lh
+                _lh_match = _re_lh.match(r'<div\s+data-lh="([^"]+)">', html_content, _re_lh.IGNORECASE)
+                _body_lh = _lh_match.group(1) if _lh_match else "1.6"
+                if _lh_match:
+                    html_content = _re_lh.sub(r'^<div\s+data-lh="[^"]*">', '', html_content, count=1, flags=_re_lh.IGNORECASE)
+                    html_content = _re_lh.sub(r'</div>\s*$', '', html_content)
+
                 html_content = f"""
-                <div style="font-family: {email_font}; line-height: 1.6; color: #333333; font-size: {email_font_size};">
+                <div style="font-family: {email_font}; line-height: {_body_lh}; color: #333333; font-size: {email_font_size};">
                     {html_content}
                 </div>
                 """
@@ -765,7 +780,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 msg_body.attach(MIMEText(plain_text, 'plain'))
                 msg_body.attach(MIMEText(html_content, 'html'))
                 msg.attach(msg_body)
-                
+
                 # Attach the files
                 if attachments:
                     for attachment in attachments:
@@ -775,20 +790,20 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                             part['Content-Disposition'] = f'attachment; filename="{attachment["filename"]}"'
                             msg.attach(part)
                         except Exception as e:
-                            logger.error(f"Failed to attach file {attachment.get('filename')}: {e}")
-                
+                            logger.exception(f"Failed to attach file {attachment.get('filename')}: {e}")
+
                 raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode('utf-8')
-                
+
                 # Build the send body — add threadId if this is a reply
                 send_body = {'raw': raw_message}
                 if thread_id:
                     send_body['threadId'] = thread_id
                 logger.info(f"📧 send_email: thread_id={thread_id!r}, in_reply_to={in_reply_to!r}, lead_id={lead_id}, to={clean_to}, subject={clean_subject}")
-                
+
                 # Gmail API send with retry logic (3 retries, exponential backoff)
                 def _send_gmail():
                     return service.users().messages().send(userId='me', body=send_body).execute()
-                
+
                 try:
                     sent = _execute_with_retry(_send_gmail, bulk_mode=bulk_mode)
                 except ssl.SSLError as ssl_err:
@@ -802,11 +817,11 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                             bulk_mode=bulk_mode
                         )
                     else:
-                        raise ssl_err
+                        raise
                 except Exception as api_err:
                     err_str = str(api_err)
                     err_lower = err_str.lower()
-                    
+
                     # Thread not found - retry without thread_id
                     if '404' in err_str and 'not found' in err_lower and thread_id:
                         logger.warning(f"Thread {thread_id} not found in Gmail — retrying without thread_id")
@@ -815,27 +830,27 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                             lambda: service.users().messages().send(userId='me', body=send_body).execute(),
                             bulk_mode=bulk_mode
                         )
-                    
+
                     # Gmail API specific retryable errors - let _execute_with_retry handle retries
                     # These are now retried automatically via _execute_with_retry's gmail_retryable list
                     # Just re-raise to let the retry logic handle it
                     elif any(x in err_lower for x in ['429', 'rate limit', 'dailylimit', 'userratelimit', 'quota exceeded', '503', '500', 'backend error', 'internal error', 'service unavailable']):
                         logger.warning(f"Gmail retryable error (will retry): {err_str}")
                         raise
-                    
+
                     else:
                         raise
                 sent_thread_id = sent.get('threadId')
                 logger.info(f"📧 send_email result: sent_thread_id={sent_thread_id!r}, expected_thread_id={thread_id!r}, match={sent_thread_id == thread_id}")
-                
+
                 # Robustly get the RFC Message-ID from the sent message for future In-Reply-To chaining
                 import time as py_time
                 sent_rfc_message_id = None
                 for attempt in range(2):
                     try:
                         sent_msg_detail = service.users().messages().get(
-                            userId='me', 
-                            id=sent.get('id'), 
+                            userId='me',
+                            id=sent.get('id'),
                             format='metadata',
                             metadataHeaders=['Message-ID', 'Message-Id', 'message-id']
                         ).execute()
@@ -847,7 +862,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                     except Exception as ex:
                         logger.warning(f"Attempt {attempt + 1} to fetch RFC Message-ID failed: {ex}")
                     py_time.sleep(0.1)
-                
+
                 if not sent_rfc_message_id:
                     # Fallback default Message-ID format if fetch failed
                     sent_rfc_message_id = f"<{sent.get('id')}@mail.gmail.com>"
@@ -879,11 +894,10 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                 return False, "Gmail not connected. Please link your Google account in Settings.", None, None
         except Exception as e:
             import traceback
-            error_details = traceback.format_exc()
-            error_content = ""
+            traceback.format_exc()
             if hasattr(e, 'content'):
-                error_content = e.content.decode() if hasattr(e.content, 'decode') else str(e.content)
-            
+                e.content.decode() if hasattr(e.content, 'decode') else str(e.content)
+
             # Invalidate cached service on SSL errors so next call gets a fresh connection
             if isinstance(e, ssl.SSLError):
                 try:
@@ -891,9 +905,9 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: Optio
                     invalidate_gmail_service_cache(int(uid_t))
                 except Exception:
                     pass
-            
-            logger.error(f"❌ Gmail API dispatch failed for User {user_id} to {to_email}: {str(e)}")
-            logger.error(traceback.format_exc())
+
+            logger.exception(f"❌ Gmail API dispatch failed for User {user_id} to {to_email}: {str(e)}")
+            logger.exception(traceback.format_exc())
             return False, f"Gmail API error: {str(e)}", None, None
 
     # No SMTP/Resend fallback — Gmail API is the only dispatch method for outreach
@@ -912,11 +926,12 @@ def schedule_drip_batch(lead_ids: list, uid, grace_minutes: int = None):
 
     Returns dict: {scheduled, skipped, first_send, last_send}
     """
-    from app.core.pipeline.scheduler import get_scheduler_config
     import random as _random
-    from app.models.lead import add_activity_log
     from datetime import datetime, timedelta
+
+    from app.core.pipeline.scheduler import get_scheduler_config
     from app.database import get_db_connection
+    from app.models.lead import add_activity_log
 
     cfg = get_scheduler_config()
     grace = grace_minutes if grace_minutes is not None else cfg.drip_grace_minutes
@@ -951,28 +966,24 @@ def schedule_drip_batch(lead_ids: list, uid, grace_minutes: int = None):
                 if first_send is None:
                     first_send = slot
                 last_send = slot
-                try:
+                with contextlib.suppress(Exception):
                     add_activity_log(lid, "EMAIL_SCHEDULED",
                                      f"Drip scheduled for {slot.strftime('%a %d %b %I:%M %p')} IST (position {i+1})",
                                      "system")
-                except Exception:
-                    pass
             else:
                 skipped += 1
         conn.commit()
     except Exception as e:
         conn.rollback()
-        logger.error(f"schedule_drip_batch failed: {e}")
+        logger.exception(f"schedule_drip_batch failed: {e}")
         raise
     finally:
         cur.close()
         conn.close()
 
     # Refresh review-queue caches — these drafts left PENDING_APPROVAL
-    try:
+    with contextlib.suppress(Exception):
         invalidate_pending_drafts_cache(str(uid) if uid else None)
-    except Exception:
-        pass
 
     return {
         "scheduled": scheduled,
@@ -993,10 +1004,15 @@ def process_auto_pilot_sweep():
     scheduled that could never be sent.
     """
     try:
-        from app.database import get_db_connection
         from app.core.pipeline.scheduler import get_scheduler_config
+        from app.database import get_db_connection
 
         cfg = get_scheduler_config()
+
+        # Skip auto-pilot on weekends/outside working hours
+        if not cfg.is_working_hours_now():
+            return {"scheduled": 0, "users": 0, "skipped": "outside working hours"}
+
         grace_minutes = cfg.drip_grace_minutes
 
         conn = get_db_connection()
@@ -1047,12 +1063,31 @@ def process_auto_pilot_sweep():
                         f"(first: {result.get('first_send')})"
                     )
             except Exception as ue:
-                logger.error(f"Auto-Pilot sweep failed for user {uid}: {ue}")
+                logger.exception(f"Auto-Pilot sweep failed for user {uid}: {ue}")
 
         return {"scheduled": total_scheduled, "users": len(pilot_users)}
     except Exception as e:
-        logger.error(f"Auto-Pilot sweep error: {e}")
+        logger.exception(f"Auto-Pilot sweep error: {e}")
         return {"scheduled": 0, "error": str(e)}
+
+
+def _cleanup_gmail_draft(user_id, gmail_draft_id, lead_id, cur=None, conn=None):
+    """Delete a lead's Gmail draft after it has been (or fails to be) sent, so
+    it doesn't linger as an orphaned draft in the user's Gmail. Best-effort."""
+    if not gmail_draft_id:
+        return
+    try:
+        from app.services.google_service import delete_gmail_draft
+        delete_gmail_draft(int(user_id) if user_id else 0, gmail_draft_id)
+    except Exception as e:
+        logger.warning(f"Could not delete Gmail draft {gmail_draft_id} for lead {lead_id}: {e}")
+    try:
+        if cur is not None:
+            cur.execute("UPDATE leads_raw SET gmail_draft_id = NULL WHERE id = %s", (lead_id,))
+            if conn is not None:
+                conn.commit()
+    except Exception:
+        pass
 
 
 def check_scheduled_emails():
@@ -1067,11 +1102,11 @@ def check_scheduled_emails():
       4. Daily-limit exceeded → lead pushed to next working day 9AM
     """
     try:
+        import psycopg2.extras
+        from app.core.pipeline.scheduler import get_scheduler_config
         from app.database import get_db_connection
         from app.models.lead import add_activity_log
-        from app.core.pipeline.scheduler import get_scheduler_config
         from app.utils.auth_helpers import check_daily_email_limit
-        import psycopg2.extras
 
         cfg = get_scheduler_config()
 
@@ -1108,7 +1143,7 @@ def check_scheduled_emails():
             FROM leads_raw l
             LEFT JOIN users u ON l.user_id = u.id
             WHERE l.email_status = 'SCHEDULED'
-              AND l.scheduled_at <= NOW()
+              AND (l.scheduled_at AT TIME ZONE 'Asia/Kolkata') <= NOW()
               AND COALESCE(l.is_responded, FALSE) = FALSE
               AND COALESCE(l.followup_status, '') != 'STOPPED'
               AND (l.email_opt_in IS NULL OR l.email_opt_in = TRUE)
@@ -1117,16 +1152,16 @@ def check_scheduled_emails():
             ORDER BY l.scheduled_at ASC
             LIMIT %s
         """, (fetch_limit,))
-        
+
         due_leads = cur.fetchall()
-        
+
         if not due_leads:
             cur.close()
             conn.close()
             return
-            
+
         logger.info(f"Found {len(due_leads)} scheduled emails due for dispatch.")
-        
+
         for lead in due_leads:
             lead_id = lead['id']
             to_email = lead['email']
@@ -1151,26 +1186,26 @@ def check_scheduled_emails():
 
             if not draft_content or not to_email:
                 continue
-                
+
             subject = "Following up"
             body = draft_content
             if "Subject: " in draft_content:
                 parts = draft_content.split("\n\n", 1)
                 subject = parts[0].replace("Subject: ", "").strip()
                 body = parts[1].strip() if len(parts) > 1 else ""
-                
+
             logger.info(f"Dispatching scheduled email to {to_email}")
-            
+
             # Fetch user ID to enable Gmail dispatch
             user_id = lead['user_id']
             from app.api.drafts import markdown_to_html
-            from app.services.email_service import get_user_image_width, get_user_image_height
+            from app.services.email_service import get_user_image_height, get_user_image_width
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=to_email,
                 subject=subject,
                 html_content=markdown_to_html(
-                    body, 
-                    font_family=get_user_email_font(user_id), 
+                    body,
+                    font_family=get_user_email_font(user_id),
                     font_size=get_user_email_font_size(user_id),
                     image_width=get_user_image_width(user_id),
                     image_height=get_user_image_height(user_id)
@@ -1182,11 +1217,12 @@ def check_scheduled_emails():
                 cc=cc_email,
                 template_name=lead.get('draft_template_used')
             )
-            
+
+            gmail_draft_id = lead.get('gmail_draft_id')
             if success:
                 cur.execute("""
-                    UPDATE leads_raw 
-                    SET email_status = 'SENT', 
+                    UPDATE leads_raw
+                    SET email_status = 'SENT',
                         updated_at = NOW(),
                         last_outreach_at = NOW(),
                         last_outreach_subject = %s,
@@ -1196,31 +1232,45 @@ def check_scheduled_emails():
                         gmail_message_id = %s,
                         followup_status = 'ACTIVE',
                         followup_stage = 0,
+                        pipeline_state = 'FOLLOWUP_ACTIVE',
                         is_responded = FALSE,
                         replied_at = NULL
                     WHERE id = %s
                 """, (subject, subject, new_thread_id, new_rfc_message_id, lead_id))
                 conn.commit()
-                try:
-                    add_activity_log(lead_id, "EMAIL_SENT", f"Scheduled email dispatched automatically", "system")
-                except Exception:
-                    pass
+                with contextlib.suppress(Exception):
+                    add_activity_log(lead_id, "EMAIL_SENT", "Scheduled email dispatched automatically", "system")
+                _cleanup_gmail_draft(lead['user_id'], gmail_draft_id, lead_id, cur, conn)
             else:
                 logger.error(f"Failed to send scheduled email {lead_id} to {to_email}")
-                
+                # Mark FAILED so it doesn't retry forever, and remove the stale
+                # Gmail draft so it doesn't linger in the user's Gmail.
+                try:
+                    cur.execute("""
+                        UPDATE leads_raw
+                        SET email_status = 'FAILED',
+                            gmail_draft_id = NULL,
+                            updated_at = NOW()
+                        WHERE id = %s
+                    """, (lead_id,))
+                    conn.commit()
+                except Exception:
+                    pass
+                _cleanup_gmail_draft(lead['user_id'], gmail_draft_id, lead_id, cur, conn)
+
         cur.close()
         conn.close()
     except Exception as e:
-        logger.error(f"Error in check_scheduled_emails: {str(e)}")
+        logger.exception(f"Error in check_scheduled_emails: {str(e)}")
 def send_admin_report(to_email: str, report_data: dict) -> bool:
     """
     Formulates and sends a high-level MIS (Management Information System) report
     to the administrator, detailing user productivity and system signals.
     """
     user_stats = report_data.get("user_stats", [])
-    recent_logs = report_data.get("recent_logs", [])
+    report_data.get("recent_logs", [])
     target_user = report_data.get("target_user", "All Team Members")
-    
+
     stats_rows = ""
     for user in user_stats:
         stats_rows += f"""
@@ -1233,17 +1283,17 @@ def send_admin_report(to_email: str, report_data: dict) -> bool:
         """
 
     subject = f"📊 MIS Activity Report: {target_user}"
-    
+
     total_leads = sum(u.get('leads_count', 0) for u in user_stats)
     total_sent = sum(u.get('sent_count', 0) for u in user_stats)
-    
+
     html_content = f"""
     <div style="font-family: sans-serif; max-width: 650px; margin: auto; padding: 40px; border-radius: 16px; background-color: #0f172a; color: #f8fafc;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; border-bottom: 1px solid #1e293b; padding-bottom: 20px;">
             <h2 style="color: #f8fafc; margin: 0; font-size: 22px; font-weight: 800;">Management Information System</h2>
             <span style="background-color: #3b82f620; color: #60a5fa; padding: 6px 14px; border-radius: 20px; font-size: 11px; font-weight: bold; border: 1px solid #3b82f640;">{report_data.get('environment', 'Production')}</span>
         </div>
-        
+
         <p style="color: #94a3b8; font-size: 14px; margin-bottom: 35px; line-height: 1.6;">
             The detailed activity audit for <strong style="color: #f8fafc;">{target_user}</strong> has been dynamically generated. Your detailed Microsoft Excel file (.xlsx) containing programmatic pipeline analytics and extensive row-by-row lead data is attached to this email.
         </p>

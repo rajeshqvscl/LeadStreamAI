@@ -1,9 +1,9 @@
-import os
-import json
 import base64
-import structlog
-import tempfile
+import json
+import os
 from pathlib import Path
+
+import structlog
 from dotenv import load_dotenv
 
 env_path = Path(__file__).resolve().parent.parent / ".env"
@@ -56,38 +56,38 @@ Respond with ONLY this JSON structure:
 
 def analyze_template_screenshot(image_base64: str) -> dict:
     """Analyze a template screenshot using Gemini vision API and return extracted template structure."""
-    
+
     try:
         import google.generativeai as genai
         gemini_key = os.getenv("GEMINI_API_KEY")
         if gemini_key:
             genai.configure(api_key=gemini_key)
             model = genai.GenerativeModel("gemini-2.0-flash")
-            
+
             image_data = base64.b64decode(image_base64)
-            
+
             response = model.generate_content([
                 ANALYSIS_PROMPT,
                 {"mime_type": "image/png", "data": image_data}
             ])
-            
+
             text = response.text.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[-1]
                 text = text.rsplit("```", 1)[0].strip()
-            
+
             result = json.loads(text)
             logger.info("template_analysis_success", source="gemini")
             return result
     except Exception as e:
         logger.warning("gemini_vision_failed", error=str(e))
-    
+
     try:
         from anthropic import Anthropic
         anthropic_key = os.getenv("ANTHROPIC_API_KEY")
         if anthropic_key:
             client = Anthropic(api_key=anthropic_key)
-            
+
             response = client.messages.create(
                 model="claude-3-5-sonnet-20240620",
                 max_tokens=4096,
@@ -103,18 +103,18 @@ def analyze_template_screenshot(image_base64: str) -> dict:
                     ]
                 }]
             )
-            
+
             text = response.content[0].text.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[-1]
                 text = text.rsplit("```", 1)[0].strip()
-            
+
             result = json.loads(text)
             logger.info("template_analysis_success", source="claude")
             return result
     except Exception as e:
-        logger.error("all_vision_models_failed", error=str(e))
-    
+        logger.exception("all_vision_models_failed", error=str(e))
+
     return {"subject": "", "body": "", "formatting_notes": "Analysis failed - no vision-capable LLM available"}
 
 
@@ -150,20 +150,21 @@ def analyze_pdf_template(file_bytes: bytes, filename: str) -> dict:
         logger.warning("pymupdf_not_available")
         return {"subject": "", "body": "", "formatting_notes": "PDF analysis requires PyMuPDF (fitz)"}
     except Exception as e:
-        logger.error("pdf_analysis_failed", error=str(e))
+        logger.exception("pdf_analysis_failed", error=str(e))
         return {"subject": "", "body": "", "formatting_notes": f"PDF analysis failed: {str(e)}"}
 
 
 def analyze_docx_template(file_bytes: bytes, filename: str) -> dict:
     """Extract text from DOCX and structure it via LLM."""
     try:
-        from docx import Document
         import io
+
+        from docx import Document
         doc = Document(io.BytesIO(file_bytes))
         full_text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
         if not full_text.strip():
             return {"subject": "", "body": "", "formatting_notes": "No text found in document"}
-        
+
         try:
             import google.generativeai as genai
             gemini_key = os.getenv("GEMINI_API_KEY")
@@ -178,11 +179,11 @@ def analyze_docx_template(file_bytes: bytes, filename: str) -> dict:
                 return json.loads(text)
         except Exception as e:
             logger.warning("gemini_text_failed", error=str(e))
-        
+
         return {"subject": "", "body": full_text, "formatting_notes": "Extracted from DOCX (no LLM formatting)"}
     except ImportError:
         logger.warning("python_docx_not_available")
         return {"subject": "", "body": "", "formatting_notes": "DOCX analysis requires python-docx"}
     except Exception as e:
-        logger.error("docx_analysis_failed", error=str(e))
+        logger.exception("docx_analysis_failed", error=str(e))
         return {"subject": "", "body": "", "formatting_notes": f"DOCX analysis failed: {str(e)}"}

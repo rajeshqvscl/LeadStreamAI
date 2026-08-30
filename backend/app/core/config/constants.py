@@ -1,21 +1,19 @@
-import re
-from typing import Dict, List, Tuple
 
 
-INVESTOR_KEYWORDS: List[str] = [
+INVESTOR_KEYWORDS: list[str] = [
     "venture", "capital", "equity", "partners", "investor", "investment", "vc ",
     "asset management", "family office", "private equity", "hedge fund", "mutual fund",
     "angel investor", "seed fund", "growth fund", "impact investor", "strategic investor",
     "vc,", "vc.", "vc)", "vc]",
 ]
 
-CLIENT_KEYWORDS: List[str] = [
+CLIENT_KEYWORDS: list[str] = [
     "saas", "fintech", "software", "client", "customer", "product", "services",
     "b2b", "enterprise", "platform", "solution", "technology", "tech",
 ]
 
 
-INVESTOR_SECTORS: Dict[str, List[str]] = {
+INVESTOR_SECTORS: dict[str, list[str]] = {
     "VC - Early Stage": ["seed", "pre-seed", "angel", "first check", "early stage", "series a", "pre-series"],
     "VC - Growth": ["series b", "series c", "growth", "late stage", "scale-up"],
     "Private Equity": ["pe ", "private equity", "buyout", "lbo", "growth equity"],
@@ -29,7 +27,7 @@ INVESTOR_SECTORS: Dict[str, List[str]] = {
     "Impact Investor": ["impact investor", "impact fund", "esg fund", "sustainable investment"],
 }
 
-CLIENT_SECTORS: Dict[str, List[str]] = {
+CLIENT_SECTORS: dict[str, list[str]] = {
     "SaaS": ["saas", "software as a service", "subscription software", "cloud platform", "b2b software", "crm", "erp", "project management"],
     "FinTech": ["fintech", "payment", "banking", "finance", "wealthtech", "insurtech", "crypto", "blockchain", "wallet", "lending", "neobank"],
     "AI & ML": ["artificial intelligence", " ai ", "machine learning", " ml ", "neural network", "generative ai", " llm ", "model"],
@@ -53,7 +51,7 @@ CLIENT_SECTORS: Dict[str, List[str]] = {
     "DevTools": ["devtools", "developer tools", "api", "sdk", "ci/cd", "github", "gitlab"],
 }
 
-OWNER_OVERRIDES: Dict[str, Tuple[str, str]] = {
+OWNER_OVERRIDES: dict[str, tuple[str, str]] = {
     "yashika": ("INVESTOR", "Investor - General"),
     "kajal": ("INVESTOR", "Investor - General"),
     "ayush": ("INVESTOR", "Investor - General"),
@@ -61,7 +59,7 @@ OWNER_OVERRIDES: Dict[str, Tuple[str, str]] = {
     "vismaya": ("CLIENT", "Other"),
 }
 
-DEFAULT_TEMPLATES: Dict[str, Dict[int, str]] = {
+DEFAULT_TEMPLATES: dict[str, dict[int, str]] = {
     "CLIENT": {
         1: "Hi {name},\n\nI hope you're having a good week.\n\nI'm just following up on my previous email regarding the collaboration we discussed. Would love to hear your thoughts on this when you have a moment.",
         2: "Hi {name},\n\nFollowing up on my last note. I'm confident that our platform can add significant value to your current workflow, especially given your focus in the sector.\n\nAre you available for a brief 5-10 minute sync later this week to explore this?",
@@ -165,7 +163,7 @@ Thank you sincerely for your time and consideration.""",
     },
 }
 
-DECLINE_PATTERNS: List[Tuple[str, str]] = [
+DECLINE_PATTERNS: list[tuple[str, str]] = [
     (r"\bwe\s+will\s+pass\s+on\s+this\s+opportunity\b", "We will pass on this opportunity"),
     (r"\bpass\s+on\s+this\s+opportunity\b", "Pass on this opportunity"),
     (r"\bwe\s+only\s+invest\s+in\b", "We only invest in"),
@@ -186,7 +184,7 @@ DECLINE_PATTERNS: List[Tuple[str, str]] = [
     (r"\bnot\s+a\s+good\s+fit\b", "Not a good fit"),
 ]
 
-CAMPAIGN_RULES: List[Tuple[str, str]] = [
+CAMPAIGN_RULES: list[tuple[str, str]] = [
     ("INVESTOR_PALAK_ADVISORY", "corporate advisory"),
     ("INVESTOR_KAJAL_HEALTH_ECOSYSTEM", "kajal_mam_health_ecosystem"),
     ("INVESTOR_KAJAL_JV", "kajal_mam_jv"),
@@ -203,18 +201,18 @@ CAMPAIGN_RULES: List[Tuple[str, str]] = [
     ("INVESTOR_KAJAL_GENERIC", "kajal_mam_agritech"),
 ]
 
-LOGO_FORCED_STYLES: Dict[str, str] = {
+LOGO_FORCED_STYLES: dict[str, str] = {
     "upload_1786095549294_2711.webp": "width:100px;height:100px;object-fit:contain;display:block;",
 }
 
-USER_EMAIL_FONTS: Dict[int, str] = {
+USER_EMAIL_FONTS: dict[int, str] = {
     2: "Arial, sans-serif",
     3: "sans-serif",
     4: "sans-serif",
     5: "sans-serif",
 }
 
-USER_EMAIL_FONT_SIZES: Dict[int, str] = {
+USER_EMAIL_FONT_SIZES: dict[int, str] = {
     2: "18px",
     3: "14px",
     4: "15px",

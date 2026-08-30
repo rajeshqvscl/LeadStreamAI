@@ -1,5 +1,5 @@
-import psycopg2
 from app.database import get_db_connection
+
 
 def get_all_prompts():
     conn = get_db_connection()
@@ -42,10 +42,10 @@ def update_prompt(prompt_id, data):
         if k in allowed:
             fields.append(f"{k} = %s")
             values.append(v)
-    
+
     if not fields:
         return False
-        
+
     values.append(prompt_id)
     cur.execute(f"UPDATE prompts SET {', '.join(fields)}, updated_at = NOW() WHERE id = %s", tuple(values))
     conn.commit()

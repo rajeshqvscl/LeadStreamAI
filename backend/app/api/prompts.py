@@ -1,11 +1,11 @@
 import os
 import shutil
-from fastapi import APIRouter, HTTPException, Header, UploadFile, File, Request
-from typing import Optional
-from pydantic import BaseModel
-from app.models.prompt import get_all_prompts, create_prompt, update_prompt, delete_prompt
-from app.database import get_db_connection
+
 import psycopg2.extras
+from app.database import get_db_connection
+from app.models.prompt import create_prompt, delete_prompt, get_all_prompts, update_prompt
+from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile
+from pydantic import BaseModel
 
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets")
 os.makedirs(ASSETS_DIR, exist_ok=True)
@@ -16,32 +16,32 @@ class PromptBase(BaseModel):
     name: str
     prompt_type: str
     content: str
-    description: Optional[str] = None
-    is_active: Optional[bool] = True
+    description: str | None = None
+    is_active: bool | None = True
 
 class PromptCreate(BaseModel):
     name: str
     content: str
-    description: Optional[str] = None
-    followup_1: Optional[str] = None
-    followup_2: Optional[str] = None
-    followup_3: Optional[str] = None
-    subject: Optional[str] = None
-    cc: Optional[str] = None
-    followup_count: Optional[int] = 3
+    description: str | None = None
+    followup_1: str | None = None
+    followup_2: str | None = None
+    followup_3: str | None = None
+    subject: str | None = None
+    cc: str | None = None
+    followup_count: int | None = 3
 
 class PromptUpdate(BaseModel):
-    name: Optional[str] = None
-    prompt_type: Optional[str] = None
-    content: Optional[str] = None
-    description: Optional[str] = None
-    is_active: Optional[bool] = None
-    followup_1: Optional[str] = None
-    followup_2: Optional[str] = None
-    followup_3: Optional[str] = None
-    subject: Optional[str] = None
-    cc: Optional[str] = None
-    followup_count: Optional[int] = None
+    name: str | None = None
+    prompt_type: str | None = None
+    content: str | None = None
+    description: str | None = None
+    is_active: bool | None = None
+    followup_1: str | None = None
+    followup_2: str | None = None
+    followup_3: str | None = None
+    subject: str | None = None
+    cc: str | None = None
+    followup_count: int | None = None
 
 @router.get("/prompts")
 def list_prompts():
@@ -84,16 +84,16 @@ def get_prompt_by_name(name: str):
 @router.post("/prompts")
 def add_prompt(prompt: PromptBase):
     prompt_id = create_prompt(
-        prompt.name, 
-        prompt.prompt_type, 
-        prompt.content, 
-        prompt.description, 
+        prompt.name,
+        prompt.prompt_type,
+        prompt.content,
+        prompt.description,
         prompt.is_active
     )
     return {"id": prompt_id, "message": "Prompt created successfully"}
 
 @router.post("/custom-draft-templates")
-def create_custom_template(tpl: PromptCreate, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def create_custom_template(tpl: PromptCreate, user_id: str | None = Header(None, alias="X-User-Id")):
     """Create a custom draft template with follow-ups, owned by the current user."""
     owner_username = None
     if user_id:
@@ -150,7 +150,7 @@ ALLOWED_DOCUMENT_TYPES = {
     'application/vnd.ms-excel': '.xls',
 }
 
-def _asset_public_url(request: Optional[Request], filename: str) -> str:
+def _asset_public_url(request: Request | None, filename: str) -> str:
     """Build a public URL for an uploaded asset that the requesting client can load.
 
     - Local development (Host header contains localhost/127.0.0.1): point back to
@@ -168,8 +168,9 @@ def _asset_public_url(request: Optional[Request], filename: str) -> str:
 def upload_image(file: UploadFile = File(...), request: Request = None):
     """Upload an image to the assets folder and return its URL path.
     Falls back to file extension detection if content-type is not recognized."""
-    import time, random
-    
+    import random
+    import time
+
     # Try content-type first, then fall back to extension
     ext = ALLOWED_IMAGE_TYPES.get(file.content_type)
     if not ext:
@@ -186,7 +187,7 @@ def upload_image(file: UploadFile = File(...), request: Request = None):
             ext = '.' + file.filename.rsplit('.', 1)[-1].lower()
         else:
             ext = '.bin'  # Generic fallback for extensionless files
-    
+
     ts = int(time.time() * 1000)
     rn = random.randint(1000, 9999)
     dest_name = f"upload_{ts}_{rn}{ext}"
@@ -199,8 +200,9 @@ def upload_image(file: UploadFile = File(...), request: Request = None):
 def upload_file(file: UploadFile = File(...), request: Request = None):
     """Upload a document file (PDF, DOCX, XLSX) to the assets folder and return its URL.
     Falls back to file extension detection if content-type is not recognized."""
-    import time, random
-    
+    import random
+    import time
+
     # Try content-type first, then fall back to extension
     ext = ALLOWED_DOCUMENT_TYPES.get(file.content_type)
     if not ext:
@@ -216,7 +218,7 @@ def upload_file(file: UploadFile = File(...), request: Request = None):
             ext = '.' + file.filename.rsplit('.', 1)[-1].lower()
         else:
             ext = '.bin'  # Generic fallback for extensionless files
-    
+
     ts = int(time.time() * 1000)
     rn = random.randint(1000, 9999)
     safe_name = "".join(c for c in file.filename.rsplit('.', 1)[0] if c.isalnum() or c in ' _-')[:60]
@@ -231,12 +233,14 @@ def upload_file(file: UploadFile = File(...), request: Request = None):
 @router.post("/upload-signature-doc")
 def upload_signature_doc(file: UploadFile = File(...)):
     """Upload a Word/PDF document and extract formatted text to use as signature.
-    
+
     Preserves: bold, italic, headings, hyperlinks, images, lists.
     Images from DOCX are extracted to the assets folder and embedded as data URIs
     so they render reliably in signature preview and sent emails.
     """
-    import tempfile, re, uuid
+    import re
+    import tempfile
+    import uuid
     name_lower = (file.filename or '').lower()
     if not any(name_lower.endswith(ext) for ext in ['.docx', '.pdf', '.doc']):
         raise HTTPException(status_code=400, detail="Only DOCX, PDF, and DOC files are allowed")
@@ -249,7 +253,6 @@ def upload_signature_doc(file: UploadFile = File(...)):
         if ext == 'docx':
             from docx import Document
             from docx.oxml.ns import qn
-            from docx.oxml import parse_xml
             doc = Document(tmp.name)
             lines = []
             img_map = {}
@@ -342,7 +345,7 @@ def upload_signature_doc(file: UploadFile = File(...)):
 
 def _build_run_text(para) -> str:
     """Build a markdown string from paragraph runs, preserving per-run formatting and hyperlinks.
-    
+
     Supports: bold, italic, underline, font name, font size, font color.
     Adjacent runs inside the same hyperlink are merged into a single markdown link.
     """
@@ -449,7 +452,7 @@ def upload_prompt_attachment(prompt_id: int, file: UploadFile = File(...)):
     return {"filename": dest_name, "message": "Attachment uploaded"}
 
 @router.delete("/prompts/{prompt_id}")
-def remove_prompt(prompt_id: int, user_id: Optional[str] = Header(None, alias="X-User-Id")):
+def remove_prompt(prompt_id: int, user_id: str | None = Header(None, alias="X-User-Id")):
     """Delete a prompt — only if the user owns it."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
