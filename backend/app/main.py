@@ -336,6 +336,21 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+
+@app.get("/")
+@app.head("/")
+async def root():
+    """Health check endpoint — Render sends HEAD / on startup."""
+    return {"status": "ok"}
+
+
+@app.get("/healthz")
+@app.head("/healthz")
+async def healthz():
+    """Dedicated liveness probe — avoids SPA catch-all interference."""
+    return {"status": "ok"}
+
+
 # Prometheus metrics endpoint
 @app.get("/metrics")
 async def metrics():
@@ -531,6 +546,7 @@ _PUBLIC_PATH_PREFIXES = (
     "/assets/",
     "/debug/",
     "/health",
+    "/healthz",
     "/metrics",
     "/openapi.json",
     "/api/health",
