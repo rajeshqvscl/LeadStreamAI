@@ -1055,15 +1055,25 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
     # Normalize newlines
     text = text.replace("\r\n", "\n")
 
-    # ── Extract editor line-height from data-lh wrapper ──
-    # The WYSIWYG editor embeds <div data-lh="X"> to persist user-selected line-height.
-    # Unwrap it and use the value for body/table line-heights instead of hardcoded defaults.
+    # ── Extract editor line-height from data-lh / data-lh-table wrappers ──
+    # The WYSIWYG editor embeds <div data-lh="X" data-lh-table="Y"> to persist
+    # user-selected line-heights. Unwrap and use separate values for body vs tables.
     _body_line_height = "1.6"  # default for outer wrapper
-    _lh_match = re.match(r'<div\s+data-lh="([^"]+)">', text, re.IGNORECASE)
-    if _lh_match:
-        _body_line_height = _lh_match.group(1)
-        text = re.sub(r'^<div\s+data-lh="[^"]*">', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'</div>\s*$', '', text)
+    _table_line_height = "1.2"  # default for tables (tighter than body)
+    _wrapper_match = re.match(r'<div\s+([^>]+)>', text, re.IGNORECASE)
+    if _wrapper_match:
+        _wrapper_attrs = _wrapper_match.group(1)
+        _lh_attr = re.search(r'data-lh="([^"]+)"', _wrapper_attrs, re.IGNORECASE)
+        _tlh_attr = re.search(r'data-lh-table="([^"]+)"', _wrapper_attrs, re.IGNORECASE)
+        if _lh_attr:
+            _body_line_height = _lh_attr.group(1)
+        if _tlh_attr:
+            _table_line_height = _tlh_attr.group(1)
+        elif _lh_attr:
+            # If no explicit table line-height, use body value for tables too
+            _table_line_height = _body_line_height
+        text = re.sub(r'^<div\s+[^>]*>\s*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\s*</div>\s*$', '', text)
 
     # ── Strip SIG_START/SIG_END marker blocks (template signature markers) ──
     # The real signature is injected separately (inject_signature / followup sig), so
@@ -1315,7 +1325,7 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
             # Check if this is a markdown table
             lines = p.split("\n")
             if len(lines) >= 2 and all(l.strip().startswith("|") and l.strip().endswith("|") for l in lines):
-                table_html = f"<table style='width:100%;border-collapse:collapse;margin-bottom:18px;font-family:{font_family};font-size:{font_size};line-height:{_body_line_height};'>"
+                table_html = f"<table style='width:100%;border-collapse:collapse;margin-bottom:18px;font-family:{font_family};font-size:{font_size};line-height:{_table_line_height};'>"
                 for i, line in enumerate(lines):
                     line = line.strip()
                     if not line: continue
@@ -1323,7 +1333,7 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
                     if all(re.match(r'^[-:\s]+$', c) for c in cells):
                         continue
                     tag = "th" if i == 0 else "td"
-                    style = f"border:1px solid #000;padding:2px 6px;text-align:left;font-weight:bold;font-size:10px;line-height:{_body_line_height};" if tag == "th" else f"border:1px solid #000;padding:1px 6px;text-align:left;font-size:10px;font-weight:bold;line-height:{_body_line_height};"
+                    style = f"border:1px solid #000;padding:2px 6px;text-align:left;font-weight:bold;font-size:10px;line-height:{_table_line_height};" if tag == "th" else f"border:1px solid #000;padding:1px 6px;text-align:left;font-size:10px;font-weight:bold;line-height:{_table_line_height};"
                     row_html = f"<{tag} style='{style}'>" + f"</{tag}><{tag} style='{style}'>".join(cells) + f"</{tag}>"
                     table_html += f"<tr>{row_html}</tr>"
                 table_html += "</table>"

@@ -15,6 +15,8 @@ const mdToHtml = (md) => {
   const [imgW, imgH] = _getEditorImgSizes();
   if (!md) return '';
   if (/^<[a-z][^>]*>/i.test(md.trim()) && /<\/[a-z]+>\s*$/i.test(md.trim())) return md;
+  const _editorBackendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+  md = md.replace(/\[\[BACKEND_URL\]\]/g, _editorBackendUrl);
   let html = md.replace(/•/g, '*');
   let lines = html.split('\n');
   let result = [];
@@ -113,6 +115,8 @@ const isHtml = (str) => /<[a-z][\s\S]*>/i.test(str);
 const convertHtmlMarkdownRemnants = (html) => {
   if (!html) return html;
   const [imgW, imgH] = _getEditorImgSizes();
+  const _editorBackendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+  html = html.replace(/\[\[BACKEND_URL\]\]/g, _editorBackendUrl);
   const converted = html
     .replace(/!\[(.*?)\]\((.*?)\)/g, (m, alt, src) => `<img src="${src}" alt="${alt}" style="width:${imgW};height:${imgH};">`)
     .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
@@ -190,8 +194,9 @@ const SizeDropdown = ({ options, onSelect }) => {
 };
 
 const LINE_HEIGHT_OPTIONS = ['1.0', '1.2', '1.4', '1.5', '1.6', '1.8', '2.0'];
+const TABLE_LINE_HEIGHT_OPTIONS = ['1.0', '1.2', '1.4', '1.5', '1.6', '1.8', '2.0'];
 
-const LineHeightDropdown = ({ value, onSelect }) => {
+const LineHeightDropdown = ({ value, onSelect, label = 'Line' }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -210,7 +215,7 @@ const LineHeightDropdown = ({ value, onSelect }) => {
         onMouseDown={(e) => { e.preventDefault(); setOpen(o => !o); }}
         className="bg-black/50 border border-white/10 rounded-md px-1.5 py-1 text-[10px] text-slate-300 cursor-pointer outline-none hover:text-white flex items-center gap-1"
       >
-        Line <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />
+        {label} <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
         <div className="absolute top-full left-0 mt-1 z-50 bg-[#1a1d26] border border-white/10 rounded-xl shadow-2xl max-h-[200px] overflow-y-auto custom-scrollbar w-[72px]">
@@ -346,6 +351,8 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
   const [showBgColors, setShowBgColors] = useState(false);
   const [lineHeight, setLineHeight] = useState('1.4');
   const lineHeightRef = useRef('1.4');
+  const [tableLineHeight, setTableLineHeight] = useState('1.2');
+  const tableLineHeightRef = useRef('1.2');
   const textColorBtnRef = useRef(null);
   const bgColorBtnRef = useRef(null);
   const editorSyncedRef = useRef(''); // Tracks what's currently in the editor DOM
@@ -389,15 +396,19 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
 
   useEffect(() => {
     if (!showSource && editorRef.current) {
-      // Extract lineHeight from data-lh wrapper if present
+      // Extract lineHeight and tableLineHeight from data-lh/data-lh-table wrappers
       let rawValue = value;
       let detectedLh = '1.4';
-      if (rawValue && /^<div\s+data-lh="([^"]+)">/i.test(rawValue)) {
-        const lhMatch = rawValue.match(/^<div\s+data-lh="([^"]+)">/i);
+      let detectedTlh = '1.2';
+      if (rawValue && /^<div\s+(?:[^>]*>)?/i.test(rawValue)) {
+        const lhMatch = rawValue.match(/data-lh="([^"]+)"/i);
+        const tlhMatch = rawValue.match(/data-lh-table="([^"]+)"/i);
         if (lhMatch) detectedLh = lhMatch[1];
-        rawValue = rawValue.replace(/^<div\s+data-lh="[^"]*">/i, '').replace(/<\/div>\s*$/i, '');
+        if (tlhMatch) detectedTlh = tlhMatch[1];
+        rawValue = rawValue.replace(/^<div\s+data-lh(?:-table)?="[^"]*"\s*(?:data-lh(?:-table)?="[^"]*")?>/i, '').replace(/<\/div>\s*$/i, '');
       }
       if (detectedLh !== lineHeight) setLineHeight(detectedLh);
+      if (detectedTlh !== tableLineHeight) setTableLineHeight(detectedTlh);
 
       const expectedHtml = toHtml(rawValue);
       // Skip if DOM already matches — preserves cursor position during user typing
@@ -445,10 +456,16 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
   const syncFromEditor = useCallback(() => {
     if (!editorRef.current) return;
     let newHtml = editorRef.current.innerHTML;
-    // Embed lineHeight in content so it persists across save/load
+    // Embed lineHeight and tableLineHeight in content so they persist across save/load
     const lh = lineHeightRef.current;
-    if (lh && lh !== '1.4') {
-      newHtml = `<div data-lh="${lh}">${newHtml}</div>`;
+    const tlh = tableLineHeightRef.current;
+    const hasLh = lh && lh !== '1.4';
+    const hasTlh = tlh && tlh !== '1.2';
+    if (hasLh || hasTlh) {
+      const attrs = [];
+      if (hasLh) attrs.push(`data-lh="${lh}"`);
+      if (hasTlh) attrs.push(`data-lh-table="${tlh}"`);
+      newHtml = `<div ${attrs.join(' ')}>${newHtml}</div>`;
     }
     // Mark as user-synced so the useEffect skips DOM update — cursor stays put!
     editorSyncedRef.current = newHtml;
@@ -707,6 +724,12 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
     setTimeout(syncFromEditor, 0);
   };
 
+  const handleTableLineHeightChange = (tlh) => {
+    setTableLineHeight(tlh);
+    tableLineHeightRef.current = tlh;
+    setTimeout(syncFromEditor, 0);
+  };
+
   // Apply lineHeight to editor div whenever it changes
   useEffect(() => {
     lineHeightRef.current = lineHeight;
@@ -714,6 +737,19 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
       editorRef.current.style.lineHeight = lineHeight;
     }
   }, [lineHeight]);
+
+  // Apply tableLineHeight to tables inside editor
+  useEffect(() => {
+    tableLineHeightRef.current = tableLineHeight;
+    if (editorRef.current) {
+      editorRef.current.querySelectorAll('table').forEach(tbl => {
+        tbl.style.lineHeight = tableLineHeight;
+      });
+      editorRef.current.querySelectorAll('td, th').forEach(cell => {
+        cell.style.lineHeight = tableLineHeight;
+      });
+    }
+  }, [tableLineHeight]);
 
   const applyTextColor = (color) => {
     setShowTextColors(false);
@@ -958,8 +994,14 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
       // Switching to Source: convert HTML → raw
       let currentHtml = editorRef.current?.innerHTML || '';
       const lh = lineHeightRef.current;
-      if (lh && lh !== '1.4') {
-        currentHtml = `<div data-lh="${lh}">${currentHtml}</div>`;
+      const tlh = tableLineHeightRef.current;
+      const hasLh = lh && lh !== '1.4';
+      const hasTlh = tlh && tlh !== '1.2';
+      if (hasLh || hasTlh) {
+        const attrs = [];
+        if (hasLh) attrs.push(`data-lh="${lh}"`);
+        if (hasTlh) attrs.push(`data-lh-table="${tlh}"`);
+        currentHtml = `<div ${attrs.join(' ')}>${currentHtml}</div>`;
       }
       const raw = toRaw(currentHtml);
       onChange({ target: { value: raw } });
@@ -1095,6 +1137,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
         </select>
         <SizeDropdown options={fontSizeOptions} onSelect={handleSizeChange} />
         <LineHeightDropdown value={lineHeight} onSelect={handleLineHeightChange} />
+        <LineHeightDropdown value={tableLineHeight} onSelect={handleTableLineHeightChange} label="Table" />
         <div className="w-px h-4 bg-white/10 mx-1" />
         <button
           type="button"

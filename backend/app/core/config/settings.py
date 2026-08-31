@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -55,7 +56,10 @@ class LLMSettings(BaseSettings):
 
 
 class EmailEngineSettings(BaseSettings):
-    redis_url: str = "redis://localhost:6379"
+    redis_url: str = Field(
+        default="redis://localhost:6379",
+        validation_alias=AliasChoices("EMAIL_ENGINE_REDIS_URL", "REDIS_URL", "REDIS_TLS_URL"),
+    )
     queue_name: str = "emails"
     scheduled_queue_name: str = "emails_scheduled"
     dead_letter_queue_name: str = "emails_dlq"

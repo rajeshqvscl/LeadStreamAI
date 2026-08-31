@@ -182,6 +182,13 @@ const EditEmail = () => {
 
     const [imgW, imgH] = getImgSizes;
 
+    // Extract table line-height from data-lh-table if present
+    let _tableLh = '1.2';
+    if (text && /data-lh-table="([^"]+)"/i.test(text)) {
+      const _tlhMatch = text.match(/data-lh-table="([^"]+)"/i);
+      if (_tlhMatch) _tableLh = _tlhMatch[1];
+    }
+
     // Resolve [[BACKEND_URL]] so images show in preview
     const backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
     text = text.replace(/\[\[BACKEND_URL\]\]/g, backendUrl);
@@ -208,29 +215,29 @@ const EditEmail = () => {
         .replace(/<table(\s[^>]*)?>/gi, (m) => {
           if (m.includes('style="')) {
             return m.replace(/style="([^"]*)"/, (_, existing) => {
-              let clean = existing.replace(/\bfont-size[^;]*;?/gi, '');
-              return `style="border-collapse:collapse;${clean}"`;
+              let clean = existing.replace(/\bfont-size[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
+              return `style="border-collapse:collapse;line-height:${_tableLh};${clean}"`;
             });
           }
-          return '<table style="border-collapse:collapse;">';
+          return `<table style="border-collapse:collapse;line-height:${_tableLh};">`;
         })
         .replace(/<th(\s[^>]*)?>/gi, (m) => {
           if (m.includes('style="')) {
             return m.replace(/style="([^"]*)"/, (_, existing) => {
-              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '');
-              return `style="${clean};padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;"`;
+              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
+              return `style="${clean};padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;line-height:${_tableLh};"`;
             });
           }
-          return '<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;"';
+          return `<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;line-height:${_tableLh};"`;
         })
         .replace(/<td(\s[^>]*)?>/gi, (m) => {
           if (m.includes('style="')) {
             return m.replace(/style="([^"]*)"/, (_, existing) => {
-              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '');
-              return `style="${clean};padding:1px 4px;border:1px solid #475569;text-align:left;"`;
+              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
+              return `style="${clean};padding:1px 4px;border:1px solid #475569;text-align:left;line-height:${_tableLh};"`;
             });
           }
-          return '<td style="padding:1px 4px;border:1px solid #475569;text-align:left;"';
+          return `<td style="padding:1px 4px;border:1px solid #475569;text-align:left;line-height:${_tableLh};"`;
         });
       // A markdown signature is appended raw to the body (inject_signature). When
       // the body is HTML we land here, so convert any markdown remnants or they'd
@@ -428,26 +435,26 @@ const EditEmail = () => {
       .replace(/<table(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
           return m.replace(/style="([^"]*)"/, (_, existing) => {
-            let clean = existing.replace(/\bfont-size[^;]*;?/gi, '');
-            return `style="${clean};border-collapse:collapse;margin-bottom:18px;font-family:sans-serif;"`;
+            let clean = existing.replace(/\bfont-size[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
+            return `style="${clean};border-collapse:collapse;margin-bottom:18px;font-family:sans-serif;line-height:${_tableLh};"`;
           });
         }
-        return m.replace('<table', '<table style="border-collapse:collapse;margin-bottom:18px;font-family:sans-serif;"');
+        return m.replace('<table', `<table style="border-collapse:collapse;margin-bottom:18px;font-family:sans-serif;line-height:${_tableLh};"`);
       })
       .replace(/<th(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
           return m.replace(/style="([^"]*)"/, (_, existing) => {
-            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\btext-transform[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '');
-            return `style="${clean};padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;"`;
+            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\btext-transform[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
+            return `style="${clean};padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;line-height:${_tableLh};"`;
           });
         }
-        return m.replace('<th', '<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;"');
+        return m.replace('<th', `<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;line-height:${_tableLh};"`);
       })
       .replace(/<td(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
           return m.replace(/style="([^"]*)"/, (_, existing) => {
-            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '');
-            return `style="${clean};padding:1px 4px;border:1px solid #475569;text-align:left;color:#cbd5e1;"`;
+            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
+            return `style="${clean};padding:1px 4px;border:1px solid #475569;text-align:left;color:#cbd5e1;line-height:${_tableLh};"`;
           });
         }
         return m.replace('<td', '<td style="padding:1px 4px;border:1px solid #475569;text-align:left;color:#cbd5e1;"');

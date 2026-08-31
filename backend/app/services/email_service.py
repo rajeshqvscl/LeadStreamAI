@@ -750,19 +750,47 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: str |
                 email_font = get_user_email_font(user_id)
                 email_font_size = get_user_email_font_size(user_id)
 
-                # Extract editor line-height from data-lh wrapper if present
+                # Extract editor line-height from data-lh / data-lh-table wrappers
                 import re as _re_lh
-                _lh_match = _re_lh.match(r'<div\s+data-lh="([^"]+)">', html_content, _re_lh.IGNORECASE)
-                _body_lh = _lh_match.group(1) if _lh_match else "1.6"
-                if _lh_match:
-                    html_content = _re_lh.sub(r'^<div\s+data-lh="[^"]*">', '', html_content, count=1, flags=_re_lh.IGNORECASE)
-                    html_content = _re_lh.sub(r'</div>\s*$', '', html_content)
+                _body_lh = "1.6"
+                _table_lh = "1.2"
+                _wrapper_match = _re_lh.match(r'<div\s+([^>]+)>', html_content, _re_lh.IGNORECASE)
+                if _wrapper_match:
+                    _wrapper_attrs = _wrapper_match.group(1)
+                    _lh_attr = _re_lh.search(r'data-lh="([^"]+)"', _wrapper_attrs, _re_lh.IGNORECASE)
+                    _tlh_attr = _re_lh.search(r'data-lh-table="([^"]+)"', _wrapper_attrs, _re_lh.IGNORECASE)
+                    if _lh_attr:
+                        _body_lh = _lh_attr.group(1)
+                    if _tlh_attr:
+                        _table_lh = _tlh_attr.group(1)
+                    elif _lh_attr:
+                        _table_lh = _body_lh
+                    html_content = _re_lh.sub(r'^<div\s+[^>]*>\s*', '', html_content, count=1, flags=_re_lh.IGNORECASE)
+                    html_content = _re_lh.sub(r'\s*</div>\s*$', '', html_content)
 
                 html_content = f"""
                 <div style="font-family: {email_font}; line-height: {_body_lh}; color: #333333; font-size: {email_font_size};">
                     {html_content}
                 </div>
                 """
+
+                # Apply table line-height to all table elements that don't already have it
+                _tlh_style = f"line-height:{_table_lh};"
+                def _ensure_table_lh(m):
+                    tag_name = m.group(1)
+                    rest = m.group(2) or ''
+                    closing = m.group(3) or ''
+                    if 'line-height' in rest.lower():
+                        return m.group(0)  # already has line-height, skip
+                    if 'style=' in rest.lower():
+                        prefix = 'style="'
+                        idx = rest.lower().find('style="')
+                        if idx >= 0:
+                            after = rest[idx + len(prefix):]
+                            new_rest = rest[:idx] + prefix + _tlh_style + after
+                            return '<' + tag_name + new_rest + closing
+                    return '<' + tag_name + ' style="' + _tlh_style + '"' + rest + closing
+                html_content = _re_lh.sub(r'<(table|th|td)((?:\s[^>]*)?)(/?)>', _ensure_table_lh, html_content, flags=_re_lh.IGNORECASE)
 
                 # Build a plain-text fallback by stripping HTML tags
                 import re as _re

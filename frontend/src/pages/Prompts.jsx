@@ -275,6 +275,12 @@ const Prompts = () => {
     const _su = JSON.parse(localStorage.getItem('user') || localStorage.getItem('user_admin') || '{}');
     const _imgW = _su?.image_width || '400px';
     const _imgH = _su?.image_height || 'auto';
+    // Extract table line-height from data-lh-table if present
+    let _tableLh = '1.2';
+    if (text && /data-lh-table="([^"]+)"/i.test(text)) {
+      const _tlhMatch = text.match(/data-lh-table="([^"]+)"/i);
+      if (_tlhMatch) _tableLh = _tlhMatch[1];
+    }
     const _backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
     // Resolve sender placeholders (needed regardless of HTML/markdown)
     const firstName = userSenderName.split(' ')[0] || userSenderName;
@@ -305,28 +311,31 @@ const Prompts = () => {
         .replace(/background(?:-color)?\s*:\s*[^;]+;?\s*/gi, '')
         .replace(/bgcolor\s*=\s*["'][^"']*["']\s*/gi, '')
         .replace(/<table(\s[^>]*)?>/gi, (m) => {
-          if (m.includes('style="')) return m.replace(/style="([^"]*)"/, 'style="border-collapse:collapse;$1"');
-          return '<table style="border-collapse:collapse;">';
+          if (m.includes('style="')) return m.replace(/style="([^"]*)"/, (_, existing) => {
+            let clean = existing.replace(/\bline-height[^;]*;?/gi, '');
+            return `style="border-collapse:collapse;line-height:${_tableLh};${clean}"`;
+          });
+          return `<table style="border-collapse:collapse;line-height:${_tableLh};">`;
         })
         .replace(/<th(\s[^>]*)?>/gi, (m) => {
           if (m.includes('style="')) {
             let s = m.replace(/style="([^"]*)"/, (_, existing) => {
-              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '');
-              return `style="${clean};padding:2px 4px;"`;
+              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
+              return `style="${clean};padding:2px 4px;line-height:${_tableLh};"`;
             });
             return s;
           }
-          return '<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;">';
+          return `<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;line-height:${_tableLh};">`;
         })
         .replace(/<td(\s[^>]*)?>/gi, (m) => {
           if (m.includes('style="')) {
             let s = m.replace(/style="([^"]*)"/, (_, existing) => {
-              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '');
-              return `style="${clean};padding:1px 4px;"`;
+              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
+              return `style="${clean};padding:1px 4px;line-height:${_tableLh};"`;
             });
             return s;
           }
-          return '<td style="padding:1px 4px;border:1px solid #475569;text-align:left;">';
+          return `<td style="padding:1px 4px;border:1px solid #475569;text-align:left;line-height:${_tableLh};">`;
         });
       // Palak's logo must preview at 150x150 (backend forces the same size in sent emails).
       html = applyForcedLogoStyles(html);
@@ -392,14 +401,14 @@ const Prompts = () => {
         listHtml += '</ol>';
         htmlParts.push(listHtml);
       } else if (lines.length >= 2 && lines.every(l => !l.trim() || (l.trim().startsWith('|') && l.trim().endsWith('|')))) {
-        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-family:Georgia,serif;">';
+        let tableHtml = `<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-family:Georgia,serif;line-height:${_tableLh};">`;
         const dataLines = lines.filter(l => l.trim() && !l.trim().match(/^\|[-:\s]+\|$/));
         dataLines.forEach((line, i) => {
           const cells = line.trim().split('|').slice(1, -1).map(c => c.trim());
           const tag = i === 0 ? 'th' : 'td';
           const cellStyle = tag === 'th'
-            ? 'border:1px solid #475569;padding:2px 4px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;'
-            : 'border:1px solid #475569;padding:1px 4px;text-align:left;color:#cbd5e1;';
+            ? `border:1px solid #475569;padding:2px 4px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;line-height:${_tableLh};`
+            : `border:1px solid #475569;padding:1px 4px;text-align:left;color:#cbd5e1;line-height:${_tableLh};`;
           const cellHtml = cells.map(c => `<${tag} style="${cellStyle}">${c}</${tag}>`).join('');
           tableHtml += `<tr>${cellHtml}</tr>`;
         });
@@ -444,29 +453,29 @@ const Prompts = () => {
       .replace(/<table(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
           return m.replace(/style="([^"]*)"/, (_, existing) => {
-            let clean = existing.replace(/\bfont-size[^;]*;?/gi, '');
-            return `style="border-collapse:collapse;${clean}"`;
+            let clean = existing.replace(/\bfont-size[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
+            return `style="border-collapse:collapse;line-height:${_tableLh};${clean}"`;
           });
         }
-        return '<table style="border-collapse:collapse;">';
+        return `<table style="border-collapse:collapse;line-height:${_tableLh};">`;
       })
       .replace(/<th(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
           return m.replace(/style="([^"]*)"/, (_, existing) => {
-            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\btext-transform[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '');
-            return `style="${clean};padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;"`;
+            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\btext-transform[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
+            return `style="${clean};padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;line-height:${_tableLh};"`;
           });
         }
-        return '<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;">';
+        return `<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;line-height:${_tableLh};"`;
       })
       .replace(/<td(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
           return m.replace(/style="([^"]*)"/, (_, existing) => {
-            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '');
-            return `style="${clean};padding:1px 4px;border:1px solid #475569;text-align:left;color:#cbd5e1;"`;
+            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
+            return `style="${clean};padding:1px 4px;border:1px solid #475569;text-align:left;color:#cbd5e1;line-height:${_tableLh};"`;
           });
         }
-        return '<td style="padding:1px 4px;border:1px solid #475569;text-align:left;color:#cbd5e1;">';
+        return `<td style="padding:1px 4px;border:1px solid #475569;text-align:left;color:#cbd5e1;line-height:${_tableLh};"`;
       });
     const _ff = user.email_font || 'sans-serif';
     const _fs = user.email_font_size || '13px';

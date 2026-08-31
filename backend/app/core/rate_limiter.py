@@ -31,7 +31,12 @@ class SlidingWindowRateLimiter:
         default_window: int = 60,
         max_connections: int = 5,
     ):
-        self.redis = redis.from_url(redis_url, decode_responses=True, max_connections=max_connections)
+        pool = redis.ConnectionPool.from_url(
+            redis_url,
+            decode_responses=True,
+            max_connections=max_connections,
+        )
+        self.redis = redis.Redis(connection_pool=pool)
         self.default_limit = default_limit
         self.default_window = default_window
     
