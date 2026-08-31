@@ -3,6 +3,7 @@ import { Plus, Loader2, CheckCircle2, AlertCircle, Trash2, ChevronDown, ChevronU
 import api from '../services/api';
 import ToolbarTextarea from '../components/ToolbarTextarea';
 import { applyForcedLogoStyles } from '../utils/logoSize';
+import { sanitizeHtml } from '../utils/sanitizeHtml';
 import { getPdfJs } from '../utils/pdfWorker';
 
 // Mammoth - use dynamic import since it's CommonJS only
@@ -568,7 +569,7 @@ const Prompts = () => {
               </button>
               {showBodyPreview && (
                 <div className="mt-3 bg-[#0a0d14] border border-white/5 rounded-xl p-5 max-h-[500px] overflow-y-auto">
-                  <div className="email-preview text-[14px] leading-relaxed" dangerouslySetInnerHTML={{ __html: form.content ? renderEmailPreview(form.content, true, false) : '<p class="text-slate-500 italic text-[12px]">Type something to see preview...</p>' }} />
+                  <div className="email-preview text-[14px] leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(form.content ? renderEmailPreview(form.content, true, false) : '<p class="text-slate-500 italic text-[12px]">Type something to see preview...</p>') }} />
                 </div>
               )}
             </div>
@@ -836,7 +837,7 @@ const Prompts = () => {
                   <span className="text-blue-400/50 ml-auto">attached</span>
                 </div>
               )}
-              <div className="email-preview text-slate-300 text-[14px] leading-relaxed" dangerouslySetInnerHTML={{ __html: renderEmailPreview(preview.content, true, preview.isFollowup) }} />
+              <div className="email-preview text-slate-300 text-[14px] leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(renderEmailPreview(preview.content, true, preview.isFollowup)) }} />
             </div>
           </div>
         </div>

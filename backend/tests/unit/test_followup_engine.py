@@ -51,8 +51,8 @@ def _make_lead(**overrides) -> dict:
     return defaults
 
 
-# Patch helper: patches SchedulerConfig.is_working_hours_now at class level
-_WH_PATCH = patch.object(SchedulerConfig, "is_working_hours_now", return_value=True)
+# Patch helper: patches SchedulerConfig.is_followup_working_hours_now at class level
+_WH_PATCH = patch.object(SchedulerConfig, "is_followup_working_hours_now", return_value=True)
 
 
 # ──────────────────────── Stage Limits ────────────────────────
@@ -193,10 +193,10 @@ class TestWorkingHours:
     def test_outside_hours_blocked(self):
         engine = _make_engine()
         lead = _make_lead()
-        with patch.object(SchedulerConfig, "is_working_hours_now", return_value=False):
+        with patch.object(SchedulerConfig, "is_followup_working_hours_now", return_value=False):
             result = engine.evaluate(lead)
         assert result.should_send is False
-        assert "Outside working hours" in result.reason
+        assert "followup working hours" in result.reason
 
     def test_inside_hours_proceeds(self):
         engine = _make_engine()

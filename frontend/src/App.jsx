@@ -121,6 +121,7 @@ function App() {
       <div className="orb orb-2"></div>
       <div className="orb orb-3"></div>
 
+      <ErrorBoundary>
       <Suspense fallback={<PageLoader />}>
         <Routes>
           <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
@@ -169,6 +170,7 @@ function App() {
           <Route path="*" element={<CatchAllRedirect token={token} />} />
         </Routes>
       </Suspense>
+      </ErrorBoundary>
     </Router>
   );
 }

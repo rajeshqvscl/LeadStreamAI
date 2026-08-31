@@ -105,6 +105,7 @@ const Dashboard = () => {
         setDetailData({ records: data, total: data.length, page: 1 });
       } catch (err) {
         console.error('Failed to fetch reminders', err);
+        showToast('error', 'Failed to load meeting requests');
         setDetailData({ records: [], total: 0, page: 1 });
       } finally {
         setDetailLoading(false);
@@ -129,6 +130,7 @@ const Dashboard = () => {
       setDetailData(data);
     } catch (err) {
       console.error('Failed to fetch card detail', err);
+      showToast('error', 'Failed to load card details');
       setDetailData({ records: [], total: 0, page: 1 });
     } finally {
       setDetailLoading(false);
@@ -187,6 +189,7 @@ const Dashboard = () => {
       setMsgDetail(data);
     } catch (err) {
       console.error('Failed to fetch message detail', err);
+      showToast('error', 'Failed to load email details');
     } finally {
       setLoadingDetail(false);
     }

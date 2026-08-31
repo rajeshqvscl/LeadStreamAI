@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import api from '../services/api';
+import { sanitizeHtml } from '../utils/sanitizeHtml';
 
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -103,7 +104,7 @@ const SignaturePreview = ({ html, content, onChangeContent, emptyText }) => {
       {content ? (
         <div
           style={{ color: '#666', fontFamily: 'Arial, sans-serif', fontSize: '13px', lineHeight: '1.4' }}
-          dangerouslySetInnerHTML={{ __html: html }}
+          dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }}
         />
       ) : (
         <span className="text-slate-600 italic">{emptyText || 'Nothing to preview yet.'}</span>

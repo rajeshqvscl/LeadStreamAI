@@ -710,6 +710,19 @@ const Followups = () => {
                               <Clock className="w-3 h-3 text-slate-600" />
                               <span>Last Outreach: {formatDate(lead.last_outreach_at, { hour: '2-digit', minute: '2-digit' })}</span>
                             </div>
+                            {lead.next_followup_at && !isCompleted && !isStopped && (
+                              <div className="flex items-center gap-2 text-[10px] font-bold">
+                                <Clock className="w-3 h-3 text-indigo-400" />
+                                <span className={
+                                  new Date(lead.next_followup_at) <= new Date()
+                                    ? 'text-amber-400'
+                                    : 'text-indigo-400'
+                                }>
+                                  Next Followup: {formatDate(lead.next_followup_at, { hour: '2-digit', minute: '2-digit' })}
+                                  {new Date(lead.next_followup_at) <= new Date() && ' (Due Now)'}
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -809,6 +822,15 @@ const Followups = () => {
                       {getStageLabel(selectedLead)}
                     </span>
                   </div>
+                  {selectedLead.next_followup_at && (
+                    <div className="flex items-center gap-2 mt-2">
+                      <Clock className="w-3 h-3 text-indigo-400" />
+                      <span className={`text-[10px] font-bold ${new Date(selectedLead.next_followup_at) <= new Date() ? 'text-amber-400' : 'text-indigo-400'}`}>
+                        Next Followup: {formatDate(selectedLead.next_followup_at, { hour: '2-digit', minute: '2-digit' })}
+                        {new Date(selectedLead.next_followup_at) <= new Date() ? ' — Due Now' : ''}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
               <button onClick={() => setIsModalOpen(false)} className="absolute top-8 right-8 p-2.5 rounded-xl bg-white/[0.03] hover:bg-white/[0.08] text-slate-500 hover:text-white transition-all cursor-pointer border border-white/[0.05]">

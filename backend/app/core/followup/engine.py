@@ -3,8 +3,12 @@ Follow-up Engine
 Pure logic: given lead + config → returns (should_send, subject, body, stage, campaign)
 """
 
+import logging
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import get_followup_settings, get_scheduler_config
 from app.core.followup.campaign_resolver import CampaignResolver, LeadData
@@ -38,7 +42,7 @@ class FollowUpEngine:
 
     def _get_lead_config(self, lead_type: str) -> dict:
         """Get max_stage and intervals for lead type"""
-        if lead_type == "CLIENT":
+        if (lead_type or '').upper() == "CLIENT":
             return {
                 "max_stage": self.followup_settings.client_max_stage,
                 "intervals": dict(
@@ -78,6 +82,17 @@ class FollowUpEngine:
         Evaluate if lead is due for follow-up.
         Returns FollowUpAction with should_send=True if ready to send.
         """
+        try:
+            return self._evaluate_inner(lead)
+        except Exception as e:
+            logger.exception(f"Engine evaluate failed for lead {lead.get('id')}: {e}")
+            return FollowUpAction(
+                should_send=False,
+                reason=f"Engine error: {e}",
+                lead_type=(lead.get('lead_type') or 'INVESTOR').upper(),
+            )
+
+    def _evaluate_inner(self, lead: dict) -> FollowUpAction:
         # Convert to LeadData for campaign resolver
         lead_data = LeadData(
             id=lead.get("id", 0),
@@ -162,7 +177,10 @@ class FollowUpEngine:
 
         lead_name = (lead.get("first_name") or "").strip() or "there"
         body = template.format(name=lead_name)
-        subject = f"Re: {lead.get('last_outreach_subject', 'Following up')}"
+        # Strip any existing Re:/RE: prefix to avoid Re: Re: Re: stacking
+        raw_subject = (lead.get('last_outreach_subject') or '').strip()
+        raw_subject = re.sub(r'^(Re:\s*|RE:\s*)+', '', raw_subject, flags=re.IGNORECASE).strip()
+        subject = f"Re: {raw_subject or 'Following up'}"
 
         return FollowUpAction(
             should_send=True,

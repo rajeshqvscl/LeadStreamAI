@@ -4,10 +4,13 @@ SINGLE SOURCE: which campaign/template for this lead.
 Removes duplication from followup_service.py, drafts.py, generate_followup_preview().
 """
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.core.config import constants
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -105,15 +108,19 @@ class CampaignResolver:
     @classmethod
     def get_template(cls, campaign_key: str, stage: int) -> str:
         """Get template for campaign and stage, with fallback"""
-        templates = constants.DEFAULT_TEMPLATES.get(campaign_key)
-        if not templates:
-            templates = constants.DEFAULT_TEMPLATES["INVESTOR_GENERIC"]
+        try:
+            templates = constants.DEFAULT_TEMPLATES.get(campaign_key)
+            if not templates:
+                templates = constants.DEFAULT_TEMPLATES["INVESTOR_GENERIC"]
 
-        template = templates.get(stage)
-        if not template:
-            template = templates.get(1, "Hi {name},\n\nFollowing up on my previous email.\n\nBest regards,")
+            template = templates.get(stage)
+            if not template:
+                template = templates.get(1, "Hi {name},\n\nFollowing up on my previous email.\n\nBest regards,")
 
-        return template
+            return template
+        except Exception as e:
+            logger.warning(f"get_template failed for campaign={campaign_key} stage={stage}: {e}")
+            return "Hi {name},\n\nFollowing up on my previous email.\n\nBest regards,"
 
 
 def get_campaign_for_lead(lead: dict) -> str:

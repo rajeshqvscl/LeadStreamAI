@@ -9,9 +9,9 @@ export const FOLLOWUP_CONFIG = {
   },
   INVESTOR: {
     maxStages: 3,
-    scheduleDays: [2, 4, 6],
+    scheduleDays: [2, 5, 7],
     getStageLabel: (stage) => {
-      const labels = ['Day 2', 'Day 4', 'Day 6'];
+      const labels = ['Day 2', 'Day 5', 'Day 7'];
       return labels[stage] || `${stage + 1}th Follow-up`;
     }
   }
@@ -62,8 +62,8 @@ export const getStageConfigs = (typeFilter) => {
   if (typeFilter === 'All') {
     return [
       { label: 'Day 2', stage: 0, type: 'Investor' },
-      { label: 'Day 4', stage: 1, type: 'Investor' },
-      { label: 'Day 6', stage: 2, type: 'Investor' },
+      { label: 'Day 5', stage: 1, type: 'Investor' },
+      { label: 'Day 7', stage: 2, type: 'Investor' },
     ];
   }
   const config = FOLLOWUP_CONFIG[typeFilter.toUpperCase()];

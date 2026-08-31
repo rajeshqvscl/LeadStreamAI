@@ -23,9 +23,9 @@ class FollowupSettings(BaseSettings):
     max_parallel_workers: int = 2
     cooldown_sec: float = 1.5
     client_max_stage: int = 2
-    client_intervals: str = "0:2,1:5"
+    client_intervals: str = "0:2,1:4"
     investor_max_stage: int = 3
-    investor_intervals: str = "0:2,1:5,2:8"
+    investor_intervals: str = "0:2,1:5,2:7"
 
     class Config:
         env_prefix = "FOLLOWUP_"
@@ -78,6 +78,7 @@ class EmailEngineSettings(BaseSettings):
         env_prefix = "EMAIL_ENGINE_"
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"
 
 
 class DatabaseSettings(BaseSettings):

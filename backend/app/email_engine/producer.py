@@ -154,26 +154,30 @@ class EmailProducer:
         Enqueue follow-up email.
         Generates idempotency key from lead_id + stage.
         """
-        idempotency_key = f"followup_lead{lead_id}_stage{stage}"
+        try:
+            idempotency_key = f"followup_lead{lead_id}_stage{stage}"
 
-        job = EmailJob(
-            to_email=to_email,
-            subject=subject,
-            html_content=html_content,
-            user_id=user_id,
-            from_email=from_email,
-            from_name=from_name,
-            lead_id=lead_id,
-            thread_id=thread_id,
-            in_reply_to=in_reply_to,
-            template_name=template_name,
-            priority=priority,
-            idempotency_key=idempotency_key,
-        )
+            job = EmailJob(
+                to_email=to_email,
+                subject=subject,
+                html_content=html_content,
+                user_id=user_id,
+                from_email=from_email,
+                from_name=from_name,
+                lead_id=lead_id,
+                thread_id=thread_id,
+                in_reply_to=in_reply_to,
+                template_name=template_name,
+                priority=priority,
+                idempotency_key=idempotency_key,
+            )
 
-        job_id = enqueue_job(job)
-        logger.info(f"Enqueued followup: {job_id} for lead {lead_id} stage {stage}")
-        return job_id
+            job_id = enqueue_job(job)
+            logger.info(f"Enqueued followup: {job_id} for lead {lead_id} stage {stage}")
+            return job_id
+        except Exception as e:
+            logger.exception(f"Failed to enqueue followup for lead {lead_id}: {e}")
+            raise
 
     def send_bulk(self, jobs: list[EmailJob]) -> list[str]:
         """

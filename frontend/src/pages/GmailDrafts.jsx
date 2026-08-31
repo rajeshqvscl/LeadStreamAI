@@ -65,6 +65,7 @@ const GmailDrafts = () => {
       setDrafts(res.data);
     } catch (err) {
       console.error('Failed to fetch Gmail drafts:', err);
+      showNotification('error', 'Failed to load Gmail drafts');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -85,6 +86,7 @@ const GmailDrafts = () => {
         setEditingDraft({ ...draft, body: cleanBody });
     } catch (err) {
         console.error('Failed to fetch full draft content:', err);
+        showNotification('error', 'Failed to load draft content');
         setEditingDraft({ ...draft, body: convertHTMLToMarkdown(draft.snippet) });
     } finally {
         setIsProcessing(false);

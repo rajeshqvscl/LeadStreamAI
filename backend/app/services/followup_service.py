@@ -12,6 +12,26 @@ from app.email_engine.producer import get_email_producer
 logger = logging.getLogger(__name__)
 
 
+def get_original_outreach_subject(lead: dict | None) -> str:
+    """Return the clean original outreach subject for a lead.
+
+    Prefers first_outreach_subject (the very first email's subject) so that
+    follow-up threads always stay coherent.  Falls back to
+    last_outreach_subject and then to a sensible default.
+    """
+    try:
+        if not lead:
+            return 'Following up'
+        return (
+            (lead.get('first_outreach_subject') or '').strip()
+            or (lead.get('last_outreach_subject') or '').strip()
+            or 'Following up'
+        )
+    except Exception as e:
+        logger.warning(f"get_original_outreach_subject failed: {e}")
+        return 'Following up'
+
+
 def is_generic_followup(body: str | None) -> bool:
     """Detects legacy, standard, or HTML-wrapped default placeholder follow-ups to allow dynamic healing."""
     if not body:
@@ -86,10 +106,12 @@ def process_outreach_sequences():
         logger.info("Outreach paused: Outside followup working hours (8:30AM-8PM)")
         return
 
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
+    conn = None
+    cur = None
     try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
         # Query leads that might need follow-up (broad filter, engine does precise check)
         cur.execute("""
             SELECT l.*, u.id as sender_id, u.email as sender_email, u.full_name as sender_name,
@@ -111,9 +133,9 @@ def process_outreach_sequences():
 
         leads = cur.fetchall()
         cur.close()
+        cur = None
 
         if not leads:
-            conn.close()
             return
 
         # Group by user for per-user limits
@@ -209,4 +231,7 @@ def process_outreach_sequences():
         logger.exception(f"Error in process_outreach_sequences: {e}")
     finally:
         with contextlib.suppress(Exception):
-            conn.close()
+            if cur:
+                cur.close()
+            if conn:
+                conn.close()

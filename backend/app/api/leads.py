@@ -392,7 +392,7 @@ _DUE_INTERVAL_SQL = (
     "(COALESCE(lr.followup_stage, 0) = 0 AND lr.last_outreach_at <= NOW() - INTERVAL '2 days')"
     " OR (lr.followup_stage = 1 AND LOWER(COALESCE(lr.lead_type, '')) = 'client' AND lr.last_outreach_at <= NOW() - INTERVAL '4 days')"
     " OR (lr.followup_stage = 1 AND LOWER(COALESCE(lr.lead_type, '')) != 'client' AND lr.last_outreach_at <= NOW() - INTERVAL '5 days')"
-    " OR (lr.followup_stage = 2 AND LOWER(COALESCE(lr.lead_type, '')) != 'client' AND lr.last_outreach_at <= NOW() - INTERVAL '8 days')"
+    " OR (lr.followup_stage = 2 AND LOWER(COALESCE(lr.lead_type, '')) != 'client' AND lr.last_outreach_at <= NOW() - INTERVAL '7 days')"
 )
 
 
@@ -536,7 +536,7 @@ def list_followups(
         try:
             count_date_query = (
                 f"SELECT last_outreach_at::date AS d, COALESCE(followup_stage, 0) AS stage, COUNT(*) AS n "
-                f"{base_query} GROUP BY 1, 2 ORDER BY 1 DESC"
+                f"{base_query} AND last_outreach_at >= '2026-08-01' GROUP BY 1, 2 ORDER BY 1 DESC"
             )
             cur.execute(count_date_query, tuple(params))
             for r in cur.fetchall():
@@ -614,7 +614,15 @@ def list_followups(
                    (SELECT action || '||' || COALESCE(details, '') FROM activity_log WHERE lead_id = lr.id ORDER BY created_at DESC LIMIT 1) as last_action_raw,
                    -- Due flag mirrors the engine's exact interval rules (shared _DUE_INTERVAL_SQL).
                    -- Powers the merged Pipeline view: due leads are badged and float to the top.
-                   CASE WHEN ({_DUE_INTERVAL_SQL}) THEN TRUE ELSE FALSE END AS is_due
+                   CASE WHEN ({_DUE_INTERVAL_SQL}) THEN TRUE ELSE FALSE END AS is_due,
+                   -- Next followup scheduled time based on followup_stage + lead_type intervals
+                   lr.last_outreach_at + CASE
+                       WHEN COALESCE(lr.followup_stage, 0) = 0 THEN INTERVAL '2 days'
+                       WHEN COALESCE(lr.followup_stage, 0) = 1 AND LOWER(COALESCE(lr.lead_type, '')) = 'client' THEN INTERVAL '4 days'
+                       WHEN COALESCE(lr.followup_stage, 0) = 1 THEN INTERVAL '5 days'
+                       WHEN COALESCE(lr.followup_stage, 0) = 2 THEN INTERVAL '7 days'
+                       ELSE INTERVAL '999 days'
+                   END AS next_followup_at
             {base_query}
             ORDER BY {order_by}
             LIMIT %s OFFSET %s
@@ -1078,6 +1086,9 @@ def approve_followup(lead_id: int, req: ApproveFollowupRequest | None = None, us
         # Use original subject, keep Re: prefix
         from app.services.followup_service import get_original_outreach_subject
         orig_subject = get_original_outreach_subject(lead)
+        # Strip any existing Re: prefix to avoid Re: Re: Re: stacking
+        import re as _re
+        orig_subject = _re.sub(r'^(Re:\s*|RE:\s*)+', '', (orig_subject or ''), flags=_re.IGNORECASE).strip()
         saved_subject = f"Re: {orig_subject}"
 
         # Touch updated_at so any stale pending-approval state is no longer the
@@ -1095,23 +1106,27 @@ def approve_followup(lead_id: int, req: ApproveFollowupRequest | None = None, us
             get_user_image_height,
             get_user_image_width,
         )
-        success, msg, new_thread_id, new_rfc_message_id = send_email(
-            to_email=lead['email'],
-            subject=saved_subject,
-            html_content=markdown_to_html(
-                body,
-                font_family=get_user_email_font(uid),
-                font_size=get_user_email_font_size(uid),
-                image_width=get_user_image_width(uid),
-                image_height=get_user_image_height(uid)
-            ),
-            from_email=profile.get('sender_email') or profile.get('username'),
-            from_name=profile.get('full_name') or profile.get('username'),
-            lead_id=lead_id,
-            user_id=uid,
-            thread_id=existing_thread_id,
-            in_reply_to=existing_message_id
-        )
+        try:
+            success, msg, new_thread_id, new_rfc_message_id = send_email(
+                to_email=lead['email'],
+                subject=saved_subject,
+                html_content=markdown_to_html(
+                    body,
+                    font_family=get_user_email_font(uid),
+                    font_size=get_user_email_font_size(uid),
+                    image_width=get_user_image_width(uid),
+                    image_height=get_user_image_height(uid)
+                ),
+                from_email=profile.get('sender_email') or profile.get('username'),
+                from_name=profile.get('full_name') or profile.get('username'),
+                lead_id=lead_id,
+                user_id=uid,
+                thread_id=existing_thread_id,
+                in_reply_to=existing_message_id
+            )
+        except Exception as send_err:
+            logger.exception(f"send_email threw exception for lead {lead_id}: {send_err}")
+            return {"error": f"Email dispatch exception: {send_err}"}
 
         lead_type = str(lead.get('lead_type') or '').upper()
         max_followup_stage = 2 if lead_type == 'CLIENT' else 3
@@ -1169,16 +1184,24 @@ def bulk_approve_followups(req: BulkApproveFollowupsRequest, user_id: str | None
             approve_followup(lead_id=lead_id, user_id=user_id, skip_daily_check=True)
             return ("ok", lead_id, None)
         except Exception as e:
+            logger.warning(f"Bulk approve failed for lead {lead_id}: {e}")
             return ("err", lead_id, str(e))
 
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {pool.submit(process_one, lid): lid for lid in req.lead_ids}
-        for f in as_completed(futures):
-            status, lid, err = f.result()
-            if status == "ok":
-                results["success"].append(lid)
-            else:
-                results["failed"].append({"id": lid, "error": err})
+    try:
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = {pool.submit(process_one, lid): lid for lid in req.lead_ids}
+            for f in as_completed(futures):
+                status, lid, err = f.result()
+                if status == "ok":
+                    results["success"].append(lid)
+                else:
+                    results["failed"].append({"id": lid, "error": err})
+    except Exception as e:
+        logger.exception(f"Bulk approve thread pool error: {e}")
+        # Mark all remaining as failed
+        for lid in req.lead_ids:
+            if lid not in [r['id'] for r in results['failed']] and lid not in results['success']:
+                results["failed"].append({"id": lid, "error": str(e)})
 
     return results
 
@@ -1188,12 +1211,16 @@ def get_followup_preview(lead_id: int, user_id: str | None = Header(None, alias=
     from app.api.drafts import normalize_user_id
     from app.services.followup_service import generate_followup_preview
 
-    # We want the signature of the person CLICKING the button (the logged-in user)
-    # Not necessarily the original owner of the lead.
-    uid_str = normalize_user_id(user_id)
-    uid = int(uid_str) if uid_str.isdigit() else 1
+    try:
+        # We want the signature of the person CLICKING the button (the logged-in user)
+        # Not necessarily the original owner of the lead.
+        uid_str = normalize_user_id(user_id)
+        uid = int(uid_str) if uid_str.isdigit() else 1
 
-    return generate_followup_preview(lead_id, uid)
+        return generate_followup_preview(lead_id, uid)
+    except Exception as e:
+        logger.exception(f"Followup preview failed for lead {lead_id}: {e}")
+        return {"error": str(e), "full_html": None, "subject": "Following up", "body": ""}
 
 @router.get("/leads/{lead_id}/timeline")
 def get_lead_timeline(lead_id: int, user_id: str | None = Header(None, alias="X-User-Id")):
