@@ -122,7 +122,7 @@ def get_rate_limiter() -> SlidingWindowRateLimiter:
     if _rate_limiter is None:
         import os
         redis_url = os.getenv("REDIS_URL") or os.getenv("REDIS_TLS_URL") or "redis://localhost:6379"
-        _rate_limiter = SlidingWindowRateLimiter(redis_url, max_connections=2)
+        _rate_limiter = SlidingWindowRateLimiter(redis_url, max_connections=5)
     return _rate_limiter
 
 
@@ -181,14 +181,22 @@ class RateLimitMiddleware:
         self.default_limit = default_limit
         self.default_window = default_window
     
+    # Paths that should skip rate limiting (health checks, readiness probes)
+    _SKIP_PATHS = frozenset({"/", "/health", "/health/ready", "/health/alive", "/api/v1/health"})
+
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Skip rate limiting for health check endpoints
+        path = scope.get("path", "/")
+        if path in self._SKIP_PATHS:
             await self.app(scope, receive, send)
             return
         
         # Extract client identifier
         client_host = scope.get("client", ("unknown", 0))[0]
-        path = scope.get("path", "/")
         key = f"ratelimit:global:{client_host}:{path}"
         
         # Check rate limit
