@@ -118,6 +118,7 @@ class Dispatcher:
         """Main dispatch loop - pulls from queues and assigns to workers"""
         from app.email_engine.queue.job import EmailPriority
         from app.email_engine.queue.registry import get_priority_queue
+        from app.email_engine.worker.sender import send_email_job
 
         while self._running:
             try:
@@ -153,7 +154,12 @@ class Dispatcher:
                         continue
 
                     logger.info(f"Dispatching job {job.id} for user {user_id} (priority={priority.name})")
-                    job_dispatched = True
+
+                    thread = self.pool.start_worker(
+                        send_email_job, user_id, job_data
+                    )
+                    if thread:
+                        job_dispatched = True
                     break
 
                 if not job_dispatched:

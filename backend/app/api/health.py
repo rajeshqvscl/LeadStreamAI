@@ -60,7 +60,8 @@ async def readiness_check():
     redis_url = os.getenv("REDIS_URL") or os.getenv("REDIS_TLS_URL")
     if redis_url:
         try:
-            r = redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
+            from app.core.redis_pool import get_redis_client
+            r = get_redis_client()
             r.ping()
             checks["redis"] = {
                 "status": "healthy",

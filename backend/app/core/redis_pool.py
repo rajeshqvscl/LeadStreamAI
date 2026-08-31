@@ -18,7 +18,7 @@ def get_redis_pool() -> "redis.ConnectionPool":
         _POOL = redis.ConnectionPool.from_url(
             url,
             decode_responses=True,
-            max_connections=10,
+            max_connections=3,
         )
     return _POOL
 
