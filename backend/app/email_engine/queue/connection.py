@@ -22,7 +22,6 @@ def get_redis_pool() -> redis.ConnectionPool:
         settings = get_email_engine_settings()
         _pool = redis.ConnectionPool.from_url(
             settings.redis_url,
-            decode_responses=True,
             max_connections=5,
         )
         logger.info(f"Created Redis connection pool: {settings.redis_url}")

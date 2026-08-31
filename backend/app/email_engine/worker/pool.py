@@ -121,18 +121,21 @@ class Dispatcher:
 
         while self._running:
             try:
-                # Check queues in priority order
                 job_dispatched = False
 
                 for priority in [EmailPriority.HIGH, EmailPriority.NORMAL, EmailPriority.LOW]:
                     queue = get_priority_queue(priority)
 
-                    # Peek at next job
                     job_ids = queue.get_job_ids(0, 1)
                     if not job_ids:
                         continue
 
-                    job = queue.fetch_job(job_ids[0])
+                    try:
+                        job = queue.fetch_job(job_ids[0])
+                    except Exception as fetch_err:
+                        logger.warning(f"Failed to fetch job {job_ids[0]} (stale/corrupt?): {fetch_err}")
+                        continue
+
                     if not job:
                         continue
 
@@ -143,25 +146,18 @@ class Dispatcher:
                         logger.warning(f"Job {job.id} missing user_id")
                         continue
 
-                    # Check rate limit
                     if not self.rate_limiter.try_acquire(user_id):
-                        # Rate limited, try next priority or wait
                         continue
 
-                    # Check worker pool capacity
                     if not self.pool.can_start_worker(user_id):
                         continue
 
-                    # Got a job we can dispatch
                     logger.info(f"Dispatching job {job.id} for user {user_id} (priority={priority.name})")
-
-                    # Requeue for actual processing (separate from dispatch)
-                    # The actual worker will pick it up
                     job_dispatched = True
                     break
 
                 if not job_dispatched:
-                    time.sleep(1)  # No jobs available, short sleep
+                    time.sleep(1)
 
             except Exception as e:
                 logger.exception(f"Dispatch loop error: {e}")
