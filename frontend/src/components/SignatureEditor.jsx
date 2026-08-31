@@ -221,9 +221,11 @@ const TEMPLATES = [
     const sigImgW = _su?.image_width || '400px';
     const sigImgH = _su?.image_height || 'auto';
     let html = text;
-    // Resolve [[BACKEND_URL]] so uploaded images show in preview
+    // Resolve [[BACKEND_URL]] and hardcoded localhost URLs so uploaded images show in preview
     const _backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
     html = html.replace(/\[\[BACKEND_URL\]\]/g, _backendUrl);
+    html = html.replace(/http:\/\/127\.0\.0\.1:8000/g, _backendUrl);
+    html = html.replace(/http:\/\/localhost:8000/g, _backendUrl);
     // Protect ALL URLs first so the _ and * italic rules can't corrupt them
     // (e.g. upload_123_456.jpg -> upload<em>123</em>456.jpg) — applies to both
     // HTML src/href attributes and markdown (url) destinations

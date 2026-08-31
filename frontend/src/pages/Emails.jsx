@@ -656,14 +656,14 @@ const Emails = () => {
             <span className="text-orange-400 text-[11px] font-black uppercase tracking-widest">⚠ Duplicate Monitor</span>
             <span className="text-[11px] text-[#cbd5e1]">
               {duplicateSummary.duplicates_in_queue > 0 && (
-                <>{duplicateSummary.duplicates_in_queue} drafts same-email collapse hue hain</>
+                <>{duplicateSummary.duplicates_in_queue} drafts collapsed to the same email</>
               )}
               {duplicateSummary.duplicate_email_drafts > 0 && duplicateSummary.duplicates_in_queue > 0 && ' · '}
-              {duplicateSummary.duplicate_email_drafts > 0 && <>{duplicateSummary.duplicate_email_drafts} drafts is page par duplicate flagged hain</>}
+              {duplicateSummary.duplicate_email_drafts > 0 && <>{duplicateSummary.duplicate_email_drafts} drafts on this page flagged as duplicates</>}
               {duplicateSummary.already_contacted_drafts > 0 && (
                 <>{(duplicateSummary.duplicates_in_queue > 0 || duplicateSummary.duplicate_email_drafts > 0) ? ' · ' : ''}{duplicateSummary.already_contacted_drafts} already-contacted emails</>
               )}
-              {' — generate-time block nahi; review karke archive/reject karo.'}
+              {' — not blocked at generation time; review and archive/reject.'}
             </span>
           </div>
         )}
@@ -756,8 +756,8 @@ const Emails = () => {
                         className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-[1px] bg-orange-500/15 border border-orange-500 text-orange-400"
                         title={
                           email.duplicate_reason === 'already_contacted'
-                            ? 'Is email pehle hi outreach ho chuka hai — duplicate'
-                            : `Is email ke ${email.duplicate_count} drafts queue mein hain — duplicate`
+                            ? 'This email has already been contacted — duplicate'
+                            : `${email.duplicate_count} drafts exist for this email in the queue — duplicate`
                         }
                       >
                         ⚠ DUP{email.duplicate_count > 1 ? ` ×${email.duplicate_count}` : ''}

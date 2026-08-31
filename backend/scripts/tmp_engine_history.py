@@ -38,7 +38,7 @@ cur.execute("""
 """)
 rows = cur.fetchall()
 if not rows:
-    print("  (koi toggle log nahi mila)")
+    print("  (no toggle log found)")
 else:
     for r in rows:
         print(f"  {r['created_at']} | {r['action']} | {(r['details'] or '')[:80]}")

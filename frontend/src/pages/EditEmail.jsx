@@ -189,9 +189,11 @@ const EditEmail = () => {
       if (_tlhMatch) _tableLh = _tlhMatch[1];
     }
 
-    // Resolve [[BACKEND_URL]] so images show in preview
+    // Resolve [[BACKEND_URL]] and hardcoded localhost URLs so images show in preview
     const backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
     text = text.replace(/\[\[BACKEND_URL\]\]/g, backendUrl);
+    text = text.replace(/http:\/\/127\.0\.0\.1:8000/g, backendUrl);
+    text = text.replace(/http:\/\/localhost:8000/g, backendUrl);
 
     // If body already has HTML tags (WYSIWYG mode), render directly — no markdown processing!
     // This ensures fonts, sizes, colors, tables, etc look EXACTLY like in the editor.

@@ -436,7 +436,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: str |
     DEFAULT_CC = "lalit.h@qvscl.com"
     if not cc:
         cc = DEFAULT_CC
-    # Vismaya ke emails mein sirf rajesh.s@qvscl.com CC karo
+    # For Vismaya's emails, CC only rajesh.s@qvscl.com
     is_vismaya = (
         template_name == 'vismaya_leadstream'
         or (from_name and 'vismaya' in from_name.lower())

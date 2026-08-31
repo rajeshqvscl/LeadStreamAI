@@ -282,6 +282,10 @@ const Prompts = () => {
       if (_tlhMatch) _tableLh = _tlhMatch[1];
     }
     const _backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+    // Resolve [[BACKEND_URL]] and hardcoded localhost URLs so uploaded images show in preview
+    text = text.replace(/\[\[BACKEND_URL\]\]/g, _backendUrl);
+    text = text.replace(/http:\/\/127\.0\.0\.1:8000/g, _backendUrl);
+    text = text.replace(/http:\/\/localhost:8000/g, _backendUrl);
     // Resolve sender placeholders (needed regardless of HTML/markdown)
     const firstName = userSenderName.split(' ')[0] || userSenderName;
     text = text.replace(/\{\{Sender Name\}\}/g, userSenderName);

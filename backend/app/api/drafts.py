@@ -950,30 +950,20 @@ def _extract_body_attachments(body: str, user_id: int | None = None) -> tuple:
         if f"{backend_url}/assets/" in url or "/assets/" in url:
             found_urls.add(url)
 
-    # HTML images: <img src="url">
-    for url in re.findall(r'<img[^>]*src="([^"]+)"[^>]*>', body, re.IGNORECASE):
-        if f"{backend_url}/assets/" in url or "/assets/" in url:
-            found_urls.add(url)
+    # NOTE: <img src> URLs are intentionally NOT collected here.
+    # Inline images (logos, signature images) must keep their original direct URLs
+    # so email clients can render them. Google Drive share links are viewer URLs,
+    # not direct image URLs, so replacing <img src> with Drive links breaks display.
 
     IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico'}
-    for url in found_urls:
+    for url in list(found_urls):
         filename = url.rsplit("/", 1)[-1] if "/" in url else url
         filepath = os.path.join(asset_dir, filename)
         if os.path.exists(filepath):
             ext = os.path.splitext(filename)[1].lower()
             if ext in IMAGE_EXTS:
-                logger.info(f"Skipping image attachment (inline in body): {filename}")
-                if user_id is not None:
-                    try:
-                        from app.services.google_service import upload_to_drive
-                        with open(filepath, "rb") as f:
-                            content_bytes = f.read()
-                        drive_link = upload_to_drive(user_id, filename, content_bytes)
-                        if drive_link:
-                            url_replacements[url] = drive_link
-                            logger.info(f"Uploaded image to Drive: {filename} -> {drive_link}")
-                    except Exception as e:
-                        logger.warning(f"Drive upload failed for image {filename}: {e}")
+                logger.info(f"Skipping image (inline in body, keeping direct URL): {filename}")
+                found_urls.discard(url)
                 continue
             import base64
             with open(filepath, "rb") as f:
@@ -3984,7 +3974,7 @@ def approve_draft(draft_id: int, req: ApproveRequest | None = None, user_id: str
 
         cc_email = req.cc if (req and req.cc) else stored_cc
 
-        # Vismaya ke emails mein sirf rajesh.s@qvscl.com CC karo
+        # For Vismaya's emails, CC only rajesh.s@qvscl.com
         is_vismaya = (
             (template_name or '').lower() == 'vismaya_leadstream'
             or 'vismaya' in (sender_name or '').lower()

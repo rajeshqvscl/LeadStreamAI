@@ -17,6 +17,8 @@ const mdToHtml = (md) => {
   if (/^<[a-z][^>]*>/i.test(md.trim()) && /<\/[a-z]+>\s*$/i.test(md.trim())) return md;
   const _editorBackendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
   md = md.replace(/\[\[BACKEND_URL\]\]/g, _editorBackendUrl);
+  md = md.replace(/http:\/\/127\.0\.0\.1:8000/g, _editorBackendUrl);
+  md = md.replace(/http:\/\/localhost:8000/g, _editorBackendUrl);
   let html = md.replace(/•/g, '*');
   let lines = html.split('\n');
   let result = [];
@@ -117,6 +119,8 @@ const convertHtmlMarkdownRemnants = (html) => {
   const [imgW, imgH] = _getEditorImgSizes();
   const _editorBackendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
   html = html.replace(/\[\[BACKEND_URL\]\]/g, _editorBackendUrl);
+  html = html.replace(/http:\/\/127\.0\.0\.1:8000/g, _editorBackendUrl);
+  html = html.replace(/http:\/\/localhost:8000/g, _editorBackendUrl);
   const converted = html
     .replace(/!\[(.*?)\]\((.*?)\)/g, (m, alt, src) => `<img src="${src}" alt="${alt}" style="width:${imgW};height:${imgH};">`)
     .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
