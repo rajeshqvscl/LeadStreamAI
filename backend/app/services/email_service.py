@@ -1057,8 +1057,8 @@ def process_auto_pilot_sweep():
 
         cfg = get_scheduler_config()
 
-        # Skip auto-pilot on weekends/outside working hours
-        if not cfg.is_working_hours_now():
+        # Skip auto-pilot on weekends/outside email working hours (9AM-6PM)
+        if not cfg.is_email_working_hours_now():
             return {"scheduled": 0, "users": 0, "skipped": "outside working hours"}
 
         grace_minutes = cfg.drip_grace_minutes
@@ -1158,8 +1158,8 @@ def check_scheduled_emails():
 
         cfg = get_scheduler_config()
 
-        # Guard 1: working-hours blackout — scheduled items just wait here
-        if not cfg.is_working_hours_now():
+        # Guard 1: working-hours blackout — email scheduler uses its own window (9AM-6PM)
+        if not cfg.is_email_working_hours_now():
             return
 
         conn = get_db_connection()

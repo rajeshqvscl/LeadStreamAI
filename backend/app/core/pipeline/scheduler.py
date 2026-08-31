@@ -16,6 +16,13 @@ class SchedulerConfig(BaseSettings):
     reply_poll_hours_ist: str = "9,13,17"  # reply detector runs at these IST hours
     working_hours_start: int = 10
     working_hours_end: int = 17
+    # Email scheduler working hours (for check_scheduled_emails / drip send)
+    email_working_hours_start: int = 9
+    email_working_hours_end: int = 18
+    # Followup scheduler working hours (for process_outreach_sequences)
+    followup_working_hours_start: int = 8
+    followup_working_hours_end: int = 20
+    followup_working_start_minute: int = 30  # 8:30 AM IST
     working_days: str = "1-5"
     timezone: str = "Asia/Kolkata"
     reply_cleanup_hours_ist: str = "10,16"
@@ -46,6 +53,27 @@ class SchedulerConfig(BaseSettings):
         if now.weekday() >= 5:
             return False
         return not (now.hour < self.working_hours_start or now.hour >= self.working_hours_end)
+
+    def is_email_working_hours_now(self) -> bool:
+        """Email scheduler: 9AM-6PM IST, Mon-Fri."""
+        tz = timezone(timedelta(hours=5, minutes=30))
+        now = datetime.now(tz)
+        if now.weekday() >= 5:
+            return False
+        return not (now.hour < self.email_working_hours_start or now.hour >= self.email_working_hours_end)
+
+    def is_followup_working_hours_now(self) -> bool:
+        """Followup scheduler: 8:30AM-8PM IST, Mon-Fri."""
+        tz = timezone(timedelta(hours=5, minutes=30))
+        now = datetime.now(tz)
+        if now.weekday() >= 5:
+            return False
+        # 8:30 AM check: hour must be >= 8, and if hour == 8 then minute >= 30
+        if now.hour < self.followup_working_hours_start:
+            return False
+        if now.hour == self.followup_working_hours_start and now.minute < self.followup_working_start_minute:
+            return False
+        return now.hour < self.followup_working_hours_end
 
     def next_working_time(self, dt) -> datetime:
         """Roll a naive datetime forward to the next allowed sending slot.

@@ -91,11 +91,11 @@ class FollowUpEngine:
             lead_type=lead.get("lead_type", "INVESTOR") or "INVESTOR",
         )
 
-        # 1. Working hours guard
-        if not self.scheduler_config.is_working_hours_now():
+        # 1. Working hours guard (followup scheduler: 8:30AM-8PM)
+        if not self.scheduler_config.is_followup_working_hours_now():
             return FollowUpAction(
                 should_send=False,
-                reason="Outside working hours",
+                reason="Outside followup working hours (8:30AM-8PM)",
                 lead_type=lead_data.lead_type,
             )
 

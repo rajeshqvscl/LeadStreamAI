@@ -82,8 +82,8 @@ def process_outreach_sequences():
     engine = get_followup_engine()
     producer = get_email_producer()
 
-    if not config.is_working_hours_now():
-        logger.info("Outreach paused: Outside working hours")
+    if not config.is_followup_working_hours_now():
+        logger.info("Outreach paused: Outside followup working hours (8:30AM-8PM)")
         return
 
     conn = get_db_connection()

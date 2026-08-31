@@ -87,7 +87,7 @@ class TransitionGuard:
             return False
         if lead.is_responded or lead.replied_at is not None:
             return False
-        if not config.is_working_hours_now():
+        if not config.is_followup_working_hours_now():
             return False
         if not lead.auto_followup:
             return False
