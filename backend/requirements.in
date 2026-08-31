@@ -38,3 +38,4 @@ numpy
 pandas
 Pillow
 numpy
+pytest
