@@ -792,6 +792,26 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: str |
                     return '<' + tag_name + ' style="' + _tlh_style + '"' + rest + closing
                 html_content = _re_lh.sub(r'<(table|th|td)((?:\s[^>]*)?)(/?)>', _ensure_table_lh, html_content, flags=_re_lh.IGNORECASE)
 
+                # ── Normalize table cell padding (send-time catch-all) ──
+                # Ensures AI-generated or pasted tables with excessive padding
+                # get squeezed before the email is sent, regardless of which
+                # markdown_to_html branch processed the content.
+                def _send_normalize_padding(m):
+                    tag = m.group(0)
+                    if _re_lh.search(r'padding', tag, _re_lh.IGNORECASE):
+                        tag = _re_lh.sub(r'padding-(?:top|bottom|left|right|inline|block-start|block-end|inline-start|inline-end)\s*:\s*[^;"]+;?\s*', '', tag, flags=_re_lh.IGNORECASE)
+                        tag = _re_lh.sub(r'padding\s*:\s*[^;"]+', 'padding:0px 6px', tag, flags=_re_lh.IGNORECASE)
+                    return tag
+                html_content = _re_lh.sub(r'<(?:th|td)\b[^>]*style\s*=\s*["\'][^"\']*["\'][^>]*>', _send_normalize_padding, html_content, flags=_re_lh.IGNORECASE)
+
+                def _send_ensure_cell_style(m):
+                    tag = m.group(0)
+                    if 'style=' in tag.lower():
+                        return tag
+                    tag = tag[:-1] + ' style="border:1px solid #475569;padding:0px 6px;text-align:left;">'
+                    return tag
+                html_content = _re_lh.sub(r'<(?:th|td)\b[^>]*>', _send_ensure_cell_style, html_content, flags=_re_lh.IGNORECASE)
+
                 # Build a plain-text fallback by stripping HTML tags
                 import re as _re
                 plain_text = _re.sub(r'<br\s*/?>', '\n', html_content)

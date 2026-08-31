@@ -1166,6 +1166,51 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
                 text = _head + f'<div style="{_sig_style}">' + _sig_marker + _sig.strip() + '</div>'
         # Wrap the entire HTML content in a styled div with font settings
         text = f'<div style="font-family: {font_family}; font-size: {font_size}; line-height: {_body_line_height}; color: #333333;">{text}</div>'
+
+        # ── Normalize table cell padding (rich-HTML path) ──
+        # Same normalization as the markdown branch so AI-generated / pasted
+        # tables with excessive padding get squeezed.
+        def _rich_cell_border(m):
+            tag_m = m.group(0)
+            if 'border' in tag_m:
+                return tag_m
+            if 'style=' in tag_m:
+                tag_m = re.sub(r'style="', 'style="border:1px solid #475569;', tag_m)
+                tag_m = re.sub(r"style='", "style='border:1px solid #475569;", tag_m)
+            else:
+                tag_m = tag_m[:-1] + ' style="border:1px solid #475569;padding:0px 6px;text-align:left;">'
+            return tag_m
+        text = re.sub(r'<(th|td)([^>]*)>', _rich_cell_border, text, flags=re.IGNORECASE)
+
+        def _rich_normalize_padding(m):
+            tag = m.group(0)
+            if re.search(r'padding', tag, re.IGNORECASE):
+                tag = re.sub(r'padding-(?:top|bottom|left|right|inline|block-start|block-end|inline-start|inline-end)\s*:\s*[^;"]+;?\s*', '', tag, flags=re.IGNORECASE)
+                tag = re.sub(r'padding\s*:\s*[^;"]+', 'padding:0px 6px', tag, flags=re.IGNORECASE)
+            return tag
+        text = re.sub(r'<(?:th|td)\b[^>]*style\s*=\s*["\'][^"\']*["\'][^>]*>', _rich_normalize_padding, text, flags=re.IGNORECASE)
+
+        def _rich_ensure_style(m):
+            tag = m.group(0)
+            if 'style=' in tag.lower():
+                return tag
+            tag = tag[:-1] + ' style="border:1px solid #475569;padding:0px 6px;text-align:left;">'
+            return tag
+        text = re.sub(r'<(?:th|td)\b[^>]*>', _rich_ensure_style, text, flags=re.IGNORECASE)
+
+        # Also ensure tables have border-collapse
+        def _rich_table_collapse(m):
+            attrs = m.group(1) or ''
+            if 'border-collapse' in attrs:
+                return f'<table{attrs}>'
+            if 'style=' in attrs:
+                attrs = re.sub(r'style="', 'style="border-collapse:collapse;', attrs)
+                attrs = re.sub(r"style='", "style='border-collapse:collapse;", attrs)
+            else:
+                attrs += ' style="border-collapse:collapse;width:100%;"'
+            return f'<table{attrs}>'
+        text = re.sub(r'<table([^>]*)>', _rich_table_collapse, text, flags=re.IGNORECASE)
+
         return _restore_rich(text)
 
     text = re.sub(r'!\[(.*?)\]\((.*?)\)', _inline_md_img, text)
@@ -1368,15 +1413,26 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
     result = re.sub(r'<table([^>]*)>', ensure_table_collapse, result, flags=re.IGNORECASE)
 
     # Normalize ALL table cell padding to 0px 6px — catches hardcoded template
-    # padding (hospital draft tables with 1px 4px / 2px 8px) as well as
-    # pasted/DOCX tables with larger padding.
+    # padding (hospital draft tables with 1px 4px / 2px 8px), pasted/DOCX tables
+    # with larger padding, AND AI-generated tables using padding-top/padding-bottom.
     def _normalize_cell_padding(m):
         tag = m.group(0)
-        # Replace any existing padding value in the style attribute
-        if re.search(r'padding\s*:', tag, re.IGNORECASE):
+        # Strip ALL padding-* variants (padding, padding-top, padding-bottom, etc.)
+        if re.search(r'padding', tag, re.IGNORECASE):
+            tag = re.sub(r'padding-(?:top|bottom|left|right|inline|block-start|block-end|inline-start|inline-end)\s*:\s*[^;"]+;?\s*', '', tag, flags=re.IGNORECASE)
             tag = re.sub(r'padding\s*:\s*[^;"]+', 'padding:0px 6px', tag, flags=re.IGNORECASE)
         return tag
     result = re.sub(r'<(?:th|td)\b[^>]*style\s*=\s*["\'][^"\']*["\'][^>]*>', _normalize_cell_padding, result, flags=re.IGNORECASE)
+
+    # Catch cells that have NO style attribute at all — force padding + border
+    def _ensure_cell_has_style(m):
+        tag = m.group(0)
+        if 'style=' in tag.lower():
+            return tag
+        # Insert style attribute before closing >
+        tag = tag[:-1] + ' style="border:1px solid #475569;padding:0px 6px;text-align:left;">'
+        return tag
+    result = re.sub(r'<(?:th|td)\b[^>]*>', _ensure_cell_has_style, result, flags=re.IGNORECASE)
 
     # Strip any stray square brackets from non-HTML text (all legit markdown
     # links/images should already be converted to <a>/<img> at this point)
