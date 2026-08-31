@@ -2160,6 +2160,10 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
             sig_content = re.sub(r'^\s*(?:-{2,}|—)\s*$', '', sig_content, flags=re.MULTILINE).strip()
             # Convert signature markdown to HTML so images/links render in email
             _sig_backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+            # Also resolve hardcoded localhost URLs to the production backend URL
+            # so images uploaded locally work in sent emails too
+            sig_content = sig_content.replace("http://127.0.0.1:8000", _sig_backend_url)
+            sig_content = sig_content.replace("http://localhost:8000", _sig_backend_url)
             # Images: ![alt](url) → <img>
             sig_content = re.sub(
                 r'!\[([^\]]*)\]\(([^)]+)\)',
