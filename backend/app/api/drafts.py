@@ -1377,6 +1377,17 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
 
     result = re.sub(r'<table([^>]*)>', ensure_table_collapse, result, flags=re.IGNORECASE)
 
+    # Normalize ALL table cell padding to 0px 6px — catches hardcoded template
+    # padding (hospital draft tables with 1px 4px / 2px 8px) as well as
+    # pasted/DOCX tables with larger padding.
+    def _normalize_cell_padding(m):
+        tag = m.group(0)
+        # Replace any existing padding value in the style attribute
+        if re.search(r'padding\s*:', tag, re.IGNORECASE):
+            tag = re.sub(r'padding\s*:\s*[^;"]+', 'padding:0px 6px', tag, flags=re.IGNORECASE)
+        return tag
+    result = re.sub(r'<(?:th|td)\b[^>]*style\s*=\s*["\'][^"\']*["\'][^>]*>', _normalize_cell_padding, result, flags=re.IGNORECASE)
+
     # Strip any stray square brackets from non-HTML text (all legit markdown
     # links/images should already be converted to <a>/<img> at this point)
     def _strip_stray_brackets(html: str) -> str:
@@ -2147,6 +2158,41 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
             sig_font = profile.get('signature_font', 'sans-serif')
             sig_size = profile.get('signature_font_size', '13px')
             sig_content = re.sub(r'^\s*(?:-{2,}|—)\s*$', '', sig_content, flags=re.MULTILINE).strip()
+            # Convert signature markdown to HTML so images/links render in email
+            _sig_backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+            # Images: ![alt](url) → <img>
+            sig_content = re.sub(
+                r'!\[([^\]]*)\]\(([^)]+)\)',
+                lambda m: f'<img src="{m.group(2).replace("[[BACKEND_URL]]", _sig_backend_url)}" alt="{m.group(1)}" style="width:200px;height:auto;display:block;margin:4px 0;" />',
+                sig_content
+            )
+            # Links: [text](url) → <a>
+            sig_content = re.sub(
+                r'(?<!!)\[([^\]]+)\]\(([^)]+)\)',
+                lambda m: f'<a href="{m.group(2).replace("[[BACKEND_URL]]", _sig_backend_url)}" style="color:#1d5fd0;text-decoration:underline;">{m.group(1)}</a>',
+                sig_content
+            )
+            # Bold: **text** → <strong>
+            sig_content = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', sig_content)
+            # Italic: *text* → <em> (single asterisk, not inside bold)
+            sig_content = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<em>\1</em>', sig_content)
+            # Newlines → <br> (except next to block-level tags)
+            _block_re = re.compile(r'</?(?:div|table|tbody|thead|tfoot|tr|td|th|p|h[1-6]|ul|ol|li|blockquote|br|hr|img|section|article|header|footer)[^>]*>', re.IGNORECASE)
+            lines = sig_content.split('\n')
+            out_lines = []
+            for i, ln in enumerate(lines):
+                stripped = ln.strip()
+                if not stripped:
+                    out_lines.append('<br>')
+                    continue
+                # Don't add <br> before or after block tags
+                prev_is_block = i > 0 and _block_re.search(out_lines[-1])
+                next_is_block = i < len(lines) - 1 and _block_re.search(lines[i + 1])
+                if prev_is_block or next_is_block:
+                    out_lines.append(stripped)
+                else:
+                    out_lines.append(stripped + '<br>')
+            sig_content = '\n'.join(out_lines)
             return body_text + "\n\n" + (
                 f'<div style="border-top: 1px solid #f0f0f0; padding-top: 10px; '
                 f'margin-top: 8px; font-family: {sig_font}; font-size: {sig_size}; '
