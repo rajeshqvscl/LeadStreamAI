@@ -122,7 +122,7 @@ def get_rate_limiter() -> SlidingWindowRateLimiter:
     if _rate_limiter is None:
         import os
         redis_url = os.getenv("REDIS_URL") or os.getenv("REDIS_TLS_URL") or "redis://localhost:6379"
-        _rate_limiter = SlidingWindowRateLimiter(redis_url, max_connections=3)
+        _rate_limiter = SlidingWindowRateLimiter(redis_url, max_connections=2)
     return _rate_limiter
 
 

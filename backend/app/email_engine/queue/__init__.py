@@ -1,5 +1,4 @@
-from .connection import close_redis_pool, get_redis_client
-from app.core.redis_pool import get_redis_pool
+from .connection import close_redis_pool, get_redis_client, get_redis_pool
 from .job import EmailJob, EmailPriority
 from .registry import (
     enqueue_job,
