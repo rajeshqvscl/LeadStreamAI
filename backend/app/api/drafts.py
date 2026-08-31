@@ -257,22 +257,22 @@ At a time when institutional investors and strategic healthcare operators are ac
 
 **Investment Snapshot**
 
-<table style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
+<table style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
 <thead>
 <tr style="background-color: #ffffff;">
-<th style="padding: 2px 4px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 18px;">Particulars</th>
-<th style="padding: 2px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">Current Metrics</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">Particulars</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">Current Metrics</th>
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Net Revenue</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~₹49.2 Cr</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">EBITDA</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~₹16.8 Cr</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">EBITDA Margin</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~34.2%</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">PAT</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~₹8.4 Cr</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Installed Capacity</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">225 Beds</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">ARPOB / RPOB</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~₹26,000</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Average Length of Stay</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">3.8 Days</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Blended Occupancy</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~28.3%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Net Revenue</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~₹49.2 Cr</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">EBITDA</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~₹16.8 Cr</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">EBITDA Margin</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~34.2%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">PAT</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~₹8.4 Cr</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Installed Capacity</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">225 Beds</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">ARPOB / RPOB</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~₹26,000</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Average Length of Stay</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">3.8 Days</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Blended Occupancy</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~28.3%</td></tr>
 </tbody>
 </table>
 
@@ -307,17 +307,17 @@ This is a key indicator because it demonstrates that the current opportunity is 
 
 The business benefits from a highly favorable payer mix:
 
-<table style="border-collapse: collapse; border: 1px solid #d0d0d0; font-family: Georgia, serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
+<table style="border-collapse: collapse; border: 1px solid #d0d0d0; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
 <thead>
 <tr style="background-color: #ffffff;">
-<th style="padding: 2px 4px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 18px;">REVENUE MIX</th>
-<th style="padding: 2px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">CONTRIBUTION</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">REVENUE MIX</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">CONTRIBUTION</th>
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Cash</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~58.3%</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Corporate</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~39.0%</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">TPA</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">Only ~2.7%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Cash</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~58.3%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Corporate</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~39.0%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">TPA</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">Only ~2.7%</td></tr>
 </tbody>
 </table>
 
@@ -371,17 +371,17 @@ This materially lowers execution and capital deployment risk relative to greenfi
 
 On a normalized basis, the platform has already demonstrated healthy operational growth:
 
-<table style="border-collapse: collapse; border: 1px solid #d0d0d0; font-family: Georgia, serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
+<table style="border-collapse: collapse; border: 1px solid #d0d0d0; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
 <thead>
 <tr style="background-color: #ffffff;">
-<th style="padding: 2px 4px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 18px;">Metric</th>
-<th style="padding: 2px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">Growth</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">Metric</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">Growth</th>
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Core Hospital EBITDA Growth</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~9.9%</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Occupancy Growth</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~14.3%</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">ARPOB Growth</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~4.0%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Core Hospital EBITDA Growth</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~9.9%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Occupancy Growth</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~14.3%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">ARPOB Growth</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~4.0%</td></tr>
 </tbody>
 </table>
 
@@ -1348,7 +1348,7 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
             attrs = attrs.replace('style="', 'style="border:1px solid #475569;')
             attrs = attrs.replace("style='", "style='border:1px solid #475569;")
         else:
-            attrs += ' style="border:1px solid #475569;padding:6px 10px;text-align:left;"'
+            attrs += ' style="border:1px solid #475569;padding:0px 6px;text-align:left;"'
         return f'<{tag}{attrs}>'
 
     result = re.sub(r'<(th|td)([^>]*)>', ensure_cell_border, result, flags=re.IGNORECASE)
@@ -2707,22 +2707,22 @@ At a time when institutional investors and strategic healthcare operators are ac
 
 <strong>Investment Snapshot</strong>
 
-<table style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
+<table style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
 <thead>
 <tr style="background-color: #ffffff;">
-<th style="padding: 2px 8px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 9pt;">PARTICULARS</th>
-<th style="padding: 2px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">CURRENT METRICS</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">PARTICULARS</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">CURRENT METRICS</th>
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Net Revenue</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~₹49.2 Cr</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">EBITDA</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~₹16.8 Cr</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">EBITDA Margin</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~34.2%</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">PAT</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~₹8.4 Cr</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Installed Capacity</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">225 Beds</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">ARPOB / RPOB</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~₹26,000</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Average Length of Stay</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">3.8 Days</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Blended Occupancy</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~28.3%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Net Revenue</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~₹49.2 Cr</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">EBITDA</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~₹16.8 Cr</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">EBITDA Margin</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~34.2%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">PAT</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~₹8.4 Cr</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Installed Capacity</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">225 Beds</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">ARPOB / RPOB</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~₹26,000</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Average Length of Stay</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">3.8 Days</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Blended Occupancy</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~28.3%</td></tr>
 </tbody>
 </table>
 
@@ -2757,17 +2757,17 @@ This is a key indicator because it demonstrates that the current opportunity is 
 
 The business benefits from a highly favorable payer mix:
 
-<table style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
+<table style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
 <thead>
 <tr style="background-color: #ffffff;">
-<th style="padding: 2px 8px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 9pt;">REVENUE MIX</th>
-<th style="padding: 2px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">CONTRIBUTION</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">REVENUE MIX</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">CONTRIBUTION</th>
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Cash</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~58.3%</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Corporate</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~39.0%</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">TPA</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">Only ~2.7%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Cash</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~58.3%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Corporate</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~39.0%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">TPA</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">Only ~2.7%</td></tr>
 </tbody>
 </table>
 
@@ -2819,17 +2819,17 @@ This materially lowers execution and capital deployment risk relative to greenfi
 
 <strong>6. Strong Historical Momentum</strong>
 
-<table style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 6px; margin-bottom: 6px;">
+<table style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
 <thead>
 <tr style="background-color: #ffffff;">
-<th style="padding: 2px 8px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 9pt;">METRIC</th>
-<th style="padding: 2px 8px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 9pt;">GROWTH</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">METRIC</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">GROWTH</th>
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Core Hospital EBITDA Growth</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~9.9%</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">Occupancy Growth</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~14.3%</td></tr>
-<tr><td style="padding: 1px 4px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 18px;">ARPOB Growth</td><td style="padding: 1px 4px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 18px;">~4.0%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Core Hospital EBITDA Growth</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~9.9%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Occupancy Growth</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~14.3%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">ARPOB Growth</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~4.0%</td></tr>
 </tbody>
 </table>
 
