@@ -110,10 +110,12 @@ class ReplyClassifier:
 
     def _classify_with_llm(self, body: str) -> ClassificationResult:
         """Call LLM with structured output"""
+        import json
+        import logging
+        _log = logging.getLogger(__name__)
+
         prompt = REPLY_CLASSIFICATION_PROMPT.format(reply_text=body)
 
-        # This will be implemented when LLM client is wired up
-        # For now, return fallback
         settings = get_llm_settings()
 
         # Try Groq first
@@ -128,11 +130,10 @@ class ReplyClassifier:
                     temperature=0.1,
                     response_format={"type": "json_object"},
                 )
-                import json
                 result = json.loads(response.choices[0].message.content)
                 return self._parse_llm_result(result, body)
-            except Exception:
-                pass
+            except Exception as e:
+                _log.debug(f"Groq classification failed: {e}")
 
         # Try Gemini
         if settings.gemini_api_key:
@@ -141,11 +142,10 @@ class ReplyClassifier:
                 genai.configure(api_key=settings.gemini_api_key)
                 model = genai.GenerativeModel(settings.gemini_model)
                 response = model.generate_content(prompt)
-                import json
                 result = json.loads(response.text)
                 return self._parse_llm_result(result, body)
-            except Exception:
-                pass
+            except Exception as e:
+                _log.debug(f"Gemini classification failed: {e}")
 
         # Try Anthropic
         if settings.anthropic_api_key:
@@ -158,11 +158,10 @@ class ReplyClassifier:
                     temperature=0.1,
                     messages=[{"role": "user", "content": prompt}],
                 )
-                import json
                 result = json.loads(response.content[0].text)
                 return self._parse_llm_result(result, body)
-            except Exception:
-                pass
+            except Exception as e:
+                _log.debug(f"Anthropic classification failed: {e}")
 
         # All LLMs failed
         return ClassificationResult(

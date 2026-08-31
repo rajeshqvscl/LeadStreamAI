@@ -92,11 +92,11 @@ class EmailJob:
         return cls.from_dict(json.loads(json_str))
 
     def with_idempotency_key(self, key: str) -> 'EmailJob':
-        """Return new job with idempotency key set"""
+        """Set idempotency key on this job (mutates self, returns self for chaining)"""
         self.idempotency_key = key
         return self
 
     def increment_retry(self) -> 'EmailJob':
-        """Return new job with incremented retry count"""
+        """Increment retry count on this job (mutates self, returns self for chaining)"""
         self.retry_count += 1
         return self

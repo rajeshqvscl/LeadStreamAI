@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import re
 from urllib.parse import quote, unquote
@@ -9,7 +10,26 @@ from fastapi.responses import RedirectResponse
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["tracking"])
 
-import hashlib
+# Allowed redirect domains for click tracking (prevent open redirect)
+_ALLOWED_REDIRECT_HOSTS = {"leadstreamai.onrender.com", "lead-backend-g9de.onrender.com", "localhost"}
+
+
+def _is_safe_redirect_url(url: str) -> bool:
+    """Validate that a URL is safe to redirect to (same-origin or known host)."""
+    if not url:
+        return False
+    lower = url.lower()
+    # Block protocol-relative and dangerous schemes
+    if lower.startswith("//") or lower.startswith("javascript:") or lower.startswith("data:"):
+        return False
+    # Allow relative paths
+    if lower.startswith("/"):
+        return True
+    # Check against allowed hosts
+    for host in _ALLOWED_REDIRECT_HOSTS:
+        if f"://{host}" in lower or lower.startswith(host):
+            return True
+    return False
 
 
 def _make_unique_gif(seed: str) -> bytes:
@@ -97,5 +117,9 @@ async def track_click(token: str, request: Request):
         logger.exception(f"Track click failed for token {token}: {e}")
 
     if url:
-        return RedirectResponse(url=unquote(url))
+        decoded = unquote(url)
+        if not _is_safe_redirect_url(decoded):
+            logger.warning(f"Blocked unsafe redirect URL for token {token}: {decoded[:200]}")
+            return Response(content="OK", status_code=200)
+        return RedirectResponse(url=decoded)
     return Response(content="OK", status_code=200)

@@ -132,15 +132,16 @@ def process_outreach_sequences():
                 continue
 
             sent_count = 0
-            max_per_cycle = config.followup_settings.max_auto_sends_per_cycle if hasattr(config, 'followup_settings') else 200
+            from app.core.config import get_followup_settings
+            max_per_cycle = get_followup_settings().max_auto_sends_per_cycle
 
             for lead in group:
                 if sent_count >= max_per_cycle:
                     logger.info(f"Per-cycle cap ({max_per_cycle}) reached for user {uid} — remaining leads picked up next cycle.")
                     break
 
-                # BUG 1: permissive gate — only skip terminal pipeline states.
-                TERMINAL = {'COMPLETED', 'STOPPED', 'CLOSED', 'REPLIED'}
+                # Only skip terminal pipeline states (must match LeadState enum values)
+                TERMINAL = {'CLOSED_WON', 'CLOSED_LOST', 'UNSUBSCRIBED', 'BOUNCED'}
                 if lead.get('pipeline_state') in TERMINAL:
                     continue
 

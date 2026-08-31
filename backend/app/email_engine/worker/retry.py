@@ -3,6 +3,7 @@ Retry Policy - Exponential Backoff + Dead Letter Queue
 """
 
 import logging
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -66,7 +67,6 @@ class RetryPolicy:
                 if attempt < self.max_retries and self.should_retry(job, e):
                     delay = self.get_delay(attempt)
                     logger.info(f"Retrying job {job.idempotency_key} in {delay}s (attempt {attempt + 2})")
-                    import time
                     time.sleep(delay)
                 else:
                     break
