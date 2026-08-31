@@ -1325,7 +1325,7 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
             # Check if this is a markdown table
             lines = p.split("\n")
             if len(lines) >= 2 and all(l.strip().startswith("|") and l.strip().endswith("|") for l in lines):
-                table_html = f"<table style='width:100%;border-collapse:collapse;margin-bottom:18px;font-family:{font_family};font-size:{font_size};line-height:{_table_line_height};'>"
+                table_html = f"<table style='width:100%;border-collapse:collapse;margin-bottom:4px;font-family:{font_family};font-size:{font_size};line-height:{_table_line_height};'>"
                 for i, line in enumerate(lines):
                     line = line.strip()
                     if not line: continue
@@ -1333,7 +1333,7 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
                     if all(re.match(r'^[-:\s]+$', c) for c in cells):
                         continue
                     tag = "th" if i == 0 else "td"
-                    style = f"border:1px solid #000;padding:2px 6px;text-align:left;font-weight:bold;font-size:10px;line-height:{_table_line_height};" if tag == "th" else f"border:1px solid #000;padding:1px 6px;text-align:left;font-size:10px;font-weight:bold;line-height:{_table_line_height};"
+                    style = f"border:1px solid #000;padding:0px 6px;text-align:left;font-weight:bold;font-size:10px;line-height:{_table_line_height};" if tag == "th" else f"border:1px solid #000;padding:0px 6px;text-align:left;font-size:10px;font-weight:bold;line-height:{_table_line_height};"
                     row_html = f"<{tag} style='{style}'>" + f"</{tag}><{tag} style='{style}'>".join(cells) + f"</{tag}>"
                     table_html += f"<tr>{row_html}</tr>"
                 table_html += "</table>"
