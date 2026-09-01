@@ -20,17 +20,19 @@ def normalize_user_id(user_id: str | None) -> str | None:
     if u_str.isdigit():
         return u_str
 
+    conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("SELECT id FROM users WHERE LOWER(username) = LOWER(%s) OR LOWER(email) = LOWER(%s) LIMIT 1", (u_str, u_str))
         row = cur.fetchone()
-        cur.close()
-        conn.close()
         if row:
             return str(row['id'])
     except Exception as e:
         logger.exception(f"Error resolving user_id for '{u_str}': {e}")
+    finally:
+        if conn:
+            conn.close()
 
     return None  # Do NOT fall back to admin on failure; callers must treat as unauthenticated
 

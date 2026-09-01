@@ -54,7 +54,6 @@ class TestNormalizeUserId:
 
         result = normalize_user_id("johndoe")
         assert result == "77"
-        cur.close.assert_called_once()
         conn.close.assert_called_once()
 
     @patch("app.utils.auth_helpers.get_db_connection")
@@ -140,72 +139,77 @@ class TestIsAdminUser:
 class TestDailyEmailLimit:
     """Each user has their own daily limit — no cross-user leakage."""
 
-    @patch("app.utils.auth_helpers.is_admin_user", return_value=False)
-    @patch("app.utils.auth_helpers.get_db_connection")
-    def test_user_within_limit(self, mock_get_db, mock_admin):
+    def test_user_within_limit(self):
+        """User with 10 sent emails and limit 2000 → allowed."""
         from app.utils.auth_helpers import check_daily_email_limit
 
         conn = MagicMock()
         cur = MagicMock()
         conn.cursor.return_value = cur
-        # First call: get limit, second call: count sent
+        # check_daily_email_limit opens ONE connection, calls:
+        #   1. SELECT outreach_daily_limit
+        #   2. SELECT COUNT(*) sent today
         cur.fetchone.side_effect = [
             {"outreach_daily_limit": 2000},  # limit query
             {"count": 10},                   # sent count
         ]
-        mock_get_db.return_value = conn
 
-        result = check_daily_email_limit("2", batch_size=1)
-        assert result is True  # 10 + 1 <= 2000
+        with patch("app.utils.auth_helpers.get_db_connection", return_value=conn), \
+             patch("app.utils.auth_helpers.normalize_user_id", return_value="2"), \
+             patch("app.utils.auth_helpers.is_admin_user", return_value=False):
+            result = check_daily_email_limit("2", batch_size=1)
+            assert result is True  # 10 + 1 <= 2000
 
-    @patch("app.utils.auth_helpers.is_admin_user", return_value=False)
-    @patch("app.utils.auth_helpers.get_db_connection")
-    def test_user_exceeds_limit(self, mock_get_db, mock_admin):
+    def test_user_exceeds_limit(self):
+        """User at limit → blocked."""
         from app.utils.auth_helpers import check_daily_email_limit
 
         conn = MagicMock()
         cur = MagicMock()
         conn.cursor.return_value = cur
+        # Code uses row[0] positional access (not DictCursor col names)
         cur.fetchone.side_effect = [
-            {"outreach_daily_limit": 100},  # low limit for testing
-            {"count": 100},                  # already at limit
+            [100],   # low limit
+            [100],   # already at limit
         ]
-        mock_get_db.return_value = conn
 
-        result = check_daily_email_limit("3", batch_size=1)
-        assert result is False  # 100 + 1 > 100
+        with patch("app.utils.auth_helpers.get_db_connection", return_value=conn), \
+             patch("app.utils.auth_helpers.normalize_user_id", return_value="3"), \
+             patch("app.utils.auth_helpers.is_admin_user", return_value=False):
+            result = check_daily_email_limit("3", batch_size=1)
+            assert result is False  # 100 + 1 > 100
 
-    @patch("app.utils.auth_helpers.is_admin_user", return_value=True)
-    @patch("app.utils.auth_helpers.get_db_connection")
-    def test_admin_unlimited(self, mock_get_db, mock_admin):
+    def test_admin_unlimited(self):
+        """Admin → no limit check, always allowed."""
         from app.utils.auth_helpers import check_daily_email_limit
 
         conn = MagicMock()
         cur = MagicMock()
         conn.cursor.return_value = cur
-        # Admin: no limit query, just count
         cur.fetchone.return_value = {"count": 9999}
-        mock_get_db.return_value = conn
 
-        result = check_daily_email_limit("1", batch_size=1)
-        assert result is True  # Admin always allowed
+        with patch("app.utils.auth_helpers.get_db_connection", return_value=conn), \
+             patch("app.utils.auth_helpers.normalize_user_id", return_value="1"), \
+             patch("app.utils.auth_helpers.is_admin_user", return_value=True):
+            result = check_daily_email_limit("1", batch_size=1)
+            assert result is True
 
-    @patch("app.utils.auth_helpers.is_admin_user", return_value=False)
-    @patch("app.utils.auth_helpers.get_db_connection")
-    def test_user_id_isolation_in_count_query(self, mock_get_db, mock_admin):
-        """The count query uses user_id in WHERE clause — different users don't share counts."""
+    def test_user_id_isolation_in_count_query(self):
+        """Count query uses user_id in WHERE — users don't share counts."""
         from app.utils.auth_helpers import check_daily_email_limit
 
         conn = MagicMock()
         cur = MagicMock()
         conn.cursor.return_value = cur
         cur.fetchone.side_effect = [
-            {"outreach_daily_limit": 2000},
-            {"count": 5},
+            [2000],  # limit
+            [5],     # count
         ]
-        mock_get_db.return_value = conn
 
-        check_daily_email_limit("2", batch_size=1)
+        with patch("app.utils.auth_helpers.get_db_connection", return_value=conn), \
+             patch("app.utils.auth_helpers.normalize_user_id", return_value="2"), \
+             patch("app.utils.auth_helpers.is_admin_user", return_value=False):
+            check_daily_email_limit("2", batch_size=1)
 
         # Verify the count query was parameterized with user_id
         count_query = cur.execute.call_args_list[1]
@@ -246,48 +250,52 @@ class TestLeadScoping:
 class TestSessionIsolation:
     """Sessions are per-user — one token maps to one user."""
 
-    @patch("app.utils.auth_helpers.get_db_connection")
-    def test_get_daily_limit_returns_own_limit(self, mock_get_db):
+    def test_get_daily_limit_returns_own_limit(self):
         """Each user's limit is fetched independently."""
         from app.utils.auth_helpers import get_daily_email_limit
 
         conn = MagicMock()
         cur = MagicMock()
         conn.cursor.return_value = cur
-        cur.fetchone.return_value = {"outreach_daily_limit": 500}
-        mock_get_db.return_value = conn
+        cur.fetchone.return_value = [500]  # positional index access
 
-        limit = get_daily_email_limit("3")
-        assert limit == 500
+        with patch("app.utils.auth_helpers.get_db_connection", return_value=conn), \
+             patch("app.utils.auth_helpers.normalize_user_id", return_value="3"), \
+             patch("app.utils.auth_helpers.is_admin_user", return_value=False):
+            limit = get_daily_email_limit("3")
+            assert limit == 500
 
-        # Verify the query used user_id=3, not some other user
-        query_params = cur.execute.call_args[0][1]
-        assert "3" in str(query_params)
+            # Verify the query used user_id=3
+            query_params = cur.execute.call_args[0][1]
+            assert "3" in str(query_params)
 
-    @patch("app.utils.auth_helpers.get_db_connection")
-    def test_user2_limit_independent_of_user3(self, mock_get_db):
+    def test_user2_limit_independent_of_user3(self):
         """User 2 and User 3 have different limits."""
         from app.utils.auth_helpers import get_daily_email_limit
 
-        # First call for user 2
+        # Call for user 2
         conn2 = MagicMock()
         cur2 = MagicMock()
         conn2.cursor.return_value = cur2
-        cur2.fetchone.return_value = {"outreach_daily_limit": 2000}
-        mock_get_db.return_value = conn2
+        cur2.fetchone.return_value = [2000]
 
-        limit2 = get_daily_email_limit("2")
-        assert limit2 == 2000
+        with patch("app.utils.auth_helpers.get_db_connection", return_value=conn2), \
+             patch("app.utils.auth_helpers.normalize_user_id", return_value="2"), \
+             patch("app.utils.auth_helpers.is_admin_user", return_value=False):
+            limit2 = get_daily_email_limit("2")
+            assert limit2 == 2000
 
-        # Second call for user 3
+        # Call for user 3
         conn3 = MagicMock()
         cur3 = MagicMock()
         conn3.cursor.return_value = cur3
-        cur3.fetchone.return_value = {"outreach_daily_limit": 1500}
-        mock_get_db.return_value = conn3
+        cur3.fetchone.return_value = [1500]
 
-        limit3 = get_daily_email_limit("3")
-        assert limit3 == 1500
+        with patch("app.utils.auth_helpers.get_db_connection", return_value=conn3), \
+             patch("app.utils.auth_helpers.normalize_user_id", return_value="3"), \
+             patch("app.utils.auth_helpers.is_admin_user", return_value=False):
+            limit3 = get_daily_email_limit("3")
+            assert limit3 == 1500
 
 
 # ---------------------------------------------------------------------------
@@ -330,26 +338,20 @@ class TestFontIsolation:
 class TestUnsubscribeIsolation:
     """Unsubscribing one lead should not affect other leads."""
 
-    @patch("app.services.email_service.get_db_connection")
+    @patch("app.database.get_db_connection")
     def test_one_unsubscribed_lead_doesnt_block_others(self, mock_get_db):
         """Lead A unsubscribed → Lead B still sends."""
         from app.services.email_service import send_email
 
-        # Guard returns unsubscribed for this specific lead
-        mock_get_db.return_value = MagicMock(
-            cursor=MagicMock(
-                return_value=MagicMock(
-                    fetchone=MagicMock(
-                        return_value={
-                            "email_opt_in": True,
-                            "is_unsubscribed": True,
-                        }
-                    ),
-                    close=MagicMock(),
-                )
-            ),
-            close=MagicMock(),
-        )
+        # Build mock DB connection for unsubscribe guard
+        conn = MagicMock()
+        cur = MagicMock()
+        conn.cursor.return_value = cur
+        cur.fetchone.return_value = {
+            "email_opt_in": True,
+            "is_unsubscribed": True,
+        }
+        mock_get_db.return_value = conn
 
         ok, msg, tid, rfc = send_email(
             to_email="unsubscribed@example.com",

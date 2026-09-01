@@ -40,7 +40,6 @@ class TestNormalizeUserId:
         mock_cur.fetchone.return_value = {"id": 42}
         result = normalize_user_id("johndoe")
         assert result == "42"
-        mock_cur.close.assert_called_once()
         mock_conn.close.assert_called_once()
 
     @patch("app.utils.auth_helpers.get_db_connection")

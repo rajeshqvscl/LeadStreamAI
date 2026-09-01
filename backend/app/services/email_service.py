@@ -21,6 +21,74 @@ load_dotenv(dotenv_path=env_path, override=True)
 logger.info(f"Module initialized with env_path: {env_path}")
 
 
+import uuid
+from email.mime.image import MIMEImage
+from email.mime.multipart import MIMEMultipart
+import urllib.request
+
+
+def _embed_inline_images(html_content: str) -> tuple:
+    """Scan HTML for <img src> pointing to local /assets/ files, download them,
+    and return (modified_html, list_of_cid_parts).
+
+    Each image is assigned a unique Content-ID (CID) and the src is replaced
+    with ``cid:<id>`` so email clients render them without fetching from the
+    server (fixes broken images when the backend sleeps on cold start).
+    """
+    asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
+    ASSET_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico'}
+    cid_parts = []
+
+    def _replace_img(match):
+        tag = match.group(0)
+        src_match = re.search(r'src=["\']([^"\']+)["\']', tag)
+        if not src_match:
+            return tag
+        src = src_match.group(1)
+
+        # Only process /assets/ references (local files)
+        filename = None
+        if '/assets/' in src:
+            filename = src.rsplit('/assets/', 1)[-1]
+        elif not src.startswith(('http://', 'https://', 'data:')):
+            filename = src
+
+        if not filename:
+            return tag
+
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in ASSET_EXTS:
+            return tag
+
+        filepath = asset_dir / filename
+        if not filepath.exists():
+            logger.warning(f"CID embed: asset not found: {filepath}")
+            return tag
+
+        cid = f"img-{uuid.uuid4().hex[:12]}@leadstream"
+        try:
+            with open(filepath, 'rb') as f:
+                img_data = f.read()
+            mime_type = {
+                '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+                '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+                '.bmp': 'image/bmp', '.ico': 'image/x-icon',
+            }.get(ext, 'application/octet-stream')
+            img_part = MIMEImage(img_data, _subtype=mime_type.split('/')[-1])
+            img_part.add_header('Content-ID', f'<{cid}>')
+            img_part.add_header('Content-Disposition', 'inline', filename=filename)
+            cid_parts.append(img_part)
+            logger.info(f"CID embedded: {filename} -> cid:{cid}")
+        except Exception as e:
+            logger.warning(f"CID embed failed for {filename}: {e}")
+            return tag
+
+        return tag.replace(f'src="{src}"', f'src="cid:{cid}"').replace(f"src='{src}'", f"src='cid:{cid}'")
+
+    html_content = re.sub(r'<img\s[^>]+>', _replace_img, html_content, flags=re.IGNORECASE)
+    return html_content, cid_parts
+
+
 def _execute_with_retry(func: Callable, max_retries: int = 3, base_delay: int = 30, max_delay: int = 300, bulk_mode: bool = False) -> Any:
     """
     Execute a function with exponential backoff retry logic.
@@ -120,6 +188,7 @@ def _get_signature_attachments(user_id: int | None, signature_id: int | None = N
     """
     if not user_id:
         return []
+    conn = None
     try:
         from app.database import get_db_connection
         conn = get_db_connection()
@@ -135,8 +204,6 @@ def _get_signature_attachments(user_id: int | None, signature_id: int | None = N
                 (user_id,)
             )
         row = cur.fetchone()
-        cur.close()
-        conn.close()
         if not row:
             return []
         # row is a tuple because of regular cursor
@@ -171,6 +238,9 @@ def _get_signature_attachments(user_id: int | None, signature_id: int | None = N
     except Exception as e:
         logger.exception(f"Error fetching signature attachments for user {user_id}: {e}")
         return []
+    finally:
+        if conn:
+            conn.close()
 
 # Per-account email font preference (applies to draft/followup emails).
 # The font is applied as the final wrapper in send_email(), so it wins over
@@ -215,156 +285,73 @@ USER_SIGNATURE_FONT_SIZES = {
 DEFAULT_SIGNATURE_FONT_SIZE = "13px"
 
 
+def _safe_uid(user_id):
+    try:
+        return int(user_id) if user_id is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _fetch_user_setting(user_id, column: str, fallback):
+    """Single DB query for any user setting column. Uses try/finally for safe cleanup."""
+    uid = _safe_uid(user_id)
+    if not uid:
+        return fallback
+    conn = None
+    try:
+        from app.database import get_db_connection
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(f"SELECT {column} FROM users WHERE id = %s", (uid,))
+        row = cur.fetchone()
+        val = row.get(column) if row else None
+        if val:
+            return val
+        logger.warning(f"get_user_setting({column}): No value found for user {uid}")
+    except Exception as e:
+        logger.exception(f"get_user_setting({column}): DB error for user {uid}: {repr(e)}")
+    finally:
+        if conn:
+            conn.close()
+    return fallback
+
+
 def get_user_email_font(user_id) -> str:
     """Resolve the preferred email font for a user id."""
-    try:
-        uid = int(user_id) if user_id is not None else None
-    except (TypeError, ValueError):
-        uid = None
-    # First check database for user's custom font setting
-    if uid:
-        try:
-            from app.database import get_db_connection
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("SELECT email_font FROM users WHERE id = %s", (uid,))
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
-            if row and row.get('email_font'):
-                return row['email_font']
-            else:
-                logger.warning(f"get_user_email_font: No email_font found for user {uid}")
-        except Exception as e:
-            logger.exception(f"get_user_email_font: DB error for user {uid}: {repr(e)}")
-            logger.exception(traceback.format_exc())
-    # Fall back to hardcoded dictionary
-    return USER_EMAIL_FONTS.get(uid, DEFAULT_EMAIL_FONT)
+    return _fetch_user_setting(user_id, 'email_font', USER_EMAIL_FONTS.get(
+        _safe_uid(user_id), DEFAULT_EMAIL_FONT
+    ))
 
 
 def get_user_email_font_size(user_id) -> str:
     """Resolve the preferred email font size (px string) for a user id."""
-    try:
-        uid = int(user_id) if user_id is not None else None
-    except (TypeError, ValueError):
-        uid = None
-    # First check database for user's custom font size setting
-    if uid:
-        try:
-            from app.database import get_db_connection
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("SELECT email_font_size FROM users WHERE id = %s", (uid,))
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
-            if row and row.get('email_font_size'):
-                return row['email_font_size']
-            else:
-                logger.warning(f"get_user_email_font_size: No email_font_size found for user {uid}")
-        except Exception as e:
-            logger.exception(f"get_user_email_font_size: DB error for user {uid}: {repr(e)}")
-            logger.exception(traceback.format_exc())
-    # Fall back to hardcoded dictionary
-    return USER_EMAIL_FONT_SIZES.get(uid, DEFAULT_EMAIL_FONT_SIZE)
+    return _fetch_user_setting(user_id, 'email_font_size', USER_EMAIL_FONT_SIZES.get(
+        _safe_uid(user_id), DEFAULT_EMAIL_FONT_SIZE
+    ))
 
 
 def get_user_signature_font(user_id) -> str:
     """Resolve the preferred signature font for a user id."""
-    try:
-        uid = int(user_id) if user_id is not None else None
-    except (TypeError, ValueError):
-        uid = None
-    # First check database for user's custom font setting
-    if uid:
-        try:
-            from app.database import get_db_connection
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("SELECT signature_font FROM users WHERE id = %s", (uid,))
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
-            if row and row.get('signature_font'):
-                return row['signature_font']
-            else:
-                logger.warning(f"get_user_signature_font: No signature_font found for user {uid}")
-        except Exception as e:
-            logger.exception(f"get_user_signature_font: DB error for user {uid}: {repr(e)}")
-            logger.exception(traceback.format_exc())
-    # Fall back to hardcoded dictionary
-    return USER_SIGNATURE_FONTS.get(uid, DEFAULT_SIGNATURE_FONT)
+    return _fetch_user_setting(user_id, 'signature_font', USER_SIGNATURE_FONTS.get(
+        _safe_uid(user_id), DEFAULT_SIGNATURE_FONT
+    ))
 
 
 def get_user_signature_font_size(user_id) -> str:
     """Resolve the preferred signature font size (px string) for a user id."""
-    try:
-        uid = int(user_id) if user_id is not None else None
-    except (TypeError, ValueError):
-        uid = None
-    # First check database for user's custom font size setting
-    if uid:
-        try:
-            from app.database import get_db_connection
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("SELECT signature_font_size FROM users WHERE id = %s", (uid,))
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
-            if row and row.get('signature_font_size'):
-                return row['signature_font_size']
-            else:
-                logger.warning(f"get_user_signature_font_size: No signature_font_size found for user {uid}")
-        except Exception as e:
-            logger.exception(f"get_user_signature_font_size: DB error for user {uid}: {repr(e)}")
-            logger.exception(traceback.format_exc())
-    # Fall back to hardcoded dictionary
-    return USER_SIGNATURE_FONT_SIZES.get(uid, DEFAULT_SIGNATURE_FONT_SIZE)
+    return _fetch_user_setting(user_id, 'signature_font_size', USER_SIGNATURE_FONT_SIZES.get(
+        _safe_uid(user_id), DEFAULT_SIGNATURE_FONT_SIZE
+    ))
 
 
 def get_user_image_width(user_id) -> str:
     """Resolve the preferred image width for a user id."""
-    try:
-        uid = int(user_id) if user_id is not None else None
-    except (TypeError, ValueError):
-        uid = None
-    if uid:
-        try:
-            from app.database import get_db_connection
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("SELECT image_width FROM users WHERE id = %s", (uid,))
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
-            if row and row.get('image_width'):
-                return row['image_width']
-        except Exception as e:
-            logger.exception(f"get_user_image_width: DB error for user {uid}: {repr(e)}")
-    return "400px"
+    return _fetch_user_setting(user_id, 'image_width', "400px")
 
 
 def get_user_image_height(user_id) -> str:
     """Resolve the preferred image height for a user id."""
-    try:
-        uid = int(user_id) if user_id is not None else None
-    except (TypeError, ValueError):
-        uid = None
-    if uid:
-        try:
-            from app.database import get_db_connection
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("SELECT image_height FROM users WHERE id = %s", (uid,))
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
-            if row and row.get('image_height'):
-                return row['image_height']
-        except Exception as e:
-            logger.exception(f"get_user_image_height: DB error for user {uid}: {repr(e)}")
-    return "auto"
+    return _fetch_user_setting(user_id, 'image_height', "auto")
 
 
 def strip_old_unsubscribe_links(html_content: str) -> str:
@@ -864,7 +851,24 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: str |
                 msg_body = MIMEMultipart('alternative')
                 msg_body.attach(MIMEText(plain_text, 'plain'))
                 msg_body.attach(MIMEText(html_content, 'html'))
-                msg.attach(msg_body)
+
+                # Embed inline images as CID parts (fixes broken images when
+                # backend server sleeps on cold start — recipient clients no
+                # longer need to fetch images from the server at view time)
+                html_for_cid, cid_parts = _embed_inline_images(html_content)
+                if cid_parts:
+                    # Rebuild the alternative body with the CID-rewritten HTML
+                    msg_body = MIMEMultipart('alternative')
+                    msg_body.attach(MIMEText(plain_text, 'plain'))
+                    msg_body.attach(MIMEText(html_for_cid, 'html'))
+                    # Wrap in 'related' so email clients know to resolve cid: refs
+                    msg_related = MIMEMultipart('related')
+                    msg_related.attach(msg_body)
+                    for cid_part in cid_parts:
+                        msg_related.attach(cid_part)
+                    msg.attach(msg_related)
+                else:
+                    msg.attach(msg_body)
 
                 # Attach the files
                 if attachments:

@@ -30,6 +30,7 @@ def _make_config():
     config.followup.investor_intervals = "0:2,1:5,2:8"
     config.followup.client_intervals = "0:2,1:5"
     config.is_working_hours_now = MagicMock(return_value=True)
+    config.is_followup_working_hours_now = MagicMock(return_value=True)
     return config
 
 

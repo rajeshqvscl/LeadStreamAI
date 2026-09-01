@@ -94,7 +94,7 @@ def _base_kwargs():
 class TestUnsubscribeGuard:
     """Lead or email is blacklisted → send blocked."""
 
-    @patch("app.services.email_service.get_db_connection")
+    @patch("app.database.get_db_connection")
     def test_lead_unsubscribed_blocks_send(self, mock_get_db):
         """is_unsubscribed=True → returns (False, 'Lead has unsubscribed', None, None)."""
         from app.services.email_service import send_email
@@ -110,7 +110,7 @@ class TestUnsubscribeGuard:
         assert tid is None
         assert rfc is None
 
-    @patch("app.services.email_service.get_db_connection")
+    @patch("app.database.get_db_connection")
     def test_lead_opt_out_blocks_send(self, mock_get_db):
         """email_opt_in=False → returns blocked."""
         from app.services.email_service import send_email
@@ -124,7 +124,7 @@ class TestUnsubscribeGuard:
         assert ok is False
         assert "unsubscribed" in msg.lower()
 
-    @patch("app.services.email_service.get_db_connection")
+    @patch("app.database.get_db_connection")
     def test_global_unsubscribe_blocks_send(self, mock_get_db):
         """No lead_id, email in global blacklist → blocked."""
         from app.services.email_service import send_email
@@ -143,14 +143,14 @@ class TestUnsubscribeGuard:
         assert ok is False
         assert "unsubscribed" in msg.lower()
 
-    @patch("app.services.email_service.get_db_connection")
+    @patch("app.database.get_db_connection")
     def test_active_lead_passes_guard(self, mock_get_db):
         """Active lead (not unsubscribed) → guard passes, proceeds to Gmail."""
         from app.services.email_service import send_email
 
         mock_get_db.return_value = _mock_guard_conn(unsubscribed=False, opt_in=True)
 
-        with patch("app.services.email_service.get_gmail_service") as mock_gmail:
+        with patch("app.services.google_service.get_gmail_service") as mock_gmail:
             mock_gmail.return_value = _mock_gmail_service()
             ok, msg, tid, rfc = send_email(**_base_kwargs(), lead_id=1)
             # Should NOT be blocked by guard (may succeed or fail on Gmail,
@@ -166,31 +166,30 @@ class TestUnsubscribeGuard:
 class TestCCLogic:
     """CC behavior — default, explicit, Vismaya override."""
 
-    @patch("app.services.email_service.get_db_connection")
+    @patch("app.database.get_db_connection")
     def test_default_cc_applied(self, mock_get_db):
         """No CC provided → lalit.h@qvscl.com CC'd."""
         from app.services.email_service import send_email
 
         mock_get_db.return_value = _mock_guard_conn()
 
-        with patch("app.services.email_service.get_gmail_service") as mock_gmail:
+        with patch("app.services.google_service.get_gmail_service") as mock_gmail:
             svc = _mock_gmail_service()
             mock_gmail.return_value = svc
             ok, msg, tid, rfc = send_email(**_base_kwargs(), lead_id=1, cc=None)
-            # Check that the Gmail send was called (msg construction happens internally)
-            if ok:
-                # The CC should have been set on the MIME message
-                # We verify by checking the Gmail API was invoked
-                svc.users().messages().send.assert_called_once()
+            # send_email succeeded and the Gmail API was invoked
+            assert ok is True, f"send_email failed: {msg}"
+            # The send chain: service.users().messages().send().execute()
+            svc.users().messages().send.assert_called()
 
-    @patch("app.services.email_service.get_db_connection")
+    @patch("app.database.get_db_connection")
     def test_vismaya_template_overrides_cc(self, mock_get_db):
         """Vismaya template → CC forced to rajesh.s@qvscl.com."""
         from app.services.email_service import send_email
 
         mock_get_db.return_value = _mock_guard_conn()
 
-        with patch("app.services.email_service.get_gmail_service") as mock_gmail:
+        with patch("app.services.google_service.get_gmail_service") as mock_gmail:
             svc = _mock_gmail_service()
             mock_gmail.return_value = svc
             ok, msg, tid, rfc = send_email(
@@ -199,25 +198,26 @@ class TestCCLogic:
                 cc="someone@example.com",
                 template_name="vismaya_leadstream",
             )
-            # Should succeed (or at least not crash) — the CC override is internal
             assert ok is True or "gmail" in (msg or "").lower()
 
-    @patch("app.services.email_service.get_db_connection")
+    @patch("app.database.get_db_connection")
     def test_vismaya_from_name_overrides_cc(self, mock_get_db):
         """from_name containing 'vismaya' → CC forced."""
         from app.services.email_service import send_email
 
         mock_get_db.return_value = _mock_guard_conn()
 
-        with patch("app.services.email_service.get_gmail_service") as mock_gmail:
+        with patch("app.services.google_service.get_gmail_service") as mock_gmail:
             svc = _mock_gmail_service()
             mock_gmail.return_value = svc
+            # NOTE: _base_kwargs already has from_name='Test Sender', so we
+            # override it here by building kwargs without it
+            kw = {k: v for k, v in _base_kwargs().items() if k != "from_name"}
             ok, msg, tid, rfc = send_email(
-                **_base_kwargs(),
+                **kw,
                 from_name="Vismaya Sharma",
                 lead_id=1,
             )
-            # Should not crash
             assert ok is True or "gmail" in (msg or "").lower()
 
 
@@ -228,7 +228,7 @@ class TestCCLogic:
 class TestReturnTuple:
     """send_email() must always return a 4-tuple."""
 
-    @patch("app.services.email_service.get_db_connection")
+    @patch("app.database.get_db_connection")
     def test_returns_4_tuple(self, mock_get_db):
         """Always returns (bool, str, str|None, str|None)."""
         from app.services.email_service import send_email
@@ -236,7 +236,7 @@ class TestReturnTuple:
         mock_get_db.return_value = _mock_guard_conn()
 
         # No Gmail service → returns False with message
-        with patch("app.services.email_service.get_gmail_service") as mock_gmail:
+        with patch("app.services.google_service.get_gmail_service") as mock_gmail:
             mock_gmail.return_value = None
             result = send_email(**_base_kwargs(), lead_id=1)
 
@@ -246,7 +246,7 @@ class TestReturnTuple:
             assert isinstance(ok, bool)
             assert isinstance(msg, str)
 
-    @patch("app.services.email_service.get_db_connection")
+    @patch("app.database.get_db_connection")
     def test_unsubscribed_returns_4_tuple(self, mock_get_db):
         """Unsubscribe path also returns 4-tuple."""
         from app.services.email_service import send_email
@@ -265,14 +265,14 @@ class TestReturnTuple:
 class TestUnsubscribeFooter:
     """Every outgoing email must have an unsubscribe footer."""
 
-    @patch("app.services.email_service.get_db_connection")
+    @patch("app.database.get_db_connection")
     def test_footer_appended(self, mock_get_db):
         """HTML content gets unsubscribe footer appended."""
         from app.services.email_service import send_email
 
         mock_get_db.return_value = _mock_guard_conn()
 
-        with patch("app.services.email_service.get_gmail_service") as mock_gmail:
+        with patch("app.services.google_service.get_gmail_service") as mock_gmail:
             svc = _mock_gmail_service()
             mock_gmail.return_value = svc
             ok, msg, tid, rfc = send_email(**_base_kwargs(), lead_id=1)
@@ -290,14 +290,14 @@ class TestUnsubscribeFooter:
 class TestNoGmailService:
     """When Gmail is not connected, send fails gracefully."""
 
-    @patch("app.services.email_service.get_db_connection")
+    @patch("app.database.get_db_connection")
     def test_no_gmail_returns_failure(self, mock_get_db):
         """No Gmail service → (False, 'not connected', None, None)."""
         from app.services.email_service import send_email
 
         mock_get_db.return_value = _mock_guard_conn()
 
-        with patch("app.services.email_service.get_gmail_service") as mock_gmail:
+        with patch("app.services.google_service.get_gmail_service") as mock_gmail:
             mock_gmail.return_value = None
             ok, msg, tid, rfc = send_email(**_base_kwargs(), lead_id=1)
 
@@ -312,14 +312,14 @@ class TestNoGmailService:
 class TestFollowupAttachments:
     """Follow-up emails should not attach default signature PDFs."""
 
-    @patch("app.services.email_service.get_db_connection")
+    @patch("app.database.get_db_connection")
     def test_followup_skips_signature_attachments(self, mock_get_db):
         """thread_id present → is_followup=True → no signature attachments."""
         from app.services.email_service import send_email
 
         mock_get_db.return_value = _mock_guard_conn()
 
-        with patch("app.services.email_service.get_gmail_service") as mock_gmail:
+        with patch("app.services.google_service.get_gmail_service") as mock_gmail:
             svc = _mock_gmail_service()
             mock_gmail.return_value = svc
             ok, msg, tid, rfc = send_email(
@@ -327,25 +327,25 @@ class TestFollowupAttachments:
                 lead_id=1,
                 thread_id="thread_xyz",
             )
-            # Should succeed without attaching default PDFs
             assert ok is True or "gmail" in (msg or "").lower()
 
-    @patch("app.services.email_service.get_db_connection")
+    @patch("app.database.get_db_connection")
     def test_re_prefix_skips_attachments(self, mock_get_db):
         """Subject starting with 'Re:' → treated as follow-up."""
         from app.services.email_service import send_email
 
         mock_get_db.return_value = _mock_guard_conn()
 
-        with patch("app.services.email_service.get_gmail_service") as mock_gmail:
+        with patch("app.services.google_service.get_gmail_service") as mock_gmail:
             svc = _mock_gmail_service()
             mock_gmail.return_value = svc
+            # Override subject — _base_kwargs already has subject, so pass it fresh
+            kw = {k: v for k, v in _base_kwargs().items() if k != "subject"}
             ok, msg, tid, rfc = send_email(
-                **_base_kwargs(),
+                **kw,
                 subject="Re: Investment Opportunity",
                 lead_id=1,
             )
-            # Should not crash
             assert ok is True or "gmail" in (msg or "").lower()
 
 
@@ -356,7 +356,7 @@ class TestFollowupAttachments:
 class TestTrackingPixel:
     """Open tracking pixel must be injected for leads with tracking tokens."""
 
-    @patch("app.services.email_service.get_db_connection")
+    @patch("app.database.get_db_connection")
     def test_tracking_token_set(self, mock_get_db):
         """When lead_id provided, tracking_token should be generated."""
         from app.services.email_service import send_email
@@ -371,7 +371,7 @@ class TestTrackingPixel:
 
         mock_get_db.return_value = conn
 
-        with patch("app.services.email_service.get_gmail_service") as mock_gmail:
+        with patch("app.services.google_service.get_gmail_service") as mock_gmail:
             svc = _mock_gmail_service()
             mock_gmail.return_value = svc
             ok, msg, tid, rfc = send_email(**_base_kwargs(), lead_id=1)
@@ -393,38 +393,40 @@ class TestTrackingPixel:
 class TestFontPerUser:
     """Different users get different email fonts."""
 
-    @patch("app.services.email_service.get_user_email_font", return_value="Arial, sans-serif")
     @patch("app.services.email_service.get_user_email_font_size", return_value="18px")
-    @patch("app.services.email_service.get_db_connection")
-    def test_user2_gets_arial(self, mock_get_db, mock_font_size, mock_font):
+    @patch("app.services.email_service.get_user_email_font", return_value="Arial, sans-serif")
+    @patch("app.database.get_db_connection")
+    def test_user2_gets_arial(self, mock_get_db, mock_font, mock_font_size):
         """User 2 → Arial font, 18px."""
         from app.services.email_service import send_email
 
         mock_get_db.return_value = _mock_guard_conn()
 
-        with patch("app.services.email_service.get_gmail_service") as mock_gmail:
+        with patch("app.services.google_service.get_gmail_service") as mock_gmail:
             svc = _mock_gmail_service()
             mock_gmail.return_value = svc
-            ok, msg, tid, rfc = send_email(**_base_kwargs(), user_id=2, lead_id=1)
+            # Override user_id from _base_kwargs
+            kw = {k: v for k, v in _base_kwargs().items() if k != "user_id"}
+            ok, msg, tid, rfc = send_email(**kw, user_id=2, lead_id=1)
 
-            # Font functions should have been called with user_id=2
             if ok:
                 mock_font.assert_called_with(2)
                 mock_font_size.assert_called_with(2)
 
-    @patch("app.services.email_service.get_user_email_font", return_value="sans-serif")
     @patch("app.services.email_service.get_user_email_font_size", return_value="14px")
-    @patch("app.services.email_service.get_db_connection")
-    def test_user3_gets_sans_serif(self, mock_get_db, mock_font_size, mock_font):
+    @patch("app.services.email_service.get_user_email_font", return_value="sans-serif")
+    @patch("app.database.get_db_connection")
+    def test_user3_gets_sans_serif(self, mock_get_db, mock_font, mock_font_size):
         """User 3 → sans-serif font, 14px."""
         from app.services.email_service import send_email
 
         mock_get_db.return_value = _mock_guard_conn()
 
-        with patch("app.services.email_service.get_gmail_service") as mock_gmail:
+        with patch("app.services.google_service.get_gmail_service") as mock_gmail:
             svc = _mock_gmail_service()
             mock_gmail.return_value = svc
-            ok, msg, tid, rfc = send_email(**_base_kwargs(), user_id=3, lead_id=1)
+            kw = {k: v for k, v in _base_kwargs().items() if k != "user_id"}
+            ok, msg, tid, rfc = send_email(**kw, user_id=3, lead_id=1)
 
             if ok:
                 mock_font.assert_called_with(3)
@@ -438,20 +440,21 @@ class TestFontPerUser:
 class TestCleanHeaders:
     """Email headers must be sanitized — no newlines in To/Subject/From."""
 
-    @patch("app.services.email_service.get_db_connection")
+    @patch("app.database.get_db_connection")
     def test_newlines_stripped_from_subject(self, mock_get_db):
         """Newlines in subject are replaced with spaces."""
         from app.services.email_service import send_email
 
         mock_get_db.return_value = _mock_guard_conn()
 
-        with patch("app.services.email_service.get_gmail_service") as mock_gmail:
+        with patch("app.services.google_service.get_gmail_service") as mock_gmail:
             svc = _mock_gmail_service()
             mock_gmail.return_value = svc
+            # Override subject — _base_kwargs already has subject
+            kw = {k: v for k, v in _base_kwargs().items() if k != "subject"}
             ok, msg, tid, rfc = send_email(
-                **_base_kwargs(),
+                **kw,
                 subject="Hello\nWorld\r\n!",
                 lead_id=1,
             )
-            # Should not crash — newlines cleaned before MIME construction
             assert ok is True or "gmail" in (msg or "").lower()
