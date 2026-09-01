@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @plugin "tailwindcss-animate";
 
+@custom-variant dark (&:is(.dark *));
+
 :root {
   /* Premium navy palette */
   --bg-body: #080d1a;
@@ -610,3 +612,209 @@ body {
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
 .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 10px; }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
+
+/* =============================================
+   LIGHT MODE THEME
+   ============================================= */
+
+.light {
+  /* Core backgrounds */
+  --bg-body: #f1f5f9;
+  --bg-sidebar: #ffffff;
+  --bg-topbar: #ffffff;
+  --bg-main: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1f5f9;
+  --bg-input: #f1f5f9;
+  --bg-surface: #e2e8f0;
+
+  /* Borders & glass */
+  --border: rgba(0, 0, 0, 0.08);
+  --border-light: rgba(0, 0, 0, 0.15);
+  --glass: rgba(0, 0, 0, 0.03);
+  --glass-hover: rgba(0, 0, 0, 0.06);
+
+  /* Text hierarchy */
+  --text-white: #ffffff;
+  --text-primary: #1e293b;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --text-dim: #cbd5e1;
+
+  /* Shadows */
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.08);
+  --shadow-heavy: 0 10px 40px rgba(0, 0, 0, 0.12);
+
+  color-scheme: light;
+}
+
+.light body {
+  background-color: #f1f5f9;
+  color: #1e293b;
+}
+
+/* ── Structural overrides ── */
+.light body,
+.light #root > div:first-child {
+  background-color: #f1f5f9 !important;
+}
+
+.light aside { background-color: #ffffff !important; border-color: rgba(0,0,0,0.08) !important; }
+.light aside > div:first-child { background-color: #ffffff !important; }
+.light aside > div:last-child { background-color: #ffffff !important; border-color: rgba(0,0,0,0.08) !important; }
+.light header { background-color: #ffffff !important; border-color: rgba(0,0,0,0.08) !important; }
+
+/* ── Text overrides ── */
+.light .text-white { color: #1e293b !important; }
+.light .text-slate-300 { color: #334155 !important; }
+.light .text-slate-400 { color: #64748b !important; }
+.light .text-slate-500 { color: #94a3b8 !important; }
+.light aside a { color: #475569 !important; }
+.light aside a:hover { background-color: rgba(0,0,0,0.04) !important; color: #1e293b !important; }
+.light aside a[class*="bg-blue-600"],
+.light aside a[class*="bg-indigo-600"],
+.light aside a[class*="bg-rose-600"],
+.light aside a[class*="bg-emerald-600"],
+.light aside a[class*="bg-violet-600"],
+.light aside a[class*="bg-orange-600"],
+.light aside a[class*="bg-slate-600"] { color: #ffffff !important; }
+
+/* ── Card / panel backgrounds ── */
+.light [class*="bg-[#131722]"],
+.light [class*="bg-[#0f121b]"],
+.light [class*="bg-[#151a26]"],
+.light [class*="bg-[#0e121d]"],
+.light [class*="bg-[#0d1117]"] {
+  background-color: #ffffff !important;
+}
+.light [class*="bg-[#0a0f1a]"],
+.light [class*="bg-[#0b0f19]"],
+.light [class*="bg-[#080d1a]"] {
+  background-color: #f8fafc !important;
+}
+.light [class*="bg-[#111521]"],
+.light [class*="bg-[#1a1d26]"] {
+  background-color: #f1f5f9 !important;
+}
+.light [class*="bg-[#0a0c10]"],
+.light [class*="bg-[#0a0d14]"],
+.light [class*="bg-[#0f111a]"],
+.light [class*="bg-[#05070a]"],
+.light [class*="bg-[#080b14]"],
+.light [class*="bg-[#030712]"] {
+  background-color: #f8fafc !important;
+}
+
+/* ── Border overrides ── */
+.light [class*="border-[#ffffff08]"],
+.light [class*="border-[#ffffff10]"],
+.light [class*="border-[#ffffff15]"],
+.light [class*="border-[#ffffff0a]"],
+.light [class*="border-white/5"],
+.light [class*="border-white/10"],
+.light [class*="border-white/[0.05]"],
+.light [class*="border-white/[0.03]"] {
+  border-color: rgba(0,0,0,0.08) !important;
+}
+
+/* ── White bg tints ── */
+.light [class*="bg-white/5"],
+.light [class*="bg-white/10"] {
+  background-color: rgba(0,0,0,0.04) !important;
+}
+.light [class*="bg-white/[0.02]"],
+.light [class*="bg-white/[0.03]"] {
+  background-color: rgba(0,0,0,0.02) !important;
+}
+
+/* ── Inputs ── */
+.light input[type="text"],
+.light input[type="email"],
+.light input[type="password"],
+.light input[type="number"],
+.light input[type="search"],
+.light input[type="url"],
+.light textarea,
+.light select {
+  background-color: #f1f5f9 !important;
+  border-color: rgba(0,0,0,0.12) !important;
+  color: #1e293b !important;
+}
+.light input::placeholder,
+.light textarea::placeholder { color: #94a3b8 !important; }
+.light input:focus,
+.light textarea:focus,
+.light select:focus {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.15) !important;
+}
+
+/* ── Black/X overlays ── */
+.light [class*="bg-black/20"],
+.light [class*="bg-black/30"],
+.light [class*="bg-black/50"],
+.light [class*="bg-black/80"] {
+  background-color: rgba(0,0,0,0.04) !important;
+}
+.light [class*="bg-black/5"] {
+  background-color: rgba(0,0,0,0.03) !important;
+}
+
+/* ── Sidebar label text ── */
+.light aside .text-\[\#475569\] { color: #94a3b8 !important; }
+.light header .text-\[\#64748b\] { color: #94a3b8 !important; }
+.light header input[type="text"] { background-color: #f1f5f9 !important; color: #1e293b !important; }
+.light header [class*="bg-[#111521]"] { background-color: #f1f5f9 !important; border-color: rgba(0,0,0,0.12) !important; }
+
+/* ── Orbs & grid ── */
+.light .orb-1 { background: rgba(59,130,246,0.06); }
+.light .orb-2 { background: rgba(168,85,247,0.05); }
+.light .orb-3 { background: rgba(6,182,212,0.04); }
+.light .bg-grid {
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(59,130,246,0.04), transparent),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(99,102,241,0.03), transparent) !important;
+}
+.light .bg-grid::before {
+  background-image:
+    linear-gradient(rgba(0,0,0,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,0,0,0.02) 1px, transparent 1px) !important;
+}
+
+/* ── Accent bg tints ── */
+.light [class*="bg-emerald-500/10"] { background-color: rgba(16,185,129,0.08) !important; }
+.light [class*="bg-red-500/10"] { background-color: rgba(239,68,68,0.08) !important; }
+.light [class*="bg-blue-500/10"] { background-color: rgba(37,99,235,0.08) !important; }
+.light [class*="bg-amber-500/10"] { background-color: rgba(245,158,11,0.08) !important; }
+.light [class*="bg-purple-500/10"] { background-color: rgba(139,92,246,0.08) !important; }
+.light [class*="bg-indigo-500/10"] { background-color: rgba(99,102,241,0.08) !important; }
+.light [class*="bg-rose-500/10"],
+.light [class*="bg-rose-500/5"] { background-color: rgba(239,68,68,0.06) !important; }
+
+/* ── Active sidebar links keep their color ── */
+.light [class*="bg-blue-600"],
+.light [class*="bg-indigo-600"],
+.light [class*="bg-rose-600"],
+.light [class*="bg-emerald-600"],
+.light [class*="bg-violet-600"],
+.light [class*="bg-orange-600"],
+.light [class*="bg-slate-600"] {
+  color: #ffffff !important;
+}
+
+/* ── Task drawer ── */
+.light [class*="bg-[#0f172a]/95"] {
+  background-color: rgba(255,255,255,0.95) !important;
+  border-color: rgba(0,0,0,0.08) !important;
+  color: #1e293b !important;
+}
+
+/* ── WYSIWYG editor stays white in both modes ── */
+.light .wysiwyg-editor { background-color: #ffffff; color: #111827; }
+
+/* ── Scrollbar ── */
+.light .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); }
+.light .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.22); }
+
+/* ── Disabled ── */
+.light [disabled] { opacity: 0.5; }

@@ -1,6 +1,7 @@
 import React, { Suspense, useSearchParams, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import ErrorBoundary from './components/ErrorBoundary';
+import { ThemeProvider } from './contexts/ThemeContext';
 
 // Lazy-loaded ALL pages (code-split for faster initial load)
 const Login = lazy(() => import('./pages/Login'));
@@ -33,6 +34,7 @@ const InboundDeals = lazy(() => import('./pages/InboundDeals'));
 const DealIntelligence = lazy(() => import('./pages/DealIntelligence'));
 const Meetings = lazy(() => import('./pages/Meetings'));
 const GmailDrafts = lazy(() => import('./pages/GmailDrafts'));
+const GmailDraftEdit = lazy(() => import('./pages/GmailDraftEdit'));
 const GmailSent = lazy(() => import('./pages/GmailSent'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const AdminAuditLogs = lazy(() => import('./pages/AdminAuditLogs'));
@@ -114,6 +116,7 @@ function App() {
   }
 
   return (
+    <ThemeProvider>
     <Router>
       {/* Global Background */}
       <div className="bg-grid"></div>
@@ -150,6 +153,7 @@ function App() {
             <Route path="intelligence" element={<DealIntelligence />} />
             <Route path="meetings" element={<Meetings />} />
             <Route path="gmail-drafts" element={<GmailDrafts />} />
+            <Route path="gmail-drafts/:draftId/edit" element={<GmailDraftEdit />} />
             <Route path="gmail-sent" element={<GmailSent />} />
             <Route path="settings" element={<Settings />} />
             <Route path="admin-intelligence" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
@@ -172,6 +176,7 @@ function App() {
       </Suspense>
       </ErrorBoundary>
     </Router>
+    </ThemeProvider>
   );
 }
 

@@ -282,6 +282,18 @@ const Prompts = () => {
       const _tlhMatch = text.match(/data-lh-table="([^"]+)"/i);
       if (_tlhMatch) _tableLh = _tlhMatch[1];
     }
+
+    // Extract row/col padding from data attributes
+    let _rowPad = '1';
+    let _colPad = '4';
+    if (text && /data-row-pad="([^"]+)"/i.test(text)) {
+      const _rpMatch = text.match(/data-row-pad="([^"]+)"/i);
+      if (_rpMatch) _rowPad = _rpMatch[1];
+    }
+    if (text && /data-col-pad="([^"]+)"/i.test(text)) {
+      const _cpMatch = text.match(/data-col-pad="([^"]+)"/i);
+      if (_cpMatch) _colPad = _cpMatch[1];
+    }
     const _backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
     // Resolve [[BACKEND_URL]] and hardcoded localhost URLs so uploaded images show in preview
     text = text.replace(/\[\[BACKEND_URL\]\]/g, _backendUrl);
@@ -316,31 +328,32 @@ const Prompts = () => {
         .replace(/background(?:-color)?\s*:\s*[^;]+;?\s*/gi, '')
         .replace(/bgcolor\s*=\s*["'][^"']*["']\s*/gi, '')
         .replace(/<table(\s[^>]*)?>/gi, (m) => {
-          if (m.includes('style="')) return m.replace(/style="([^"]*)"/, (_, existing) => {
+          let attrs = m.includes('style="') ? m.replace(/style="([^"]*)"/, (_, existing) => {
             let clean = existing.replace(/\bline-height[^;]*;?/gi, '');
             return `style="border-collapse:collapse;line-height:${_tableLh};${clean}"`;
-          });
-          return `<table style="border-collapse:collapse;line-height:${_tableLh};">`;
+          }) : `<table style="border-collapse:collapse;line-height:${_tableLh};">`;
+          if (!/border="/i.test(attrs)) attrs = attrs.replace('<table', '<table border="1" bordercolor="#999"');
+          return attrs;
         })
         .replace(/<th(\s[^>]*)?>/gi, (m) => {
           if (m.includes('style="')) {
             let s = m.replace(/style="([^"]*)"/, (_, existing) => {
-              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
-              return `style="${clean};padding:2px 4px;line-height:${_tableLh};"`;
+              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '').replace(/\bborder\s*:\s*[^;"]+;?/gi, '');
+              return `style="border:1px solid #999;${clean};padding:${_rowPad}px ${_colPad}px;line-height:${_tableLh};"`;
             });
             return s;
           }
-          return `<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;line-height:${_tableLh};">`;
+          return `<th style="padding:${_rowPad}px ${_colPad}px;border:1px solid #999;text-align:left;font-weight:700;line-height:${_tableLh};">`;
         })
         .replace(/<td(\s[^>]*)?>/gi, (m) => {
           if (m.includes('style="')) {
             let s = m.replace(/style="([^"]*)"/, (_, existing) => {
-              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
-              return `style="${clean};padding:1px 4px;line-height:${_tableLh};"`;
+              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '').replace(/\bborder\s*:\s*[^;"]+;?/gi, '');
+              return `style="border:1px solid #999;${clean};padding:${_rowPad}px ${_colPad}px;line-height:${_tableLh};"`;
             });
             return s;
           }
-          return `<td style="padding:1px 4px;border:1px solid #475569;text-align:left;line-height:${_tableLh};">`;
+          return `<td style="padding:${_rowPad}px ${_colPad}px;border:1px solid #999;text-align:left;line-height:${_tableLh};">`;
         });
       // Palak's logo must preview at 150x150 (backend forces the same size in sent emails).
       html = applyForcedLogoStyles(html);
@@ -406,14 +419,14 @@ const Prompts = () => {
         listHtml += '</ol>';
         htmlParts.push(listHtml);
       } else if (lines.length >= 2 && lines.every(l => !l.trim() || (l.trim().startsWith('|') && l.trim().endsWith('|')))) {
-        let tableHtml = `<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-family:Georgia,serif;line-height:${_tableLh};">`;
+        let tableHtml = `<table border="1" bordercolor="#999" style="width:100%;border-collapse:collapse;margin-bottom:12px;font-family:Georgia,serif;line-height:${_tableLh};">`;
         const dataLines = lines.filter(l => l.trim() && !l.trim().match(/^\|[-:\s]+\|$/));
         dataLines.forEach((line, i) => {
           const cells = line.trim().split('|').slice(1, -1).map(c => c.trim());
           const tag = i === 0 ? 'th' : 'td';
           const cellStyle = tag === 'th'
-            ? `border:1px solid #475569;padding:2px 4px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;line-height:${_tableLh};`
-            : `border:1px solid #475569;padding:1px 4px;text-align:left;color:#cbd5e1;line-height:${_tableLh};`;
+            ? `border:1px solid #999;padding:${_rowPad}px ${_colPad}px;text-align:left;font-weight:700;line-height:${_tableLh};`
+            : `border:1px solid #999;padding:${_rowPad}px ${_colPad}px;text-align:left;line-height:${_tableLh};`;
           const cellHtml = cells.map(c => `<${tag} style="${cellStyle}">${c}</${tag}>`).join('');
           tableHtml += `<tr>${cellHtml}</tr>`;
         });
@@ -456,31 +469,34 @@ const Prompts = () => {
     // (strip any hardcoded font-size so the table matches the normal text size).
     finalHtml = finalHtml
       .replace(/<table(\s[^>]*)?>/gi, (m) => {
-        if (m.includes('style="')) {
-          return m.replace(/style="([^"]*)"/, (_, existing) => {
-            let clean = existing.replace(/\bfont-size[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
-            return `style="border-collapse:collapse;line-height:${_tableLh};${clean}"`;
-          });
+        if (!m) return m;
+        let attrs = m;
+        if (!/border-collapse/i.test(attrs)) {
+          if (attrs.includes('style="')) {
+            attrs = attrs.replace(/style="([^"]*)"/, (_, s) => `style="border-collapse:collapse;line-height:${_tableLh};${s}"`);
+          } else {
+            attrs = attrs.replace('>', ` style="border-collapse:collapse;line-height:${_tableLh};">`);
+          }
         }
-        return `<table style="border-collapse:collapse;line-height:${_tableLh};">`;
+        if (!/border="/i.test(attrs)) attrs = attrs.replace('<table', '<table border="1" bordercolor="#999"');
+        return attrs;
       })
       .replace(/<th(\s[^>]*)?>/gi, (m) => {
+        if (!m) return m;
+        // Preserve existing borders — only add if missing
+        if (/border/i.test(m)) return m;
         if (m.includes('style="')) {
-          return m.replace(/style="([^"]*)"/, (_, existing) => {
-            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\btext-transform[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
-            return `style="${clean};padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;line-height:${_tableLh};"`;
-          });
+          return m.replace(/style="([^"]*)"/, (_, s) => `style="border:1px solid #999;${s}"`);
         }
-        return `<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;line-height:${_tableLh};"`;
+        return m.replace(/>$/, ' style="border:1px solid #999;">');
       })
       .replace(/<td(\s[^>]*)?>/gi, (m) => {
+        if (!m) return m;
+        if (/border/i.test(m)) return m;
         if (m.includes('style="')) {
-          return m.replace(/style="([^"]*)"/, (_, existing) => {
-            let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
-            return `style="${clean};padding:1px 4px;border:1px solid #475569;text-align:left;color:#cbd5e1;line-height:${_tableLh};"`;
-          });
+          return m.replace(/style="([^"]*)"/, (_, s) => `style="border:1px solid #999;${s}"`);
         }
-        return `<td style="padding:1px 4px;border:1px solid #475569;text-align:left;color:#cbd5e1;line-height:${_tableLh};"`;
+        return m.replace(/>$/, ' style="border:1px solid #999;">');
       });
     const _ff = user.email_font || 'sans-serif';
     const _fs = user.email_font_size || '13px';
@@ -569,7 +585,7 @@ const Prompts = () => {
               </button>
               {showBodyPreview && (
                 <div className="mt-3 bg-[#0a0d14] border border-white/5 rounded-xl p-5 max-h-[500px] overflow-y-auto">
-                  <div className="email-preview text-[14px] leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(form.content ? renderEmailPreview(form.content, true, false) : '<p class="text-slate-500 italic text-[12px]">Type something to see preview...</p>') }} />
+                  <div className="bg-white text-gray-800 p-4 rounded-xl email-preview text-[14px] leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(form.content ? renderEmailPreview(form.content, true, false) : '<p class="text-slate-500 italic text-[12px]">Type something to see preview...</p>') }} />
                 </div>
               )}
             </div>
@@ -837,7 +853,7 @@ const Prompts = () => {
                   <span className="text-blue-400/50 ml-auto">attached</span>
                 </div>
               )}
-              <div className="email-preview text-slate-300 text-[14px] leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(renderEmailPreview(preview.content, true, preview.isFollowup)) }} />
+              <div className="bg-white text-gray-800 p-4 rounded-xl email-preview text-[14px] leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(renderEmailPreview(preview.content, true, preview.isFollowup)) }} />
             </div>
           </div>
         </div>

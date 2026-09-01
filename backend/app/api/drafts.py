@@ -257,22 +257,22 @@ At a time when institutional investors and strategic healthcare operators are ac
 
 **Investment Snapshot**
 
-<table style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
+<table border="1" bordercolor="#999" style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
 <thead>
-<tr style="background-color: #ffffff;">
+<tr style="background-color: #f2f2f2;">
 <th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">Particulars</th>
-<th style="padding: 1px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">Current Metrics</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">Current Metrics</th>
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Net Revenue</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~₹49.2 Cr</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">EBITDA</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~₹16.8 Cr</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">EBITDA Margin</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~34.2%</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">PAT</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~₹8.4 Cr</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Installed Capacity</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">225 Beds</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">ARPOB / RPOB</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~₹26,000</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Average Length of Stay</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">3.8 Days</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Blended Occupancy</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~28.3%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Net Revenue</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~₹49.2 Cr</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">EBITDA</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~₹16.8 Cr</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">EBITDA Margin</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~34.2%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">PAT</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~₹8.4 Cr</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Installed Capacity</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">225 Beds</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">ARPOB / RPOB</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~₹26,000</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Average Length of Stay</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">3.8 Days</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Blended Occupancy</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~28.3%</td></tr>
 </tbody>
 </table>
 
@@ -307,17 +307,17 @@ This is a key indicator because it demonstrates that the current opportunity is 
 
 The business benefits from a highly favorable payer mix:
 
-<table style="border-collapse: collapse; border: 1px solid #d0d0d0; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
+<table border="1" bordercolor="#999" style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
 <thead>
-<tr style="background-color: #ffffff;">
+<tr style="background-color: #f2f2f2;">
 <th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">REVENUE MIX</th>
-<th style="padding: 1px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">CONTRIBUTION</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">CONTRIBUTION</th>
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Cash</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~58.3%</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Corporate</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~39.0%</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">TPA</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">Only ~2.7%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Cash</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~58.3%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Corporate</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~39.0%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">TPA</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Only ~2.7%</td></tr>
 </tbody>
 </table>
 
@@ -371,17 +371,17 @@ This materially lowers execution and capital deployment risk relative to greenfi
 
 On a normalized basis, the platform has already demonstrated healthy operational growth:
 
-<table style="border-collapse: collapse; border: 1px solid #d0d0d0; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
+<table border="1" bordercolor="#999" style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
 <thead>
-<tr style="background-color: #ffffff;">
-<th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">Metric</th>
-<th style="padding: 1px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">Growth</th>
+<tr style="background-color: #f2f2f2;">
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">REVENUE MIX</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">CONTRIBUTION</th>
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Core Hospital EBITDA Growth</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~9.9%</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Occupancy Growth</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~14.3%</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">ARPOB Growth</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~4.0%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Cash</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~58.3%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Corporate</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~39.0%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">TPA</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Only ~2.7%</td></tr>
 </tbody>
 </table>
 
@@ -1172,13 +1172,14 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
         # tables with excessive padding get squeezed.
         def _rich_cell_border(m):
             tag_m = m.group(0)
+            # Preserve existing borders — only add if missing
             if 'border' in tag_m:
                 return tag_m
             if 'style=' in tag_m:
-                tag_m = re.sub(r'style="', 'style="border:1px solid #475569;', tag_m)
-                tag_m = re.sub(r"style='", "style='border:1px solid #475569;", tag_m)
+                tag_m = re.sub(r'style="', 'style="border:1px solid #999;', tag_m)
+                tag_m = re.sub(r"style='", "style='border:1px solid #999;", tag_m)
             else:
-                tag_m = tag_m[:-1] + ' style="border:1px solid #475569;padding:0px 6px;text-align:left;">'
+                tag_m = tag_m[:-1] + ' style="border:1px solid #999;">'
             return tag_m
         text = re.sub(r'<(th|td)([^>]*)>', _rich_cell_border, text, flags=re.IGNORECASE)
 
@@ -1194,13 +1195,16 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
             tag = m.group(0)
             if 'style=' in tag.lower():
                 return tag
-            tag = tag[:-1] + ' style="border:1px solid #475569;padding:0px 6px;text-align:left;">'
+            tag = tag[:-1] + ' style="border:1px solid #999;">'
             return tag
         text = re.sub(r'<(?:th|td)\b[^>]*>', _rich_ensure_style, text, flags=re.IGNORECASE)
 
-        # Also ensure tables have border-collapse
+        # Also ensure tables have border-collapse AND HTML border attribute
         def _rich_table_collapse(m):
             attrs = m.group(1) or ''
+            # Add HTML border="1" attribute so Gmail shows borders
+            if 'border="' not in attrs and "border='" not in attrs:
+                attrs = ' border="1" bordercolor="#999"' + attrs
             if 'border-collapse' in attrs:
                 return f'<table{attrs}>'
             if 'style=' in attrs:
@@ -1390,17 +1394,19 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
         if 'border' in attrs:
             return f'<{tag}{attrs}>'
         if 'style=' in attrs:
-            attrs = attrs.replace('style="', 'style="border:1px solid #475569;')
-            attrs = attrs.replace("style='", "style='border:1px solid #475569;")
+            attrs = attrs.replace('style="', 'style="border:1px solid #999;')
+            attrs = attrs.replace("style='", "style='border:1px solid #999;")
         else:
-            attrs += ' style="border:1px solid #475569;padding:0px 6px;text-align:left;"'
+            attrs += ' style="border:1px solid #999;"'
         return f'<{tag}{attrs}>'
 
     result = re.sub(r'<(th|td)([^>]*)>', ensure_cell_border, result, flags=re.IGNORECASE)
 
-    # Ensure tables have border-collapse
+    # Ensure tables have border-collapse AND HTML border attribute
     def ensure_table_collapse(m):
         attrs = m.group(1) or ''
+        if 'border="' not in attrs and "border='" not in attrs:
+            attrs = ' border="1" bordercolor="#999"' + attrs
         if 'border-collapse' in attrs:
             return f'<table{attrs}>'
         if 'style=' in attrs:
@@ -1430,7 +1436,7 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
         if 'style=' in tag.lower():
             return tag
         # Insert style attribute before closing >
-        tag = tag[:-1] + ' style="border:1px solid #475569;padding:0px 6px;text-align:left;">'
+        tag = tag[:-1] + ' style="border:1px solid #999;">'
         return tag
     result = re.sub(r'<(?:th|td)\b[^>]*>', _ensure_cell_has_style, result, flags=re.IGNORECASE)
 
@@ -1618,7 +1624,7 @@ def get_sender_profile(user_id: str | None) -> dict:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         # Select all relevant signature fields including font settings
-        cur.execute("SELECT full_name, username, job_title, phone, linkedin_url, signature, signature_mode, signature_font, signature_font_size FROM users WHERE id = %s", (uid,))
+        cur.execute("SELECT full_name, username, job_title, phone, linkedin_url, signature, signature_mode, signature_font, signature_font_size, image_width, image_height FROM users WHERE id = %s", (uid,))
         user = cur.fetchone()
         if user:
             profile = dict(user)
@@ -2092,6 +2098,38 @@ def heal_draft_content(email_draft: str, user_id: str | None, profile: dict | No
     # split on \n for the Subject line, and the frontend/send-time renderers
     # convert them to <br> themselves.
     healed = _convert_markdown_remnants(healed, convert_newlines=False)
+
+    # ── Force hospital-style collapse borders on ALL tables ──
+    # Gmail strips CSS borders from td/th; only the HTML border attribute survives.
+    # Apply clean 1px borders with no row padding to every table in every draft.
+    def _fix_table_attrs(m):
+        attrs = m.group(1) or ''
+        # Add HTML border="1" if missing
+        if 'border="' not in attrs and "border='" not in attrs:
+            attrs = ' border="1" bordercolor="#999"' + attrs
+        # Ensure border-collapse in CSS
+        if 'border-collapse' not in attrs:
+            if 'style=' in attrs:
+                attrs = re.sub(r'style="', 'style="border-collapse:collapse;', attrs)
+                attrs = re.sub(r"style='", "style='border-collapse:collapse;", attrs)
+            else:
+                attrs += ' style="border-collapse:collapse;"'
+        return f'<table{attrs}>'
+    healed = re.sub(r'<table([^>]*)>', _fix_table_attrs, healed, flags=re.IGNORECASE)
+
+    def _fix_cell_border(m):
+        tag_m = m.group(0)
+        # If cell already has a border, preserve it as-is
+        if 'border' in tag_m:
+            return tag_m
+        if 'style=' in tag_m:
+            tag_m = re.sub(r'style="', 'style="border:1px solid #999;', tag_m)
+            tag_m = re.sub(r"style='", "style='border:1px solid #999;", tag_m)
+        else:
+            tag_m = tag_m[:-1] + ' style="border:1px solid #999;">'
+        return tag_m
+    healed = re.sub(r'<(th|td)([^>]*)>', _fix_cell_border, healed, flags=re.IGNORECASE)
+
     return healed
 
 def _md_to_html(text: str) -> str:
@@ -2210,10 +2248,12 @@ def inject_signature(body: str, profile: dict, lead_id: int) -> str:
             # so images uploaded locally work in sent emails too
             sig_content = sig_content.replace("http://127.0.0.1:8000", _sig_backend_url)
             sig_content = sig_content.replace("http://localhost:8000", _sig_backend_url)
-            # Images: ![alt](url) → <img>
+            # Images: ![alt](url) → <img> — use user's image_width/height settings
+            _sig_img_w = profile.get('image_width') or '200px'
+            _sig_img_h = profile.get('image_height') or 'auto'
             sig_content = re.sub(
                 r'!\[([^\]]*)\]\(([^)]+)\)',
-                lambda m: f'<img src="{m.group(2).replace("[[BACKEND_URL]]", _sig_backend_url)}" alt="{m.group(1)}" style="width:200px;height:auto;display:block;margin:4px 0;" />',
+                lambda m: f'<img src="{m.group(2).replace("[[BACKEND_URL]]", _sig_backend_url)}" alt="{m.group(1)}" style="width:{_sig_img_w};height:{_sig_img_h};display:block;margin:4px 0;" />',
                 sig_content
             )
             # Links: [text](url) → <a>
@@ -2763,22 +2803,22 @@ At a time when institutional investors and strategic healthcare operators are ac
 
 <strong>Investment Snapshot</strong>
 
-<table style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
+<table border="1" bordercolor="#999" style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
 <thead>
-<tr style="background-color: #ffffff;">
+<tr style="background-color: #f2f2f2;">
 <th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">PARTICULARS</th>
-<th style="padding: 1px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">CURRENT METRICS</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">CURRENT METRICS</th>
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Net Revenue</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~₹49.2 Cr</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">EBITDA</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~₹16.8 Cr</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">EBITDA Margin</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~34.2%</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">PAT</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~₹8.4 Cr</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Installed Capacity</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">225 Beds</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">ARPOB / RPOB</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~₹26,000</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Average Length of Stay</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">3.8 Days</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Blended Occupancy</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~28.3%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Net Revenue</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~₹49.2 Cr</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">EBITDA</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~₹16.8 Cr</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">EBITDA Margin</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~34.2%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">PAT</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~₹8.4 Cr</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Installed Capacity</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">225 Beds</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">ARPOB / RPOB</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~₹26,000</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Average Length of Stay</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">3.8 Days</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Blended Occupancy</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~28.3%</td></tr>
 </tbody>
 </table>
 
@@ -2813,17 +2853,17 @@ This is a key indicator because it demonstrates that the current opportunity is 
 
 The business benefits from a highly favorable payer mix:
 
-<table style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
+<table border="1" bordercolor="#999" style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
 <thead>
-<tr style="background-color: #ffffff;">
+<tr style="background-color: #f2f2f2;">
 <th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">REVENUE MIX</th>
-<th style="padding: 1px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">CONTRIBUTION</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">CONTRIBUTION</th>
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Cash</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~58.3%</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Corporate</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~39.0%</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">TPA</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">Only ~2.7%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Cash</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~58.3%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Corporate</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~39.0%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">TPA</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Only ~2.7%</td></tr>
 </tbody>
 </table>
 
@@ -2875,17 +2915,17 @@ This materially lowers execution and capital deployment risk relative to greenfi
 
 <strong>6. Strong Historical Momentum</strong>
 
-<table style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
+<table border="1" bordercolor="#999" style="border-collapse: collapse; border: 1px solid #999; font-family: Georgia, serif; font-size: 9pt; margin-top: 2px; margin-bottom: 2px;">
 <thead>
-<tr style="background-color: #ffffff;">
-<th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">METRIC</th>
-<th style="padding: 1px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">GROWTH</th>
+<tr style="background-color: #f2f2f2;">
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">Metric</th>
+<th style="padding: 1px 3px; border: 1px solid #999; text-align: left; font-weight: bold; color: #000; font-size: 13px;">Growth</th>
 </tr>
 </thead>
 <tbody>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Core Hospital EBITDA Growth</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~9.9%</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Occupancy Growth</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~14.3%</td></tr>
-<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">ARPOB Growth</td><td style="padding: 0px 3px; border: 1px solid #999; text-align: right; font-weight: bold; color: #000; font-size: 13px;">~4.0%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Core Hospital EBITDA Growth</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~9.9%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">Occupancy Growth</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~14.3%</td></tr>
+<tr><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">ARPOB Growth</td><td style="padding: 0px 3px; border: 1px solid #999; font-weight: bold; color: #000; font-size: 13px;">~4.0%</td></tr>
 </tbody>
 </table>
 
@@ -3169,6 +3209,41 @@ Thank you again for your consideration."""
         cur.close()
         conn.close()
         result = [_fill_hardcoded_followups(dict(r)) for r in rows]
+
+        # ── Ensure every template has table borders (runs on every fetch) ──
+        def _ensure_borders(content: str) -> str:
+            if not content or '<table' not in content.lower():
+                return content
+            def _fix_tbl(m):
+                a = m.group(1) or ''
+                if 'border="' not in a and "border='" not in a:
+                    a = ' border="1" bordercolor="#999"' + a
+                if 'border-collapse' not in a:
+                    if 'style=' in a:
+                        a = re.sub(r'style="', 'style="border-collapse:collapse;', a)
+                        a = re.sub(r"style='", "style='border-collapse:collapse;", a)
+                    else:
+                        a += ' style="border-collapse:collapse;"'
+                return f'<table{a}>'
+            content = re.sub(r'<table([^>]*)>', _fix_tbl, content, flags=re.IGNORECASE)
+            def _fix_cell(m):
+                t = m.group(0)
+                if 'border' in t:
+                    return t
+                if 'style=' in t:
+                    t = re.sub(r'style="', 'style="border:1px solid #999;', t)
+                    t = re.sub(r"style='", "style='border:1px solid #999;", t)
+                else:
+                    t = t[:-1] + ' style="border:1px solid #999;">'
+                return t
+            content = re.sub(r'<(th|td)([^>]*)>', _fix_cell, content, flags=re.IGNORECASE)
+            return content
+
+        for r in result:
+            for key in ('content', 'followup_1', 'followup_2', 'followup_3'):
+                if r.get(key):
+                    r[key] = _ensure_borders(r[key])
+
         return result
     except Exception:
         traceback.print_exc()

@@ -50,7 +50,7 @@ const mdToHtml = (md) => {
   html = html.replace(/^###\s+(.*?)$/gm, '<h3>$1</h3>');
   html = html.replace(/^##\s+(.*?)$/gm, '<h2>$1</h2>');
   html = html.replace(/^#\s+(.*?)$/gm, '<h1>$1</h1>');
-  html = html.replace(/^[-*_]{3,}\s*$/gm, '<hr style="border: none; border-top: 2px solid #475569; margin: 16px 0;">');
+  html = html.replace(/^[-*_]{3,}\s*$/gm, '<hr style="border: none; border-top: 2px solid #999; margin: 16px 0;">');
   html = html.replace(/\n/g, '<br>');
   // Palak's logo must preview at 150x150 (backend forces the same size in sent emails).
   return applyForcedLogoStyles(html);
@@ -130,7 +130,7 @@ const convertHtmlMarkdownRemnants = (html) => {
       return `<em>${inner}</em>`;
     })
     .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>')
-    .replace(/^\s*(--|—)\s*$/gm, '<div style="color:#475569; font-style:italic;">--</div>')
+    .replace(/^\s*(--|—)\s*$/gm, '<div style="color:#999; font-style:italic;">--</div>')
     .replace(/\n(?=[ \t]*(?:<\/?)(?:div|table|tbody|thead|tfoot|tr|td|th|p|h[1-6]|ul|ol|li|blockquote|section|article|header|footer|main|aside|nav|form|fieldset|figure|figcaption|hr|pre|address|br)[\s/>])/gi, '@@LSBLOCKNL@@')
     .replace(/(<\/?(?:div|table|tbody|thead|tfoot|tr|td|th|p|h[1-6]|ul|ol|li|blockquote|section|article|header|footer|main|aside|nav|form|fieldset|figure|figcaption|hr|pre|address|br)[^>]*>)\n/gi, '$1@@LSBLOCKNL@@')
     .replace(/\n/g, '<br>')
@@ -175,18 +175,18 @@ const SizeDropdown = ({ options, onSelect }) => {
       <button
         type="button"
         onMouseDown={(e) => { e.preventDefault(); setOpen(o => !o); }}
-        className="bg-black/50 border border-white/10 rounded-md px-1.5 py-1 text-[10px] text-slate-300 cursor-pointer outline-none hover:text-white flex items-center gap-1"
+        className="bg-white border border-gray-200 rounded-md px-1.5 py-1 text-[10px] text-gray-600 cursor-pointer outline-none hover:text-gray-900 flex items-center gap-1"
       >
         Size <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div className="absolute top-full left-0 mt-1 z-50 bg-[#1a1d26] border border-white/10 rounded-xl shadow-2xl max-h-[200px] overflow-y-auto custom-scrollbar w-[84px]">
+        <div className="absolute top-full left-0 mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-2xl max-h-[200px] overflow-y-auto custom-scrollbar w-[84px]">
           {options.map(s => (
             <button
               key={s}
               type="button"
               onMouseDown={(e) => { e.preventDefault(); onSelect(String(s)); setOpen(false); }}
-              className="w-full text-left px-3 py-1.5 text-[11px] text-slate-200 hover:bg-white/10 hover:text-white"
+              className="w-full text-left px-3 py-1.5 text-[11px] text-gray-700 hover:bg-gray-100 hover:text-gray-900"
             >
               {s}px
             </button>
@@ -199,6 +199,8 @@ const SizeDropdown = ({ options, onSelect }) => {
 
 const LINE_HEIGHT_OPTIONS = ['0.2', '0.3', '0.4', '0.5', '0.6', '0.7', '0.8', '0.9', '1.0', '1.2', '1.4', '1.5', '1.6', '1.8', '2.0'];
 const TABLE_LINE_HEIGHT_OPTIONS = ['0.2', '0.3', '0.4', '0.5', '0.6', '0.7', '0.8', '0.9', '1.0', '1.2', '1.4', '1.5', '1.6', '1.8', '2.0'];
+const ROW_PADDING_OPTIONS = ['0', '1', '2', '3', '4', '5', '6', '8', '10', '12', '15', '20'];
+const COL_PADDING_OPTIONS = ['0', '1', '2', '3', '4', '5', '6', '8', '10', '12', '15', '20'];
 
 const LineHeightDropdown = ({ value, onSelect, label = 'Line' }) => {
   const [open, setOpen] = useState(false);
@@ -217,20 +219,59 @@ const LineHeightDropdown = ({ value, onSelect, label = 'Line' }) => {
       <button
         type="button"
         onMouseDown={(e) => { e.preventDefault(); setOpen(o => !o); }}
-        className="bg-black/50 border border-white/10 rounded-md px-1.5 py-1 text-[10px] text-slate-300 cursor-pointer outline-none hover:text-white flex items-center gap-1"
+        className="bg-white border border-gray-200 rounded-md px-1.5 py-1 text-[10px] text-gray-600 cursor-pointer outline-none hover:text-gray-900 flex items-center gap-1"
       >
         {label} <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div className="absolute top-full left-0 mt-1 z-50 bg-[#1a1d26] border border-white/10 rounded-xl shadow-2xl max-h-[200px] overflow-y-auto custom-scrollbar w-[72px]">
+        <div className="absolute top-full left-0 mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-2xl max-h-[200px] overflow-y-auto custom-scrollbar w-[72px]">
           {LINE_HEIGHT_OPTIONS.map(lh => (
             <button
               key={lh}
               type="button"
               onMouseDown={(e) => { e.preventDefault(); onSelect(lh); setOpen(false); }}
-              className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-white/10 ${lh === value ? 'text-blue-400 font-bold' : 'text-slate-200 hover:text-white'}`}
+              className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-gray-100 ${lh === value ? 'text-blue-600 font-bold' : 'text-gray-700 hover:text-gray-900'}`}
             >
               {lh}x
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const PaddingDropdown = ({ value, onSelect, label = 'Pad', options = ROW_PADDING_OPTIONS }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onMouseDown={(e) => { e.preventDefault(); setOpen(o => !o); }}
+        className="bg-white border border-gray-200 rounded-md px-1.5 py-1 text-[10px] text-gray-600 cursor-pointer outline-none hover:text-gray-900 flex items-center gap-1"
+      >
+        {label} <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-2xl max-h-[200px] overflow-y-auto custom-scrollbar w-[72px]">
+          {options.map(p => (
+            <button
+              key={p}
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); onSelect(p); setOpen(false); }}
+              className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-gray-100 ${p === value ? 'text-blue-600 font-bold' : 'text-gray-700 hover:text-gray-900'}`}
+            >
+              {p}px
             </button>
           ))}
         </div>
@@ -265,7 +306,7 @@ const ToolButton = ({ icon: Icon, title, onClick, active, className = '' }) => (
     type="button"
     title={title}
     onMouseDown={e => { e.preventDefault(); onClick?.(); }}
-    className={`p-1.5 rounded-md hover:bg-white/10 text-slate-400 hover:text-white transition-all ${active ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : ''} ${className}`}
+    className={`p-1.5 rounded-md hover:bg-gray-200 text-gray-500 hover:text-gray-900 transition-all ${active ? 'bg-blue-500/20 text-blue-600 border border-blue-500/30' : ''} ${className}`}
   >
     <Icon className="w-3.5 h-3.5" />
   </button>
@@ -276,7 +317,7 @@ const CtxItem = ({ icon: Icon, label, onMouseDown, danger }) => (
   <button
     type="button"
     onMouseDown={e => { e.preventDefault(); e.stopPropagation(); onMouseDown?.(); }}
-    className={`w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-left transition-colors ${danger ? 'text-red-400 hover:bg-red-500/10 hover:text-red-300' : 'text-slate-300 hover:bg-white/10 hover:text-white'}`}
+    className={`w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-left transition-colors ${danger ? 'text-red-500 hover:bg-red-500/10 hover:text-red-600' : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'}`}
   >
     <Icon className="w-3 h-3 shrink-0" />
     {label}
@@ -357,6 +398,10 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
   const lineHeightRef = useRef('1.4');
   const [tableLineHeight, setTableLineHeight] = useState('1.2');
   const tableLineHeightRef = useRef('1.2');
+  const [rowPadding, setRowPadding] = useState('1');
+  const rowPaddingRef = useRef('1');
+  const [colPadding, setColPadding] = useState('6');
+  const colPaddingRef = useRef('6');
   const textColorBtnRef = useRef(null);
   const bgColorBtnRef = useRef(null);
   const editorSyncedRef = useRef(''); // Tracks what's currently in the editor DOM
@@ -400,19 +445,27 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
 
   useEffect(() => {
     if (!showSource && editorRef.current) {
-      // Extract lineHeight and tableLineHeight from data-lh/data-lh-table wrappers
+      // Extract lineHeight, tableLineHeight, rowPadding and colPadding from data attributes
       let rawValue = value;
       let detectedLh = '1.4';
       let detectedTlh = '1.2';
+      let detectedRp = '1';
+      let detectedCp = '6';
       if (rawValue && /^<div\s+(?:[^>]*>)?/i.test(rawValue)) {
         const lhMatch = rawValue.match(/data-lh="([^"]+)"/i);
         const tlhMatch = rawValue.match(/data-lh-table="([^"]+)"/i);
+        const rpMatch = rawValue.match(/data-row-pad="([^"]+)"/i);
+        const cpMatch = rawValue.match(/data-col-pad="([^"]+)"/i);
         if (lhMatch) detectedLh = lhMatch[1];
         if (tlhMatch) detectedTlh = tlhMatch[1];
-        rawValue = rawValue.replace(/^<div\s+data-lh(?:-table)?="[^"]*"\s*(?:data-lh(?:-table)?="[^"]*")?>/i, '').replace(/<\/div>\s*$/i, '');
+        if (rpMatch) detectedRp = rpMatch[1];
+        if (cpMatch) detectedCp = cpMatch[1];
+        rawValue = rawValue.replace(/^<div\s+data-(?:lh(?:-table)?|(?:row|col)-pad)="[^"]*"\s*(?:data-(?:lh(?:-table)?|(?:row|col)-pad)="[^"]*")?>/i, '').replace(/<\/div>\s*$/i, '');
       }
       if (detectedLh !== lineHeight) setLineHeight(detectedLh);
       if (detectedTlh !== tableLineHeight) setTableLineHeight(detectedTlh);
+      if (detectedRp !== rowPadding) setRowPadding(detectedRp);
+      if (detectedCp !== colPadding) setColPadding(detectedCp);
 
       const expectedHtml = toHtml(rawValue);
       // Skip if DOM already matches — preserves cursor position during user typing
@@ -460,15 +513,21 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
   const syncFromEditor = useCallback(() => {
     if (!editorRef.current) return;
     let newHtml = editorRef.current.innerHTML;
-    // Embed lineHeight and tableLineHeight in content so they persist across save/load
+    // Embed lineHeight, tableLineHeight, rowPadding and colPadding in content so they persist across save/load
     const lh = lineHeightRef.current;
     const tlh = tableLineHeightRef.current;
+    const rp = rowPaddingRef.current;
+    const cp = colPaddingRef.current;
     const hasLh = lh && lh !== '1.4';
     const hasTlh = tlh && tlh !== '1.2';
-    if (hasLh || hasTlh) {
+    const hasRp = rp && rp !== '1';
+    const hasCp = cp && cp !== '6';
+    if (hasLh || hasTlh || hasRp || hasCp) {
       const attrs = [];
       if (hasLh) attrs.push(`data-lh="${lh}"`);
       if (hasTlh) attrs.push(`data-lh-table="${tlh}"`);
+      if (hasRp) attrs.push(`data-row-pad="${rp}"`);
+      if (hasCp) attrs.push(`data-col-pad="${cp}"`);
       newHtml = `<div ${attrs.join(' ')}>${newHtml}</div>`;
     }
     // Mark as user-synced so the useEffect skips DOM update — cursor stays put!
@@ -734,6 +793,18 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
     setTimeout(syncFromEditor, 0);
   };
 
+  const handleRowPaddingChange = (rp) => {
+    setRowPadding(rp);
+    rowPaddingRef.current = rp;
+    setTimeout(syncFromEditor, 0);
+  };
+
+  const handleColPaddingChange = (cp) => {
+    setColPadding(cp);
+    colPaddingRef.current = cp;
+    setTimeout(syncFromEditor, 0);
+  };
+
   // Apply lineHeight to editor div whenever it changes
   useEffect(() => {
     lineHeightRef.current = lineHeight;
@@ -754,6 +825,28 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
       });
     }
   }, [tableLineHeight]);
+
+  // Apply rowPadding to tables inside editor
+  useEffect(() => {
+    rowPaddingRef.current = rowPadding;
+    if (editorRef.current) {
+      editorRef.current.querySelectorAll('td, th').forEach(cell => {
+        const currentColPad = cell.style.paddingLeft || '6px';
+        cell.style.padding = `${rowPadding}px ${currentColPad}`;
+      });
+    }
+  }, [rowPadding]);
+
+  // Apply colPadding to tables inside editor
+  useEffect(() => {
+    colPaddingRef.current = colPadding;
+    if (editorRef.current) {
+      editorRef.current.querySelectorAll('td, th').forEach(cell => {
+        const currentRowPad = cell.style.paddingTop || '1px';
+        cell.style.padding = `${currentRowPad} ${colPadding}px`;
+      });
+    }
+  }, [colPadding]);
 
   const applyTextColor = (color) => {
     setShowTextColors(false);
@@ -798,10 +891,12 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
     if (!table || rowIndex < 0) return;
     const cols = table.rows[0]?.cells.length || 3;
     const newRow = table.insertRow(above ? rowIndex : rowIndex + 1);
+    const rp = rowPaddingRef.current || '1';
+    const cp = colPaddingRef.current || '6';
     for (let c = 0; c < cols; c++) {
       const cell = newRow.insertCell();
       cell.innerHTML = '&nbsp;';
-      cell.style.cssText = 'border:1px solid #475569;padding:1px 6px;text-align:left;color:#cbd5e1;font-size:10px;';
+      cell.style.cssText = `border:1px solid #999;padding:${rp}px ${cp}px;text-align:left;color:#cbd5e1;font-size:10px;`;
     }
     syncFromEditor();
   }, [syncFromEditor]);
@@ -814,6 +909,8 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
 
   const insertTableCol = useCallback((table, colIndex, before) => {
     if (!table) return;
+    const rp = rowPaddingRef.current || '1';
+    const cp = colPaddingRef.current || '6';
     for (let r = 0; r < table.rows.length; r++) {
       const row = table.rows[r];
       const cellIdx = before ? colIndex : colIndex + 1;
@@ -821,8 +918,8 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
       cell.innerHTML = '&nbsp;';
       const isHeader = row.cells[cellIdx - 1]?.tagName === 'TH' || row.cells[0]?.tagName === 'TH' && cellIdx === 0;
       cell.style.cssText = isHeader
-        ? 'border:1px solid #475569;padding:2px 6px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:10px;'
-        : 'border:1px solid #475569;padding:1px 6px;text-align:left;color:#cbd5e1;font-size:10px;';
+        ? `border:1px solid #999;padding:2px ${cp}px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:10px;`
+        : `border:1px solid #999;padding:${rp}px ${cp}px;text-align:left;color:#cbd5e1;font-size:10px;`;
     }
     syncFromEditor();
   }, [syncFromEditor]);
@@ -973,14 +1070,16 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
     }
     if (editorRef.current) {
       editorRef.current.focus();
-      let tableHtml = `<table style="width:100%;border-collapse:collapse;margin-bottom:1em;font-family:sans-serif;font-size:13px;">`;
+      const rp = rowPaddingRef.current || '1';
+      const cp = colPaddingRef.current || '6';
+      let tableHtml = `<table border="1" bordercolor="#999" style="width:100%;border-collapse:collapse;margin-bottom:1em;font-family:sans-serif;font-size:13px;">`;
       for (let r = 0; r < rows; r++) {
         tableHtml += '<tr>';
         for (let c = 0; c < cols; c++) {
           const tag = r === 0 ? 'th' : 'td';
           const style = r === 0
-            ? 'border:1px solid #475569;padding:2px 6px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:10px;'
-            : 'border:1px solid #475569;padding:1px 6px;text-align:left;color:#cbd5e1;font-size:10px;';
+            ? `border:1px solid #999;padding:2px ${cp}px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:10px;`
+            : `border:1px solid #999;padding:${rp}px ${cp}px;text-align:left;color:#cbd5e1;font-size:10px;`;
           tableHtml += `<${tag} style="${style}">${r === 0 ? `Header ${c + 1}` : ''}</${tag}>`;
         }
         tableHtml += '</tr>';
@@ -999,12 +1098,18 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
       let currentHtml = editorRef.current?.innerHTML || '';
       const lh = lineHeightRef.current;
       const tlh = tableLineHeightRef.current;
+      const rp = rowPaddingRef.current;
+      const cp = colPaddingRef.current;
       const hasLh = lh && lh !== '1.4';
       const hasTlh = tlh && tlh !== '1.2';
-      if (hasLh || hasTlh) {
+      const hasRp = rp && rp !== '1';
+      const hasCp = cp && cp !== '6';
+      if (hasLh || hasTlh || hasRp || hasCp) {
         const attrs = [];
         if (hasLh) attrs.push(`data-lh="${lh}"`);
         if (hasTlh) attrs.push(`data-lh-table="${tlh}"`);
+        if (hasRp) attrs.push(`data-row-pad="${rp}"`);
+        if (hasCp) attrs.push(`data-col-pad="${cp}"`);
         currentHtml = `<div ${attrs.join(' ')}>${currentHtml}</div>`;
       }
       const raw = toRaw(currentHtml);
@@ -1020,6 +1125,48 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
     setShowSource(!showSource);
     setShowTextColors(false);
     setShowBgColors(false);
+  };
+
+  // ── Paste: auto-detect tab-separated data → table ─────────────────
+
+  const handleEditorPaste = (e) => {
+    // 1) HTML table from web page
+    const html = e.clipboardData?.getData('text/html') || '';
+    const htmlMatch = html.match(/<table[\s\S]*?<\/table>/i);
+    if (htmlMatch) {
+      e.preventDefault();
+      document.execCommand('insertHTML', false, htmlMatch[0]);
+      syncFromEditor();
+      return;
+    }
+    // 2) Tab-separated text from Excel/Sheets
+    const text = e.clipboardData?.getData('text/plain') || '';
+    const lines = text.split('\n').filter(r => r.length > 0);
+    if (lines.length < 2) return;
+    const hasTabs = lines.some(r => r.includes('\t'));
+    const allMultiCol = lines.every(r => r.split('\t').length > 1);
+    if (!hasTabs || !allMultiCol) return;
+    e.preventDefault();
+    const rp = rowPaddingRef.current || '1';
+    const cp = colPaddingRef.current || '6';
+    const parsedRows = lines.map(r => r.split('\t'));
+    const maxCols = Math.max(...parsedRows.map(r => r.length));
+    let tableHtml = `<table border="1" bordercolor="#999" style="width:100%;border-collapse:collapse;margin-bottom:1em;font-family:sans-serif;font-size:13px;">`;
+    parsedRows.forEach((cells, ri) => {
+      tableHtml += '<tr>';
+      for (let ci = 0; ci < maxCols; ci++) {
+        const tag = ri === 0 ? 'th' : 'td';
+        const val = (cells[ci] || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const style = ri === 0
+          ? `border:1px solid #999;padding:2px ${cp}px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;font-size:10px;`
+          : `border:1px solid #999;padding:${rp}px ${cp}px;text-align:left;color:#cbd5e1;font-size:10px;`;
+        tableHtml += `<${tag} style="${style}">${val}</${tag}>`;
+      }
+      tableHtml += '</tr>';
+    });
+    tableHtml += '</table><br>';
+    document.execCommand('insertHTML', false, tableHtml);
+    syncFromEditor();
   };
 
   // ── Keyboard shortcuts for WYSIWYG ─────────────────────────────────
@@ -1039,42 +1186,42 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
   return (
     <div className="flex flex-col flex-1 min-w-0 relative">
       {/* Toolbar */}
-      <div className="flex items-center gap-0.5 px-2 py-1.5 bg-black/30 border border-b-0 border-white/5 rounded-t-xl flex-wrap relative">
+      <div className="flex items-center gap-0.5 px-2 py-1.5 bg-gray-100 border border-b-0 border-gray-200 rounded-t-xl flex-wrap relative">
         <ToolButton icon={Bold} title="Bold (Ctrl+B)" onClick={handleBold} />
         <ToolButton icon={Italic} title="Italic (Ctrl+I)" onClick={handleItalic} />
         <ToolButton icon={Underline} title="Underline (Ctrl+U)" onClick={handleUnderline} />
-        <div className="w-px h-4 bg-white/10 mx-1" />
+        <div className="w-px h-4 bg-gray-300 mx-1" />
         <ToolButton icon={List} title="Bullet List" onClick={handleBulletList} />
         <ToolButton icon={ListOrdered} title="Numbered List" onClick={handleOrderedList} />
-        <div className="w-px h-4 bg-white/10 mx-1" />
+        <div className="w-px h-4 bg-gray-300 mx-1" />
         <ToolButton icon={Link} title="Insert Link" onClick={handleLink} />
         <ToolButton icon={Image} title="Insert Image" onClick={handleImageUpload} />
         <ToolButton icon={Table} title="Insert Table" onClick={handleInsertTable} />
-        <div className="w-px h-4 bg-white/10 mx-1" />
+        <div className="w-px h-4 bg-gray-300 mx-1" />
         <select
           onChange={handleHeading}
           defaultValue=""
-          className="bg-black/50 border border-white/10 rounded-md px-1.5 py-1 text-[10px] text-slate-300 cursor-pointer outline-none focus:border-blue-500/50 appearance-none"
+          className="bg-white border border-gray-200 rounded-md px-1.5 py-1 text-[10px] text-gray-600 cursor-pointer outline-none focus:border-blue-500/50 appearance-none"
         >
           <option value="" disabled>Heading</option>
           {HEADINGS.map(h => (
             <option key={h.prefix} value={h.prefix}>{h.label}</option>
           ))}
         </select>
-        <div className="w-px h-4 bg-white/10 mx-1" />
+        <div className="w-px h-4 bg-gray-300 mx-1" />
         <div className="relative">
           <button
             type="button"
             title="Text Color"
             ref={textColorBtnRef}
             onMouseDown={e => { e.preventDefault(); setShowTextColors(!showTextColors); setShowBgColors(false); }}
-            className={`p-1.5 rounded-md hover:bg-white/10 text-slate-400 hover:text-white transition-all relative ${showTextColors ? 'bg-blue-500/20 text-blue-400' : ''}`}
+            className={`p-1.5 rounded-md hover:bg-gray-200 text-gray-500 hover:text-gray-900 transition-all relative ${showTextColors ? 'bg-blue-500/20 text-blue-600' : ''}`}
           >
             <Palette className="w-3.5 h-3.5" />
           </button>
           {showTextColors && (
-            <div className="absolute top-full left-0 mt-1 z-50 bg-[#1a1d26] border border-white/10 rounded-xl p-2 shadow-2xl w-[248px]" onMouseDown={e => e.preventDefault()}>
-              <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1.5 px-0.5">Text Color</div>
+            <div className="absolute top-full left-0 mt-1 z-50 bg-white border border-gray-200 rounded-xl p-2 shadow-2xl w-[248px]" onMouseDown={e => e.preventDefault()}>
+              <div className="text-[9px] text-gray-400 font-bold uppercase tracking-widest mb-1.5 px-0.5">Text Color</div>
               <div className="grid grid-cols-8 gap-1">
                 {COLORS.map(c => (
                   <button
@@ -1082,7 +1229,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
                     type="button"
                     title={c}
                     onMouseDown={() => applyTextColor(c)}
-                    className="w-6 h-6 rounded-md border border-white/10 hover:scale-110 transition-transform cursor-pointer"
+                    className="w-6 h-6 rounded-md border border-gray-200 hover:scale-110 transition-transform cursor-pointer"
                     style={{ backgroundColor: c }}
                   />
                 ))}
@@ -1096,14 +1243,14 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
             title="Background / Highlight Color"
             ref={bgColorBtnRef}
             onMouseDown={e => { e.preventDefault(); setShowBgColors(!showBgColors); setShowTextColors(false); }}
-            className={`p-1.5 rounded-md hover:bg-white/10 text-slate-400 hover:text-white transition-all relative ${showBgColors ? 'bg-blue-500/20 text-blue-400' : ''}`}
+            className={`p-1.5 rounded-md hover:bg-gray-200 text-gray-500 hover:text-gray-900 transition-all relative ${showBgColors ? 'bg-blue-500/20 text-blue-600' : ''}`}
             style={{ background: 'linear-gradient(135deg, transparent 50%, #ffd70020 50%)' }}
           >
             <span className="text-[11px] font-bold leading-none" style={{ textShadow: '0 0 2px rgba(255,215,0,0.5)' }}>H</span>
           </button>
           {showBgColors && (
-            <div className="absolute top-full left-0 mt-1 z-50 bg-[#1a1d26] border border-white/10 rounded-xl p-2 shadow-2xl w-[248px]" onMouseDown={e => e.preventDefault()}>
-              <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1.5 px-0.5">Highlight Color</div>
+            <div className="absolute top-full left-0 mt-1 z-50 bg-white border border-gray-200 rounded-xl p-2 shadow-2xl w-[248px]" onMouseDown={e => e.preventDefault()}>
+              <div className="text-[9px] text-gray-400 font-bold uppercase tracking-widest mb-1.5 px-0.5">Highlight Color</div>
               <div className="grid grid-cols-8 gap-1">
                 {COLORS.map(c => (
                   <button
@@ -1111,7 +1258,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
                     type="button"
                     title={c}
                     onMouseDown={() => applyBgColor(c)}
-                    className="w-6 h-6 rounded-md border border-white/10 hover:scale-110 transition-transform cursor-pointer"
+                    className="w-6 h-6 rounded-md border border-gray-200 hover:scale-110 transition-transform cursor-pointer"
                     style={{ backgroundColor: c }}
                   />
                 ))}
@@ -1123,15 +1270,15 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
           type="button"
           title="Attach File"
           onMouseDown={e => { e.preventDefault(); handleFileUpload(); }}
-          className={`p-1.5 rounded-md transition-all ${uploading ? 'text-blue-400 animate-pulse' : 'text-slate-400 hover:text-white hover:bg-white/10'}`}
+          className={`p-1.5 rounded-md transition-all ${uploading ? 'text-blue-500 animate-pulse' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-200'}`}
         >
           <Paperclip className="w-3.5 h-3.5" />
         </button>
-        <div className="w-px h-4 bg-white/10 mx-1" />
+        <div className="w-px h-4 bg-gray-300 mx-1" />
         <select
           onChange={handleFontChange}
           defaultValue=""
-          className="bg-black/50 border border-white/10 rounded-md px-1.5 py-1 text-[10px] text-slate-300 cursor-pointer outline-none focus:border-blue-500/50 appearance-none"
+          className="bg-white border border-gray-200 rounded-md px-1.5 py-1 text-[10px] text-gray-600 cursor-pointer outline-none focus:border-blue-500/50 appearance-none"
           style={{ fontFamily: 'inherit' }}
         >
           <option value="" disabled>Font</option>
@@ -1142,12 +1289,15 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
         <SizeDropdown options={fontSizeOptions} onSelect={handleSizeChange} />
         <LineHeightDropdown value={lineHeight} onSelect={handleLineHeightChange} />
         <LineHeightDropdown value={tableLineHeight} onSelect={handleTableLineHeightChange} label="Table" />
-        <div className="w-px h-4 bg-white/10 mx-1" />
+        <div className="w-px h-4 bg-gray-300 mx-1" />
+        <PaddingDropdown value={rowPadding} onSelect={handleRowPaddingChange} label="Row Pad" options={ROW_PADDING_OPTIONS} />
+        <PaddingDropdown value={colPadding} onSelect={handleColPaddingChange} label="Col Pad" options={COL_PADDING_OPTIONS} />
+        <div className="w-px h-4 bg-gray-300 mx-1" />
         <button
           type="button"
           title={showSource ? 'Rich Text View' : 'Source View'}
           onMouseDown={e => { e.preventDefault(); toggleSource(); }}
-          className={`p-1.5 rounded-md transition-all ${showSource ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'text-slate-400 hover:text-white hover:bg-white/10'}`}
+          className={`p-1.5 rounded-md transition-all ${showSource ? 'bg-blue-500/20 text-blue-600 border border-blue-500/30' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-200'}`}
         >
           {showSource ? <Eye className="w-3.5 h-3.5" /> : <Code className="w-3.5 h-3.5" />}
         </button>
@@ -1162,7 +1312,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
           rows={rows}
           placeholder={placeholder}
           readOnly={readOnly}
-          className={`w-full bg-black/40 border border-white/5 rounded-b-xl p-3 text-xs text-white focus:border-blue-500/50 outline-none resize-none font-mono ${className || ''}`}
+          className={`w-full bg-white border border-gray-200 rounded-b-xl p-3 text-xs text-gray-900 focus:border-blue-500/50 outline-none resize-none font-mono ${className || ''}`}
           style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}
         />
       ) : (
@@ -1171,6 +1321,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
           contentEditable={!readOnly}
           suppressContentEditableWarning
           onInput={syncFromEditor}
+          onPaste={handleEditorPaste}
           onKeyDown={handleEditorKeyDown}
           onBlur={handleEditorBlur}
           onContextMenu={handleEditorContextMenu}
@@ -1189,7 +1340,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
               handleColResizeStart(e, table, colIndex);
             }
           }}
-          className={`wysiwyg-editor w-full bg-black/40 border border-white/5 rounded-b-xl p-3 text-[13px] text-white outline-none resize-none overflow-y-auto min-h-[120px] focus:border-blue-500/50 [&:empty:before]:content-[attr(data-placeholder)] [&:empty:before]:text-slate-500 [&:empty:before]:italic ${className || ''}`}
+          className={`wysiwyg-editor w-full bg-white border border-gray-200 rounded-b-xl p-3 text-[13px] text-gray-900 outline-none resize-none overflow-y-auto min-h-[120px] focus:border-blue-500/50 [&:empty:before]:content-[attr(data-placeholder)] [&:empty:before]:text-gray-400 [&:empty:before]:italic ${className || ''}`}
           style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0, lineHeight: lineHeight, ...(rows ? { minHeight: `${rows * 28}px` } : {}) }}
           data-placeholder={placeholder || 'Start writing...'}
         />
@@ -1200,7 +1351,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
         <div
           ref={tableMenuRef}
           onMouseDown={e => e.preventDefault()}
-          className="fixed z-[9999] bg-[#1a1d26] border border-white/10 rounded-xl shadow-2xl py-1 min-w-[180px]"
+          className="fixed z-[9999] bg-white border border-gray-200 rounded-xl shadow-2xl py-1 min-w-[180px]"
           style={{ left: tableMenu.x, top: tableMenu.y }}
         >
           {(() => {

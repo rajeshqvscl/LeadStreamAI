@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
 import ReminderPanel from './ReminderPanel';
+import { useTheme } from '../contexts/ThemeContext';
 
 const Layout = () => {
   const location = useLocation();
@@ -11,6 +12,7 @@ const Layout = () => {
   const activePage = pathParts[2] || 'dashboard';
   const activeStatus = searchParams.get('status');
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const { theme, toggleTheme } = useTheme();
   const [time, setTime] = useState('');
   const [totalLeads, setTotalLeads] = useState(0);
   const [totalCompanies, setTotalCompanies] = useState(0);
@@ -335,6 +337,13 @@ const Layout = () => {
               }}
             />
           </div>
+          <button
+            onClick={toggleTheme}
+            className="w-9 h-9 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-[16px] transition-all cursor-pointer shrink-0"
+            title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+          >
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
           <div className="relative">
             <div
               className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-[12px] font-bold text-white cursor-pointer border-2 border-transparent transition-all hover:border-blue-500"

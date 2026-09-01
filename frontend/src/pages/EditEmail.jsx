@@ -189,6 +189,18 @@ const EditEmail = () => {
       if (_tlhMatch) _tableLh = _tlhMatch[1];
     }
 
+    // Extract row/col padding from data attributes
+    let _rowPad = '1';
+    let _colPad = '4';
+    if (text && /data-row-pad="([^"]+)"/i.test(text)) {
+      const _rpMatch = text.match(/data-row-pad="([^"]+)"/i);
+      if (_rpMatch) _rowPad = _rpMatch[1];
+    }
+    if (text && /data-col-pad="([^"]+)"/i.test(text)) {
+      const _cpMatch = text.match(/data-col-pad="([^"]+)"/i);
+      if (_cpMatch) _colPad = _cpMatch[1];
+    }
+
     // Resolve [[BACKEND_URL]] and hardcoded localhost URLs so images show in preview
     const backendUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
     text = text.replace(/\[\[BACKEND_URL\]\]/g, backendUrl);
@@ -215,31 +227,33 @@ const EditEmail = () => {
         .replace(/background(?:-color)?\s*:\s*[^;]+;?\s*/gi, '')
         .replace(/bgcolor\s*=\s*["'][^"']*["']\s*/gi, '')
         .replace(/<table(\s[^>]*)?>/gi, (m) => {
-          if (m.includes('style="')) {
-            return m.replace(/style="([^"]*)"/, (_, existing) => {
-              let clean = existing.replace(/\bfont-size[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
-              return `style="border-collapse:collapse;line-height:${_tableLh};${clean}"`;
-            });
+          if (!m) return m;
+          let attrs = m;
+          if (!/border-collapse/i.test(attrs)) {
+            if (attrs.includes('style="')) {
+              attrs = attrs.replace(/style="([^"]*)"/, (_, s) => `style="border-collapse:collapse;line-height:${_tableLh};${s}"`);
+            } else {
+              attrs = attrs.replace('>', ` style="border-collapse:collapse;line-height:${_tableLh};">`);
+            }
           }
-          return `<table style="border-collapse:collapse;line-height:${_tableLh};">`;
+          if (!/border="/i.test(attrs)) attrs = attrs.replace('<table', '<table border="1" bordercolor="#999"');
+          return attrs;
         })
         .replace(/<th(\s[^>]*)?>/gi, (m) => {
+          if (!m) return m;
+          if (/border/i.test(m)) return m;
           if (m.includes('style="')) {
-            return m.replace(/style="([^"]*)"/, (_, existing) => {
-              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
-              return `style="${clean};padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;line-height:${_tableLh};"`;
-            });
+            return m.replace(/style="([^"]*)"/, (_, s) => `style="border:1px solid #999;${s}"`);
           }
-          return `<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;line-height:${_tableLh};"`;
+          return m.replace(/>$/, ' style="border:1px solid #999;">');
         })
         .replace(/<td(\s[^>]*)?>/gi, (m) => {
+          if (!m) return m;
+          if (/border/i.test(m)) return m;
           if (m.includes('style="')) {
-            return m.replace(/style="([^"]*)"/, (_, existing) => {
-              let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
-              return `style="${clean};padding:1px 4px;border:1px solid #475569;text-align:left;line-height:${_tableLh};"`;
-            });
+            return m.replace(/style="([^"]*)"/, (_, s) => `style="border:1px solid #999;${s}"`);
           }
-          return `<td style="padding:1px 4px;border:1px solid #475569;text-align:left;line-height:${_tableLh};"`;
+          return m.replace(/>$/, ' style="border:1px solid #999;">');
         });
       // A markdown signature is appended raw to the body (inject_signature). When
       // the body is HTML we land here, so convert any markdown remnants or they'd
@@ -386,8 +400,8 @@ const EditEmail = () => {
           const cells = line.trim().split('|').slice(1, -1).map(c => c.trim());
           const tag = i === 0 ? 'th' : 'td';
           const cellStyle = tag === 'th'
-            ? 'border:1px solid #475569;padding:2px 4px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;'
-            : 'border:1px solid #475569;padding:1px 4px;text-align:left;color:#cbd5e1;';
+            ? `border:1px solid #475569;padding:${_rowPad}px ${_colPad}px;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;`
+            : `border:1px solid #475569;padding:${_rowPad}px ${_colPad}px;text-align:left;color:#cbd5e1;`;
           const cellHtml = cells.map(c => `<${tag} style="${cellStyle}">${c}</${tag}>`).join('');
           tableHtml += `<tr>${cellHtml}</tr>`;
         });
@@ -447,19 +461,19 @@ const EditEmail = () => {
         if (m.includes('style="')) {
           return m.replace(/style="([^"]*)"/, (_, existing) => {
             let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\btext-transform[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
-            return `style="${clean};padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;line-height:${_tableLh};"`;
+            return `style="${clean};padding:${_rowPad}px ${_colPad}px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;line-height:${_tableLh};"`;
           });
         }
-        return m.replace('<th', `<th style="padding:2px 4px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;line-height:${_tableLh};"`);
+        return m.replace('<th', `<th style="padding:${_rowPad}px ${_colPad}px;border:1px solid #475569;text-align:left;font-weight:700;color:#e2e8f0;background:#1e293b;line-height:${_tableLh};"`);
       })
       .replace(/<td(\s[^>]*)?>/gi, (m) => {
         if (m.includes('style="')) {
           return m.replace(/style="([^"]*)"/, (_, existing) => {
             let clean = existing.replace(/\bpadding\b[^;]*;?/gi, '').replace(/\bfont-size[^;]*;?/gi, '').replace(/\bline-height[^;]*;?/gi, '');
-            return `style="${clean};padding:1px 4px;border:1px solid #475569;text-align:left;color:#cbd5e1;line-height:${_tableLh};"`;
+            return `style="${clean};padding:${_rowPad}px ${_colPad}px;border:1px solid #475569;text-align:left;color:#cbd5e1;line-height:${_tableLh};"`;
           });
         }
-        return m.replace('<td', '<td style="padding:1px 4px;border:1px solid #475569;text-align:left;color:#cbd5e1;"');
+        return m.replace('<td', `<td style="padding:${_rowPad}px ${_colPad}px;border:1px solid #475569;text-align:left;color:#cbd5e1;line-height:${_tableLh};"`);
       });
     return `<div style="font-family:${user.email_font || 'sans-serif'};font-size:${user.email_font_size || '13px'};line-height:1.6;">${finalHtml}</div>`;
   };

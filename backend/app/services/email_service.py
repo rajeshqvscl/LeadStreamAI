@@ -812,6 +812,35 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: str |
                     return tag
                 html_content = _re_lh.sub(r'<(?:th|td)\b[^>]*>', _send_ensure_cell_style, html_content, flags=_re_lh.IGNORECASE)
 
+                # ── FINAL border-fix: ensure every <table> has border="1" + border-collapse,
+                #    and every <td>/<th> has a CSS border. Gmail strips CSS borders from cells
+                #    but the HTML border="1" on <table> survives, and border-collapse:collapse
+                #    on the <table> makes single-line borders. This is the last safety net. ──
+                def _final_fix_tbl(m):
+                    a = m.group(1) or ''
+                    if 'border="' not in a and "border='" not in a:
+                        a = ' border="1" bordercolor="#999"' + a
+                    if 'border-collapse' not in a:
+                        if 'style=' in a:
+                            a = _re_lh.sub(r'style="', 'style="border-collapse:collapse;', a)
+                            a = _re_lh.sub(r"style='", "style='border-collapse:collapse;", a)
+                        else:
+                            a += ' style="border-collapse:collapse;"'
+                    return '<table' + a + '>'
+                html_content = _re_lh.sub(r'<table([^>]*)>', _final_fix_tbl, html_content, flags=_re_lh.IGNORECASE)
+
+                def _final_fix_cell(m):
+                    t = m.group(0)
+                    if 'border' in t:
+                        return t
+                    if 'style=' in t:
+                        t = _re_lh.sub(r'style="', 'style="border:1px solid #999;', t)
+                        t = _re_lh.sub(r"style='", "style='border:1px solid #999;", t)
+                    else:
+                        t = t[:-1] + ' style="border:1px solid #999;">'
+                    return t
+                html_content = _re_lh.sub(r'<(th|td)([^>]*)>', _final_fix_cell, html_content, flags=_re_lh.IGNORECASE)
+
                 # Build a plain-text fallback by stripping HTML tags
                 import re as _re
                 plain_text = _re.sub(r'<br\s*/?>', '\n', html_content)
