@@ -112,20 +112,28 @@ def clean_display_filename(filename: str) -> str:
     return base
 
 
-def _get_signature_attachments(user_id: int | None) -> list:
-    """Fetch the current user's default signature attachment_file list and
-    return file dicts ready for MIME inclusion."""
+def _get_signature_attachments(user_id: int | None, signature_id: int | None = None) -> list:
+    """Fetch signature attachment_file list and return file dicts ready for MIME inclusion.
+    
+    If signature_id is provided, fetch attachments from that specific signature.
+    Otherwise, fetch from the default signature (backward compatible).
+    """
     if not user_id:
         return []
     try:
         from app.database import get_db_connection
         conn = get_db_connection()
         cur = conn.cursor()
-        # Get the default signature's attachment_file
-        cur.execute(
-            "SELECT attachment_file FROM user_signatures WHERE user_id = %s ORDER BY is_default DESC, created_at ASC LIMIT 1",
-            (user_id,)
-        )
+        if signature_id:
+            cur.execute(
+                "SELECT attachment_file FROM user_signatures WHERE id = %s AND user_id = %s",
+                (signature_id, user_id)
+            )
+        else:
+            cur.execute(
+                "SELECT attachment_file FROM user_signatures WHERE user_id = %s ORDER BY is_default DESC, created_at ASC LIMIT 1",
+                (user_id,)
+            )
         row = cur.fetchone()
         cur.close()
         conn.close()
@@ -425,7 +433,7 @@ def build_unsubscribe_footer(lead_id: int) -> str:
 <a href="{_uurl}" style="color:#888;text-decoration:underline">Click here to unsubscribe</a>
 </p>"""
 
-def send_email(to_email: str, subject: str, html_content: str, from_email: str | None = None, from_name: str | None = None, attachments: list | None = None, lead_id: int | None = None, is_system_email: bool = False, user_id: int | None = None, cc: str | None = None, thread_id: str | None = None, in_reply_to: str | None = None, template_name: str | None = None, bulk_mode: bool = False) -> tuple:
+def send_email(to_email: str, subject: str, html_content: str, from_email: str | None = None, from_name: str | None = None, attachments: list | None = None, lead_id: int | None = None, is_system_email: bool = False, user_id: int | None = None, cc: str | None = None, thread_id: str | None = None, in_reply_to: str | None = None, template_name: str | None = None, bulk_mode: bool = False, signature_id: int | None = None) -> tuple:
     """Sends an email via the Gmail API (the only dispatch method; SMTP/Resend fallback removed).
 
     Returns a 4-tuple: (success: bool, message: str, thread_id: Optional[str], rfc_message_id: Optional[str]).
@@ -525,7 +533,7 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: str |
     if not is_followup:
         # Include signature attachments from the user's saved signature
         if user_id and not is_system_email:
-            sig_attachments = _get_signature_attachments(int(user_id))
+            sig_attachments = _get_signature_attachments(int(user_id), signature_id=signature_id)
             for sig_att in sig_attachments:
                 if not any(a.get('filename') == sig_att['filename'] for a in merged_attachments):
                     merged_attachments.append(sig_att)
@@ -1199,7 +1207,7 @@ def check_scheduled_emails():
         cur.execute(f"""
             SELECT COUNT(*) FROM leads_raw
             WHERE email_status = 'SENT'
-              AND updated_at > NOW() - INTERVAL '{int(cfg.cooldown_window_minutes)} minutes'
+              AND last_outreach_at > NOW() - INTERVAL '{int(cfg.cooldown_window_minutes)} minutes'
         """)
         recent_sends = cur.fetchone()[0]
         if recent_sends >= cfg.cooldown_every_n_emails:
@@ -1216,6 +1224,7 @@ def check_scheduled_emails():
 
         cur.execute("""
             SELECT l.id, l.email, l.email_draft, l.cc_email, l.user_id, l.draft_template_used,
+                   l.draft_signature_id,
                    u.email as sender_email, u.full_name, u.username
             FROM leads_raw l
             LEFT JOIN users u ON l.user_id = u.id
@@ -1292,7 +1301,8 @@ def check_scheduled_emails():
                 lead_id=lead_id,
                 user_id=user_id,
                 cc=cc_email,
-                template_name=lead.get('draft_template_used')
+                template_name=lead.get('draft_template_used'),
+                signature_id=lead.get('draft_signature_id')
             )
 
             gmail_draft_id = lead.get('gmail_draft_id')

@@ -29,6 +29,7 @@ def _send_email_once(job: EmailJob) -> tuple[bool, str, str | None, str | None]:
         thread_id=job.thread_id,
         in_reply_to=job.in_reply_to,
         template_name=job.template_name,
+        signature_id=job.signature_id,
     )
 
 
@@ -147,6 +148,7 @@ def send_email_direct(
     cc: str | None = None,
     thread_id: str | None = None,
     in_reply_to: str | None = None,
+    signature_id: int | None = None,
 ) -> tuple[bool, str, str | None, str | None]:
     """
     Direct synchronous send (bypasses queue).
@@ -164,4 +166,5 @@ def send_email_direct(
         cc=cc,
         thread_id=thread_id,
         in_reply_to=in_reply_to,
+        signature_id=signature_id,
     )

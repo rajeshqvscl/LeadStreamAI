@@ -1486,7 +1486,7 @@ def send_company_email(row_id: int, user_id: str | None = Header(None, alias="X-
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
         # 2. Fetch the Lead and Draft for sending
-        cur.execute("SELECT email, email_draft FROM leads_raw WHERE id = %s", (lead_id,))
+        cur.execute("SELECT email, email_draft, draft_signature_id FROM leads_raw WHERE id = %s", (lead_id,))
         lead = cur.fetchone()
 
         # 3. Fetch Sender Identity
@@ -1517,7 +1517,8 @@ def send_company_email(row_id: int, user_id: str | None = Header(None, alias="X-
             from_email=sender_email,
             from_name=sender_name,
             lead_id=lead_id,
-            user_id=uid
+            user_id=uid,
+            signature_id=lead.get('draft_signature_id')
         )
 
         if success:

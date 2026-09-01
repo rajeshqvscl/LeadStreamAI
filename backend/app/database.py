@@ -222,6 +222,7 @@ def create_tables():
         ("cc_email", "TEXT"),
         ("gmail_draft_id", "TEXT"),
         ("draft_template_used", "TEXT"),
+        ("draft_signature_id", "INTEGER"),
         ("tracking_token", "TEXT"),
         # Reply analysis columns (used by gmail.py handle_potential_reply)
         ("check_size", "TEXT"),

@@ -40,6 +40,7 @@ class EmailJob:
     # Metadata
     priority: EmailPriority = EmailPriority.NORMAL
     template_name: str | None = None
+    signature_id: int | None = None
     tracking_enabled: bool = True
     idempotency_key: str | None = None
 

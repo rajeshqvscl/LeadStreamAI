@@ -103,11 +103,11 @@ def check_daily_email_limit(user_id: str | None, batch_size: int = 1) -> bool:
                 daily_limit = int(stored)
 
         if is_admin:
-            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
+            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'SENT' AND last_outreach_at >= NOW() - INTERVAL '1 day'")
         elif uid:
-            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id = %s AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'", (uid,))
+            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id = %s AND email_status = 'SENT' AND last_outreach_at >= NOW() - INTERVAL '1 day'", (uid,))
         else:
-            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id IS NULL AND email_status = 'SENT' AND updated_at >= NOW() - INTERVAL '1 day'")
+            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id IS NULL AND email_status = 'SENT' AND last_outreach_at >= NOW() - INTERVAL '1 day'")
 
         sent_today = cur.fetchone()[0] or 0
         return (sent_today + batch_size) <= daily_limit

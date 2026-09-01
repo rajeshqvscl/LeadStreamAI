@@ -1457,6 +1457,7 @@ def markdown_to_html(text, gmail_style=False, font_family="sans-serif", font_siz
 class DraftRequest(BaseModel):
     lead_id: int
     template_type: str | None = "standard"
+    signature_id: int | None = None
 
 
 
@@ -2346,6 +2347,23 @@ def generate_email_internal(req: DraftRequest, user_id: str | None = None):
 
         profile = get_sender_profile(user_id)
         generator = EmailGenerator()
+
+        # Override signature if a specific signature_id is provided
+        if req.signature_id:
+            try:
+                sig_conn = get_db_connection()
+                sig_cur = sig_conn.cursor()
+                sig_cur.execute("SELECT content FROM user_signatures WHERE id = %s AND user_id = %s", (req.signature_id, uid))
+                sig_row = sig_cur.fetchone()
+                sig_cur.close()
+                sig_conn.close()
+                if sig_row:
+                    sig_content = sig_row[0] if not isinstance(sig_row, dict) else sig_row['content']
+                    profile['signatures'] = [{'content': sig_content, 'is_default': True}]
+                    logger.info(f"✅ Overrode profile signature with user_signatures id={req.signature_id}")
+            except Exception as sig_err:
+                logger.warning(f"Failed to fetch signature_id={req.signature_id}: {sig_err}")
+
         is_yashika = False
 
         # Select template
@@ -2531,9 +2549,10 @@ def generate_email_internal(req: DraftRequest, user_id: str | None = None):
 
         cur.execute("""
             UPDATE leads_raw
-            SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW(), gmail_draft_id = %s, draft_template_used = %s
+            SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW(), gmail_draft_id = %s, draft_template_used = %s,
+                draft_signature_id = %s
             WHERE id = %s
-        """, (email_content, gmail_draft_id, req.template_type if req.template_type != 'standard' else None, req.lead_id))
+        """, (email_content, gmail_draft_id, req.template_type if req.template_type != 'standard' else None, req.signature_id, req.lead_id))
         conn.commit()
 
         invalidate_pending_drafts_cache(str(uid) if uid else None)
@@ -3483,9 +3502,9 @@ def _generate_template_draft_inner(lead_id: int, template_name: str, user_id: st
         cur2.execute("""
             UPDATE leads_raw
             SET email_draft = %s, email_status = 'PENDING_APPROVAL', updated_at = NOW(), gmail_draft_id = %s, draft_template_used = %s,
-                cc_email = COALESCE(%s, cc_email)
+                cc_email = COALESCE(%s, cc_email), draft_signature_id = %s
             WHERE id = %s
-        """, (email_content, gmail_draft_id, template_name, vismaya_cc, lead_id))
+        """, (email_content, gmail_draft_id, template_name, vismaya_cc, signature_id, lead_id))
         conn2.commit()
         cur2.close()
         conn2.close()
@@ -4031,7 +4050,7 @@ def approve_draft(draft_id: int, req: ApproveRequest | None = None, user_id: str
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
         # 1. Fetch/Prepare Draft FIRST to get lead owner's user_id
-        cur.execute("SELECT first_name, last_name, email, email_draft, cc_email, draft_template_used, user_id FROM leads_raw WHERE id = %s", (draft_id,))
+        cur.execute("SELECT first_name, last_name, email, email_draft, cc_email, draft_template_used, user_id, draft_signature_id FROM leads_raw WHERE id = %s", (draft_id,))
         lead = cur.fetchone()
         if not lead:
             raise HTTPException(status_code=404, detail="Lead not found")
@@ -4137,7 +4156,8 @@ def approve_draft(draft_id: int, req: ApproveRequest | None = None, user_id: str
             user_id=int(uid),
             cc=cc_email,
             template_name=template_name,
-            attachments=body_attachments
+            attachments=body_attachments,
+            signature_id=lead.get('draft_signature_id')
         )
 
         dispatch_method = "Gmail API" if has_gmail else "NO DISPATCH (Gmail not connected)"
@@ -4438,7 +4458,7 @@ def send_approved_batch(user_id: str | None = Header(None, alias="X-User-Id")):
     else:
         where_clause += " AND user_id IS NULL"
 
-    cur.execute(f"SELECT id, email, email_draft, cc_email, draft_template_used, gmail_draft_id FROM leads_raw {where_clause}", params)
+    cur.execute(f"SELECT id, email, email_draft, cc_email, draft_template_used, gmail_draft_id, draft_signature_id FROM leads_raw {where_clause}", params)
     leads_to_send = cur.fetchall()
 
     if leads_to_send and not check_daily_email_limit(user_id, len(leads_to_send)):
@@ -4497,7 +4517,8 @@ def send_approved_batch(user_id: str | None = Header(None, alias="X-User-Id")):
                 user_id=int(uid_val),
                 cc=lead['cc_email'],
                 template_name=template_name,
-                bulk_mode=True
+                bulk_mode=True,
+                signature_id=lead.get('draft_signature_id')
             )
 
             if success:
@@ -4611,7 +4632,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: str | None = Header(None,
     #    send_email()'s own unsubscribe guard.
     cur.execute(
         """
-        SELECT id, email, email_draft, gmail_draft_id, cc_email, draft_template_used, user_id
+        SELECT id, email, email_draft, gmail_draft_id, cc_email, draft_template_used, user_id, draft_signature_id
         FROM leads_raw
         WHERE id = ANY(%s)
           AND email_status IN ('PENDING_APPROVAL', 'APPROVED', 'SCHEDULED')
@@ -4673,7 +4694,8 @@ def send_selected_batch(req: BulkSendRequest, user_id: str | None = Header(None,
                 lead_id=lead['id'],
                 user_id=int(lead_uid) if lead_uid else None,
                 cc=lead['cc_email'],
-                template_name=lead.get('draft_template_used')
+                template_name=lead.get('draft_template_used'),
+                signature_id=lead.get('draft_signature_id')
             )
 
             if success:
@@ -4898,9 +4920,10 @@ def generate_bulk_domain_drafts(req: BulkDraftRequest, user_id: str | None = Hea
                         email_status = 'PENDING_APPROVAL',
                         cc_email = COALESCE(%s, cc_email),
                         updated_at = NOW(),
-                        gmail_draft_id = %s
+                        gmail_draft_id = %s,
+                        draft_signature_id = %s
                     WHERE id = %s
-                """, (resolved_content, req.cc, gmail_draft_id, lead_item['id']))
+                """, (resolved_content, req.cc, gmail_draft_id, req.signature_id, lead_item['id']))
 
                 total_leads_updated += 1
 
@@ -4975,7 +4998,7 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: str | None = Header(N
             where_clause = f"WHERE id IN ({format_strings}) AND user_id IS NULL"
             params = tuple(req.lead_ids)
 
-        cur.execute(f"SELECT id, first_name, email, email_draft, domain, company_name, cc_email, draft_template_used, gmail_draft_id FROM leads_raw {where_clause}", params)
+        cur.execute(f"SELECT id, first_name, email, email_draft, domain, company_name, cc_email, draft_template_used, gmail_draft_id, draft_signature_id FROM leads_raw {where_clause}", params)
         leads = cur.fetchall()
 
         sent_count = 0
@@ -5025,7 +5048,8 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: str | None = Header(N
                     user_id=int(uid),
                     cc=req.cc or lead['cc_email'],
                     template_name=lead.get('draft_template_used'),
-                    bulk_mode=True
+                    bulk_mode=True,
+                    signature_id=lead.get('draft_signature_id')
                 )
 
                 if success:
