@@ -5,7 +5,7 @@ import { useState, useCallback } from 'react';
  * 
  * Usage:
  *   const { call, loading, error } = useApiCall();
- *   const data = await call(() => api.get('/api/some-endpoint'));
+ *   const data = await call(() => api.get('/api/leads/followups'));
  * 
  * Features:
  * - Automatic loading state management

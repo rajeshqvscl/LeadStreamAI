@@ -49,6 +49,8 @@ jobs:
 
       - name: Verify API contract (route collisions + missing routes)
         run: python scripts/verify_api_contract.py --frontend ../frontend/src
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/leadstreamai
 
       - name: Runtime smoke test (no 404/405 regressions)
         run: python scripts/smoke_test.py
