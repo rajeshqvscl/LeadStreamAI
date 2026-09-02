@@ -2,7 +2,7 @@
 Unit-test conftest — shared fixtures for backend/tests/unit/.
 
 Key fixture: ``track_db_connections``
-    Wraps ``app.database.get_db_connection`` so every call is tracked.
+    Wraps ``app.database.get_db`` so every call is tracked.
     After each test the fixture verifies:
     1. Every connection that was opened was also closed.
     2. No connection was closed twice (double-free).
@@ -10,15 +10,15 @@ Key fixture: ``track_db_connections``
 
 Usage in any test file:
     def test_something(track_db_connections):
-        conn = get_db_connection()
-        # ... work ...
-        conn.close()
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(...)
+            conn.commit()
         # fixture auto-verifies after the test
 """
 
 import contextlib
 import threading
-import weakref
 
 import pytest
 
@@ -34,10 +34,6 @@ class _ConnectionTracker:
         self._opened: dict[int, str] = {}      # id(conn) -> traceback string
         self._closed: set[int] = set()
         self._lock = threading.Lock()
-        # Monkey-patched originals (restored after each test)
-        self._original_get_db = None
-
-    # -- public helpers called by the patched get_db_connection --
 
     def record_open(self, conn):
         with self._lock:
@@ -46,8 +42,6 @@ class _ConnectionTracker:
     def record_close(self, conn):
         with self._lock:
             self._closed.add(id(conn))
-
-    # -- assertion helpers called by the fixture teardown --
 
     def assert_all_closed(self):
         with self._lock:
@@ -76,7 +70,7 @@ class _ConnectionTracker:
 
 @pytest.fixture
 def track_db_connections(monkeypatch):
-    """Patch ``get_db_connection`` to track open/close lifecycle.
+    """Patch ``get_db`` to track open/close lifecycle.
 
     After the test the fixture asserts no connections leaked.
     """
@@ -112,21 +106,36 @@ def track_db_connections(monkeypatch):
 
         return conn
 
+    # Patch get_db_connection in database module
     monkeypatch.setattr(dbmod, "get_db_connection", _tracked_get_db)
 
-    # Also patch the alias used inside some service modules
-    for mod_name in [
-        "app.services.email_service",
-        "app.api.drafts",
-        "app.api.leads",
-        "app.api.gmail",
-        "app.utils.auth_helpers",
-    ]:
-        with contextlib.suppress(ImportError, AttributeError):
-            import importlib
-            mod = importlib.import_module(mod_name)
-            if hasattr(mod, "get_db_connection"):
-                monkeypatch.setattr(mod, "get_db_connection", _tracked_get_db)
+    # Also patch get_db in database module (context manager version)
+    import contextlib as _ctx
+    _real_get_db_cm = dbmod.get_db
+
+    @contextlib.contextmanager
+    def _tracked_get_db_cm(*args, **kwargs):
+        with _real_get_db_cm(*args, **kwargs) as conn:
+            tracker.record_open(conn)
+            _real_close_cm = conn.close
+
+            def _tracked_close_cm(*a, **kw):
+                tracker.record_close(conn)
+                return _real_close_cm(*a, **kw)
+
+            if hasattr(conn, '_conn'):
+                inner = object.__getattribute__(conn, '_conn')
+                _inner_close = inner.close
+
+                def _tracked_inner_close_cm(*a, **kw):
+                    tracker.record_close(conn)
+                    return _inner_close(*a, **kw)
+                inner.close = _tracked_inner_close_cm
+            else:
+                conn.close = _tracked_close_cm
+            yield conn
+
+    monkeypatch.setattr(dbmod, "get_db", _tracked_get_db_cm)
 
     yield tracker
 

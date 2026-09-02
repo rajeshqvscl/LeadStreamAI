@@ -139,6 +139,32 @@ def get_db_connection():
         except psycopg2.OperationalError as e:
             raise Exception(f"Failed to connect to database: {str(e)}")
 
+
+@contextlib.contextmanager
+def get_db():
+    """Context manager that yields a DB connection and guarantees cleanup.
+
+    Usage:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(...)
+            conn.commit()
+        # connection is ALWAYS returned to pool, even on exception
+    """
+    conn = get_db_connection()
+    try:
+        yield conn
+    except Exception:
+        # On error, rollback any uncommitted transaction before returning to pool
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()  # Returns to pool (never actually closes the socket)
+
+
 # Create Database Tables
 def create_tables():
     conn = get_db_connection()

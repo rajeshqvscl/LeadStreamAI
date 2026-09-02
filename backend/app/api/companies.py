@@ -813,6 +813,7 @@ async def import_companies_gsheet(req: dict[str, Any], user_id: str | None = Hea
         return inferred
 
     async def process_single_tab(tab):
+        tab_errors = []
         try:
             import csv
             import sys
@@ -838,6 +839,8 @@ async def import_companies_gsheet(req: dict[str, Any], user_id: str | None = Hea
                     resp = await client.get(export_url)
                 if resp.status_code == 200:
                     csv_data = resp.text
+                else:
+                    tab_errors.append(f"GID CSV export returned HTTP {resp.status_code}")
 
             # Fallback to GViz JSON by sheet name (works without GID)
             if not csv_data or len(csv_data) < 10:
@@ -848,24 +851,43 @@ async def import_companies_gsheet(req: dict[str, Any], user_id: str | None = Hea
                 if resp.status_code == 200:
                     import io
                     import json
-                    match = re.search(r'google\.visualization\.Query\.setResponse\((.*)\);', resp.text)
+                    match = re.search(r'google\.visualization\.Query\.setResponse\((.*?)\);', resp.text, re.DOTALL)
                     if match:
                         try:
                             data = json.loads(match.group(1))
-                            rows = data.get('table', {}).get('rows', [])
-                            output = io.StringIO()
-                            writer = csv.writer(output)
-                            for row in rows:
-                                cols = row.get('c', [])
-                                parsed_row = [str(c.get('v', '')) if c and c.get('v') is not None else '' for c in cols]
-                                writer.writerow(parsed_row)
-                            csv_data = output.getvalue()
+                            gviz_status = data.get('status')
+                            if gviz_status == 'error':
+                                err_msgs = [e.get('detailed_message', e.get('message', '')) for e in data.get('errors', [])]
+                                tab_errors.append(f"GViz API error: {'; '.join(err_msgs) or 'Sheet may not be public'}")
+                            else:
+                                rows = data.get('table', {}).get('rows', [])
+                                output = io.StringIO()
+                                writer = csv.writer(output)
+                                for row in rows:
+                                    cols = row.get('c', [])
+                                    parsed_row = [str(c.get('v', '')) if c and c.get('v') is not None else '' for c in cols]
+                                    writer.writerow(parsed_row)
+                                csv_data = output.getvalue()
                         except Exception as e:
-                            print(f"ERROR processing GViz JSON: {e}")
+                            tab_errors.append(f"GViz JSON parse error: {e}")
+                    else:
+                        tab_errors.append("GViz response did not contain expected callback pattern — sheet may not be shared")
+
+            # Last resort: try CSV export with gid=0 (first sheet) as fallback
+            if not csv_data or len(csv_data) < 10:
+                fallback_gid = "0"
+                export_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv&gid={fallback_gid}"
+                print(f"DEBUG: Last resort CSV export with gid=0 for tab '{tab['name']}'")
+                async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                    resp = await client.get(export_url)
+                if resp.status_code == 200 and len(resp.text) > 10:
+                    csv_data = resp.text
+                    print(f"DEBUG: Fallback gid=0 CSV export succeeded for tab '{tab['name']}'")
 
             if not csv_data or len(csv_data) < 5:
-                print(f"ERROR: Sync failed for tab '{tab['name']}'. Skipping.")
-                return
+                err_detail = '; '.join(tab_errors) if tab_errors else 'Unknown error'
+                print(f"ERROR: Sync failed for tab '{tab['name']}': {err_detail}")
+                return {"error": f"Tab '{tab['name']}': {err_detail}"}
 
             lines = csv_data.splitlines()
             header_index = -1
@@ -947,14 +969,24 @@ async def import_companies_gsheet(req: dict[str, Any], user_id: str | None = Hea
                 all_rows.extend(tab_rows)
         except Exception as e:
             print(f"GSheet import error for tab {tab['name']}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {"error": f"Tab '{tab['name']}': Unexpected error — {str(e)}"}
 
     # Run sequentially to save memory!
+    tab_errors = []
     for tab in tabs_to_process:
-        await process_single_tab(tab)
+        result = await process_single_tab(tab)
+        if isinstance(result, dict) and result.get('error'):
+            tab_errors.append(result['error'])
 
     print(f"DEBUG: Finished processing all tabs. Total rows collected: {len(all_rows)}")
     if not all_rows:
-        raise HTTPException(status_code=400, detail="No data found in selected tabs. Ensure the sheet is public and tabs contain data.")
+        if tab_errors:
+            detail = "No data found. Per-tab errors: " + " | ".join(tab_errors) + " — Ensure the sheet is shared with 'Anyone with link' (Viewer) or published to web."
+        else:
+            detail = "No data found in selected tabs. Ensure the sheet is public and tabs contain data."
+        raise HTTPException(status_code=400, detail=detail)
 
     return import_companies(all_rows, user_id)
 

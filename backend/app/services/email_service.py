@@ -188,59 +188,55 @@ def _get_signature_attachments(user_id: int | None, signature_id: int | None = N
     """
     if not user_id:
         return []
-    conn = None
     try:
-        from app.database import get_db_connection
-        conn = get_db_connection()
-        cur = conn.cursor()
-        if signature_id:
-            cur.execute(
-                "SELECT attachment_file FROM user_signatures WHERE id = %s AND user_id = %s",
-                (signature_id, user_id)
-            )
-        else:
-            cur.execute(
-                "SELECT attachment_file FROM user_signatures WHERE user_id = %s ORDER BY is_default DESC, created_at ASC LIMIT 1",
-                (user_id,)
-            )
-        row = cur.fetchone()
-        if not row:
-            return []
-        # row is a tuple because of regular cursor
-        raw = row[0] if isinstance(row, (tuple, list)) else (row.get('attachment_file') if hasattr(row, 'get') else None)
-        if not raw:
-            return []
-        filenames = [f.strip() for f in raw.split(',') if f.strip()]
-        if not filenames:
-            return []
-        IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico'}
-        asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
-        result = []
-        for fn in filenames:
-            ext = os.path.splitext(fn)[1].lower()
-            if ext in IMAGE_EXTS:
-                logger.info(f"Skipping image from signature attachments (inline in body): {fn}")
-                continue
-            path = asset_dir / fn
-            if path.exists():
-                import base64
-                with open(path, "rb") as f:
-                    content_bytes = f.read()
-                result.append({
-                    "content": base64.b64encode(content_bytes).decode('utf-8'),
-                    # Recipient-facing name — internal sig_<uid>_ prefix hidden.
-                    "filename": clean_display_filename(fn)
-                })
-                logger.info(f"Loaded signature attachment: {fn}")
+        from app.database import get_db
+        with get_db() as conn:
+            cur = conn.cursor()
+            if signature_id:
+                cur.execute(
+                    "SELECT attachment_file FROM user_signatures WHERE id = %s AND user_id = %s",
+                    (signature_id, user_id)
+                )
             else:
-                logger.warning(f"Signature attachment NOT FOUND: {fn} at {path}")
-        return result
+                cur.execute(
+                    "SELECT attachment_file FROM user_signatures WHERE user_id = %s ORDER BY is_default DESC, created_at ASC LIMIT 1",
+                    (user_id,)
+                )
+            row = cur.fetchone()
+            if not row:
+                return []
+            # row is a tuple because of regular cursor
+            raw = row[0] if isinstance(row, (tuple, list)) else (row.get('attachment_file') if hasattr(row, 'get') else None)
+            if not raw:
+                return []
+            filenames = [f.strip() for f in raw.split(',') if f.strip()]
+            if not filenames:
+                return []
+            IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico'}
+            asset_dir = Path(__file__).resolve().parent.parent.parent / "assets"
+            result = []
+            for fn in filenames:
+                ext = os.path.splitext(fn)[1].lower()
+                if ext in IMAGE_EXTS:
+                    logger.info(f"Skipping image from signature attachments (inline in body): {fn}")
+                    continue
+                path = asset_dir / fn
+                if path.exists():
+                    import base64
+                    with open(path, "rb") as f:
+                        content_bytes = f.read()
+                    result.append({
+                        "content": base64.b64encode(content_bytes).decode('utf-8'),
+                        # Recipient-facing name — internal sig_<uid>_ prefix hidden.
+                        "filename": clean_display_filename(fn)
+                    })
+                    logger.info(f"Loaded signature attachment: {fn}")
+                else:
+                    logger.warning(f"Signature attachment NOT FOUND: {fn} at {path}")
+            return result
     except Exception as e:
         logger.exception(f"Error fetching signature attachments for user {user_id}: {e}")
         return []
-    finally:
-        if conn:
-            conn.close()
 
 # Per-account email font preference (applies to draft/followup emails).
 # The font is applied as the final wrapper in send_email(), so it wins over
@@ -292,28 +288,76 @@ def _safe_uid(user_id):
         return None
 
 
+_USER_SETTING_COLUMNS = (
+    'email_font', 'email_font_size',
+    'signature_font', 'signature_font_size',
+    'image_width', 'image_height',
+)
+_USER_SETTINGS_CACHE_TTL = 300  # 5 minutes
+
+
+def _get_settings_redis():
+    """Return a Redis client or None if unavailable."""
+    try:
+        from app.core.redis_pool import get_redis_client
+        return get_redis_client()
+    except Exception:
+        return None
+
+
+def _settings_cache_key(user_id: int, column: str) -> str:
+    return f"user_setting:{user_id}:{column}"
+
+
 def _fetch_user_setting(user_id, column: str, fallback):
-    """Single DB query for any user setting column. Uses try/finally for safe cleanup."""
+    """Single DB query for any user setting column with Redis caching."""
     uid = _safe_uid(user_id)
     if not uid:
         return fallback
-    conn = None
+    # 1. Try Redis cache
+    r = _get_settings_redis()
+    if r is not None:
+        try:
+            cached = r.get(_settings_cache_key(uid, column))
+            if cached is not None:
+                return cached
+        except Exception:
+            pass  # Redis down — fall through to DB
+    # 2. Cache miss — query DB
     try:
-        from app.database import get_db_connection
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(f"SELECT {column} FROM users WHERE id = %s", (uid,))
-        row = cur.fetchone()
-        val = row.get(column) if row else None
-        if val:
-            return val
-        logger.warning(f"get_user_setting({column}): No value found for user {uid}")
+        from app.database import get_db
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(f"SELECT {column} FROM users WHERE id = %s", (uid,))
+            row = cur.fetchone()
+            val = row.get(column) if row else None
+            if val:
+                # 3. Populate cache
+                if r is not None:
+                    try:
+                        r.setex(_settings_cache_key(uid, column), _USER_SETTINGS_CACHE_TTL, val)
+                    except Exception:
+                        pass
+                return val
+            logger.warning(f"get_user_setting({column}): No value found for user {uid}")
     except Exception as e:
         logger.exception(f"get_user_setting({column}): DB error for user {uid}: {repr(e)}")
-    finally:
-        if conn:
-            conn.close()
     return fallback
+
+
+def _invalidate_user_settings(user_id):
+    """Clear cached settings for a user (call after preference update)."""
+    uid = _safe_uid(user_id)
+    if not uid:
+        return
+    r = _get_settings_redis()
+    if r is None:
+        return
+    try:
+        keys = [_settings_cache_key(uid, col) for col in _USER_SETTING_COLUMNS]
+        r.delete(*keys)
+    except Exception:
+        pass
 
 
 def get_user_email_font(user_id) -> str:
@@ -352,6 +396,50 @@ def get_user_image_width(user_id) -> str:
 def get_user_image_height(user_id) -> str:
     """Resolve the preferred image height for a user id."""
     return _fetch_user_setting(user_id, 'image_height', "auto")
+
+
+def get_all_user_settings(user_id) -> dict:
+    """Fetch all user settings in a single DB query. Returns dict with all columns.
+    Used by send_email() to avoid 6 separate queries."""
+    uid = _safe_uid(user_id)
+    if not uid:
+        return {col: None for col in _USER_SETTING_COLUMNS}
+    # 1. Try Redis — all-or-nothing
+    r = _get_settings_redis()
+    if r is not None:
+        try:
+            keys = [_settings_cache_key(uid, col) for col in _USER_SETTING_COLUMNS]
+            cached_vals = r.mget(keys)
+            if all(v is not None for v in cached_vals):
+                return dict(zip(_USER_SETTING_COLUMNS, cached_vals))
+        except Exception:
+            pass
+    # 2. Single DB query for ALL settings
+    result = {col: None for col in _USER_SETTING_COLUMNS}
+    try:
+        from app.database import get_db
+        cols_str = ', '.join(_USER_SETTING_COLUMNS)
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(f"SELECT {cols_str} FROM users WHERE id = %s", (uid,))
+            row = cur.fetchone()
+            if row:
+                for col in _USER_SETTING_COLUMNS:
+                    result[col] = row.get(col)
+        # 3. Populate cache
+        if r is not None:
+            try:
+                pipe = r.pipeline()
+                for col in _USER_SETTING_COLUMNS:
+                    val = result[col]
+                    if val:
+                        pipe.setex(_settings_cache_key(uid, col), _USER_SETTINGS_CACHE_TTL, val)
+                pipe.execute()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.exception(f"get_all_user_settings: DB error for user {uid}: {repr(e)}")
+    return result
 
 
 def strip_old_unsubscribe_links(html_content: str) -> str:
@@ -443,39 +531,31 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: str |
     # Unsubscribe guard: skip sending if lead or email is blacklisted
     if lead_id:
         try:
-            from app.database import get_db_connection
-            guard_conn = get_db_connection()
-            guard_cur = guard_conn.cursor()
-            guard_cur.execute(
-                "SELECT email_opt_in, is_unsubscribed FROM leads_raw WHERE id = %s",
-                (lead_id,)
-            )
-            guard_row = guard_cur.fetchone()
-            if guard_row and (guard_row.get('email_opt_in') is False or guard_row.get('is_unsubscribed')):
-                guard_cur.close()
-                guard_conn.close()
-                logger.info(f"Unsubscribe guard blocked send to lead {lead_id} ({to_email}) — lead is unsubscribed")
-                return False, "Lead has unsubscribed", None, None
-            guard_cur.close()
-            guard_conn.close()
+            from app.database import get_db
+            with get_db() as guard_conn:
+                guard_cur = guard_conn.cursor()
+                guard_cur.execute(
+                    "SELECT email_opt_in, is_unsubscribed FROM leads_raw WHERE id = %s",
+                    (lead_id,)
+                )
+                guard_row = guard_cur.fetchone()
+                if guard_row and (guard_row.get('email_opt_in') is False or guard_row.get('is_unsubscribed')):
+                    logger.info(f"Unsubscribe guard blocked send to lead {lead_id} ({to_email}) — lead is unsubscribed")
+                    return False, "Lead has unsubscribed", None, None
         except Exception as guard_err:
             logger.warning(f"Unsubscribe guard check failed for lead {lead_id}: {guard_err}")
     else:
         # Check global unsubscribe_list when no lead_id is provided
         try:
-            from app.database import get_db_connection
-            guard_conn = get_db_connection()
-            guard_cur = guard_conn.cursor()
-            guard_cur.execute("SELECT 1 FROM unsubscribe_list WHERE email = %s", (to_email,))
-            if guard_cur.fetchone():
-                guard_cur.close()
-                guard_conn.close()
-                logger.info(f"Unsubscribe guard blocked send to {to_email} — email is in global blacklist")
-                return False, "Email is unsubscribed globally", None, None
-            guard_cur.close()
-            guard_conn.close()
-        except Exception:
-            pass
+            from app.database import get_db
+            with get_db() as guard_conn:
+                guard_cur = guard_conn.cursor()
+                guard_cur.execute("SELECT 1 FROM unsubscribe_list WHERE email = %s", (to_email,))
+                if guard_cur.fetchone():
+                    logger.info(f"Unsubscribe guard blocked send to {to_email} — email is in global blacklist")
+                    return False, "Email is unsubscribed globally", None, None
+        except Exception as guard_err:
+            logger.warning(f"Unsubscribe guard check failed for {to_email}: {guard_err}")
 
     import markdown
     # Convert markdown to HTML for a premium look — but ONLY for genuinely
@@ -556,7 +636,6 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: str |
                     logger.warning(f"No Gmail service found for user {uid_t}. personalized dispatch skipped.")
             except Exception as e:
                 logger.exception(f"Error building Gmail service for user {user_id}: {e}")
-                pass
 
             if service:
                 logger.info(f"Using Google API for personalized dispatch (User ID: {user_id})")
@@ -653,15 +732,13 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: str |
 
                     import uuid
 
-                    from app.database import get_db_connection
                     tracking_token = str(uuid.uuid4())
                     try:
-                        track_conn = get_db_connection()
-                        track_cur = track_conn.cursor()
-                        track_cur.execute("UPDATE leads_raw SET tracking_token = %s, updated_at = NOW() WHERE id = %s", (tracking_token, lead_id))
-                        track_conn.commit()
-                        track_cur.close()
-                        track_conn.close()
+                        from app.database import get_db
+                        with get_db() as track_conn:
+                            track_cur = track_conn.cursor()
+                            track_cur.execute("UPDATE leads_raw SET tracking_token = %s, updated_at = NOW() WHERE id = %s", (tracking_token, lead_id))
+                            track_conn.commit()
                     except Exception as track_err:
                         logger.warning(f"Failed to save tracking token for lead {lead_id}: {track_err}")
                         tracking_token = None
@@ -742,8 +819,11 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: str |
                 html_content = _strip_fontsize_preserving_design(html_content)
 
                 # Wrap in clean email template for professional appearance in Gmail
-                email_font = get_user_email_font(user_id)
-                email_font_size = get_user_email_font_size(user_id)
+                _settings = get_all_user_settings(user_id)
+                email_font = _settings.get('email_font') or USER_EMAIL_FONTS.get(
+                    _safe_uid(user_id), DEFAULT_EMAIL_FONT)
+                email_font_size = _settings.get('email_font_size') or USER_EMAIL_FONT_SIZES.get(
+                    _safe_uid(user_id), DEFAULT_EMAIL_FONT_SIZE)
 
                 # Extract editor line-height from data-lh / data-lh-table wrappers
                 import re as _re_lh
@@ -962,17 +1042,16 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: str |
                 # This ensures replies are attributed to the correct user's inbound deals.
                 if lead_id and user_id:
                     try:
-                        own_conn = get_db_connection()
-                        own_cur = own_conn.cursor()
-                        own_cur.execute(
-                            "UPDATE leads_raw SET user_id = %s, updated_at = NOW() WHERE id = %s AND COALESCE(user_id, 0) != %s",
-                            (int(user_id), lead_id, int(user_id))
-                        )
-                        if own_cur.rowcount > 0:
-                            logger.info(f"Lead {lead_id} ownership transferred to user {user_id}")
-                        own_conn.commit()
-                        own_cur.close()
-                        own_conn.close()
+                        from app.database import get_db
+                        with get_db() as own_conn:
+                            own_cur = own_conn.cursor()
+                            own_cur.execute(
+                                "UPDATE leads_raw SET user_id = %s, updated_at = NOW() WHERE id = %s AND COALESCE(user_id, 0) != %s",
+                                (int(user_id), lead_id, int(user_id))
+                            )
+                            if own_cur.rowcount > 0:
+                                logger.info(f"Lead {lead_id} ownership transferred to user {user_id}")
+                            own_conn.commit()
                     except Exception as own_err:
                         logger.warning(f"Failed to update lead ownership for {lead_id}: {own_err}")
 
@@ -992,8 +1071,8 @@ def send_email(to_email: str, subject: str, html_content: str, from_email: str |
                 try:
                     from app.services.google_service import invalidate_gmail_service_cache
                     invalidate_gmail_service_cache(int(uid_t))
-                except Exception:
-                    pass
+                except Exception as cache_err:
+                    logger.warning(f"Failed to invalidate Gmail cache for user {uid_t}: {cache_err}")
 
             logger.exception(f"❌ Gmail API dispatch failed for User {user_id} to {to_email}: {str(e)}")
             logger.exception(traceback.format_exc())
@@ -1019,7 +1098,7 @@ def schedule_drip_batch(lead_ids: list, uid, grace_minutes: int = None):
     from datetime import datetime, timedelta
 
     from app.core.pipeline.scheduler import get_scheduler_config
-    from app.database import get_db_connection
+    from app.database import get_db
     from app.models.lead import add_activity_log
 
     cfg = get_scheduler_config()
@@ -1028,8 +1107,7 @@ def schedule_drip_batch(lead_ids: list, uid, grace_minutes: int = None):
     if not lead_ids:
         return {"scheduled": 0, "skipped": 0}
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+    conn = get_db()
     scheduled = 0
     skipped = 0
     try:
@@ -1094,7 +1172,7 @@ def process_auto_pilot_sweep():
     """
     try:
         from app.core.pipeline.scheduler import get_scheduler_config
-        from app.database import get_db_connection
+        from app.database import get_db
 
         cfg = get_scheduler_config()
 
@@ -1104,17 +1182,15 @@ def process_auto_pilot_sweep():
 
         grace_minutes = cfg.drip_grace_minutes
 
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT id FROM users
-            WHERE COALESCE(auto_pilot_drafts, FALSE) = TRUE
-              AND google_refresh_token IS NOT NULL
-              AND is_active = TRUE
-        """)
-        pilot_users = [list(r.values())[0] if isinstance(r, dict) else r[0] for r in cur.fetchall()]
-        cur.close()
-        conn.close()
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id FROM users
+                WHERE COALESCE(auto_pilot_drafts, FALSE) = TRUE
+                  AND google_refresh_token IS NOT NULL
+                  AND is_active = TRUE
+            """)
+            pilot_users = [list(r.values())[0] if isinstance(r, dict) else r[0] for r in cur.fetchall()]
 
         if not pilot_users:
             return {"scheduled": 0, "users": 0}
@@ -1122,24 +1198,22 @@ def process_auto_pilot_sweep():
         total_scheduled = 0
         for uid in pilot_users:
             try:
-                conn = get_db_connection()
-                cur = conn.cursor()
-                cur.execute(f"""
-                    SELECT lr.id
-                    FROM leads_raw lr
-                    WHERE lr.user_id = %s
-                      AND lr.email_status = 'PENDING_APPROVAL'
-                      AND lr.email_draft IS NOT NULL
-                      AND lr.updated_at <= NOW() - INTERVAL '{int(grace_minutes)} minutes'
-                      AND (lr.email_opt_in IS NULL OR lr.email_opt_in = TRUE)
-                      AND (lr.is_unsubscribed IS NULL OR lr.is_unsubscribed = FALSE)
-                      AND lr.email NOT IN (SELECT email FROM unsubscribe_list)
-                    ORDER BY lr.id
-                    LIMIT 200
-                """, (uid,))
-                lead_ids = [list(r.values())[0] if isinstance(r, dict) else r[0] for r in cur.fetchall()]
-                cur.close()
-                conn.close()
+                with get_db() as conn:
+                    cur = conn.cursor()
+                    cur.execute(f"""
+                        SELECT lr.id
+                        FROM leads_raw lr
+                        WHERE lr.user_id = %s
+                          AND lr.email_status = 'PENDING_APPROVAL'
+                          AND lr.email_draft IS NOT NULL
+                          AND lr.updated_at <= NOW() - INTERVAL '{int(grace_minutes)} minutes'
+                          AND (lr.email_opt_in IS NULL OR lr.email_opt_in = TRUE)
+                          AND (lr.is_unsubscribed IS NULL OR lr.is_unsubscribed = FALSE)
+                          AND lr.email NOT IN (SELECT email FROM unsubscribe_list)
+                        ORDER BY lr.id
+                        LIMIT 200
+                    """, (uid,))
+                    lead_ids = [list(r.values())[0] if isinstance(r, dict) else r[0] for r in cur.fetchall()]
 
                 if not lead_ids:
                     continue
@@ -1175,8 +1249,8 @@ def _cleanup_gmail_draft(user_id, gmail_draft_id, lead_id, cur=None, conn=None):
             cur.execute("UPDATE leads_raw SET gmail_draft_id = NULL WHERE id = %s", (lead_id,))
             if conn is not None:
                 conn.commit()
-    except Exception:
-        pass
+    except Exception as cleanup_err:
+        logger.warning(f"Failed to clear gmail_draft_id for lead {lead_id}: {cleanup_err}")
 
 
 def check_scheduled_emails():
@@ -1193,7 +1267,7 @@ def check_scheduled_emails():
     try:
         import psycopg2.extras
         from app.core.pipeline.scheduler import get_scheduler_config
-        from app.database import get_db_connection
+        from app.database import get_db
         from app.models.lead import add_activity_log
         from app.utils.auth_helpers import check_daily_email_limit
 
@@ -1203,52 +1277,48 @@ def check_scheduled_emails():
         if not cfg.is_email_working_hours_now():
             return
 
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        with get_db() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        # Guard 2: rolling-window cooldown — any recent outreach counts
-        # (manual + drip) so total volume stays human-like.
-        cur.execute(f"""
-            SELECT COUNT(*) FROM leads_raw
-            WHERE email_status = 'SENT'
-              AND last_outreach_at > NOW() - INTERVAL '{int(cfg.cooldown_window_minutes)} minutes'
-        """)
-        recent_sends = cur.fetchone()[0]
-        if recent_sends >= cfg.cooldown_every_n_emails:
-            logger.info(
-                f"Drip cooldown active: {recent_sends} sends in last {cfg.cooldown_window_minutes} min "
-                f"(>= {cfg.cooldown_every_n_emails}). Cycle skipped."
-            )
-            cur.close()
-            conn.close()
-            return
+            # Guard 2: rolling-window cooldown — any recent outreach counts
+            # (manual + drip) so total volume stays human-like.
+            cur.execute(f"""
+                SELECT COUNT(*) FROM leads_raw
+                WHERE email_status = 'SENT'
+                  AND last_outreach_at > NOW() - INTERVAL '{int(cfg.cooldown_window_minutes)} minutes'
+            """)
+            recent_sends = cur.fetchone()[0]
+            if recent_sends >= cfg.cooldown_every_n_emails:
+                logger.info(
+                    f"Drip cooldown active: {recent_sends} sends in last {cfg.cooldown_window_minutes} min "
+                    f"(>= {cfg.cooldown_every_n_emails}). Cycle skipped."
+                )
+                return
 
-        # Guard 3: per-cycle cap
-        fetch_limit = max(cfg.scheduled_max_per_cycle, 1)
+            # Guard 3: per-cycle cap
+            fetch_limit = max(cfg.scheduled_max_per_cycle, 1)
 
-        cur.execute("""
-            SELECT l.id, l.email, l.email_draft, l.cc_email, l.user_id, l.draft_template_used,
-                   l.draft_signature_id,
-                   u.email as sender_email, u.full_name, u.username
-            FROM leads_raw l
-            LEFT JOIN users u ON l.user_id = u.id
-            WHERE l.email_status = 'SCHEDULED'
-              AND (l.scheduled_at AT TIME ZONE 'Asia/Kolkata') <= NOW()
-              AND COALESCE(l.is_responded, FALSE) = FALSE
-              AND COALESCE(l.followup_status, '') != 'STOPPED'
-              AND (l.email_opt_in IS NULL OR l.email_opt_in = TRUE)
-              AND (l.is_unsubscribed IS NULL OR l.is_unsubscribed = FALSE)
-              AND l.email NOT IN (SELECT email FROM unsubscribe_list)
-            ORDER BY l.scheduled_at ASC
-            LIMIT %s
-        """, (fetch_limit,))
+            cur.execute("""
+                SELECT l.id, l.email, l.email_draft, l.cc_email, l.user_id, l.draft_template_used,
+                       l.draft_signature_id,
+                       u.email as sender_email, u.full_name, u.username
+                FROM leads_raw l
+                LEFT JOIN users u ON l.user_id = u.id
+                WHERE l.email_status = 'SCHEDULED'
+                  AND (l.scheduled_at AT TIME ZONE 'Asia/Kolkata') <= NOW()
+                  AND COALESCE(l.is_responded, FALSE) = FALSE
+                  AND COALESCE(l.followup_status, '') != 'STOPPED'
+                  AND (l.email_opt_in IS NULL OR l.email_opt_in = TRUE)
+                  AND (l.is_unsubscribed IS NULL OR l.is_unsubscribed = FALSE)
+                  AND l.email NOT IN (SELECT email FROM unsubscribe_list)
+                ORDER BY l.scheduled_at ASC
+                LIMIT %s
+            """, (fetch_limit,))
 
-        due_leads = cur.fetchall()
+            due_leads = cur.fetchall()
 
-        if not due_leads:
-            cur.close()
-            conn.close()
-            return
+            if not due_leads:
+                return
 
         logger.info(f"Found {len(due_leads)} scheduled emails due for dispatch.")
 
@@ -1289,16 +1359,17 @@ def check_scheduled_emails():
             # Fetch user ID to enable Gmail dispatch
             user_id = lead['user_id']
             from app.api.drafts import markdown_to_html
-            from app.services.email_service import get_user_image_height, get_user_image_width
+            from app.services.email_service import get_all_user_settings
+            _s = get_all_user_settings(user_id)
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=to_email,
                 subject=subject,
                 html_content=markdown_to_html(
                     body,
-                    font_family=get_user_email_font(user_id),
-                    font_size=get_user_email_font_size(user_id),
-                    image_width=get_user_image_width(user_id),
-                    image_height=get_user_image_height(user_id)
+                    font_family=_s.get('email_font') or USER_EMAIL_FONTS.get(_safe_uid(user_id), DEFAULT_EMAIL_FONT),
+                    font_size=_s.get('email_font_size') or USER_EMAIL_FONT_SIZES.get(_safe_uid(user_id), DEFAULT_EMAIL_FONT_SIZE),
+                    image_width=_s.get('image_width') or '400px',
+                    image_height=_s.get('image_height') or 'auto'
                 ),
                 from_email=sender_email,
                 from_name=sender_name,
@@ -1345,8 +1416,8 @@ def check_scheduled_emails():
                         WHERE id = %s
                     """, (lead_id,))
                     conn.commit()
-                except Exception:
-                    pass
+                except Exception as send_err:
+                    logger.warning(f"Failed to update lead {lead_id} after dispatch: {send_err}")
                 _cleanup_gmail_draft(lead['user_id'], gmail_draft_id, lead_id, cur, conn)
 
         cur.close()
@@ -1440,13 +1511,11 @@ def send_admin_report(to_email: str, report_data: dict) -> bool:
     """
 
     # Get admin recipients
-    from app.database import get_db_connection
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT email FROM users WHERE role = 'ADMIN' LIMIT 1")
-    admin = cur.fetchone()
-    cur.close()
-    conn.close()
+    from app.database import get_db
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT email FROM users WHERE role = 'ADMIN' LIMIT 1")
+        admin = cur.fetchone()
 
     if not admin:
         logger.error("No admin found to receive MIS report.")

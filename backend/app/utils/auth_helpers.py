@@ -1,6 +1,6 @@
 import logging
 
-from app.database import get_db_connection
+from app.database import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -20,19 +20,15 @@ def normalize_user_id(user_id: str | None) -> str | None:
     if u_str.isdigit():
         return u_str
 
-    conn = None
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM users WHERE LOWER(username) = LOWER(%s) OR LOWER(email) = LOWER(%s) LIMIT 1", (u_str, u_str))
-        row = cur.fetchone()
-        if row:
-            return str(row['id'])
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM users WHERE LOWER(username) = LOWER(%s) OR LOWER(email) = LOWER(%s) LIMIT 1", (u_str, u_str))
+            row = cur.fetchone()
+            if row:
+                return str(row['id'])
     except Exception as e:
         logger.exception(f"Error resolving user_id for '{u_str}': {e}")
-    finally:
-        if conn:
-            conn.close()
 
     return None  # Do NOT fall back to admin on failure; callers must treat as unauthenticated
 
@@ -50,15 +46,11 @@ def is_admin_user(user_id: str | None) -> bool:
     if not uid.isdigit():
         return False
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        try:
+        with get_db() as conn:
+            cur = conn.cursor()
             cur.execute("SELECT role FROM users WHERE id = %s", (int(uid),))
             row = cur.fetchone()
             return bool(row and str(row['role']).strip().upper() == "ADMIN")
-        finally:
-            cur.close()
-            conn.close()
     except Exception as e:
         logger.exception(f"Error checking admin role for '{uid}': {e}")
         return False
@@ -69,23 +61,20 @@ def get_daily_email_limit(user_id: str | None) -> int:
     uid = normalize_user_id(user_id)
     is_admin = is_admin_user(user_id)
 
-    conn = get_db_connection()
-    cur = conn.cursor()
     try:
-        daily_limit = 2000
-        if not is_admin and uid:
-            cur.execute("SELECT outreach_daily_limit FROM users WHERE id = %s", (uid,))
-            limit_row = cur.fetchone()
-            stored = limit_row[0] if limit_row else None
-            if stored:
-                daily_limit = int(stored)
-        return daily_limit
+        with get_db() as conn:
+            cur = conn.cursor()
+            daily_limit = 2000
+            if not is_admin and uid:
+                cur.execute("SELECT outreach_daily_limit FROM users WHERE id = %s", (uid,))
+                limit_row = cur.fetchone()
+                stored = limit_row[0] if limit_row else None
+                if stored:
+                    daily_limit = int(stored)
+            return daily_limit
     except Exception as e:
         logger.exception(f"Error fetching email limit: {e}")
         return 2000
-    finally:
-        cur.close()
-        conn.close()
 
 
 def check_daily_email_limit(user_id: str | None, batch_size: int = 1) -> bool:
@@ -93,29 +82,26 @@ def check_daily_email_limit(user_id: str | None, batch_size: int = 1) -> bool:
     uid = normalize_user_id(user_id)
     is_admin = is_admin_user(user_id)
 
-    conn = get_db_connection()
-    cur = conn.cursor()
     try:
-        daily_limit = 2000
-        if not is_admin and uid:
-            cur.execute("SELECT outreach_daily_limit FROM users WHERE id = %s", (uid,))
-            limit_row = cur.fetchone()
-            stored = limit_row[0] if limit_row else None
-            if stored:
-                daily_limit = int(stored)
+        with get_db() as conn:
+            cur = conn.cursor()
+            daily_limit = 2000
+            if not is_admin and uid:
+                cur.execute("SELECT outreach_daily_limit FROM users WHERE id = %s", (uid,))
+                limit_row = cur.fetchone()
+                stored = limit_row[0] if limit_row else None
+                if stored:
+                    daily_limit = int(stored)
 
-        if is_admin:
-            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'SENT' AND last_outreach_at >= NOW() - INTERVAL '1 day'")
-        elif uid:
-            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id = %s AND email_status = 'SENT' AND last_outreach_at >= NOW() - INTERVAL '1 day'", (uid,))
-        else:
-            cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id IS NULL AND email_status = 'SENT' AND last_outreach_at >= NOW() - INTERVAL '1 day'")
+            if is_admin:
+                cur.execute("SELECT COUNT(*) FROM leads_raw WHERE email_status = 'SENT' AND last_outreach_at >= NOW() - INTERVAL '1 day'")
+            elif uid:
+                cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id = %s AND email_status = 'SENT' AND last_outreach_at >= NOW() - INTERVAL '1 day'", (uid,))
+            else:
+                cur.execute("SELECT COUNT(*) FROM leads_raw WHERE user_id IS NULL AND email_status = 'SENT' AND last_outreach_at >= NOW() - INTERVAL '1 day'")
 
-        sent_today = cur.fetchone()[0] or 0
-        return (sent_today + batch_size) <= daily_limit
+            sent_today = cur.fetchone()[0] or 0
+            return (sent_today + batch_size) <= daily_limit
     except Exception as e:
         logger.exception(f"Error checking email limit: {e}")
         return True
-    finally:
-        cur.close()
-        conn.close()

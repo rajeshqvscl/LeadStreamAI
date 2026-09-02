@@ -489,6 +489,13 @@ def update_preferences(req: PreferencesUpdateRequest, user_id: str | None = Head
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
+        # Invalidate cached user settings so next send_email() picks up new values
+        try:
+            from app.services.email_service import _invalidate_user_settings
+            _invalidate_user_settings(real_uid)
+        except Exception:
+            pass
+
         return dict(user)
     finally:
         cur.close()
