@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   History, Mail, CheckCircle, Clock, AlertCircle, X,
   ChevronRight, Loader2, Search, Filter, Zap, Calendar, User,
-  Building2, CheckSquare, Square, Cpu, Save
+  Building2, CheckSquare, Square, Cpu, Save, Trash2
 } from 'lucide-react';
 import api from '../services/api';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
@@ -206,6 +206,20 @@ const Followups = () => {
       showNotification('error', 'Failed to send follow-up.');
     }
   }, [isEditing, editedDraft, page, showNotification, fetchFollowups]);
+
+  const handleBulkDelete = useCallback(async () => {
+    if (selectedIds.length === 0) return;
+    if (!window.confirm(`Are you sure you want to delete ${selectedIds.length} follow-up lead(s)? This will remove them from the pipeline.`)) return;
+    const idsToDelete = [...selectedIds];
+    try {
+      await api.post('/api/leads/bulk-delete', idsToDelete);
+      showNotification('success', `${idsToDelete.length} follow-up lead(s) deleted successfully.`);
+      setSelectedIds([]);
+      fetchFollowups(page);
+    } catch (err) {
+      showNotification('error', err?.response?.data?.detail || 'Failed to delete leads.');
+    }
+  }, [selectedIds, page, showNotification, fetchFollowups]);
 
   const handleBulkSend = useCallback(async () => {
     if (selectedIds.length === 0) return;
@@ -919,6 +933,12 @@ const Followups = () => {
                 className="px-4 py-2 text-[11px] font-black text-slate-400 uppercase tracking-wider hover:text-white transition-colors cursor-pointer"
               >
                 Cancel
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                className="flex items-center gap-2 px-5 py-2.5 bg-red-600/80 text-white rounded-xl text-[11px] font-black uppercase tracking-wider hover:bg-red-500 transition-all cursor-pointer border border-red-500/30"
+              >
+                <Trash2 className="w-4 h-4" /> Delete
               </button>
               <button
                 onClick={handleBulkSend}
