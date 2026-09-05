@@ -474,25 +474,6 @@ def create_tables():
     );
     """)
 
-    # Email Events Table — full audit trail for campaign analytics
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS email_events (
-        id SERIAL PRIMARY KEY,
-        lead_id INTEGER REFERENCES leads_raw(id) ON DELETE CASCADE,
-        campaign_id INTEGER REFERENCES campaigns(id) ON DELETE SET NULL,
-        gmail_message_id TEXT,
-        tracking_id TEXT,
-        email_type VARCHAR(50),
-        status VARCHAR(50) NOT NULL,
-        metadata JSONB,
-        sent_at TIMESTAMP WITH TIME ZONE,
-        opened_at TIMESTAMP WITH TIME ZONE,
-        clicked_at TIMESTAMP WITH TIME ZONE,
-        unsubscribed_at TIMESTAMP WITH TIME ZONE,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-    );
-    """)
-
     # Ensure user_id and user_name exist in activity_log
     for col, col_type in [("user_id", "INTEGER"), ("user_name", "TEXT")]:
         try:
@@ -531,6 +512,27 @@ def create_tables():
             conn.commit()
         except psycopg2.Error:
             conn.rollback()
+
+    # Email Events Table — full audit trail for campaign analytics.
+    # NOTE: created AFTER campaigns because email_events.campaign_id references
+    # campaigns(id) — creating it first aborts schema bootstrap on a fresh DB.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS email_events (
+        id SERIAL PRIMARY KEY,
+        lead_id INTEGER REFERENCES leads_raw(id) ON DELETE CASCADE,
+        campaign_id INTEGER REFERENCES campaigns(id) ON DELETE SET NULL,
+        gmail_message_id TEXT,
+        tracking_id TEXT,
+        email_type VARCHAR(50),
+        status VARCHAR(50) NOT NULL,
+        metadata JSONB,
+        sent_at TIMESTAMP WITH TIME ZONE,
+        opened_at TIMESTAMP WITH TIME ZONE,
+        clicked_at TIMESTAMP WITH TIME ZONE,
+        unsubscribed_at TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    """)
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS recipients (

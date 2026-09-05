@@ -100,6 +100,33 @@ def seed_security_data() -> dict:
             (uid_b,),
         )
         lead_b = cur.fetchone()[0]
+
+        # Extra User-A leads so stateful tests (sent/active/unsubscribed) never
+        # collide with the plain lead_a used by ownership/isolation tests.
+        cur.execute(
+            "INSERT INTO leads_raw (first_name, last_name, email, company_name, user_id, "
+            "email_status, followup_status, pipeline_state, validation_status) "
+            "VALUES ('Sec', 'A-Sent', 'sent-a@pytest-security.local', 'Acme A', %s, 'SENT', 'ACTIVE', 'SENT', 'PENDING') "
+            "RETURNING id",
+            (uid_a,),
+        )
+        lead_sent_a = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO leads_raw (first_name, last_name, email, company_name, user_id, "
+            "email_status, followup_status, pipeline_state, validation_status) "
+            "VALUES ('Sec', 'A-Active', 'active-a@pytest-security.local', 'Acme A', %s, 'PENDING', 'ACTIVE', 'NEW', 'PENDING') "
+            "RETURNING id",
+            (uid_a,),
+        )
+        lead_active_a = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO leads_raw (first_name, last_name, email, company_name, user_id, "
+            "email_status, pipeline_state, validation_status, is_unsubscribed) "
+            "VALUES ('Sec', 'A-Unsub', 'unsub-a@pytest-security.local', 'Acme A', %s, 'PENDING', 'NEW', 'PENDING', TRUE) "
+            "RETURNING id",
+            (uid_a,),
+        )
+        lead_unsub_a = cur.fetchone()[0]
         conn.commit()
 
         cur.execute(
@@ -125,6 +152,9 @@ def seed_security_data() -> dict:
             "admin_id": uid_admin,
             "lead_a": lead_a,
             "lead_b": lead_b,
+            "sent_lead_id": lead_sent_a,
+            "active_lead_id": lead_active_a,
+            "unsubscribed_lead_id": lead_unsub_a,
             "campaign_a": camp_a,
             "campaign_b": camp_b,
         }
@@ -187,6 +217,36 @@ def user_a_campaign_id(security_seed):
 def user_b_campaign_id(security_seed):
     """Campaign id owned by seeded User B (skips when no DB)."""
     return security_seed["campaign_b"]
+
+
+@pytest.fixture
+def user_a_id(security_seed):
+    """DB id of seeded User A (skips when no DB)."""
+    return security_seed["user_a_id"]
+
+
+@pytest.fixture
+def user_b_id(security_seed):
+    """DB id of seeded User B (skips when no DB)."""
+    return security_seed["user_b_id"]
+
+
+@pytest.fixture
+def sent_lead_id(security_seed):
+    """A SENT-state lead owned by seeded User A (skips when no DB)."""
+    return security_seed["sent_lead_id"]
+
+
+@pytest.fixture
+def active_lead_id(security_seed):
+    """An active (non-deleted) lead owned by seeded User A (skips when no DB)."""
+    return security_seed["active_lead_id"]
+
+
+@pytest.fixture
+def unsubscribed_lead_id(security_seed):
+    """An unsubscribed lead owned by seeded User A (skips when no DB)."""
+    return security_seed["unsubscribed_lead_id"]
 
 
 @pytest.fixture

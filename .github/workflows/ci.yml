@@ -55,6 +55,12 @@ jobs:
       - name: Runtime smoke test (no 404/405 regressions)
         run: python scripts/smoke_test.py
 
+      - name: Bootstrap database schema (fresh CI Postgres has no tables)
+        run: python -c "from app.database import create_tables; create_tables(); print('Schema OK')"
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/leadstreamai
+          ADMIN_PASSWORD: test_admin_pass
+
       - name: Security test suite
         run: |
           python -m pytest tests/unit/test_cross_user_security.py -v --tb=short
