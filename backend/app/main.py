@@ -370,6 +370,17 @@ async def lifespan(app: FastAPI):
         logger.exception(f"Failed to create/verify tables on startup: {e}")
         logger.warning("App will still start — DB may be temporarily unavailable")
 
+    # Seed/self-heal prompt templates ONCE, after the schema exists. This used
+    # to run at `import app.api.drafts` time, which made worker boot block on
+    # the DB (gunicorn worker boot timeouts) and could never succeed on a fresh
+    # database (the `prompts` table didn't exist yet). The function logs and
+    # swallows its own failures, so a DB hiccup here can't take the app down.
+    try:
+        from app.api.drafts import seed_startup_templates
+        seed_startup_templates()
+    except Exception as e:
+        logger.warning(f"Startup template seeding skipped: {e}")
+
     # Start email engine dispatcher
     email_dispatcher = None
     try:
@@ -633,24 +644,47 @@ _PUBLIC_PATH_PREFIXES = (
 )
 
 
+class SessionCheckUnavailable(Exception):
+    """Raised when session verification cannot reach the database.
+
+    The AuthMiddleware maps this to a 503 so a transient DB/DNS outage does
+    NOT look like an expired session (which would log every user out).
+    """
+
+
 def _verify_session(token: str):
-    """Returns the verified user_id for a valid, unexpired session token, else None."""
+    """Returns the verified user_id for a valid, unexpired session token, else None.
+
+    Raises SessionCheckUnavailable when the database is unreachable or errors,
+    so the AuthMiddleware can return 503 instead of 401 — a DB outage must not
+    present as "Invalid or expired session".
+    """
     try:
         from app.database import get_db_connection
         conn = get_db_connection()
+    except Exception as e:
+        raise SessionCheckUnavailable(str(e)) from e
+    cur = None
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT user_id FROM sessions WHERE token = %s AND expires_at > NOW()",
+            (token,),
+        )
+        row = cur.fetchone()
+        return row["user_id"] if row else None
+    except Exception as e:
+        raise SessionCheckUnavailable(str(e)) from e
+    finally:
         try:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT user_id FROM sessions WHERE token = %s AND expires_at > NOW()",
-                (token,),
-            )
-            row = cur.fetchone()
-            return row["user_id"] if row else None
-        finally:
-            cur.close()
+            if cur is not None:
+                cur.close()
+        except Exception:
+            pass
+        try:
             conn.close()
-    except Exception:
-        return None
+        except Exception:
+            pass
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -681,7 +715,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
             return JSONResponse(status_code=401, content={"detail": "Authentication required"})
 
-        user_id = await asyncio.to_thread(_verify_session, token)
+        try:
+            user_id = await asyncio.to_thread(_verify_session, token)
+        except SessionCheckUnavailable as e:
+            logger.warning(f"Session verification unavailable (DB?): {e}")
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Authentication service temporarily unavailable. Please try again."},
+            )
         if not user_id:
             from app.core.security_logging import log_security_event
             log_security_event(

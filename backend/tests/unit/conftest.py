@@ -36,12 +36,17 @@ def seed_security_data() -> dict:
     """Seed users A/B + admin with sessions, plus leads & campaigns, and return
     a dict of ids/tokens. Plain function (not a fixture) so test files can
     decide for themselves whether to skip vs. fall back to stub mode."""
-    import os
     import datetime
     import psycopg2
     import psycopg2.extras
 
-    conn = psycopg2.connect(os.environ["DATABASE_URL"], cursor_factory=psycopg2.extras.DictCursor)
+    from tests.conftest import _TEST_DATABASE_URL
+
+    # Connect to the TEST database explicitly — NOT the ambient DATABASE_URL
+    # env var, which app modules flip to the production URL at import time
+    # (load_dotenv(override=True)). Reading the ambient var made local runs
+    # seed pytest rows into the real production Neon DB.
+    conn = psycopg2.connect(_TEST_DATABASE_URL, cursor_factory=psycopg2.extras.DictCursor)
     cur = conn.cursor()
     try:
         # Clean up rows from previous runs of the same suite (safe namespace)

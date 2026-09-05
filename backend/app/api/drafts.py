@@ -100,14 +100,20 @@ def _redis_delete_pattern(pattern: str):
 def invalidate_pending_drafts_cache(user_id: str = "*"):
     _redis_delete_pattern(f"pending_drafts:{user_id}:*")
 
-# Guaranteed self-healing database update at module load/hot-reload time
-try:
-    conn = get_db_connection()
-    cur = conn.cursor()
+def seed_startup_templates():
+    """Self-healing template seeding for prompt templates.
 
-    # 1. Yashika AI Tech Template
-    latest_description = "AI-Powered Hiring Infrastructure Platform fundraising draft ($1M)"
-    latest_content = """Subject: AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |
+    Runs once at app startup (FastAPI lifespan) AFTER create_tables(),
+    so importing this module never blocks on (or writes to) the database.
+    On a fresh database the seeding now succeeds because the tables exist
+    by the time it runs."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # 1. Yashika AI Tech Template
+        latest_description = "AI-Powered Hiring Infrastructure Platform fundraising draft ($1M)"
+        latest_content = """Subject: AI-Powered Hiring Infrastructure Platform Company | 100K+ Recruiters | 250+ Companies |
 
 Dear {{First Name}},
 
@@ -213,24 +219,24 @@ Thanks & Regards,
 
 SIG_END"""
 
-    cur.execute("SELECT id FROM prompts WHERE name = 'yashika_draft_ai_tech'")
-    row = cur.fetchone()
-    if row:
-        # Seed ONLY when still a placeholder (never clobber user edits).
-        cur.execute(
-            "UPDATE prompts SET content = %s, description = %s WHERE name = 'yashika_draft_ai_tech' AND (content IS NULL OR content = '' OR content = 'placeholder')",
-            (latest_content, latest_description)
-        )
-    else:
-        cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type) VALUES ('yashika_draft_ai_tech', %s, %s, 'CUSTOM_DRAFT')",
-            (latest_description, latest_content)
-        )
-    conn.commit()
+        cur.execute("SELECT id FROM prompts WHERE name = 'yashika_draft_ai_tech'")
+        row = cur.fetchone()
+        if row:
+            # Seed ONLY when still a placeholder (never clobber user edits).
+            cur.execute(
+                "UPDATE prompts SET content = %s, description = %s WHERE name = 'yashika_draft_ai_tech' AND (content IS NULL OR content = '' OR content = 'placeholder')",
+                (latest_content, latest_description)
+            )
+        else:
+            cur.execute(
+                "INSERT INTO prompts (name, description, content, prompt_type) VALUES ('yashika_draft_ai_tech', %s, %s, 'CUSTOM_DRAFT')",
+                (latest_description, latest_content)
+            )
+        conn.commit()
 
-    # 2. Ayush Sir Hospital Template
-    hospital_description = "Integrated Multi-Site Hospital Platform in Eastern Uttar Pradesh ($240 Cr EV)"
-    hospital_content = """Subject: Strategic Investment Opportunity – Integrated Multi-Site Hospital Platform in Eastern Uttar Pradesh
+        # 2. Ayush Sir Hospital Template
+        hospital_description = "Integrated Multi-Site Hospital Platform in Eastern Uttar Pradesh ($240 Cr EV)"
+        hospital_content = """Subject: Strategic Investment Opportunity – Integrated Multi-Site Hospital Platform in Eastern Uttar Pradesh
 
 Dear {{First Name}},
 
@@ -444,23 +450,23 @@ SIG_START
 The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
 SIG_END"""
 
-    # 2. Seed ayush_hospital_draft ONLY when missing or still a placeholder —
-    #    never overwrite a template the user has edited (self-healing must not
-    #    clobber user changes).
-    cur.execute(
-        "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_hospital_draft' AND (content IS NULL OR content = '' OR content = 'placeholder')",
-        (hospital_content, hospital_description)
-    )
-    if cur.rowcount == 0:
+        # 2. Seed ayush_hospital_draft ONLY when missing or still a placeholder —
+        #    never overwrite a template the user has edited (self-healing must not
+        #    clobber user changes).
         cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type) SELECT 'ayush_hospital_draft', %s, %s, 'CUSTOM_DRAFT' WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'ayush_hospital_draft')",
-            (hospital_description, hospital_content)
+            "UPDATE prompts SET content = %s, description = %s WHERE name = 'ayush_hospital_draft' AND (content IS NULL OR content = '' OR content = 'placeholder')",
+            (hospital_content, hospital_description)
         )
-    conn.commit()
+        if cur.rowcount == 0:
+            cur.execute(
+                "INSERT INTO prompts (name, description, content, prompt_type) SELECT 'ayush_hospital_draft', %s, %s, 'CUSTOM_DRAFT' WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'ayush_hospital_draft')",
+                (hospital_description, hospital_content)
+            )
+        conn.commit()
 
-    # 3. Palak Mam Corporate Advisory Template
-    palak_corp_description = "Corporate Advisory / Equity Fund Raising Services — QVSCL Introduction"
-    palak_corp_followup1 = """Dear {{First Name}},
+        # 3. Palak Mam Corporate Advisory Template
+        palak_corp_description = "Corporate Advisory / Equity Fund Raising Services — QVSCL Introduction"
+        palak_corp_followup1 = """Dear {{First Name}},
 
 I hope you are doing well.
 
@@ -469,7 +475,7 @@ Just following up on my previous email. We would value the opportunity to connec
 Would you be open to a short video call this week or next week? Happy to coordinate as per your availability.
 
 Looking forward to hearing from you."""
-    palak_corp_followup2 = """Dear {{First Name}},
+        palak_corp_followup2 = """Dear {{First Name}},
 
 Just following up on my earlier note.
 
@@ -478,7 +484,7 @@ Given your growth journey, we thought it may be worthwhile to connect and exchan
 **Please let us know a suitable time for a brief discussion if this would be of interest.**
 
 Looking forward to connecting."""
-    palak_corp_content = """Subject: Corporate Advisory/ Equity Fund Raising Services.
+        palak_corp_content = """Subject: Corporate Advisory/ Equity Fund Raising Services.
 
 Dear {{First Name}},
 
@@ -517,22 +523,22 @@ Thanks & Regards,
 The information contained in this email is confidential, may be legally privileged, may constitute inside information and is intended solely and exclusively for the use of the intended addressee and any others who have been specifically authorized to receive it. Quantum Value Strategic Consulting does not provide legal, accounting or tax advice. Any statement in this email (including any attachments) regarding legal, accounting or tax matters was written in connection with the explanation of the matters described herein and was not intended or written to be relied upon by any person. Unauthorized dissemination, distribution, disclosure or other use of the contents of this email is strictly prohibited and may be unlawful. If you have received this email in error, please notify us immediately by return email and destroy this message and all copies thereof, including any attachments.
 SIG_END"""
 
-    # FORCE UPDATE -> seed ONLY when missing or still a placeholder (never
-    # clobber user edits).
-    cur.execute(
-        "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s, followup_3 = NULL WHERE name = 'palak_mam_corporate_advisory' AND (content IS NULL OR content = '' OR content = 'placeholder')",
-        (palak_corp_content, palak_corp_description, palak_corp_followup1, palak_corp_followup2)
-    )
-    if cur.rowcount == 0:
+        # FORCE UPDATE -> seed ONLY when missing or still a placeholder (never
+        # clobber user edits).
         cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type, followup_1, followup_2) SELECT 'palak_mam_corporate_advisory', %s, %s, 'CUSTOM_DRAFT', %s, %s WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'palak_mam_corporate_advisory')",
-            (palak_corp_description, palak_corp_content, palak_corp_followup1, palak_corp_followup2)
+            "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s, followup_3 = NULL WHERE name = 'palak_mam_corporate_advisory' AND (content IS NULL OR content = '' OR content = 'placeholder')",
+            (palak_corp_content, palak_corp_description, palak_corp_followup1, palak_corp_followup2)
         )
-    conn.commit()
+        if cur.rowcount == 0:
+            cur.execute(
+                "INSERT INTO prompts (name, description, content, prompt_type, followup_1, followup_2) SELECT 'palak_mam_corporate_advisory', %s, %s, 'CUSTOM_DRAFT', %s, %s WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'palak_mam_corporate_advisory')",
+                (palak_corp_description, palak_corp_content, palak_corp_followup1, palak_corp_followup2)
+            )
+        conn.commit()
 
-    # 4. Kajal Mam Health Ecosystem Template
-    kajal_ecosystem_description = "AI-Enabled Preventive Health Ecosystem Platform ($1M Seed)"
-    kajal_ecosystem_content = """Subject: India's AI-Enabled Preventive Health Ecosystem Platform | ₹2.6Cr ARR | 300+ Labs
+        # 4. Kajal Mam Health Ecosystem Template
+        kajal_ecosystem_description = "AI-Enabled Preventive Health Ecosystem Platform ($1M Seed)"
+        kajal_ecosystem_content = """Subject: India's AI-Enabled Preventive Health Ecosystem Platform | ₹2.6Cr ARR | 300+ Labs
 
 Dear {{First Name}},
 
@@ -636,21 +642,21 @@ Thanks & Regards,<br>
 <img src="[[BACKEND_URL]]/assets/kajal.png" style="width: 150px; height: auto; display: block; margin-top: 10px;" />
 SIG_END"""
 
-    # Seed ONLY when missing or still a placeholder (never clobber user edits).
-    cur.execute(
-        "UPDATE prompts SET content = %s, description = %s WHERE name = 'kajal_mam_health_ecosystem' AND (content IS NULL OR content = '' OR content = 'placeholder')",
-        (kajal_ecosystem_content, kajal_ecosystem_description)
-    )
-    if cur.rowcount == 0:
+        # Seed ONLY when missing or still a placeholder (never clobber user edits).
         cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type, owner_username) SELECT 'kajal_mam_health_ecosystem', %s, %s, 'CUSTOM_DRAFT', 'kajal' WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'kajal_mam_health_ecosystem')",
-            (kajal_ecosystem_description, kajal_ecosystem_content)
+            "UPDATE prompts SET content = %s, description = %s WHERE name = 'kajal_mam_health_ecosystem' AND (content IS NULL OR content = '' OR content = 'placeholder')",
+            (kajal_ecosystem_content, kajal_ecosystem_description)
         )
-    conn.commit()
+        if cur.rowcount == 0:
+            cur.execute(
+                "INSERT INTO prompts (name, description, content, prompt_type, owner_username) SELECT 'kajal_mam_health_ecosystem', %s, %s, 'CUSTOM_DRAFT', 'kajal' WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'kajal_mam_health_ecosystem')",
+                (kajal_ecosystem_description, kajal_ecosystem_content)
+            )
+        conn.commit()
 
-    # 5. Kajal Mam QVSCL Introduction Template
-    kajal_qvscl_description = "QVSCL Capital & Growth Solutions for Portfolio Companies"
-    kajal_qvscl_content = """Subject: QVSCL: Capital & Growth Solutions for Portfolio Companies
+        # 5. Kajal Mam QVSCL Introduction Template
+        kajal_qvscl_description = "QVSCL Capital & Growth Solutions for Portfolio Companies"
+        kajal_qvscl_content = """Subject: QVSCL: Capital & Growth Solutions for Portfolio Companies
 
 Dear {{First Name}},
 
@@ -678,7 +684,7 @@ I would be happy to schedule a brief call at your convenience and discuss potent
 
 Looking forward to connecting."""
 
-    kajal_qvscl_followup1 = """Dear {{First Name}},
+        kajal_qvscl_followup1 = """Dear {{First Name}},
 
 I am following up on my previous email regarding the investment opportunity. Please let me know if you are open to a brief introductory call or if I should send the pitch deck for your review.
 
@@ -686,41 +692,41 @@ Additionally, Would you like to share your investment thesis so that I can share
 
 Looking forward to connecting."""
 
-    kajal_qvscl_followup2 = """Hi {{First Name}},
+        kajal_qvscl_followup2 = """Hi {{First Name}},
 
 Just checking in regarding the opportunity I shared earlier. I'd appreciate any initial thoughts or feedback on the opportunity when you have a moment.
 
 Thank you for your time."""
 
-    kajal_qvscl_followup3 = """Hi {{First Name}},
+        kajal_qvscl_followup3 = """Hi {{First Name}},
 
 This will be my final follow-up regarding the opportunity I shared earlier. If it's not a fit at the moment, I completely understand. If there is any interest, I'd be happy to share further details or schedule a brief discussion.
 
 Thank you again for your consideration."""
 
-    # Seed ONLY when missing or still a placeholder (never clobber user edits).
-    cur.execute(
-        "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s, followup_3 = %s WHERE name = 'kajal_mam_qvscl_intro' AND (content IS NULL OR content = '' OR content = 'placeholder')",
-        (kajal_qvscl_content, kajal_qvscl_description, kajal_qvscl_followup1, kajal_qvscl_followup2, kajal_qvscl_followup3)
-    )
-    if cur.rowcount == 0:
+        # Seed ONLY when missing or still a placeholder (never clobber user edits).
         cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1, followup_2, followup_3) SELECT 'kajal_mam_qvscl_intro', %s, %s, 'CUSTOM_DRAFT', 'kajal', %s, %s, %s WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'kajal_mam_qvscl_intro')",
-            (kajal_qvscl_description, kajal_qvscl_content, kajal_qvscl_followup1, kajal_qvscl_followup2, kajal_qvscl_followup3)
+            "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s, followup_3 = %s WHERE name = 'kajal_mam_qvscl_intro' AND (content IS NULL OR content = '' OR content = 'placeholder')",
+            (kajal_qvscl_content, kajal_qvscl_description, kajal_qvscl_followup1, kajal_qvscl_followup2, kajal_qvscl_followup3)
         )
-    conn.commit()
+        if cur.rowcount == 0:
+            cur.execute(
+                "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1, followup_2, followup_3) SELECT 'kajal_mam_qvscl_intro', %s, %s, 'CUSTOM_DRAFT', 'kajal', %s, %s, %s WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'kajal_mam_qvscl_intro')",
+                (kajal_qvscl_description, kajal_qvscl_content, kajal_qvscl_followup1, kajal_qvscl_followup2, kajal_qvscl_followup3)
+            )
+        conn.commit()
 
-    # Fix kajal_mam_jv: remove CONFIDENTIAL disclaimer
-    cur.execute(
-        "UPDATE prompts SET content = REPLACE(content, '<div style=\"text-align: center; margin-top: 25px; font-weight: bold; color: #444; font-size: 12px; letter-spacing: 1.5px;\">CONFIDENTIAL | FOR PRIVATE CIRCULATION ONLY</div>', '') WHERE name = 'kajal_mam_jv'"
-    )
-    conn.commit()
+        # Fix kajal_mam_jv: remove CONFIDENTIAL disclaimer
+        cur.execute(
+            "UPDATE prompts SET content = REPLACE(content, '<div style=\"text-align: center; margin-top: 25px; font-weight: bold; color: #444; font-size: 12px; letter-spacing: 1.5px;\">CONFIDENTIAL | FOR PRIVATE CIRCULATION ONLY</div>', '') WHERE name = 'kajal_mam_jv'"
+        )
+        conn.commit()
 
-    # Remove the 'Important: This message...' legal disclaimer from ALL stored prompt
-    # templates (content + followup columns). Only the standard legal disclaimer is
-    # stripped here — 'Strictly Private and Confidential' blocks are preserved.
-    cur.execute(
-        """
+        # Remove the 'Important: This message...' legal disclaimer from ALL stored prompt
+        # templates (content + followup columns). Only the standard legal disclaimer is
+        # stripped here — 'Strictly Private and Confidential' blocks are preserved.
+        cur.execute(
+            """
         UPDATE prompts SET
             content = regexp_replace(content, '\\n?\\s*\\*?Important: This message.*?Thank you\\.\\*?\\s*\\n?', '', 'g'),
             followup_1 = regexp_replace(COALESCE(followup_1, ''), '\\n?\\s*\\*?Important: This message.*?Thank you\\.\\*?\\s*\\n?', '', 'g'),
@@ -731,22 +737,22 @@ Thank you again for your consideration."""
            OR followup_2 ILIKE '%Important: This message%'
            OR followup_3 ILIKE '%Important: This message%'
         """
-    )
-    # Also strip from saved signature content (outreach + followup) on every startup,
-    # so previously-saved signatures with the old disclaimer get self-healed too.
-    cur.execute(
-        """
+        )
+        # Also strip from saved signature content (outreach + followup) on every startup,
+        # so previously-saved signatures with the old disclaimer get self-healed too.
+        cur.execute(
+            """
         UPDATE user_signatures SET
             content = regexp_replace(content, '\\n?\\s*\\*?Important: This message.*?Thank you\\.\\*?\\s*\\n?', '', 'g')
         WHERE content ILIKE '%Important: This message%'
         """
-    )
-    conn.commit()
+        )
+        conn.commit()
 
-    # 6. Palak Mam M&A and Fundraising Template
-    palak_mna_description = "Supporting Growth Through M&A and Fundraising"
-    palak_mna_description = "Supporting Growth Through M&A and Fundraising"
-    palak_mna_content = """Subject: Supporting Growth Through M&A and Fundraising
+        # 6. Palak Mam M&A and Fundraising Template
+        palak_mna_description = "Supporting Growth Through M&A and Fundraising"
+        palak_mna_description = "Supporting Growth Through M&A and Fundraising"
+        palak_mna_content = """Subject: Supporting Growth Through M&A and Fundraising
 
 Dear {{First Name}},
 
@@ -769,7 +775,7 @@ Please find our Company Profile attached.
 
 Looking forward to connecting."""
 
-    palak_mna_followup1 = """Dear {{First Name}},
+        palak_mna_followup1 = """Dear {{First Name}},
 
 I wanted to follow up on my previous email regarding QV Strategic Consulting's M&A and fundraising advisory services.
 
@@ -782,7 +788,7 @@ Looking forward to hearing from you.
 Thanks and regards,
 Palak"""
 
-    palak_mna_followup2 = """Dear {{First Name}},
+        palak_mna_followup2 = """Dear {{First Name}},
 
 Just following up on my earlier note.
 
@@ -794,21 +800,21 @@ Looking forward to your response.
 Best regards,
 Palak"""
 
-    # Seed ONLY when missing or still a placeholder (never clobber user edits).
-    cur.execute(
-        "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s WHERE name = 'palak_mam_mna_fundraising' AND (content IS NULL OR content = '' OR content = 'placeholder')",
-        (palak_mna_content, palak_mna_description, palak_mna_followup1, palak_mna_followup2)
-    )
-    if cur.rowcount == 0:
+        # Seed ONLY when missing or still a placeholder (never clobber user edits).
         cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1, followup_2) SELECT 'palak_mam_mna_fundraising', %s, %s, 'CUSTOM_DRAFT', 'palak', %s, %s WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'palak_mam_mna_fundraising')",
-            (palak_mna_description, palak_mna_content, palak_mna_followup1, palak_mna_followup2)
+            "UPDATE prompts SET content = %s, description = %s, followup_1 = %s, followup_2 = %s WHERE name = 'palak_mam_mna_fundraising' AND (content IS NULL OR content = '' OR content = 'placeholder')",
+            (palak_mna_content, palak_mna_description, palak_mna_followup1, palak_mna_followup2)
         )
-    conn.commit()
+        if cur.rowcount == 0:
+            cur.execute(
+                "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1, followup_2) SELECT 'palak_mam_mna_fundraising', %s, %s, 'CUSTOM_DRAFT', 'palak', %s, %s WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'palak_mam_mna_fundraising')",
+                (palak_mna_description, palak_mna_content, palak_mna_followup1, palak_mna_followup2)
+            )
+        conn.commit()
 
-    # 7. Vismaya LeadStream Template
-    vismaya_description = "LeadStreamAI Client Outreach Draft by Vismaya Rajeevan"
-    vismaya_content = """Subject: Your Business on Autopilot — Meet LeadStreamAI
+        # 7. Vismaya LeadStream Template
+        vismaya_description = "LeadStreamAI Client Outreach Draft by Vismaya Rajeevan"
+        vismaya_content = """Subject: Your Business on Autopilot — Meet LeadStreamAI
 
 Dear {{First Name}},
 
@@ -840,7 +846,7 @@ Thanks & Regards,
 {{Sender Phone}}
 SIG_END"""
 
-    vismaya_followup1 = """Dear {{First Name}},
+        vismaya_followup1 = """Dear {{First Name}},
 
 I hope you are doing well. I am following up on my previous email about LeadStreamAI.
 
@@ -850,7 +856,7 @@ Would love to understand your team's current process so I can show you exactly w
 
 Looking forward to hearing from you!"""
 
-    vismaya_followup2 = """Dear {{First Name}},
+        vismaya_followup2 = """Dear {{First Name}},
 
 I hope you are doing well.
 
@@ -862,29 +868,29 @@ Would this week or next work for a quick call?
 
 Looking forward to hearing from you!"""
 
-    # Seed ONLY when missing or still a placeholder (never clobber user edits).
-    cur.execute(
-        "UPDATE prompts SET content = %s, description = %s, owner_username = 'vismaya', followup_1 = %s, followup_2 = %s WHERE name = 'vismaya_leadstream' AND (content IS NULL OR content = '' OR content = 'placeholder')",
-        (vismaya_content, vismaya_description, vismaya_followup1, vismaya_followup2)
-    )
-    if cur.rowcount == 0:
+        # Seed ONLY when missing or still a placeholder (never clobber user edits).
         cur.execute(
-            "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1, followup_2) SELECT 'vismaya_leadstream', %s, %s, 'CUSTOM_DRAFT', 'vismaya', %s, %s WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'vismaya_leadstream')",
-            (vismaya_description, vismaya_content, vismaya_followup1, vismaya_followup2)
+            "UPDATE prompts SET content = %s, description = %s, owner_username = 'vismaya', followup_1 = %s, followup_2 = %s WHERE name = 'vismaya_leadstream' AND (content IS NULL OR content = '' OR content = 'placeholder')",
+            (vismaya_content, vismaya_description, vismaya_followup1, vismaya_followup2)
         )
-    conn.commit()
+        if cur.rowcount == 0:
+            cur.execute(
+                "INSERT INTO prompts (name, description, content, prompt_type, owner_username, followup_1, followup_2) SELECT 'vismaya_leadstream', %s, %s, 'CUSTOM_DRAFT', 'vismaya', %s, %s WHERE NOT EXISTS (SELECT 1 FROM prompts WHERE name = 'vismaya_leadstream')",
+                (vismaya_description, vismaya_content, vismaya_followup1, vismaya_followup2)
+            )
+        conn.commit()
 
-    # Strip dead SIG_START/SIG_END template signature blocks after seeding — the
-    # real signature is injected separately at send time (inject_signature), so
-    # these blocks would otherwise re-appear as literal text in the editors.
-    cur.execute(_STRIP_TEMPLATE_SIG_SQL)
-    conn.commit()
+        # Strip dead SIG_START/SIG_END template signature blocks after seeding — the
+        # real signature is injected separately at send time (inject_signature), so
+        # these blocks would otherwise re-appear as literal text in the editors.
+        cur.execute(_STRIP_TEMPLATE_SIG_SQL)
+        conn.commit()
 
-    cur.close()
-    conn.close()
-    logger.info("Startup templates creation/verification completed successfully!")
-except Exception as db_err:
-    logger.exception(f"Startup template creation failed: {db_err}")
+        cur.close()
+        conn.close()
+        logger.info("Startup templates creation/verification completed successfully!")
+    except Exception as db_err:
+        logger.exception(f"Startup template creation failed: {db_err}")
 
 import contextlib
 

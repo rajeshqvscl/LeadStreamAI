@@ -40,7 +40,15 @@ os.environ["TOKEN_ENCRYPTION_KEY"] = "pytest-token-encryption-key"
 
 
 def db_reachable() -> bool:
-    """True if a real PostgreSQL is listening on the configured DATABASE_URL.
+    """True if a real PostgreSQL is listening on the TEST database URL.
+
+    Checks ``_TEST_DATABASE_URL`` — NOT the ambient ``DATABASE_URL`` env var.
+    App modules call ``load_dotenv(override=True)`` at import time, which
+    flips ``DATABASE_URL`` to the URL in backend/app/.env (the REAL production
+    database). Reading the ambient var here made local test runs see the
+    production DB as "reachable" and seed pytest rows into it. The sandbox
+    URL never changes, so the stub-vs-real decision is stable and can never
+    point at production.
 
     Raw TCP check so it is not fooled by app-level DB stubs. Test modules and
     fixtures can import this: ``from tests.conftest import db_reachable``
@@ -49,7 +57,7 @@ def db_reachable() -> bool:
     from urllib.parse import urlparse
     import socket
 
-    url = os.getenv("DATABASE_URL", "")
+    url = _TEST_DATABASE_URL
     if not url:
         return False
     p = urlparse(url.replace("postgresql://", "http://"))

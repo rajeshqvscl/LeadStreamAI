@@ -11,27 +11,17 @@ import pytest
 
 
 def _db_available() -> bool:
-    """True if a real PostgreSQL is reachable on the configured DATABASE_URL.
+    """True if the TEST database is reachable (CI service container).
 
-    Uses a raw TCP socket check (NOT get_db_connection, which tests may stub)
-    so idempotency-claim tests skip cleanly when no DB container is running.
+    Delegates to tests.conftest.db_reachable, which checks the sandbox
+    ``_TEST_DATABASE_URL`` — never the ambient ``DATABASE_URL`` env var.
+    App modules flip that var to the production URL at import time
+    (``load_dotenv(override=True)``), so reading it here made local runs
+    detect the production Neon DB as "available" and seed it with pytest
+    rows.
     """
-    import os
-    import socket
-    from urllib.parse import urlparse
-
-    url = os.getenv("DATABASE_URL", "")
-    if not url:
-        return False
-    p = urlparse(url.replace("postgresql://", "http://"))
-    host = p.hostname or "localhost"
-    port = p.port or 5432
-    try:
-        s = socket.create_connection((host, port), timeout=2)
-        s.close()
-        return True
-    except Exception:
-        return False
+    from tests.conftest import db_reachable
+    return db_reachable()
 
 
 # DB-aware fixtures: with a live DB (CI) the tests exercise the REAL API with

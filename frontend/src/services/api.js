@@ -105,9 +105,17 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (err) {
         processQueue(err, null);
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        window.location.href = '/login';
+        // Only destroy the session on a DEFINITIVE auth rejection (401/403
+        // from the refresh call itself). Transient failures — network errors,
+        // 502 from a restarting backend, 5xx from a DB blip — must NOT wipe
+        // the stored token: the token is still valid server-side and the next
+        // request will recover on its own once the backend is back.
+        const refreshStatus = err?.response?.status;
+        if (refreshStatus === 401 || refreshStatus === 403) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          window.location.href = '/login';
+        }
         return Promise.reject(err);
       } finally {
         isRefreshing = false;

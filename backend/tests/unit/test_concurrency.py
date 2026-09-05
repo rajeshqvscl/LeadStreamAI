@@ -19,19 +19,14 @@ from unittest.mock import patch, MagicMock
 
 
 def _db_reachable() -> bool:
-    """True when a real PostgreSQL is listening on DATABASE_URL."""
-    url = os.getenv("DATABASE_URL", "")
-    if not url:
-        return False
-    p = urlparse(url.replace("postgresql://", "http://"))
-    host = p.hostname or "localhost"
-    port = p.port or 5432
-    try:
-        s = socket.create_connection((host, port), timeout=2)
-        s.close()
-        return True
-    except Exception:
-        return False
+    """True when the TEST database (CI service container) is listening.
+
+    Delegates to tests.conftest.db_reachable, which checks the sandbox
+    ``_TEST_DATABASE_URL`` — never the ambient ``DATABASE_URL`` env var that
+    app modules flip to the production URL at import time.
+    """
+    from tests.conftest import db_reachable
+    return db_reachable()
 
 
 class TestIdempotencyUnderConcurrency:
