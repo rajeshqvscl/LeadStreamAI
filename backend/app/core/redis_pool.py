@@ -19,6 +19,9 @@ def get_redis_pool() -> "redis.ConnectionPool":
             url,
             decode_responses=True,
             max_connections=4,
+            socket_connect_timeout=5,
+            socket_timeout=10,
+            retry_on_timeout=False,
         )
     return _POOL
 

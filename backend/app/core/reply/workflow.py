@@ -73,11 +73,14 @@ class ReplyWorkflow:
         email_status = self.INTENT_TO_EMAIL_STATUS.get(intent, "REPLIED")
         pipeline_state = self.INTENT_TO_PIPELINE_STATE.get(intent, LeadState.REPLIED)
 
-        IST = timezone(timedelta(hours=5, minutes=30))
+        # DB-clock timestamp so replied_at never skews with a wrong machine
+        # clock (aware datetime, same semantics as the old datetime.now(IST))
+        from app.core.clock import now_ist
+        replied_at = now_ist()
 
         return LeadUpdate(
             is_responded=True,
-            replied_at=datetime.now(IST),
+            replied_at=replied_at,
             email_status=email_status,
             reply_intent=intent,
             followup_status=followup_status,

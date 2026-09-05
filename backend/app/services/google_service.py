@@ -54,6 +54,8 @@ def get_google_flow(redirect_uri: str | None = None):
 
 def get_user_credentials(user_id: int) -> Credentials | None:
     """Retrieves and refreshes Google OAuth credentials for a user."""
+    from app.utils.token_encryption import decrypt_token
+
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
@@ -66,9 +68,16 @@ def get_user_credentials(user_id: int) -> Credentials | None:
         if not user or not user['google_refresh_token']:
             return None
 
+        # Decrypt tokens from storage
+        access_token = decrypt_token(user['google_access_token'])
+        refresh_token = decrypt_token(user['google_refresh_token'])
+
+        if not refresh_token:
+            return None
+
         creds = Credentials(
-            token=user['google_access_token'],
-            refresh_token=user['google_refresh_token'],
+            token=access_token,
+            refresh_token=refresh_token,
             token_uri="https://oauth2.googleapis.com/token",
             client_id=os.getenv("GOOGLE_CLIENT_ID"),
             client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
@@ -108,13 +117,14 @@ def get_user_credentials(user_id: int) -> Credentials | None:
                 else:
                     raise
 
-        # Save new tokens
+        # Save new tokens (encrypted at rest)
+        from app.utils.token_encryption import encrypt_token
         cur.execute("""
             UPDATE users
             SET google_access_token = %s,
                 google_token_expiry = %s
             WHERE id = %s
-        """, (creds.token, creds.expiry, user_id))
+        """, (encrypt_token(creds.token), creds.expiry, user_id))
         conn.commit()
 
         return creds

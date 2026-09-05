@@ -19,6 +19,8 @@ This folder documents the full system architecture, logic flows, database schema
 | `DATABASE.md` | All tables, columns, constraints, indexes, key queries |
 | `ACCOUNTS.md` | The 5 sender accounts (users), templates, personas |
 | `TROUBLESHOOTING.md` | Common problems, debug steps, log points |
+| `DR.md` | Disaster recovery runbook — RPO/RTO targets, backup/restore scripts, restore-drill checklist |
+| `STAGING-RUNBOOK.md` | Exact steps to stand up the live staging environment (Neon + Render + test Gmail) |
 | `FLOWS/00-scheduler-loop.md` | The 10s background loop |
 | `FLOWS/01-reply-detection.md` | Push + Poll → handle_potential_reply → cross-account stop |
 | `FLOWS/02-followup-engine.md` | process_outreach_sequences → filtering → sending |

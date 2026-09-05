@@ -55,11 +55,29 @@ jobs:
       - name: Runtime smoke test (no 404/405 regressions)
         run: python scripts/smoke_test.py
 
+      - name: Security test suite
+        run: |
+          python -m pytest tests/unit/test_cross_user_security.py -v --tb=short
+          python -m pytest tests/unit/test_state_machine.py -v --tb=short
+          python -m pytest tests/unit/test_reply_validator.py -v --tb=short
+          python -m pytest tests/unit/test_failure_injection.py -v --tb=short
+          python -m pytest tests/unit/test_endpoint_security.py -v --tb=short
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/leadstreamai
+          ADMIN_PASSWORD: test_admin_pass
+
       - name: Integration tests
         run: python -m pytest tests/integration -q
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/leadstreamai
+          ADMIN_PASSWORD: test_admin_pass
 
       - name: E2E wiring test (real Postgres + Redis)
         run: python scripts/e2e_real_wiring.py
         env:
           E2E_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/leadstreamai
           E2E_REDIS_URL: redis://localhost:6379/0
+
+      - name: Deploy gate check
+        run: python -m py_compile scripts/deploy_gate.py && echo "Deploy gate script OK"
+        if: github.ref == 'refs/heads/main'

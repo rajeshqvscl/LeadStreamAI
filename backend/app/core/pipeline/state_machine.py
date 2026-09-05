@@ -119,9 +119,9 @@ class SchedulerConfig:
         self.followup = get_followup_settings()
 
     def is_working_hours_now(self) -> bool:
-        """Check if current IST time is within working hours"""
-        IST = timezone(timedelta(hours=5, minutes=30))
-        now = datetime.now(IST)
+        """Check if current IST time is within working hours (DB clock)."""
+        from app.core.clock import now_ist
+        now = now_ist()
         if now.weekday() >= 5:  # Weekend
             return False
         return not (now.hour < self.scheduler.working_hours_start or now.hour >= self.scheduler.working_hours_end)

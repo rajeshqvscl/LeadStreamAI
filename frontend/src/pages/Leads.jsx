@@ -16,6 +16,7 @@ const Leads = () => {
   const [leads, setLeads] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, total_pages: 1, total: 0 });
+  const [pageSize, setPageSize] = useState(parseInt(localStorage.getItem('leads_page_size')) || 25);
   const [filters, setFilters] = useState({
     search: '',
     title: '',
@@ -153,6 +154,7 @@ const Leads = () => {
     try {
       const params = {
         page: pagination.page,
+        per_page: pageSize,
         search: filters.search,
         title: filters.title,
         persona: filters.persona,
@@ -173,7 +175,7 @@ const Leads = () => {
       setLeads(fetchedLeads);
       setPagination(prev => ({
         ...prev,
-        total_pages: Math.ceil(response.data.total / 25),
+        total_pages: Math.ceil(response.data.total / pageSize),
         total: response.data.total
       }));
       setSelectedLeads(new Set());
@@ -187,7 +189,7 @@ const Leads = () => {
 
   useEffect(() => {
     fetchLeads();
-  }, [pagination.page, filters]);
+  }, [pagination.page, filters, pageSize]);
 
   useEffect(() => {
     const urlSearch = searchParams.get('search');
@@ -1174,39 +1176,61 @@ const Leads = () => {
         </div>
       )}
 
-      {/* Pagination Container - Same as Original */}
-      {sortedLeads.length > 0 && pagination.total_pages > 1 && (
+      {/* Pagination Container */}
+      {sortedLeads.length > 0 && (
         <div className="flex justify-center items-center gap-2 mt-8 pb-10">
-          <button
-            disabled={pagination.page === 1}
-            onClick={() => setPagination(v => ({ ...v, page: v.page - 1 }))}
-            className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-800 border border-white/5 text-slate-400 disabled:opacity-20 translate-y-0 hover:-translate-y-0.5 transition-all cursor-pointer"
-          >
-            <ChevronLeft className="w-5 h-5" />
-          </button>
+          <span className="flex items-center gap-1.5 mr-4">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">Rows:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                const newSize = parseInt(e.target.value);
+                setPageSize(newSize);
+                localStorage.setItem('leads_page_size', String(newSize));
+                setPagination(v => ({ ...v, page: 1 }));
+              }}
+              className="appearance-none bg-transparent border border-white/10 rounded-md px-2 py-0.5 text-[11px] font-bold text-slate-400 focus:outline-none focus:border-blue-500/30 cursor-pointer hover:border-white/20 transition-colors"
+            >
+              <option value={25} className="bg-[#0d1117]">25</option>
+              <option value={50} className="bg-[#0d1117]">50</option>
+              <option value={100} className="bg-[#0d1117]">100</option>
+            </select>
+          </span>
 
-          <div className="flex gap-1">
-            {[...Array(pagination.total_pages)].map((_, i) => (
+          {pagination.total_pages > 1 && (
+            <>
               <button
-                key={i}
-                onClick={() => setPagination(v => ({ ...v, page: i + 1 }))}
-                className={`w-10 h-10 rounded-xl font-bold text-sm transition-all cursor-pointer ${pagination.page === i + 1
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
-                  : 'bg-slate-800 border border-white/5 text-slate-400 hover:bg-slate-700'
-                  }`}
+                disabled={pagination.page === 1}
+                onClick={() => setPagination(v => ({ ...v, page: v.page - 1 }))}
+                className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-800 border border-white/5 text-slate-400 disabled:opacity-20 translate-y-0 hover:-translate-y-0.5 transition-all cursor-pointer"
               >
-                {i + 1}
+                <ChevronLeft className="w-5 h-5" />
               </button>
-            ))}
-          </div>
 
-          <button
-            disabled={pagination.page === pagination.total_pages}
-            onClick={() => setPagination(v => ({ ...v, page: v.page + 1 }))}
-            className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-800 border border-white/5 text-slate-400 disabled:opacity-20 translate-y-0 hover:-translate-y-0.5 transition-all cursor-pointer"
-          >
-            <ChevronRight className="w-5 h-5" />
-          </button>
+              <div className="flex gap-1">
+                {[...Array(pagination.total_pages)].map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setPagination(v => ({ ...v, page: i + 1 }))}
+                    className={`w-10 h-10 rounded-xl font-bold text-sm transition-all cursor-pointer ${pagination.page === i + 1
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
+                      : 'bg-slate-800 border border-white/5 text-slate-400 hover:bg-slate-700'
+                      }`}
+                  >
+                    {i + 1}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                disabled={pagination.page === pagination.total_pages}
+                onClick={() => setPagination(v => ({ ...v, page: v.page + 1 }))}
+                className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-800 border border-white/5 text-slate-400 disabled:opacity-20 translate-y-0 hover:-translate-y-0.5 transition-all cursor-pointer"
+              >
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            </>
+          )}
         </div>
       )}
 

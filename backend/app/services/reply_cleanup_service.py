@@ -151,6 +151,19 @@ def cleanup_replied_leads(scope_user_id=None, dry_run: bool = False) -> dict:
                 conn.rollback()
                 logger.exception(f"Cleanup failed for lead {lead_id}: {e}")
 
+        # Delete scheduled/pending follow-up email jobs from the queues for
+        # every lead that was just cleaned — the queue must never fire an email
+        # for a replied lead (stale jobs otherwise linger until a worker pops
+        # and rejects them one by one).
+        if not dry_run:
+            try:
+                from app.email_engine.queue.registry import cancel_pending_jobs_for_leads
+                purged = cancel_pending_jobs_for_leads([l["id"] for l in leads])
+                if purged:
+                    logger.info("Reply cleanup purged %d queued followup job(s)", purged)
+            except Exception as purge_err:
+                logger.warning(f"Reply cleanup queue purge failed: {purge_err}")
+
         logger.info(
             "Reply cleanup %s: %d replied leads matched, %d follow-ups deleted, %d errors",
             "(DRY RUN)" if dry_run else "",

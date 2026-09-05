@@ -352,16 +352,20 @@ async def analyze_lead_manually(lead_id: int, user_id: str | None = Header(None,
         try:
             import io
 
-            from app.core.http_client import get, post, post_multipart
+            # Bounded single-attempt calls (no auto-retry): /process & /ingest
+            # are non-idempotent, and a hung upstream must not tie up the
+            # request thread for retries*timeout seconds. RAG deep analysis is
+            # best-effort — failures fall through to the existing lead data.
+            from app.core.http_client import secure_request_bounded as _rag_call
 
             # 0. Wake-Up Check
             with contextlib.suppress(Exception):
-                get(rag_url, timeout=60)
+                _rag_call("GET", rag_url, timeout=10)
 
             if file_data:
                 # 1. RAG Processing (PDF)
                 files = {'file': (f"lead_{lead_id}.pdf", file_data)}
-                process_res = post_multipart(f"{rag_url}/process", files=files, timeout=300)
+                process_res = _rag_call("POST", f"{rag_url}/process", files=files, timeout=90)
 
                 if process_res.status_code == 200:
                     rag_data = process_res.json()
@@ -432,10 +436,10 @@ async def analyze_lead_manually(lead_id: int, user_id: str | None = Header(None,
                 # 1. RAG Processing (Text Fallback)
                 lead_text = f"Lead Persona: {lead.get('persona')}\nCompany: {lead.get('company_name')}\nBody: {lead.get('remarks') or ''}"
                 files = {'file': (f"lead_{lead_id}.txt", io.StringIO(lead_text).getvalue())}
-                post_multipart(f"{rag_url}/ingest", files=files, timeout=60)
+                _rag_call("POST", f"{rag_url}/ingest", files=files, timeout=30)
 
                 query_msg = f"Provide a strategic intelligence analysis for this lead. Persona: {lead.get('persona')}. Company: {lead.get('company_name')}. Context: {lead.get('remarks')[:500]}"
-                query_res = post(f"{rag_url}/ask", params={"question": query_msg}, timeout=120)
+                query_res = _rag_call("POST", f"{rag_url}/ask", params={"question": query_msg}, timeout=60)
                 if query_res.status_code == 200:
                     rag_data = query_res.json()
                     rag_advice = f"### TEXT ANALYSIS SUMMARY\n{rag_data.get('answer') or rag_data.get('response')}"

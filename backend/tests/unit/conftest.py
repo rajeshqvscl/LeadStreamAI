@@ -15,12 +15,183 @@ Usage in any test file:
             cur.execute(...)
             conn.commit()
         # fixture auto-verifies after the test
+
+Security-suite fixtures (``security_seed`` + named accessors)
+    Seed two users + one admin with real sessions, plus leads and campaigns,
+    in the PostgreSQL container CI provides. Every accessor fixture SKIPS its
+    test when no DB is reachable, so the same files run green locally (skip)
+    and in CI (real assertions). The ``client`` fixture (tests/conftest.py) is
+    in real-DB mode when a DB is up, so session tokens are actually verified.
 """
 
 import contextlib
 import threading
 
 import pytest
+
+from tests.conftest import db_reachable
+
+
+def seed_security_data() -> dict:
+    """Seed users A/B + admin with sessions, plus leads & campaigns, and return
+    a dict of ids/tokens. Plain function (not a fixture) so test files can
+    decide for themselves whether to skip vs. fall back to stub mode."""
+    import os
+    import datetime
+    import psycopg2
+    import psycopg2.extras
+
+    conn = psycopg2.connect(os.environ["DATABASE_URL"], cursor_factory=psycopg2.extras.DictCursor)
+    cur = conn.cursor()
+    try:
+        # Clean up rows from previous runs of the same suite (safe namespace)
+        cur.execute("DELETE FROM sessions WHERE token LIKE 'pytest-sec-%'")
+        cur.execute("DELETE FROM leads_raw WHERE email LIKE '%@pytest-security.local'")
+        cur.execute("DELETE FROM campaigns WHERE name LIKE 'pytest-sec-%'")
+        cur.execute("DELETE FROM users WHERE email LIKE '%@pytest-security.local'")
+        conn.commit()
+
+        cur.execute(
+            "INSERT INTO users (username, email, full_name, role, is_active, is_approved) "
+            "VALUES ('pytest_sec_a', 'sec-a@pytest-security.local', 'Sec A', 'USER', TRUE, TRUE) "
+            "RETURNING id"
+        )
+        uid_a = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO users (username, email, full_name, role, is_active, is_approved) "
+            "VALUES ('pytest_sec_b', 'sec-b@pytest-security.local', 'Sec B', 'USER', TRUE, TRUE) "
+            "RETURNING id"
+        )
+        uid_b = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO users (username, email, full_name, role, is_active, is_approved) "
+            "VALUES ('pytest_sec_admin', 'sec-admin@pytest-security.local', 'Sec Admin', 'ADMIN', TRUE, TRUE) "
+            "RETURNING id"
+        )
+        uid_admin = cur.fetchone()[0]
+        conn.commit()
+
+        expires = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
+        for token, uid in [
+            ("pytest-sec-token-a", uid_a),
+            ("pytest-sec-token-b", uid_b),
+            ("pytest-sec-token-admin", uid_admin),
+        ]:
+            cur.execute(
+                "INSERT INTO sessions (token, user_id, expires_at) VALUES (%s, %s, %s)",
+                (token, uid, expires),
+            )
+        conn.commit()
+
+        # One lead + one campaign per user (same ids used by every accessor)
+        cur.execute(
+            "INSERT INTO leads_raw (first_name, last_name, email, company_name, user_id, "
+            "email_status, pipeline_state, validation_status) "
+            "VALUES ('Sec', 'A', 'lead-a@pytest-security.local', 'Acme A', %s, 'PENDING', 'NEW', 'PENDING') "
+            "RETURNING id",
+            (uid_a,),
+        )
+        lead_a = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO leads_raw (first_name, last_name, email, company_name, user_id, "
+            "email_status, pipeline_state, validation_status) "
+            "VALUES ('Sec', 'B', 'lead-b@pytest-security.local', 'Acme B', %s, 'PENDING', 'NEW', 'PENDING') "
+            "RETURNING id",
+            (uid_b,),
+        )
+        lead_b = cur.fetchone()[0]
+        conn.commit()
+
+        cur.execute(
+            "INSERT INTO campaigns (name, description, is_active, user_id) "
+            "VALUES ('pytest-sec-camp-a', 'seed', TRUE, %s) RETURNING id",
+            (uid_a,),
+        )
+        camp_a = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO campaigns (name, description, is_active, user_id) "
+            "VALUES ('pytest-sec-camp-b', 'seed', TRUE, %s) RETURNING id",
+            (uid_b,),
+        )
+        camp_b = cur.fetchone()[0]
+        conn.commit()
+
+        return {
+            "token_a": "pytest-sec-token-a",
+            "token_b": "pytest-sec-token-b",
+            "token_admin": "pytest-sec-token-admin",
+            "user_a_id": uid_a,
+            "user_b_id": uid_b,
+            "admin_id": uid_admin,
+            "lead_a": lead_a,
+            "lead_b": lead_b,
+            "campaign_a": camp_a,
+            "campaign_b": camp_b,
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _requires_db():
+    """Skip helper: call inside a fixture when no real DB is available."""
+    if not db_reachable():
+        pytest.skip("PostgreSQL not reachable — CI provides a service container")
+
+
+@pytest.fixture(scope="session")
+def security_seed():
+    """Seeded users A/B + admin with sessions, leads & campaigns for
+    ownership-matrix tests. Skips without a live DB."""
+    _requires_db()
+    return seed_security_data()
+
+
+@pytest.fixture
+def user_a_token(security_seed):
+    """Session token for seeded User A (skips when no DB)."""
+    return security_seed["token_a"]
+
+
+@pytest.fixture
+def user_b_token(security_seed):
+    """Session token for seeded User B (skips when no DB)."""
+    return security_seed["token_b"]
+
+
+@pytest.fixture
+def admin_token(security_seed):
+    """Session token for seeded Admin (skips when no DB)."""
+    return security_seed["token_admin"]
+
+
+@pytest.fixture
+def user_a_lead_id(security_seed):
+    """Lead id owned by seeded User A (skips when no DB)."""
+    return security_seed["lead_a"]
+
+
+@pytest.fixture
+def user_b_lead_id(security_seed):
+    """Lead id owned by seeded User B (skips when no DB)."""
+    return security_seed["lead_b"]
+
+
+@pytest.fixture
+def user_a_campaign_id(security_seed):
+    """Campaign id owned by seeded User A (skips when no DB)."""
+    return security_seed["campaign_a"]
+
+
+@pytest.fixture
+def user_b_campaign_id(security_seed):
+    """Campaign id owned by seeded User B (skips when no DB)."""
+    return security_seed["campaign_b"]
+
+
+@pytest.fixture
+def admin_id(security_seed):
+    return security_seed["admin_id"]
 
 
 # ---------------------------------------------------------------------------

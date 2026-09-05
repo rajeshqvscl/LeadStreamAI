@@ -236,6 +236,21 @@ def _is_valid_company_name(name: str) -> bool:
     alpha_count = sum(c.isalpha() for c in clean)
     return alpha_count >= 2
 
+def _cancel_pending_followup_jobs(lead_ids):
+    """Best-effort purge of queued/scheduled follow-up email jobs for leads
+    that replied (or were stopped because a same-company / same-email lead
+    replied). The queue must never fire a follow-up for a replied lead, and
+    stale jobs must not linger in the queue."""
+    if not lead_ids:
+        return 0
+    try:
+        from app.email_engine.queue.registry import cancel_pending_jobs_for_leads
+        return cancel_pending_jobs_for_leads(lead_ids)
+    except Exception as purge_err:
+        logger.warning(f"Failed to purge pending followup jobs for leads {lead_ids}: {purge_err}")
+        return 0
+
+
 def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
     """Correlates a new Gmail message with a lead and performs AI intent analysis."""
     conn = get_db_connection()
@@ -331,30 +346,33 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 lead_exists = domain_lead
                 print(f"DEBUG: Same-domain (alias) reply — matched {sender_email} to lead {domain_lead['id']}")
             else:
-                # Cross-account fallback: search for this email under any user
-                cur.execute(
-                    "SELECT id, user_id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND email_status IN %s AND is_responded = FALSE LIMIT 1",
-                    (sender_email, _outreach_statuses)
+                # SECURITY FIX: Cross-account automatic retargeting removed.
+                # Original code overwrote `user_id` with another user's ID,
+                # causing Gmail service, Drive uploads, and activity logs to
+                # operate under the wrong user context.
+                #
+                # New behavior: flag for manual review instead of auto-retarget.
+                # The reply came to inbox_owner's Gmail but no matching lead
+                # was found under that user — this is either:
+                #   (a) a reply from someone we never contacted (spam/newsletter)
+                #   (b) a cross-account scenario requiring human review
+                logger.info(
+                    f"REPLY_NO_MATCH: {sender_email} replied to user {user_id}'s inbox "
+                    f"but no matching lead found. Flagging for manual review."
                 )
-                cross_lead = cur.fetchone()
-                if cross_lead:
-                    user_id = cross_lead['user_id']
-                    lead_exists = cross_lead
-                    print(f"DEBUG: Cross-account reply — retargeted to user {user_id}")
-                else:
-                    # Cross-account domain fallback: same domain under any user
-                    cur.execute(
-                        "SELECT id, user_id FROM leads_raw WHERE LOWER(split_part(email, '@', 2)) = LOWER(split_part(%s, '@', 2)) AND is_responded = FALSE AND email_status IN %s LIMIT 1",
-                        (sender_email, _outreach_statuses)
+                # Log as activity so admin can review
+                try:
+                    from app.models.lead import add_activity_log
+                    add_activity_log(
+                        None,  # no lead_id — orphan reply
+                        "ORPHAN_REPLY",
+                        f"Reply from {sender_email} — no matching lead under user {user_id}. Requires manual review.",
+                        "system",
+                        user_id,
                     )
-                    domain_cross = cur.fetchone()
-                    if domain_cross:
-                        user_id = domain_cross['user_id']
-                        lead_exists = domain_cross
-                        print(f"DEBUG: Cross-account same-domain reply — retargeted to user {user_id}")
-                    else:
-                        print(f"DEBUG: Skipping {sender_email} — not a lead we contacted through this platform.")
-                        return  # Hard stop — don't process random inbox mail
+                except Exception as log_err:
+                    logger.warning(f"Orphan reply log failed: {log_err}")
+                return  # Do NOT process — require manual triage
 
         lead_id = lead_exists['id']
 
@@ -366,11 +384,45 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         workflow = get_reply_workflow()
 
         print(f"DEBUG: Classifying reply from {sender_email}...")
-        classification = classifier.classify(body)
+        raw_classification = classifier.classify(body)
+
+        # Step 1.5: Validate AI output against schema + business rules
+        from app.core.reply.validator import validate_classification
+        cur.execute(
+            "SELECT pipeline_state, followup_status FROM leads_raw WHERE id = %s",
+            (lead_id,),
+        )
+        lead_state_row = cur.fetchone()
+        current_state = lead_state_row['pipeline_state'] if lead_state_row else None
+        current_fu_status = lead_state_row['followup_status'] if lead_state_row else None
+
+        validation = validate_classification(
+            raw_classification,
+            lead_state=current_state,
+            current_followup_status=current_fu_status,
+        )
+
+        if not validation.is_valid:
+            logger.error(
+                f"Classification validation FAILED for lead {lead_id}: "
+                f"{validation.errors}. Using FALLBACK intent."
+            )
+            # Use safe fallback — Unknown intent keeps sequence ACTIVE for manual review
+            from app.core.reply.classifier import ClassificationResult
+            classification = ClassificationResult(
+                intent=None,
+                source="VALIDATION_FAILED",
+                sentiment_score=50,
+                confidence=0.0,
+            )
+        else:
+            classification = validation.sanitized
+            if validation.warnings:
+                logger.info(f"Classification warnings for lead {lead_id}: {validation.warnings}")
 
         print(f"DEBUG: Classification result: intent={classification.intent}, source={classification.source}, confidence={classification.confidence}")
 
-        # Step 2: Apply workflow to get lead updates
+        # Step 2: Apply workflow to get lead updates (AI recommends, state machine decides)
         lead_update = workflow.apply(classification)
 
         # Extract check size / ticket size from the reply text
@@ -406,16 +458,21 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
         try:
             import io
 
-            from app.core.http_client import get, post, post_multipart
+            # Bounded single-attempt calls (no auto-retry): RAG endpoints are
+            # non-idempotent (retrying /process double-processes a PDF) and a
+            # hung upstream must not block reply processing for retries*timeout
+            # seconds. RAG enrichment is best-effort — on any failure the reply
+            # still commits below.
+            from app.core.http_client import secure_request_bounded as _rag_call
 
             # 0. Wake-Up Check
             with contextlib.suppress(Exception):
-                get(RAG_URL, timeout=60)
+                _rag_call("GET", RAG_URL, timeout=10)
 
             # 1. RAG Processing (PDF vs Text)
             if pdf_attachment:
                 files = {'file': (pdf_attachment['filename'], pdf_attachment['data'])}
-                process_res = post_multipart(f"{RAG_URL}/process", files=files, timeout=300)
+                process_res = _rag_call("POST", f"{RAG_URL}/process", files=files, timeout=90)
                 if process_res.status_code == 200:
                     rag_data = process_res.json()
                     rag_item_id = rag_data.get('id')
@@ -424,7 +481,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                         import time
                         max_polls = 30
                         for _poll in range(max_polls):
-                            status_res = get(f"{RAG_URL}/status/{rag_item_id}", timeout=60)
+                            status_res = _rag_call("GET", f"{RAG_URL}/status/{rag_item_id}", timeout=25)
                             if status_res.status_code == 200:
                                 status_data = status_res.json()
                                 current_status = status_data.get('status', '').lower()
@@ -465,9 +522,9 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             else:
                 # Non-PDF replies get generic advice, but deal_size remains None
                 files = {'file': ('email_reply.txt', io.StringIO(body).getvalue())}
-                post_multipart(f"{RAG_URL}/ingest", files=files, timeout=60)
+                _rag_call("POST", f"{RAG_URL}/ingest", files=files, timeout=30)
                 query_msg = f"Reply body: {body[:300]}"
-                query_res = post(f"{RAG_URL}/ask", params={"question": query_msg}, timeout=120)
+                query_res = _rag_call("POST", f"{RAG_URL}/ask", params={"question": query_msg}, timeout=60)
                 if query_res.status_code == 200:
                     rag_data = query_res.json()
                     rag_advice = rag_data.get("answer") or rag_data.get("response")
@@ -536,6 +593,10 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
             except Exception as cleanup_err:
                 logger.warning(f"Reply cleanup sweep failed: {cleanup_err}")
 
+            # Delete this lead's scheduled/pending follow-up email jobs from the
+            # queues — a replied lead must never receive another automated email.
+            _cancel_pending_followup_jobs([lead_id])
+
             # Stop followups for ALL other leads from the same company/domain
             try:
                 cur.execute("SELECT company_name FROM leads_raw WHERE id = %s", (lead_id,))
@@ -569,6 +630,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                     else:
                         cur.execute("SELECT id, first_name, last_name, email FROM leads_raw WHERE FALSE", ())
                 same_company_leads = cur.fetchall()
+                stopped_sc_ids = []
                 for sc_lead in same_company_leads:
                     sc_id = sc_lead['id']
                     sc_name = f"{sc_lead['first_name'] or ''} {sc_lead['last_name'] or ''}".strip() or sc_lead['email']
@@ -584,7 +646,9 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                     from app.models.lead import add_activity_log
                     add_activity_log(sc_id, 'FOLLOWUP_STOPPED', f'Reply received from {lead_name} ({sender_email}) at same company — auto-stopped', 'system')
                     logger.info(f"Stopped followup for {sc_name} ({sc_lead['email']}) — same company as {lead_name} who replied")
+                    stopped_sc_ids.append(sc_id)
                 conn.commit()
+                _cancel_pending_followup_jobs(stopped_sc_ids)
             except Exception as company_err:
                 logger.warning(f"Company-level followup stop failed: {company_err}")
 
@@ -596,6 +660,7 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                     AND followup_status = 'ACTIVE' AND is_responded = FALSE
                 """, (sender_email, lead_id))
                 same_email_leads = cur.fetchall()
+                stopped_se_ids = []
                 for se_lead in same_email_leads:
                     se_id = se_lead['id']
                     se_name = f"{se_lead['first_name'] or ''} {se_lead['last_name'] or ''}".strip() or se_lead['email']
@@ -610,7 +675,9 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                     from app.models.lead import add_activity_log
                     add_activity_log(se_id, 'FOLLOWUP_STOPPED', f'Reply received from same email ({sender_email}) on another account — auto-stopped', 'system')
                     logger.info(f"Stopped followup for {se_name} ({se_lead['email']}) under user {se_lead['user_id']} — same email replied on another account")
+                    stopped_se_ids.append(se_id)
                 conn.commit()
+                _cancel_pending_followup_jobs(stopped_se_ids)
             except Exception as same_email_err:
                 logger.warning(f"Cross-account same-email followup stop failed: {same_email_err}")
 
@@ -1429,6 +1496,8 @@ def poll_all_users_for_replies():
                                         for row in bounced_ids:
                                             add_activity_log(row['id'], 'BOUNCED', f'Email bounced — {bounce_reason}', 'system')
                                             logger.info(f"Marked lead {row['id']} ({failed_email}) as BOUNCED. Reason: {bounce_reason}")
+                                        # Cancel queued followup jobs for bounced leads
+                                        _cancel_pending_followup_jobs([r['id'] for r in bounced_ids])
                                 except Exception as bounce_err:
                                     logger.warning(f"Bounce processing failed for msg {m_id}: {bounce_err}")
                                 cur.execute("INSERT INTO gmail_processed_messages (message_id, user_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (m_id, uid))
@@ -1605,17 +1674,20 @@ def retro_sync_pdfs(request: Request, x_user_id: str | None = Header(None)):
                         rag_intel = None
 
                         try:
-                            from app.core.http_client import get, post_multipart
+                            # Bounded single-attempt RAG calls (no auto-retry):
+                            # /process is non-idempotent and a hung upstream must
+                            # not block this path for retries*timeout seconds.
+                            from app.core.http_client import secure_request_bounded as _rag_call
                             files = {'file': (pdf_attachment['filename'], pdf_attachment['data'])}
                             # Send to RAG
-                            rag_res = post_multipart(f"{rag_url}/process", files=files, timeout=300)
+                            rag_res = _rag_call("POST", f"{rag_url}/process", files=files, timeout=90)
                             if rag_res.status_code == 200:
                                 rag_data = rag_res.json()
                                 rag_item_id = rag_data.get('id')
                                 if rag_item_id:
                                     import time
                                     for _ in range(30):
-                                        st_res = get(f"{rag_url}/status/{rag_item_id}", timeout=60)
+                                        st_res = _rag_call("GET", f"{rag_url}/status/{rag_item_id}", timeout=25)
                                         if st_res.status_code == 200:
                                             st_data = st_res.json()
                                             if st_data.get('status', '').lower() in ['completed', 'success']:

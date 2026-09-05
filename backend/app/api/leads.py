@@ -192,7 +192,7 @@ def get_leads(
                ) as designation,
                labels, remarks
         FROM leads_raw
-        WHERE 1=1
+        WHERE 1=1 AND (lr.is_deleted IS NULL OR lr.is_deleted = FALSE)
     """
     params = []
 
@@ -418,17 +418,17 @@ def list_followups(
 
         # Base query depends on status
         if status_val == 'SENT':
-            base_query = " FROM leads_raw lr WHERE email_status IN ('SENT', 'OPENED', 'CLICKED') AND COALESCE(followup_stage, 0) > 0 AND followup_status != 'STOPPED' AND last_outreach_at >= NOW() - INTERVAL '7 days' "
+            base_query = " FROM leads_raw lr WHERE (lr.is_deleted IS NULL OR lr.is_deleted = FALSE) AND email_status IN ('SENT', 'OPENED', 'CLICKED') AND COALESCE(followup_stage, 0) > 0 AND followup_status != 'STOPPED' AND last_outreach_at >= NOW() - INTERVAL '7 days' "
         elif status_val == 'REPLIED':
-            base_query = " FROM leads_raw lr WHERE COALESCE(is_responded, FALSE) = TRUE "
+            base_query = " FROM leads_raw lr WHERE (lr.is_deleted IS NULL OR lr.is_deleted = FALSE) AND COALESCE(is_responded, FALSE) = TRUE "
         elif status_val == 'IN_PROGRESS':
             # Stage-0 leads (initial email sent, waiting on the 2/5/8-day timer)
             # are ACTIVE too — they must be visible here, not just in DUE.
-            base_query = " FROM leads_raw lr WHERE followup_status IN ('ACTIVE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED') AND COALESCE(is_responded, FALSE) = FALSE AND last_outreach_at IS NOT NULL "
+            base_query = " FROM leads_raw lr WHERE (lr.is_deleted IS NULL OR lr.is_deleted = FALSE) AND followup_status IN ('ACTIVE', 'SCHEDULED', 'PENDING_APPROVAL', 'APPROVED') AND COALESCE(is_responded, FALSE) = FALSE AND last_outreach_at IS NOT NULL "
         elif status_val == 'STOPPED':
-            base_query = " FROM leads_raw lr WHERE followup_status = 'STOPPED' AND COALESCE(followup_stage, 0) > 0 "
+            base_query = " FROM leads_raw lr WHERE (lr.is_deleted IS NULL OR lr.is_deleted = FALSE) AND followup_status = 'STOPPED' AND COALESCE(followup_stage, 0) > 0 "
         elif status_val == 'COMPLETED':
-            base_query = " FROM leads_raw lr WHERE (followup_status = 'COMPLETED' OR (COALESCE(followup_stage, 0) >= 3 AND followup_status != 'STOPPED')) AND COALESCE(is_responded, FALSE) = FALSE "
+            base_query = " FROM leads_raw lr WHERE (lr.is_deleted IS NULL OR lr.is_deleted = FALSE) AND (followup_status = 'COMPLETED' OR (COALESCE(followup_stage, 0) >= 3 AND followup_status != 'STOPPED')) AND COALESCE(is_responded, FALSE) = FALSE "
         else: # DUE
             # Mirrors the engine (followup_service._get_lead_type_config):
             # CLIENT sequences use 2/4-day intervals and cap at stage 2;
@@ -689,8 +689,22 @@ def export_all_leads(user_id: str | None = Header(None, alias="X-User-Id")):
     query += " ORDER BY created_at DESC"
     cur.execute(query, tuple(params))
     rows = cur.fetchall()
+    export_count = len(rows)
     cur.close()
     conn.close()
+
+    # SECURITY: Audit log for bulk data export
+    try:
+        from app.models.lead import add_activity_log
+        add_activity_log(
+            None,  # no specific lead
+            "EXPORT_LEADS",
+            f"User exported {export_count} leads (admin={is_admin})",
+            "system",
+            uid,
+        )
+    except Exception as audit_err:
+        logger.warning(f"Export audit log failed: {audit_err}")
 
     leads = []
     for r in rows:
@@ -954,10 +968,18 @@ def mark_lead_responded(lead_id: int, user_id: str | None = Header(None, alias="
         from app.models.lead import add_activity_log
         add_activity_log(lead_id, "RESPONDED", "Marked as responded (Follow-up stopped)", get_user_name(user_id))
 
+        # Delete scheduled/pending follow-up email jobs for this lead so the
+        # queue never fires an email for a responded lead.
+        try:
+            from app.email_engine.queue.registry import cancel_pending_jobs_for_leads
+            cancel_pending_jobs_for_leads([lead_id])
+        except Exception as purge_err:
+            logger.warning(f"mark_lead_responded queue purge failed for lead {lead_id}: {purge_err}")
+
         conn.commit()
         cur.close()
         conn.close()
-        return {"message": "Lead marked as responded. Follow-ups stopped."}
+        return {"message": "Lead marked as responded. Follow-ups stopped."} 
     except HTTPException:
         raise
     except Exception as e:
@@ -1159,6 +1181,10 @@ def approve_followup(lead_id: int, req: ApproveFollowupRequest | None = None, us
         else:
             return {"error": f"Gmail dispatch failed: {msg}"}
 
+    except HTTPException:
+        # Ownership/state guard errors (404/403/400) must propagate unchanged —
+        # never wrap them into a 500 (breaks the security semantics).
+        raise
     except Exception as e:
         logger.exception(f"Approval failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1547,6 +1573,18 @@ def process_unsubscribe(lead_id: int, conn=None, cur=None):
         else:
             conn.commit()
         add_activity_log(lead_id, "UNSUBSCRIBED", "Lead opted out — unsubscribed, follow-ups stopped, email blacklisted globally", lead.get('source') or 'lead')
+
+        # Cancel queued/scheduled followup email jobs for every stopped instance
+        # of this email so nothing fires after opt-out.
+        try:
+            from app.email_engine.queue.registry import cancel_pending_jobs_for_leads
+            all_ids = [lead_id]
+            cur.execute("SELECT id FROM leads_raw WHERE LOWER(email) = LOWER(%s) AND id != %s", (email, lead_id))
+            for row in (cur.fetchall() or []):
+                all_ids.append(row[0] if not isinstance(row, dict) else row['id'])
+            cancel_pending_jobs_for_leads(all_ids)
+        except Exception as purge_err:
+            logger.warning(f"process_unsubscribe queue purge failed: {purge_err}")
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -1569,6 +1607,15 @@ def bulk_delete(req: list[int], user_id: str | None = Header(None, alias="X-User
         else:
             cur.execute("DELETE FROM leads_raw lr WHERE id = ANY(%s) AND user_id IS NULL", (req,))
         conn.commit()
+
+        # Cancel any queued/scheduled followup email jobs for the deleted leads
+        # (bulk-delete used to hard-delete rows but left their Redis jobs behind,
+        # so a dispatcher could keep picking up jobs for leads that no longer exist).
+        try:
+            from app.email_engine.queue.registry import cancel_pending_jobs_for_leads
+            cancel_pending_jobs_for_leads(req)
+        except Exception as purge_err:
+            logger.warning(f"bulk_delete queue purge failed: {purge_err}")
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -1579,16 +1626,58 @@ def bulk_delete(req: list[int], user_id: str | None = Header(None, alias="X-User
 
 @router.delete("/leads/{lead_id}")
 def delete_lead(lead_id: int, user_id: str | None = Header(None, alias="X-User-Id")):
+    """Soft-delete a lead and cancel any pending/scheduled follow-ups."""
     conn = get_db_connection()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
         uid = normalize_user_id(user_id)
-        if _is_admin_user(conn, user_id):
-            cur.execute("DELETE FROM leads_raw lr WHERE id = %s", (lead_id,))
+        is_admin = _is_admin_user(conn, user_id)
+
+        # Verify ownership before delete
+        if is_admin:
+            cur.execute("SELECT id, followup_status, email_status FROM leads_raw WHERE id = %s", (lead_id,))
+        elif uid:
+            cur.execute("SELECT id, followup_status, email_status FROM leads_raw WHERE id = %s AND user_id = %s", (lead_id, uid))
         else:
-            cur.execute("DELETE FROM leads_raw lr WHERE id = %s AND user_id = %s", (lead_id, uid))
+            cur.execute("SELECT id, followup_status, email_status FROM leads_raw WHERE id = %s AND user_id IS NULL", (lead_id,))
+
+        lead = cur.fetchone()
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found or access denied")
+
+        # Soft-delete: mark as deleted, stop all automation
+        cur.execute("""
+            UPDATE leads_raw
+            SET is_deleted = TRUE,
+                followup_status = 'STOPPED',
+                email_status = CASE WHEN email_status IN ('SCHEDULED', 'PENDING_APPROVAL') THEN 'CANCELLED' ELSE email_status END,
+                scheduled_at = NULL,
+                followup_draft = NULL,
+                updated_at = NOW()
+            WHERE id = %s
+        """, (lead_id,))
+
+        # Audit log
+        from app.models.lead import add_activity_log
+        add_activity_log(
+            lead_id, "LEAD_DELETED",
+            f"Lead soft-deleted (was followup={lead.get('followup_status')}, email={lead.get('email_status')})",
+            "system", uid,
+        )
+
         conn.commit()
+
+        # Cancel any queued/scheduled followup email jobs for this lead
+        try:
+            from app.email_engine.queue.registry import cancel_pending_jobs_for_leads
+            cancel_pending_jobs_for_leads([lead_id])
+        except Exception as purge_err:
+            logger.warning(f"delete_lead queue purge failed for lead {lead_id}: {purge_err}")
+
+        invalidate_leads_cache()
         return {"message": "Lead deleted successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail=str(e))

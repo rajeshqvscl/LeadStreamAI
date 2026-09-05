@@ -63,6 +63,27 @@ EMAIL_QUEUE_SIZE = Gauge(
     registry=registry,
 )
 
+EMAIL_DISPATCHER_ITERATIONS = Counter(
+    "email_dispatcher_iterations_total",
+    "Email dispatcher loop iterations",
+    ["priority"],
+    registry=registry,
+)
+
+EMAIL_DISPATCHER_POPS = Counter(
+    "email_dispatcher_pops_total",
+    "Jobs popped off the email queue by the dispatcher",
+    ["priority", "outcome"],
+    registry=registry,
+)
+
+EMAIL_DISPATCHER_ERRORS = Counter(
+    "email_dispatcher_errors_total",
+    "Email dispatcher loop errors",
+    ["error"],
+    registry=registry,
+)
+
 EMAIL_BOUNCES_TOTAL = Counter(
     "email_bounces_total",
     "Total email bounces",

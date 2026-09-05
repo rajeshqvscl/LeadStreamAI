@@ -137,7 +137,10 @@ class FollowUpEngine:
                 stage=current_stage,
             )
 
-        now = datetime.now(timezone(timedelta(hours=5, minutes=30))).replace(tzinfo=None)
+        # DB-clock IST (a skewed machine clock would fire follow-ups a day
+        # early/late around interval boundaries)
+        from app.core.clock import now_ist_naive
+        now = now_ist_naive()
         days_since_last = (now - last_sent_ist).days
 
         interval_days = cfg["intervals"].get(str(current_stage))

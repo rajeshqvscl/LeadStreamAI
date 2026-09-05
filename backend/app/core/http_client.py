@@ -132,3 +132,59 @@ def post_multipart(url: str, files: dict, **kwargs) -> requests.Response:
     headers = kwargs.pop("headers", {})
     headers.pop("Content-Type", None)  # Let requests set multipart boundary
     return secure_request("POST", url, files=files, headers=headers, **kwargs)
+
+
+# --- Bounded single-attempt calls (no auto-retry) ---
+#
+# The shared session above retries up to 3x with backoff. That is fine for
+# idempotent GETs, but it is actively harmful for two cases:
+#   1. Non-idempotent upload endpoints (e.g. RAG /process /ingest) where a
+#      retry can double-process the same document.
+#   2. Any upstream that accepts the connection but never responds: a hung
+#      call can block the caller for `retries * timeout` seconds (e.g. 3 x 300s
+#      = 15 minutes) inside a reply-processing path.
+#
+# `secure_request_bounded()` uses its own session with auto-retry disabled, so
+# each call fails after exactly one `timeout` window. Pick a timeout that the
+# healthy upstream comfortably beats and treat the call as enrichment-only:
+# if it fails, the caller must continue without the result.
+_bounded_session: requests.Session | None = None
+
+
+def get_bounded_session() -> requests.Session:
+    """Session with auto-retry disabled — one attempt per call."""
+    global _bounded_session
+    if _bounded_session is None:
+        session = requests.Session()
+        no_retry = Retry(total=0, connect=0, read=0, status=0, redirect=0, other=0)
+        adapter = HTTPAdapter(max_retries=no_retry)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        _bounded_session = session
+    return _bounded_session
+
+
+def secure_request_bounded(
+    method: str,
+    url: str,
+    *,
+    timeout: int = 30,
+    verify: bool | str | None = None,
+    **kwargs
+) -> requests.Response:
+    """
+    Single-attempt HTTP request (no auto-retry, no backoff waits).
+
+    Use for non-idempotent uploads and for upstreams that may hang — the call
+    returns/raises after exactly one `timeout` window. SSL verification follows
+    the same rules as :func:`secure_request`.
+    """
+    if verify is None:
+        verify = _get_ssl_verify()
+    return get_bounded_session().request(
+        method=method,
+        url=url,
+        timeout=timeout,
+        verify=verify,
+        **kwargs
+    )

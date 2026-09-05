@@ -788,7 +788,8 @@ def google_callback(request: Request, code: str, state: str):
             logger.exception(f"Failed to fetch Google user info: {e}")
             pass
 
-        # Store tokens and identity in database
+        # Store tokens and identity in database (encrypted at rest)
+        from app.utils.token_encryption import encrypt_token
         # Only update refresh_token if Google provided a new one (to avoid nullifying old working one)
         if creds.refresh_token:
             cur.execute("""
@@ -800,7 +801,7 @@ def google_callback(request: Request, code: str, state: str):
                     google_email = %s,
                     google_id = %s
                 WHERE id = %s
-            """, (creds.token, creds.refresh_token, creds.expiry, google_email, google_id, user_id))
+            """, (encrypt_token(creds.token), encrypt_token(creds.refresh_token), creds.expiry, google_email, google_id, user_id))
         else:
             cur.execute("""
                 UPDATE users
@@ -810,7 +811,7 @@ def google_callback(request: Request, code: str, state: str):
                     google_email = %s,
                     google_id = %s
                 WHERE id = %s
-            """, (creds.token, creds.expiry, google_email, google_id, user_id))
+            """, (encrypt_token(creds.token), creds.expiry, google_email, google_id, user_id))
         conn.commit()
 
         # Scope Validation: Check if we actually got the required permission

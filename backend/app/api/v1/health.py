@@ -57,6 +57,46 @@ async def readiness_check():
     
     # Gmail API
     checks["gmail_api"] = "configured" if os.getenv("GOOGLE_CLIENT_ID") else "not_configured"
+
+    # Email dispatcher liveness — a dispatcher stuck on Redis (no recent loop
+    # iterations) silently stops the queue from draining. Surface it here.
+    try:
+        from app.email_engine.worker.pool import (
+            POOL_MODULE_VERSION,
+            dispatcher_start_called,
+            get_dispatcher,
+            get_dispatcher_start_error,
+        )
+        checks["pool_module_version"] = POOL_MODULE_VERSION
+        start_error = get_dispatcher_start_error()
+        called = dispatcher_start_called()
+        dispatcher = get_dispatcher()
+        now = time.time()
+        thread = dispatcher._thread
+        alive = bool(thread and thread.is_alive())
+        if not called:
+            checks["email_dispatcher"] = "start_never_called"
+            all_healthy = False
+        elif start_error:
+            checks["email_dispatcher"] = f"start_failed({start_error})"
+            all_healthy = False
+        elif not dispatcher._running or not alive:
+            checks["email_dispatcher"] = (
+                f"not_running(running={dispatcher._running},thread_alive={alive})"
+            )
+            all_healthy = False
+        elif dispatcher.last_iteration_ts is None:
+            checks["email_dispatcher"] = "starting"
+        elif now - dispatcher.last_iteration_ts > 120:
+            checks["email_dispatcher"] = (
+                f"stalled_{int(now - dispatcher.last_iteration_ts)}s"
+                f"(last={dispatcher.last_iteration_queue})"
+            )
+            all_healthy = False
+        else:
+            checks["email_dispatcher"] = "healthy"
+    except Exception:
+        checks["email_dispatcher"] = "unknown"
     
     # RAG Service
     rag_url = os.getenv("RAG_URL", "https://rag-sys-gz59.onrender.com")
@@ -69,7 +109,12 @@ async def readiness_check():
     
     status_code = 200 if all_healthy else 503
     return Response(
-        content=json.dumps({"status": "ready" if all_healthy else "not_ready", "checks": checks, "timestamp": time.time()}),
+        content=json.dumps({
+            "status": "ready" if all_healthy else "not_ready",
+            "checks": checks,
+            "timestamp": time.time(),
+            "code_version": "dispatcher-v2",
+        }),
         media_type="application/json",
         status_code=status_code
     )

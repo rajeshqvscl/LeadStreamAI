@@ -8,6 +8,8 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings
 
+from app.core import clock
+
 
 class SchedulerConfig(BaseSettings):
     followup_interval_sec: int = 5
@@ -48,24 +50,21 @@ class SchedulerConfig(BaseSettings):
         case_sensitive = False
 
     def is_working_hours_now(self) -> bool:
-        tz = timezone(timedelta(hours=5, minutes=30))
-        now = datetime.now(tz)
+        now = clock.now_ist()
         if now.weekday() >= 5:
             return False
         return not (now.hour < self.working_hours_start or now.hour >= self.working_hours_end)
 
     def is_email_working_hours_now(self) -> bool:
-        """Email scheduler: 9AM-6PM IST, Mon-Fri."""
-        tz = timezone(timedelta(hours=5, minutes=30))
-        now = datetime.now(tz)
+        """Email scheduler: 9AM-6PM IST, Mon-Fri (DB clock)."""
+        now = clock.now_ist()
         if now.weekday() >= 5:
             return False
         return not (now.hour < self.email_working_hours_start or now.hour >= self.email_working_hours_end)
 
     def is_followup_working_hours_now(self) -> bool:
-        """Followup scheduler: 8:30AM-8PM IST, Mon-Fri."""
-        tz = timezone(timedelta(hours=5, minutes=30))
-        now = datetime.now(tz)
+        """Followup scheduler: 8:30AM-8PM IST, Mon-Fri (DB clock)."""
+        now = clock.now_ist()
         if now.weekday() >= 5:
             return False
         # 8:30 AM check: hour must be >= 8, and if hour == 8 then minute >= 30

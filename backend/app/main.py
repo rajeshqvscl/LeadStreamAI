@@ -18,8 +18,15 @@ configure_logging(
     json_output=os.getenv("LOG_FORMAT", "json").lower() == "json",
 )
 
+# Setup security logging with redaction filter
+from app.core.security_logging import setup_security_logging
+setup_security_logging()
+
 import logging
 logger = logging.getLogger(__name__)
+
+# Set by lifespan if starting the email dispatcher fails — exposed via /healthz
+_DISPATCHER_LIFESPAN_ERROR: str | None = None
 
 from app.core.pipeline.scheduler import get_scheduler_config
 from app.database import create_tables
@@ -34,19 +41,23 @@ async def maintenance_loop():
     The actual work (renew Gmail watches, cache cleanup, etc.) is a no-op
     placeholder for now; only the scheduling window is enforced so it can be
     wired up later without touching the loop logic.
-    """
-    from datetime import datetime, timedelta, timezone
 
+    Slot timing uses the DATABASE clock (app.core.clock.now_ist) so a skewed
+    machine clock can't fire maintenance at the wrong IST time, and the work is
+    wrapped in the distributed maintenance lock for multi-instance safety.
+    """
+    from datetime import datetime, timedelta
+
+    from app.core.clock import IST, now_ist
     from app.core.pipeline.scheduler import get_scheduler_config
 
     config = get_scheduler_config()
-    IST = timezone(timedelta(hours=5, minutes=30))
     maint_hours = config.get_maintenance_hours()
     maint_days = config.get_maintenance_days()
 
     while True:
         try:
-            now = datetime.now(IST)
+            now = now_ist()
             # Skip on off-days (outside Mon–Sat)
             if now.weekday() not in maint_days:
                 # Wait until the next Monday at the first maintenance hour
@@ -76,12 +87,19 @@ async def maintenance_loop():
                 wait_seconds / 3600,
             )
             await asyncio.sleep(wait_seconds)
-            # Run the actual maintenance work.
-            try:
-                # renew_all_gmail_watches()
-                pass
-            except Exception as e:
-                logger.exception(f"Maintenance task error: {e}")
+            # Run the actual maintenance work (under the distributed lock).
+            import time as _t
+            from app.core.observability.metrics import record_scheduler_job
+            from app.core.scheduler_lock import _maintenance_lock, scheduler_critical_section
+
+            with scheduler_critical_section(_maintenance_lock, "maintenance"):
+                start = _t.monotonic()
+                try:
+                    # renew_all_gmail_watches()
+                    record_scheduler_job("maintenance", "success", _t.monotonic() - start)
+                except Exception as e:
+                    logger.exception(f"Maintenance task error: {e}")
+                    record_scheduler_job("maintenance", "error", _t.monotonic() - start)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -132,30 +150,51 @@ async def scheduler_loop():
 
         async with _scheduler_lock:
             try:
-                # Check if it's weekend (Saturday=5, Sunday=6)
-                from datetime import datetime, timezone, timedelta
-                IST = timezone(timedelta(hours=5, minutes=30))
-                now_ist = datetime.now(IST)
-                if now_ist.weekday() >= 5:
+                # Weekend check uses the DB clock (a skewed machine clock must
+                # not decide sending days). Saturday=5, Sunday=6.
+                from app.core.clock import now_ist
+                if now_ist().weekday() >= 5:
                     # Weekend - skip this cycle
                     await asyncio.sleep(config.followup_interval_sec)
                     continue
 
                 tasks = []
 
-                # Follow-ups: every FOLLOWUP_INTERVAL
+                def _instrumented(name: str, lock, fn):
+                    """Wrap a scheduler task with its distributed lock + timing so
+                    /metrics gets one record per REAL run (skipped-lock cycles
+                    record nothing)."""
+                    import time as _t
+                    from app.core.observability.metrics import record_scheduler_job
+                    from app.core.scheduler_lock import scheduler_critical_section
+
+                    async def _run():
+                        with scheduler_critical_section(lock, name):
+                            start = _t.monotonic()
+                            try:
+                                await asyncio.to_thread(fn)
+                                record_scheduler_job(name, "success", _t.monotonic() - start)
+                            except Exception:
+                                record_scheduler_job(name, "error", _t.monotonic() - start)
+                                raise
+                    return _run()
+
+                # Follow-ups: every FOLLOWUP_INTERVAL (with distributed lock)
                 if now - last_followup >= config.followup_interval_sec:
-                    tasks.append(("followup", asyncio.to_thread(process_outreach_sequences)))
+                    from app.core.scheduler_lock import _followup_lock
+                    tasks.append(("followup", _instrumented("followup", _followup_lock, process_outreach_sequences)))
                     last_followup = now
 
-                # Scheduled emails: every SCHEDULED_INTERVAL
+                # Scheduled emails: every SCHEDULED_INTERVAL (with distributed lock)
                 if now - last_scheduled >= config.scheduled_interval_sec:
-                    tasks.append(("scheduled", asyncio.to_thread(check_scheduled_emails)))
+                    from app.core.scheduler_lock import _scheduled_lock
+                    tasks.append(("scheduled", _instrumented("scheduled", _scheduled_lock, check_scheduled_emails)))
                     last_scheduled = now
 
-                # Auto-pilot sweep: pick up review-queue drafts every ~5 min
+                # Auto-pilot sweep: pick up review-queue drafts every ~5 min (with distributed lock)
                 if now - last_autopilot >= 300:
-                    tasks.append(("autopilot", asyncio.to_thread(process_auto_pilot_sweep)))
+                    from app.core.scheduler_lock import _autopilot_lock
+                    tasks.append(("autopilot", _instrumented("autopilot", _autopilot_lock, process_auto_pilot_sweep)))
                     last_autopilot = now
 
                 if tasks:
@@ -177,20 +216,20 @@ async def reply_cleanup_loop():
     Runs the reply-monitoring job twice a day (configurable hours IST):
       - deletes remaining generated follow-ups for replied leads
       - sends the admin email report + in-app reminder notification
-    The loop sleeps precisely until the next scheduled slot.
+    The loop sleeps precisely until the next scheduled slot (DB clock).
     Skips weekends (Saturday/Sunday).
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
+    from app.core.clock import IST, now_ist
     from app.core.pipeline.scheduler import get_scheduler_config
 
     config = get_scheduler_config()
-    IST = timezone(timedelta(hours=5, minutes=30))
     cleanup_hours = config.get_reply_cleanup_hours()
 
     while True:
         try:
-            now = datetime.now(IST)
+            now = now_ist()
             # Skip cleanup on weekends (Sat=5, Sun=6)
             if now.weekday() >= 5:
                 # Calculate wait until Monday at first cleanup hour
@@ -216,8 +255,20 @@ async def reply_cleanup_loop():
                 wait_seconds / 3600,
             )
             await asyncio.sleep(wait_seconds)
+            # Run cleanup under the distributed lock (DB-clock slot).
+            import time as _t
+            from app.core.observability.metrics import record_scheduler_job
+            from app.core.scheduler_lock import _reply_cleanup_lock, scheduler_critical_section
             from app.services.reply_cleanup_service import run_daily_reply_cleanup_and_report
-            await asyncio.to_thread(run_daily_reply_cleanup_and_report)
+
+            with scheduler_critical_section(_reply_cleanup_lock, "reply_cleanup"):
+                start = _t.monotonic()
+                try:
+                    await asyncio.to_thread(run_daily_reply_cleanup_and_report)
+                    record_scheduler_job("reply_cleanup", "success", _t.monotonic() - start)
+                except Exception as e:
+                    logger.exception(f"Reply cleanup task error: {e}")
+                    record_scheduler_job("reply_cleanup", "error", _t.monotonic() - start)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -233,37 +284,50 @@ async def reply_polling_loop():
 
     Startup catch-up: if the most recent passed slot was missed <2 hours ago
     (e.g. server restart), poll immediately once so replies aren't delayed.
+    Slot timing uses the DATABASE clock so a skewed machine clock can't shift
+    the 9AM/1PM/5PM IST polls.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from app.api.gmail import poll_all_users_for_replies
+    from app.core.clock import IST, now_ist
     from app.core.pipeline.scheduler import get_scheduler_config
 
     config = get_scheduler_config()
-    IST = timezone(timedelta(hours=5, minutes=30))
     CATCHUP_WINDOW_HOURS = 2
+
+    async def _poll_once():
+        """Run one poll under the distributed lock, with metric recording."""
+        import time as _t
+        from app.core.observability.metrics import record_scheduler_job
+        from app.core.scheduler_lock import _reply_poll_lock, scheduler_critical_section
+
+        with scheduler_critical_section(_reply_poll_lock, "reply_poll"):
+            start = _t.monotonic()
+            try:
+                await asyncio.to_thread(poll_all_users_for_replies)
+                record_scheduler_job("reply_poll", "success", _t.monotonic() - start)
+            except Exception as e:
+                logger.exception(f"Reply polling error: {e}")
+                record_scheduler_job("reply_poll", "error", _t.monotonic() - start)
 
     # Startup catch-up: run once if we're just past a missed slot
     try:
-        now = datetime.now(IST)
+        now = now_ist()
         # Skip catch-up on weekends
         if now.weekday() < 5:
             for h in sorted(config.get_reply_poll_hours(), reverse=True):
                 slot = now.replace(hour=h, minute=0, second=0, microsecond=0)
                 if slot <= now and (now - slot) <= timedelta(hours=CATCHUP_WINDOW_HOURS):
                     logger.info(f"Reply polling: catching up on {h}:00 IST slot")
-                    # Run in thread with error handling
-                    try:
-                        await asyncio.to_thread(poll_all_users_for_replies)
-                    except Exception as e:
-                        logger.exception(f"Reply polling catch-up error: {e}")
+                    await _poll_once()
                     break
     except Exception as e:
         logger.exception(f"Reply polling catch-up setup error: {e}")
 
     while True:
         try:
-            now = datetime.now(IST)
+            now = now_ist()
             # Skip polling on weekends (Sat=5, Sun=6)
             if now.weekday() >= 5:
                 # Calculate wait until Monday 9 AM
@@ -289,12 +353,9 @@ async def reply_polling_loop():
                 wait_seconds / 3600,
             )
             await asyncio.sleep(wait_seconds)
-            
+
             # Run polling in thread with error handling
-            try:
-                await asyncio.to_thread(poll_all_users_for_replies)
-            except Exception as e:
-                logger.exception(f"Reply polling error: {e}")
+            await _poll_once()
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -312,12 +373,14 @@ async def lifespan(app: FastAPI):
     # Start email engine dispatcher
     email_dispatcher = None
     try:
-        from app.email_engine.worker.pool import get_dispatcher
+        from app.email_engine.worker.pool import get_dispatcher, start_dispatcher
+        start_dispatcher()
         email_dispatcher = get_dispatcher()
-        email_dispatcher.start()
         logger.info("Email engine dispatcher started")
     except Exception as e:
         logger.warning(f"Could not start email dispatcher: {e}")
+        global _DISPATCHER_LIFESPAN_ERROR
+        _DISPATCHER_LIFESPAN_ERROR = f"{type(e).__name__}: {e}"
 
     t1 = asyncio.create_task(scheduler_loop())
     t2 = asyncio.create_task(maintenance_loop())
@@ -348,7 +411,18 @@ async def root():
 @app.head("/healthz")
 async def healthz():
     """Dedicated liveness probe — avoids SPA catch-all interference."""
-    return {"status": "ok"}
+    from app.email_engine.worker.pool import (
+        POOL_MODULE_VERSION,
+        dispatcher_start_called,
+        get_dispatcher_start_error,
+    )
+    return {
+        "status": "ok",
+        "pool_version": POOL_MODULE_VERSION,
+        "dispatcher_start_called": dispatcher_start_called(),
+        "dispatcher_start_error": get_dispatcher_start_error(),
+        "dispatcher_lifespan_error": _DISPATCHER_LIFESPAN_ERROR,
+    }
 
 
 # Prometheus metrics endpoint
@@ -599,10 +673,22 @@ class AuthMiddleware(BaseHTTPMiddleware):
             token = auth_header[7:].strip()
 
         if not token:
+            from app.core.security_logging import log_security_event
+            log_security_event(
+                "AUTH_FAILURE",
+                details=f"No token provided for {request.url.path}",
+                ip_address=request.client.host if request.client else None,
+            )
             return JSONResponse(status_code=401, content={"detail": "Authentication required"})
 
         user_id = await asyncio.to_thread(_verify_session, token)
         if not user_id:
+            from app.core.security_logging import log_security_event
+            log_security_event(
+                "AUTH_FAILURE",
+                details=f"Invalid/expired session token for {request.url.path}",
+                ip_address=request.client.host if request.client else None,
+            )
             return JSONResponse(status_code=401, content={"detail": "Invalid or expired session. Please log in again."})
 
         # Override any client-supplied X-User-Id with the verified session user

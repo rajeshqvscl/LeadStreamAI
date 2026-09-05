@@ -266,6 +266,8 @@ def create_tables():
         ("replied_at", "TIMESTAMP"),
         # Pipeline state machine (replaces scattered status columns)
         ("pipeline_state", "TEXT DEFAULT 'NEW'"),
+        # Soft-delete flag — prevents active operations on deleted leads
+        ("is_deleted", "BOOLEAN DEFAULT FALSE"),
     ]
     # Skip ALTER TABLEs if all columns already exist (saves ~11s on Neon)
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'leads_raw'")

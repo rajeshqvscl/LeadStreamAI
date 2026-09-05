@@ -29,6 +29,12 @@ def get_redis_pool() -> redis.ConnectionPool:
         _pool = redis.ConnectionPool.from_url(
             url,
             max_connections=4,
+            # Without timeouts a hung Redis connection blocks the dispatcher
+            # thread forever (seen in prod: queue stopped draining, job
+            # backlog grew to ~8.8k). Fail fast and let the loop retry.
+            socket_connect_timeout=5,
+            socket_timeout=10,
+            retry_on_timeout=False,
             # decode_responses defaults to False — that's what we need
         )
     return _pool
