@@ -128,8 +128,17 @@ class TestIsSafeRedirectUrl:
     def test_allowed_host_localhost(self):
         assert _is_safe_redirect_url("http://localhost:3000/page") is True
 
-    def test_unknown_host_blocked(self):
-        assert _is_safe_redirect_url("https://evil.com/phish") is False
+    def test_any_http_host_allowed(self):
+        # External links (calendar, LinkedIn, company sites) must redirect fine
+        assert _is_safe_redirect_url("https://evil.com/phish") is True
+
+    def test_google_calendar_link_allowed(self):
+        assert _is_safe_redirect_url(
+            "https://calendar.google.com/calendar/u/0/r?cid=cGFsYWsuakBxdnNjbC5jb20"
+        ) is True
+
+    def test_query_params_preserved(self):
+        assert _is_safe_redirect_url("https://example.com/page?a=1&b=2") is True
 
     def test_javascript_blocked(self):
         assert _is_safe_redirect_url("javascript:alert(1)") is False

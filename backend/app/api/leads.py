@@ -192,7 +192,7 @@ def get_leads(
                ) as designation,
                labels, remarks
         FROM leads_raw
-        WHERE 1=1 AND (lr.is_deleted IS NULL OR lr.is_deleted = FALSE)
+        WHERE 1=1 AND (is_deleted IS NULL OR is_deleted = FALSE)
     """
     params = []
 

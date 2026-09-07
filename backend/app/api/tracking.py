@@ -1,7 +1,7 @@
 import hashlib
 import logging
 import re
-from urllib.parse import quote, unquote
+from urllib.parse import quote, urlparse
 
 from app.database import get_db_connection
 from fastapi import APIRouter, Request, Response
@@ -10,26 +10,26 @@ from fastapi.responses import RedirectResponse
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["tracking"])
 
-# Allowed redirect domains for click tracking (prevent open redirect)
-_ALLOWED_REDIRECT_HOSTS = {"leadstreamai.onrender.com", "lead-backend-g9de.onrender.com", "localhost"}
-
-
 def _is_safe_redirect_url(url: str) -> bool:
-    """Validate that a URL is safe to redirect to (same-origin or known host)."""
+    """Validate that a URL is safe to redirect to.
+
+    Click-tracked links legitimately point to ANY external destination the
+    sender put in the email (calendar invites, company sites, LinkedIn, ...),
+    so every absolute http/https URL with a host is allowed. Only
+    protocol-relative and non-http(s) schemes (javascript:, data:, ...) are
+    blocked.
+    """
     if not url:
         return False
     lower = url.lower()
-    # Block protocol-relative and dangerous schemes
-    if lower.startswith("//") or lower.startswith("javascript:") or lower.startswith("data:"):
+    # Block protocol-relative URLs (no scheme — resolve to unexpected hosts)
+    if lower.startswith("//"):
         return False
-    # Allow relative paths
+    # Allow relative paths (same-origin)
     if lower.startswith("/"):
         return True
-    # Check against allowed hosts
-    for host in _ALLOWED_REDIRECT_HOSTS:
-        if f"://{host}" in lower or lower.startswith(host):
-            return True
-    return False
+    parsed = urlparse(url)
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
 
 
 def _make_unique_gif(seed: str) -> bytes:
@@ -117,7 +117,9 @@ async def track_click(token: str, request: Request):
         logger.exception(f"Track click failed for token {token}: {e}")
 
     if url:
-        decoded = unquote(url)
+        # url comes from request.query_params, which is already percent-decoded
+        # once — unquoting again would corrupt URLs containing literal % chars.
+        decoded = url
         if not _is_safe_redirect_url(decoded):
             logger.warning(f"Blocked unsafe redirect URL for token {token}: {decoded[:200]}")
             return Response(content="OK", status_code=200)
