@@ -52,7 +52,12 @@ class LLMSettings(BaseSettings):
     groq_model: str = "llama-3.3-70b-versatile"
 
     class Config:
-        env_prefix = "LLM_"
+        # Keys live in .env WITHOUT the LLM_ prefix (GROQ_API_KEY, GEMINI_API_KEY,
+        # ANTHROPIC_API_KEY) — same names llm_services.EmailGenerator reads via os.getenv.
+        env_prefix = ""
+        env_file = ".env"
+        case_sensitive = False
+        extra = "ignore"
 
 
 class EmailEngineSettings(BaseSettings):

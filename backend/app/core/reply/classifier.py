@@ -69,7 +69,12 @@ class ReplyClassifier:
 
     def __init__(self, llm_client=None):
         self.llm_client = llm_client
-        self._llm_available = llm_client is not None
+        # LLM path is available when a client is injected OR when at least one
+        # LLM API key is configured (the singleton get_reply_classifier() passes
+        # no client, but must still use the LLM chain when keys exist).
+        settings = get_llm_settings()
+        has_keys = bool(settings.groq_api_key or settings.gemini_api_key or settings.anthropic_api_key)
+        self._llm_available = llm_client is not None or has_keys
 
     def classify(self, body: str) -> ClassificationResult:
         """
@@ -204,5 +209,6 @@ _classifier: ReplyClassifier | None = None
 def get_reply_classifier() -> ReplyClassifier:
     global _classifier
     if _classifier is None:
+        # No client injected — _llm_available is derived from configured LLM keys.
         _classifier = ReplyClassifier()
     return _classifier

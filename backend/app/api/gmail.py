@@ -251,6 +251,79 @@ def _cancel_pending_followup_jobs(lead_ids):
         return 0
 
 
+def _hard_delete_followups(cur, conn, lead_id: int, reason: str, user_id=None, reply_intent: str | None = None) -> int:
+    """HARD-DELETE a lead's follow-up state — not just 'STOPPED'.
+
+    Deletes the follow-up entirely:
+      - followup_status -> NULL, followup_stage -> 0
+      - followup_draft -> NULL, followup_approved -> FALSE
+      - scheduled_at -> NULL
+    plus purges queued/scheduled follow-up jobs from the queues.
+
+    Every deletion is recorded in the `followup_deletions` audit table
+    (before-state + how many queued jobs were removed + reason) so the
+    deletion is permanent but traceable.
+
+    Returns the number of queued jobs purged.
+    """
+    if not lead_id:
+        return 0
+
+    # Snapshot the before-state for the audit trail
+    fu_status = None
+    fu_stage = 0
+    lead_email = None
+    company = None
+    try:
+        cur.execute(
+            "SELECT followup_status, followup_stage, email, company_name FROM leads_raw WHERE id = %s",
+            (lead_id,),
+        )
+        before = cur.fetchone()
+        if before:
+            fu_status = before.get('followup_status')
+            fu_stage = before.get('followup_stage') or 0
+            lead_email = before.get('email')
+            company = before.get('company_name')
+    except Exception as e:
+        logger.warning(f"Hard-delete: could not snapshot lead {lead_id}: {e}")
+
+    # Purge queued/scheduled follow-up jobs
+    jobs_purged = _cancel_pending_followup_jobs([lead_id])
+
+    # HARD DELETE the follow-up state (NULL / 0 — not STOPPED)
+    try:
+        cur.execute(
+            "UPDATE leads_raw SET followup_status = NULL, followup_stage = 0, "
+            "followup_draft = NULL, followup_approved = FALSE, scheduled_at = NULL, "
+            "updated_at = NOW() WHERE id = %s",
+            (lead_id,),
+        )
+    except Exception as e:
+        logger.exception(f"Hard-delete: DB update failed for lead {lead_id}: {e}")
+        return jobs_purged
+
+    # Audit record — permanent receipt of the deletion
+    try:
+        cur.execute(
+            """INSERT INTO followup_deletions
+               (lead_id, user_id, email, company_name, reply_intent,
+                followup_status_before, followup_stage_before, jobs_deleted, reason)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (lead_id, user_id, lead_email, company, reply_intent,
+             fu_status, fu_stage, jobs_purged, reason),
+        )
+    except Exception as log_err:
+        logger.warning(f"Hard-delete: audit log insert failed for lead {lead_id}: {log_err}")
+
+    conn.commit()
+    if jobs_purged:
+        logger.info(f"HARD-DELETE followups for lead {lead_id}: {jobs_purged} queued job(s) purged, state cleared")
+    else:
+        logger.info(f"HARD-DELETE followups for lead {lead_id}: state cleared (no queued jobs)")
+    return jobs_purged
+
+
 def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
     """Correlates a new Gmail message with a lead and performs AI intent analysis."""
     conn = get_db_connection()
@@ -375,6 +448,30 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 return  # Do NOT process — require manual triage
 
         lead_id = lead_exists['id']
+
+        # ── CRITICAL: ANY reply cancels this lead's scheduled followups IMMEDIATELY ──
+        # This runs BEFORE AI classification / RAG enrichment (which can take minutes
+        # — RAG PDF processing polls up to ~5 min). A replied lead must never receive
+        # another automated email, regardless of reply type (decline, interested,
+        # meeting request, or unknown). Queue purge is idempotent, so the later
+        # cancel call in the success path is harmless.
+        #
+        # HARD DELETE (not 'STOPPED'): the follow-up is removed entirely —
+        # followup_status -> NULL, stage -> 0, draft -> NULL, approved -> FALSE,
+        # scheduled_at -> NULL, plus queued jobs purged. Recorded in the
+        # followup_deletions audit table. If the AI classification / RAG
+        # enrichment below raises, the scheduler (which picks leads from the DB
+        # by followup_status='ACTIVE' AND is_responded=FALSE) can never re-queue
+        # a followup — the state is simply gone.
+        cur.execute(
+            "UPDATE leads_raw SET is_responded = TRUE, "
+            "replied_at = COALESCE(replied_at, NOW()), "
+            "updated_at = NOW() "
+            "WHERE id = %s",
+            (lead_id,)
+        )
+        conn.commit()
+        _hard_delete_followups(cur, conn, lead_id, reason="REPLY_DETECTED", user_id=user_id)
 
         # Step 1: AI Intent Classification using new ReplyClassifier
         from app.core.reply.classifier import get_reply_classifier
@@ -560,12 +657,11 @@ def handle_potential_reply(user_id: int, thread_id: str, message_data: dict):
                 urgency_level = %s,
                 remarks = %s,
                 rejection_reason = %s,
-                followup_status = %s,
                 pipeline_state = %s,
                 updated_at = NOW()
             WHERE id = %s
             RETURNING id, first_name, last_name, user_id
-        """, (final_status, classification.intent, check_size, deal_size, pitch_deck_url, rag_advice, rag_intel_json, rag_category, classification.sentiment_score, classification.urgency_level, body, rejection_reason, lead_update.followup_status, lead_update.pipeline_state.value, lead_id))
+        """, (final_status, classification.intent, check_size, deal_size, pitch_deck_url, rag_advice, rag_intel_json, rag_category, classification.sentiment_score, classification.urgency_level, body, rejection_reason, lead_update.pipeline_state.value, lead_id))
 
 
         lead = cur.fetchone()

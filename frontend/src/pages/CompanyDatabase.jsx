@@ -21,6 +21,7 @@ const CompanyDatabase = () => {
   const [selectedTab, setSelectedTab] = useState(null);
   const [isLoadingTabs, setIsLoadingTabs] = useState(false);
   const [processingId, setProcessingId] = useState(null);
+  const [viewDraftCompany, setViewDraftCompany] = useState(null);
 
   const [isSaving, setIsSaving] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState(null);
@@ -350,9 +351,8 @@ const CompanyDatabase = () => {
     setProcessingId(id);
     try {
       await api.post(`/api/companies/${id}/generate-draft`);
-      showNotification('success', '✓ Lead moved to pipeline. Draft added to Email Queue.');
+      showNotification('success', '✓ Draft generated & saved in Company Database.');
       fetchCompanies();
-      navigate('/dashboard/emails?status=PENDING_APPROVAL');
     } catch (err) {
       showNotification('error', 'Draft Generation Fault: ' + (err.response?.data?.detail || err.message));
     } finally {
@@ -395,24 +395,8 @@ const CompanyDatabase = () => {
             }));
             if (p.status === 'done') {
               clearInterval(pollInterval);
-              // Smart reconciliation: verify actual draft results from the DB
-              // instead of blindly trusting in-memory progress counters.
-              let finalSuccess = p.success;
-              try {
-                const leadIds = (p.results || []).filter(r => r.ok && r.lead_id).map(r => r.lead_id);
-                if (leadIds.length > 0) {
-                  const st = await api.post('/api/leads/status-batch', { lead_ids: leadIds }, { timeout: 15000 });
-                  const verified = (st.data.statuses || []).filter(s => ['PENDING_APPROVAL', 'APPROVED', 'SENT'].includes(s.email_status)).length;
-                  finalSuccess = Math.max(verified, p.success);
-                }
-              } catch { /* fall back to reported counter */ }
               fetchCompanies();
-              const sched = p.scheduled_info;
-              const schedNote = sched?.scheduled
-                ? ` Drip-scheduled ${sched.scheduled} — first email ${new Date(sched.first_send).toLocaleString('en-IN', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}.`
-                : '';
-              showNotification('success', `✓ ${finalSuccess} lead${finalSuccess > 1 ? 's' : ''} moved to pipeline.${schedNote}`);
-              navigate('/dashboard/emails?status=PENDING_APPROVAL');
+              showNotification('success', `✓ ${p.success} draft${p.success > 1 ? 's' : ''} generated & saved in Company Database.`);
             } else if (p.status === 'error') {
               clearInterval(pollInterval);
               fetchCompanies();
@@ -475,20 +459,8 @@ const CompanyDatabase = () => {
             }));
             if (p.status === 'done') {
               clearInterval(pollInterval);
-              // Smart reconciliation: verify actual draft results from the DB
-              // instead of blindly trusting in-memory progress counters.
-              let finalSuccess = p.success;
-              try {
-                const leadIds = (p.results || []).filter(r => r.ok && r.lead_id).map(r => r.lead_id);
-                if (leadIds.length > 0) {
-                  const st = await api.post('/api/leads/status-batch', { lead_ids: leadIds }, { timeout: 15000 });
-                  const verified = (st.data.statuses || []).filter(s => ['PENDING_APPROVAL', 'APPROVED', 'SENT'].includes(s.email_status)).length;
-                  finalSuccess = Math.max(verified, p.success);
-                }
-              } catch { /* fall back to reported counter */ }
               fetchCompanies();
-              showNotification('success', `Template "${templateName}" applied to ${finalSuccess} lead${finalSuccess > 1 ? 's' : ''}.`);
-              navigate('/dashboard/emails?status=PENDING_APPROVAL');
+              showNotification('success', `Template "${templateName}" applied — ${p.success} draft${p.success > 1 ? 's' : ''} saved in Company Database.`);
             } else if (p.status === 'error') {
               clearInterval(pollInterval);
               fetchCompanies();
@@ -508,11 +480,11 @@ const CompanyDatabase = () => {
   };
 
   const handleSendEmail = async (id) => {
-    if (!window.confirm("Confirm Direct Dispatch? This will generate a lead and mark email as sent.")) return;
+    if (!window.confirm("Confirm Direct Dispatch? This will send the email immediately and create a pipeline lead for tracking.")) return;
     setProcessingId(id);
     try {
       await api.post(`/api/companies/${id}/send`);
-      showNotification('success', 'Direct Dispatch: Logged in lead pipeline.');
+      showNotification('success', 'Direct Dispatch: Email sent, lead added to pipeline.');
     } catch (err) {
       showNotification('error', 'Dispatch Failure: ' + (err.response?.data?.detail || err.message));
     } finally {
@@ -1141,10 +1113,19 @@ const CompanyDatabase = () => {
                         onClick={() => openTemplatePicker(company.id)}
                         disabled={processingId === company.id}
                         className="p-2.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 transition-all group/btn"
-                        title="Generate Draft in Pipeline"
+                        title="Generate Draft"
                       >
                         {processingId === company.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 group-hover/btn:scale-110 transition-transform" />}
                       </button>
+                      {company._draft && (
+                        <button
+                          onClick={() => setViewDraftCompany(company)}
+                          className="p-2.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 transition-all group/btn"
+                          title="View Generated Draft"
+                        >
+                          <Eye className="w-4 h-4 group-hover/btn:scale-110 transition-transform" />
+                        </button>
+                      )}
                       <button
                         onClick={() => handleSendEmail(company.id)}
                         disabled={processingId === company.id}
@@ -1290,6 +1271,57 @@ const CompanyDatabase = () => {
         )}
       </div>
       {renderEditDrawer()}
+
+      {/* Generated Draft Viewer — drafts live on the registry row, not the lead pipeline */}
+      {viewDraftCompany && (
+        <div
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[5000] animate-in fade-in duration-300"
+          onClick={() => setViewDraftCompany(null)}
+        />
+      )}
+      {viewDraftCompany && (
+        <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-3xl bg-[#0d1117] border border-white/10 rounded-3xl shadow-[0_0_60px_rgba(0,0,0,0.6)] z-[5001] animate-in zoom-in-95 duration-300 flex flex-col max-h-[85vh]">
+          <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-purple-500 via-blue-500 to-emerald-500 shrink-0" />
+          <div className="flex items-center justify-between px-6 py-5 border-b border-white/5 shrink-0">
+            <div>
+              <h2 className="text-lg font-black text-white tracking-tight flex items-center gap-2">
+                <Eye className="w-5 h-5 text-purple-400" /> Generated Draft
+              </h2>
+              <p className="text-slate-500 text-[11px] mt-0.5 font-medium">
+                {viewDraftCompany['Company Name'] || viewDraftCompany['company'] || viewDraftCompany['name'] || 'Company'} — saved in Company Database (not in lead pipeline)
+              </p>
+            </div>
+            <button onClick={() => setViewDraftCompany(null)} className="text-slate-500 hover:text-white transition-colors cursor-pointer">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="p-6 overflow-y-auto custom-scrollbar flex-1 min-h-0">
+            <div className="mb-4">
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Subject</p>
+              <p className="text-white font-bold text-sm">{viewDraftCompany._draft?.subject || '—'}</p>
+            </div>
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Body</p>
+            <div
+              className="prose prose-invert prose-sm max-w-none text-slate-300 leading-relaxed bg-white/[0.02] border border-white/5 rounded-2xl p-5"
+              dangerouslySetInnerHTML={{ __html: viewDraftCompany._draft?.html || viewDraftCompany._draft?.body || 'No body' }}
+            />
+          </div>
+          <div className="flex gap-3 p-6 pt-0 shrink-0">
+            <button
+              onClick={() => setViewDraftCompany(null)}
+              className="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 font-bold text-xs uppercase tracking-widest border border-white/5 cursor-pointer transition-colors"
+            >
+              Close
+            </button>
+            <button
+              onClick={() => { setViewDraftCompany(null); openTemplatePicker(viewDraftCompany.id); }}
+              className="flex-[2] py-3 px-6 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-500/20 cursor-pointer transition-all"
+            >
+              Regenerate Draft
+            </button>
+          </div>
+        </div>
+      )}
 
       <DraftTemplatePicker
         isOpen={showTemplatePicker}

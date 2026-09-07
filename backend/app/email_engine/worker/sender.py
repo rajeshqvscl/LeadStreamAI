@@ -49,7 +49,7 @@ def _validate_job_ownership(job: 'EmailJob') -> tuple[bool, str]:
         cur = conn.cursor()
         try:
             cur.execute(
-                "SELECT id, user_id, email_status, followup_status, pipeline_state "
+                "SELECT id, user_id, email_status, followup_status, pipeline_state, is_responded "
                 "FROM leads_raw WHERE id = %s",
                 (job.lead_id,),
             )
@@ -81,6 +81,11 @@ def _validate_job_ownership(job: 'EmailJob') -> tuple[bool, str]:
                 return False, f"Lead {job.lead_id} has status {lead['email_status']}"
             if (lead.get('followup_status') or '') in stop_followups:
                 return False, f"Lead {job.lead_id} followup is {lead['followup_status']}"
+            # Reply monitor HARD-DELETES followup state on any reply
+            # (followup_status -> NULL), so also block on the reply flag itself.
+            # DB is source of truth — never email a lead that has responded.
+            if lead.get('is_responded'):
+                return False, f"Lead {job.lead_id} has responded (is_responded=TRUE) — blocking send"
 
             # Gmail account ownership: verify user has Google tokens
             cur.execute(

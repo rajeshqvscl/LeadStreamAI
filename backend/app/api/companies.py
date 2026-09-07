@@ -380,6 +380,16 @@ def update_company(row_id: int, row_data: dict[str, Any], user_id: str | None = 
     cur = conn.cursor()
 
     try:
+        # Preserve the generated draft (stored in row_data as _draft) across edits
+        if "_draft" not in row_data:
+            cur.execute("SELECT row_data FROM company_registry WHERE id = %s AND user_id = %s", (row_id, uid))
+            old = cur.fetchone()
+            if old:
+                old_data = old[0]
+                if isinstance(old_data, str):
+                    old_data = json.loads(old_data)
+                if isinstance(old_data, dict) and old_data.get("_draft"):
+                    row_data = {**row_data, "_draft": old_data["_draft"]}
         cur.execute(
             "UPDATE company_registry SET row_data = %s, updated_at = NOW() WHERE id = %s AND user_id = %s",
             (json.dumps(row_data), row_id, uid)
@@ -1041,9 +1051,164 @@ def enrich_row_data_internal(data: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         return data
 
+
+def _generate_registry_draft(data: dict[str, Any], template_name: str | None, signature_id: int | None, user_id: str | None) -> dict:
+    """Generate draft content for a company registry row WITHOUT creating a pipeline lead.
+
+    Returns {"subject": ..., "body": ..., "html": ...}. Mirrors the template logic in
+    drafts.generate_email_internal() but works off registry row_data only — no leads_raw row.
+    """
+    from app.api.drafts import get_sender_profile, inject_signature, markdown_to_html
+    from app.services.email_service import (
+        get_user_email_font,
+        get_user_email_font_size,
+        get_user_image_height,
+        get_user_image_width,
+    )
+    from app.services.llm_services import EmailGenerator
+
+    uid = normalize_user_id(user_id)
+    norm = {str(k).lower().replace(" ", "").replace("-", "").replace("_", ""): v for k, v in data.items() if v}
+
+    # Build a lead-like dict from the registry row (mirrors generate_email_internal usage)
+    _raw_name = (
+        norm.get("name") or norm.get("fullname") or norm.get("person")
+        or norm.get("personname") or norm.get("contact") or norm.get("contactname") or ""
+    )
+    _parts = _raw_name.split(" ", 1)
+    f_name = (_parts[0] if _parts else "") or "there"
+    l_name = _parts[1] if len(_parts) > 1 else ""
+    company = (
+        norm.get("companyname") or norm.get("company") or norm.get("investorname")
+        or norm.get("org") or norm.get("firm") or norm.get("organization") or ""
+    ).strip()
+
+    lead_like = {
+        "first_name": f_name,
+        "last_name": l_name,
+        "name": f"{f_name} {l_name}".strip(),
+        "email": norm.get("email") or norm.get("emailaddress") or norm.get("workemail") or norm.get("primaryemail") or "",
+        "company_name": company or "your organization",
+        "designation": norm.get("designation") or norm.get("jobtitle") or norm.get("role") or "",
+        "persona": norm.get("persona") or "OTHER",
+        "sector": norm.get("sector") or norm.get("industry") or "",
+        "rag_advice": None,
+    }
+
+    profile = get_sender_profile(user_id)
+
+    # Override signature if a specific signature_id is provided (same as generate_email_internal)
+    if signature_id:
+        try:
+            sig_conn = get_db_connection()
+            sig_cur = sig_conn.cursor()
+            sig_cur.execute("SELECT content FROM user_signatures WHERE id = %s AND user_id = %s", (signature_id, uid))
+            sig_row = sig_cur.fetchone()
+            sig_cur.close()
+            sig_conn.close()
+            if sig_row:
+                sig_content = sig_row[0] if not isinstance(sig_row, dict) else sig_row['content']
+                profile['signatures'] = [{'content': sig_content, 'is_default': True}]
+        except Exception as sig_err:
+            logger.warning(f"Failed to fetch signature_id={signature_id}: {sig_err}")
+
+    generator = EmailGenerator()
+    sender_name = profile.get('full_name') or profile.get('username') or "the team"
+    sender_linkedin = profile.get('linkedin_url') or "https://www.linkedin.com/company/qvscl/"
+    full_name = f"{f_name} {l_name}".strip() or "there"
+
+    subject = None
+    body = None
+
+    if template_name == 'palak':
+        # Try the saved palak template first, else AI fallback
+        conn = get_db_connection()
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cur.execute("SELECT content FROM prompts WHERE name = 'palak_mam_Draft_1' AND is_active = TRUE")
+            palak_row = cur.fetchone()
+        finally:
+            cur.close(); conn.close()
+        if palak_row:
+            template_body = palak_row["content"]
+            body = template_body.replace("{{First Name}}", f_name).replace("{{first name}}", f_name).replace("{{first_name}}", f_name)
+            body = body.replace("{{Full Name}}", full_name).replace("{{full_name}}", full_name)
+            body = body.replace("{{Company Name}}", company or "your organization").replace("{{Company}}", company or "your organization").replace("{{company_name}}", company or "your organization")
+            body = body.replace("***{{Sender Name}}***", sender_name).replace("{{Sender Name}}", sender_name)
+            body = body.replace("{{Sender Title}}", profile.get('job_title') or "").replace("{{Sender Phone}}", profile.get('phone') or "")
+            body = body.replace("{{Sender LinkedIn}}", sender_linkedin).replace("{{Sender Linkedin}}", sender_linkedin)
+            subject = f"Strategic Investment/Partnership Opportunity | QVSCL × {company or 'your organization'}"
+        else:
+            email_data = generator.generate_palak_email(lead_like, sender_name=sender_name, sender_linkedin=sender_linkedin)
+            subject, body = email_data.get("subject"), email_data.get("body")
+    elif template_name and template_name != 'standard':
+        # Custom prompt from prompts table (CUSTOM_DRAFT)
+        conn = get_db_connection()
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cur.execute("SELECT content, subject, description FROM prompts WHERE name = %s AND prompt_type = 'CUSTOM_DRAFT' AND is_active = TRUE", (template_name,))
+            row_t = cur.fetchone()
+        finally:
+            cur.close(); conn.close()
+        if row_t:
+            template_body = row_t["content"]
+            template_subject = (row_t.get("subject") or "").strip()
+            sender_full_name = sender_name
+            sender_first_name = sender_full_name.split()[0] if sender_full_name else "Team"
+            sender_title = (profile.get('job_title') or "").strip() or "Analyst"
+            sender_phone = (profile.get('phone') or "").strip() or "8527083798"
+            subject = template_subject or template_name.replace("_", " ").title()
+            subject = subject.replace("{{First Name}}", f_name).replace("{{Company Name}}", company or "your organization").replace("{{Company}}", company or "your organization")
+            body = template_body
+            replacements = [
+                ("{{First Name}}", f_name),
+                ("{{first name}}", f_name),
+                ("{{first_name}}", f_name),
+                ("{{Full Name}}", full_name),
+                ("{{full_name}}", full_name),
+                ("{{Company Name}}", company or "your organization"),
+                ("{{company_name}}", company or "your organization"),
+                ("{{Company}}", company or "your organization"),
+                ("{{Designation}}", (norm.get("designation") or norm.get("jobtitle") or "").strip()),
+                ("***{{Sender Name}}***", sender_full_name),
+                ("{{Sender Name}}", sender_full_name),
+                ("{{Sender Full Name}}", sender_full_name),
+                ("{{Sender First Name}}", sender_first_name),
+                ("{{Sender Title}}", sender_title),
+                ("{{Sender Phone}}", sender_phone),
+                ("{{Sender LinkedIn}}", sender_linkedin),
+                ("{{Sender Linkedin}}", sender_linkedin),
+                ("[[BACKEND_URL]]", os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")),
+            ]
+            for placeholder, value in replacements:
+                reg = re.compile(re.escape(placeholder), re.IGNORECASE)
+                body = reg.sub(str(value or ""), body)
+        else:
+            email_data = generator.generate_email(lead_like, sender_name=sender_name, sender_linkedin=sender_linkedin)
+            subject, body = email_data.get("subject"), email_data.get("body")
+    else:
+        email_data = generator.generate_email(lead_like, sender_name=sender_name, sender_linkedin=sender_linkedin)
+        subject, body = email_data.get("subject"), email_data.get("body")
+
+    body_with_sig = inject_signature(body or "", profile, 0)
+    html_body = markdown_to_html(
+        body_with_sig,
+        font_family=get_user_email_font(user_id),
+        font_size=get_user_email_font_size(user_id),
+        image_width=get_user_image_width(user_id),
+        image_height=get_user_image_height(user_id),
+    )
+    return {"subject": subject or "Following up", "body": body_with_sig, "html": html_body}
+
+
 @router.post("/companies/{row_id}/generate-draft")
-def generate_company_draft(row_id: int, template_name: str | None = None, auto_schedule: bool = False, user_id: str | None = Header(None, alias="X-User-Id")):
-    """Converts a company registry record to a lead and generates an email draft."""
+def generate_company_draft(row_id: int, template_name: str | None = None, auto_schedule: bool = False, create_lead: bool = False, signature_id: int | None = None, user_id: str | None = Header(None, alias="X-User-Id")):
+    """Generates an email draft for a company registry record.
+
+    Default (create_lead=False): draft is generated and stored ON the registry row —
+    NO lead is created in the lead pipeline. create_lead=True (used by /send) also
+    creates a pipeline lead because email dispatch needs lead tracking.
+    """
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
@@ -1151,113 +1316,67 @@ def generate_company_draft(row_id: int, template_name: str | None = None, auto_s
         )
         conn.commit()
 
-        insert_lead(f_name, l_name, email, "", norm.get("linkedin", ""), company, "intelligence", data, user_id=uid, user_name=sender_name)
+        if create_lead:
+            # --- LEAD-BASED FLOW (used by /send — email dispatch needs pipeline tracking) ---
+            insert_lead(f_name, l_name, email, "", norm.get("linkedin", ""), company, "intelligence", data, user_id=uid, user_name=sender_name)
 
-        cur.execute("SELECT id FROM leads_raw WHERE email = %s AND user_id = %s ORDER BY created_at DESC LIMIT 1", (email, uid))
-        lead_row = cur.fetchone()
-        if not lead_row:
-             raise HTTPException(status_code=500, detail="Lead synchronization fault: Record failed to propagate to pipeline.")
+            cur.execute("SELECT id FROM leads_raw WHERE email = %s AND user_id = %s ORDER BY created_at DESC LIMIT 1", (email, uid))
+            lead_row = cur.fetchone()
+            if not lead_row:
+                raise HTTPException(status_code=500, detail="Lead synchronization fault: Record failed to propagate to pipeline.")
 
-        lead_id = lead_row['id'] if isinstance(lead_row, dict) else lead_row[0]
+            lead_id = lead_row['id'] if isinstance(lead_row, dict) else lead_row[0]
 
-        try:
-            # --- NEW: Reuse universal generator logic ---
-            from app.api.drafts import DraftRequest, generate_email_internal
-            req = DraftRequest(lead_id=lead_id, template_type=template_name or 'standard')
-            res = generate_email_internal(req, user_id)
-            # Mark as generated in company registry
-            if is_admin:
-                cur.execute("UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = %s", (row_id,))
-            else:
-                cur.execute("UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = %s AND user_id = %s", (row_id, uid))
-            conn.commit()
-            invalidate_companies_cache(str(uid))
+            try:
+                # --- Reuse universal generator logic (needs an existing lead row) ---
+                from app.api.drafts import DraftRequest, generate_email_internal
+                req = DraftRequest(lead_id=lead_id, template_type=template_name or 'standard', signature_id=signature_id)
+                res = generate_email_internal(req, user_id)
+                res["lead_id"] = lead_id
+                # Mark as generated in company registry
+                if is_admin:
+                    cur.execute("UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = %s", (row_id,))
+                else:
+                    cur.execute("UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = %s AND user_id = %s", (row_id, uid))
+                conn.commit()
+                invalidate_companies_cache(str(uid))
 
-            # AUTO-DRIP: single-row generation also enters the drip queue
-            # (skipped when the caller dispatches immediately, e.g. /send).
-            if auto_schedule:
-                try:
-                    from app.services.email_service import schedule_drip_batch
-                    sched_info = schedule_drip_batch([lead_id], uid)
-                    if sched_info.get("scheduled"):
-                        logger.info(f"AUTO-DRIP: lead {lead_id} scheduled (single generate)")
-                        res["scheduled_info"] = sched_info
-                except Exception as sched_err:
-                    logger.exception(f"AUTO-DRIP scheduling failed for lead {lead_id}: {sched_err}")
+                # AUTO-DRIP: single-row generation also enters the drip queue
+                # (skipped when the caller dispatches immediately, e.g. /send).
+                if auto_schedule:
+                    try:
+                        from app.services.email_service import schedule_drip_batch
+                        sched_info = schedule_drip_batch([lead_id], uid)
+                        if sched_info.get("scheduled"):
+                            logger.info(f"AUTO-DRIP: lead {lead_id} scheduled (single generate)")
+                            res["scheduled_info"] = sched_info
+                    except Exception as sched_err:
+                        logger.exception(f"AUTO-DRIP scheduling failed for lead {lead_id}: {sched_err}")
 
-            return res
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).exception(f"Draft Generation Error for lead {lead_id}: {e}")
-            raise HTTPException(status_code=500, detail=f"Generation pipeline error: {str(e)}")
+                return res
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).exception(f"Draft Generation Error for lead {lead_id}: {e}")
+                raise HTTPException(status_code=500, detail=f"Generation pipeline error: {str(e)}")
 
-        subject = res.get("subject")
-        body = res.get("body")
-        gmail_draft_id = res.get("gmail_draft_id")
-        email_content = f"Subject: {subject}\n\n{body}"
+        # --- REGISTRY-ONLY FLOW: draft stored on the registry row, NO pipeline lead ---
+        draft = _generate_registry_draft(data, template_name, signature_id, user_id)
 
-        # Mark as generated in company registry
-        cur.execute("UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = %s AND user_id = %s", (row_id, uid))
+        # Persist the draft on the registry row so Company Database UI can show it
+        data["_draft"] = draft
+        if is_admin:
+            cur.execute("UPDATE company_registry SET row_data = %s, _is_generated = TRUE, updated_at = NOW() WHERE id = %s", (json.dumps(data), row_id))
+        else:
+            cur.execute("UPDATE company_registry SET row_data = %s, _is_generated = TRUE, updated_at = NOW() WHERE id = %s AND user_id = %s", (json.dumps(data), row_id, uid))
         conn.commit()
+        invalidate_companies_cache(str(uid))
 
-        return {"success": True, "lead_id": lead_id, "message": "Draft generated and moved to Lead Pipeline."}
-
-        # --- Step 1: Create Gmail Draft FIRST (so we have the ID) ---
-        gmail_draft_id = None
-        try:
-            import base64
-            from email.mime.text import MIMEText
-
-            from app.api.drafts import markdown_to_html
-            from app.services.google_service import get_gmail_service
-
-            service = get_gmail_service(int(uid))
-            if service:
-                # Use HTML for better consistency
-                from app.services.email_service import get_user_email_font, get_user_email_font_size, get_user_image_width, get_user_image_height
-                html_body = markdown_to_html(body, font_family=get_user_email_font(uid), font_size=get_user_email_font_size(uid), image_width=get_user_image_width(uid), image_height=get_user_image_height(uid))
-                message = MIMEText(html_body, 'html')
-                message['to'] = email
-                message['subject'] = subject
-                raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
-
-                # Create Gmail Draft
-                draft_body = {'message': {'raw': raw_message}}
-                created_draft = service.users().drafts().create(userId='me', body=draft_body).execute()
-                gmail_draft_id = created_draft.get('id')
-                print(f"✅ Created Gmail draft {gmail_draft_id} for Lead {lead_id} (from Registry)")
-        except Exception as ge:
-            print(f"⚠️  Gmail draft sync failed for Registry lead (non-blocking): {ge}")
-
-        # --- Step 2: Save to DB with gmail_draft_id ---
-        cur.execute("""
-            UPDATE leads_raw
-            SET email_draft = %s,
-                email_status = 'PENDING_APPROVAL',
-                updated_at = NOW(),
-                gmail_draft_id = %s
-            WHERE id = %s
-        """, (email_content, gmail_draft_id, lead_id))
-
-        # Mark as generated in company registry - it's now in the lead pipeline
-        cur.execute("UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = %s AND user_id = %s", (row_id, uid))
-        conn.commit()
-
-        # Invalidate Redis cache so review queue shows the new draft
-        try:
-            from app.api.drafts import invalidate_pending_drafts_cache
-            invalidate_pending_drafts_cache(str(uid) if uid else None)
-        except Exception:
-            pass
-
-        # Log activity
-        try:
-            from app.models.lead import add_activity_log
-            add_activity_log(lead_id, "DRAFT_GENERATED", f"Draft generated from Intelligence Grid {'(Gmail synced ✅)' if gmail_draft_id else ''}", sender_name)
-        except Exception:
-            pass
-
-        return {"success": True, "lead_id": lead_id, "message": "Draft generated and moved to Lead Pipeline."}
+        return {
+            "success": True,
+            "row_id": row_id,
+            "draft": draft,
+            "message": "Draft generated and saved to Company Database."
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1292,7 +1411,6 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: str | No
         import logging
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        from app.api.drafts import DraftRequest, generate_email_internal
         logger = logging.getLogger(__name__)
         uid = normalize_user_id(user_id)
 
@@ -1326,13 +1444,14 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: str | No
                 cur.close(); conn.close()
                 return
 
-            created_leads = []
+            # Drop opt-out flags for these contacts — user explicitly chose to generate
+            # drafts for them, so treat as an opt-back-in. No lead row is touched.
+            emails_here = []
             for row in rows:
                 data = row['row_data']
                 if isinstance(data, str):
                     data = json.loads(data)
                 norm = {str(k).lower().replace(" ", "").replace("-", "").replace("_", ""): v for k, v in data.items() if v}
-
                 email = (
                     norm.get("email") or norm.get("emailaddress") or
                     norm.get("workemail") or norm.get("primaryemail")
@@ -1342,101 +1461,45 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: str | No
                         val = str(v).strip()
                         if "@" in val and "." in val and len(val) > 5 and " " not in val:
                             email = val; break
-                if not email:
-                    _bulk_company_progress[batch_id]["processed"] += 1
-                    _bulk_company_progress[batch_id]["failed"] += 1
-                    continue
-
-                _name_candidates = [
-                    norm.get("name"), norm.get("fullname"),
-                    norm.get("leadname"), norm.get("contactname"), norm.get("contact"),
-                    norm.get("investor"), norm.get("person"), norm.get("personname"),
-                    f"{norm.get('firstname', '')} {norm.get('lastname', '')}".strip(),
-                ]
-                name = ""
-                for _cand in _name_candidates:
-                    _cand = (_cand or "").strip()
-                    if not _cand:
-                        continue
-                    if "http://" in _cand.lower() or "https://" in _cand.lower() or "linkedin.com" in _cand.lower():
-                        continue
-                    if not any(ch.isalpha() for ch in _cand):
-                        continue
-                    name = _cand
-                    break
-                if not name:
-                    email_prefix = email.split('@')[0]
-                    name = email_prefix.replace(".", " ").replace("_", " ").replace("-", " ").title()
-
-                company = (
-                    norm.get("companyname") or norm.get("company") or
-                    norm.get("investorname") or norm.get("org") or
-                    norm.get("firm") or norm.get("account") or norm.get("organization")
-                )
-                parts = name.split(" ", 1)
-                f_name, l_name = parts[0], (parts[1] if len(parts) > 1 else "")
-                sender_name = "the team"
-                if uid:
-                    cur.execute("SELECT full_name, username FROM users WHERE id = %s", (uid,))
-                    u = cur.fetchone()
-                    if u: sender_name = u['full_name'] or u['username']
-
-                # Remove from unsubscribe_list if present — user explicitly chose to generate
-                # drafts for these contacts, so treat as an opt-back-in.
+                if email:
+                    emails_here.append((row['id'], email))
+            for _rid, email in emails_here:
                 cur.execute("DELETE FROM unsubscribe_list WHERE LOWER(email) = LOWER(%s)", (email,))
-                # Also reset opt-out flags on any existing lead
                 cur.execute(
                     "UPDATE leads_raw SET is_unsubscribed = FALSE, email_opt_in = TRUE WHERE LOWER(email) = LOWER(%s) AND user_id = %s",
                     (email, uid)
                 )
-                conn.commit()
-
-                insert_lead(f_name, l_name, email, "", norm.get("linkedin", ""), company, "intelligence", data, user_id=uid, user_name=sender_name)
-                created_leads.append((row['id'], email))
-
-            lead_id_map = {}
-            for row_id, email in created_leads:
-                cur.execute(
-                    "SELECT id FROM leads_raw WHERE email = %s AND user_id = %s ORDER BY created_at DESC LIMIT 1",
-                    (email, uid)
-                )
-                lr = cur.fetchone()
-                if lr:
-                    lead_id_map[row_id] = lr['id']
+            conn.commit()
             cur.close(); conn.close()
-
-            if not lead_id_map:
-                _bulk_company_progress[batch_id]["status"] = "done"
-                return
 
             template_type = req.template_name or 'standard'
             success_ids, failed_ids = [], []
-            lead_results = []  # [{lead_id, ok}] for frontend DB reconciliation
+            row_results = []  # [{row_id, ok}] for frontend reconciliation
+            drafts_by_row: dict[int, dict] = {}
 
             with ThreadPoolExecutor(max_workers=3) as executor:
                 def process_one(row_id):
-                    lid = lead_id_map.get(row_id)
-                    if not lid:
-                        return (row_id, None, False, "lead not found")
+                    data = next((r['row_data'] for r in rows if r['id'] == row_id), None)
+                    if data is None:
+                        return (row_id, False, "row not found")
                     try:
-                        draft_req = DraftRequest(lead_id=lid, template_type=template_type)
-                        res = generate_email_internal(draft_req, user_id)
-                        return (row_id, lid, "error" not in res, res)
+                        draft = _generate_registry_draft(data, template_type, req.signature_id, uid)
+                        return (row_id, True, draft)
                     except Exception as e:
-                        return (row_id, lid, False, str(e))
+                        return (row_id, False, str(e))
 
-                futures = {executor.submit(process_one, rid): rid for rid in lead_id_map}
+                futures = {executor.submit(process_one, rid): rid for rid in [r['id'] for r in rows]}
                 for future in as_completed(futures):
-                    rid, lid, ok, _ = future.result()
-                    if lid:
-                        lead_results.append({"lead_id": lid, "ok": ok})
+                    rid, ok, draft = future.result()
+                    row_results.append({"row_id": rid, "ok": ok})
                     if ok:
                         success_ids.append(rid)
+                        drafts_by_row[rid] = draft
                     else:
                         failed_ids.append(rid)
                     p = _bulk_company_progress[batch_id]
                     p["processed"] += 1
-                    p["results"] = list(lead_results)  # snapshot for reconciliation
+                    p["results"] = list(row_results)  # snapshot for reconciliation
                     if ok:
                         p["success"] += 1
                     else:
@@ -1445,43 +1508,37 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: str | No
             if success_ids:
                 conn2 = get_db_connection()
                 cur2 = conn2.cursor()
-                if is_admin:
-                    cur2.execute(
-                        "UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = ANY(%s)",
-                        (success_ids,)
-                    )
-                else:
-                    cur2.execute(
-                        "UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = ANY(%s) AND user_id = %s",
-                        (success_ids, uid)
-                    )
+                for rid in success_ids:
+                    data = next((r['row_data'] for r in rows if r['id'] == rid), None)
+                    if isinstance(data, str):
+                        data = json.loads(data)
+                    if isinstance(data, dict):
+                        data = {**data, "_draft": drafts_by_row.get(rid, {})}
+                        if is_admin:
+                            cur2.execute(
+                                "UPDATE company_registry SET row_data = %s, _is_generated = TRUE, updated_at = NOW() WHERE id = %s",
+                                (json.dumps(data), rid)
+                            )
+                        else:
+                            cur2.execute(
+                                "UPDATE company_registry SET row_data = %s, _is_generated = TRUE, updated_at = NOW() WHERE id = %s AND user_id = %s",
+                                (json.dumps(data), rid, uid)
+                            )
+                    else:
+                        if is_admin:
+                            cur2.execute(
+                                "UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = %s",
+                                (rid,)
+                            )
+                        else:
+                            cur2.execute(
+                                "UPDATE company_registry SET _is_generated = TRUE, updated_at = NOW() WHERE id = %s AND user_id = %s",
+                                (rid, uid)
+                            )
                 conn2.commit()
                 cur2.close(); conn2.close()
 
             invalidate_companies_cache(str(uid))
-
-            # AUTO-DRIP: only drip-schedule if the user has auto-pilot enabled.
-            # Non-auto-pilot users keep their drafts in PENDING_APPROVAL for
-            # manual review in the queue (otherwise they silently leave Pending).
-            successful_lead_ids = [r["lead_id"] for r in lead_results if r["ok"] and r.get("lead_id")]
-            if successful_lead_ids:
-                try:
-                    cur.execute("SELECT auto_pilot_drafts FROM users WHERE id = %s", (uid,))
-                    ap_row = cur.fetchone()
-                    auto_pilot = bool(ap_row['auto_pilot_drafts']) if ap_row else False
-                except Exception:
-                    auto_pilot = False
-                if auto_pilot:
-                    try:
-                        from app.services.email_service import schedule_drip_batch
-                        sched_info = schedule_drip_batch(successful_lead_ids, uid)
-                        logger.info(f"AUTO-DRIP: {sched_info['scheduled']}/{len(successful_lead_ids)} drafts drip-scheduled for user {uid}")
-                        _bulk_company_progress[batch_id]["scheduled_info"] = sched_info
-                    except Exception as sched_err:
-                        logger.exception(f"AUTO-DRIP scheduling failed for batch {batch_id}: {sched_err}")
-                else:
-                    logger.info(f"AUTO-DRIP skipped: user {uid} has auto_pilot_drafts disabled — drafts stay PENDING_APPROVAL")
-
             _bulk_company_progress[batch_id]["status"] = "done"
         except Exception as e:
             _bulk_company_progress[batch_id]["status"] = "error"
@@ -1510,8 +1567,8 @@ def send_company_email(row_id: int, user_id: str | None = Header(None, alias="X-
     from app.api.drafts import markdown_to_html
     from app.services.email_service import send_email
 
-    # 1. Generate the draft and lead record (no auto-scheduling — we send immediately)
-    res = generate_company_draft(row_id, user_id=user_id, auto_schedule=False)
+    # 1. Generate the draft + pipeline lead (create_lead=True — dispatch needs tracking)
+    res = generate_company_draft(row_id, user_id=user_id, auto_schedule=False, create_lead=True)
     lead_id = res["lead_id"]
 
     conn = get_db_connection()

@@ -9,7 +9,9 @@ Responsibilities
    Finds every lead that HAS replied but still has remaining generated
    follow-ups (followup_draft / pending-approval / scheduled states), deletes
    those follow-ups, and moves the lead into the "replied" state
-   (email_status=REPLIED/CLOSED, followup_status=STOPPED, is_responded=TRUE).
+   (email_status=REPLIED/CLOSED, followup_status=NULL (hard delete),
+   is_responded=TRUE). Every deletion is recorded in the
+   `followup_deletions` audit table.
 
 2. `run_daily_reply_cleanup_and_report()`
    Orchestrates the cleanup, then sends a morning/evening email report to all
@@ -70,10 +72,11 @@ def cleanup_replied_leads(scope_user_id=None, dry_run: bool = False) -> dict:
     - followup_approved -> FALSE       (approval flag reset)
     - scheduled_at      -> NULL        (scheduled follow-up email cancelled)
     - email_status      -> REPLIED/CLOSED unless already terminal
-    - followup_status   -> STOPPED for decline/neutral replies, but preserved
-                           as MEETING_REQUIRED for INTERESTED/MEETING_REQUESTED
-                           (both states stop auto-follow-ups; the warm-lead
-                           state is kept so the meeting workflow stays intact)
+    - followup_status   -> NULL (HARD DELETE — the follow-up is removed, not
+                           merely stopped); every deletion is recorded in the
+                           followup_deletions audit table. The meeting
+                           workflow is unaffected: warm leads are tracked via
+                           pipeline_state (MEETING_REQUIRED), not followup_status.
     - is_responded      -> TRUE
 
     With `dry_run=True` nothing is written — only the match count is returned.
@@ -84,7 +87,7 @@ def cleanup_replied_leads(scope_user_id=None, dry_run: bool = False) -> dict:
     try:
         query = f"""
             SELECT id, user_id, first_name, last_name, email, company_name,
-                   email_status, followup_status, reply_intent
+                   email_status, followup_status, followup_stage, reply_intent
             FROM leads_raw
             WHERE {REPLY_SIGNAL_SQL}
               AND {REMAINING_FOLLOWUP_SQL}
@@ -101,18 +104,17 @@ def cleanup_replied_leads(scope_user_id=None, dry_run: bool = False) -> dict:
         for lead in leads:
             lead_id = lead["id"]
             target_status = _replied_email_status(lead.get("reply_intent"))
-            intent = (lead.get("reply_intent") or "").upper()
-            # Warm intents keep the reply workflow's MEETING_REQUIRED state so
-            # the meeting workflow stays intact; everything else stops cleanly.
-            target_followup_status = (
-                "MEETING_REQUIRED" if intent in ("INTERESTED", "MEETING_REQUESTED") else "STOPPED"
-            )
             try:
                 if not dry_run:
+                    # HARD DELETE (not 'STOPPED'): follow-up state is removed
+                    # entirely and recorded in followup_deletions audit table.
+                    # The meeting workflow is unaffected — it tracks warm leads
+                    # via pipeline_state (MEETING_REQUIRED), not followup_status.
                     cur.execute(
                         """
                         UPDATE leads_raw
-                        SET followup_status = %s,
+                        SET followup_status = NULL,
+                            followup_stage = 0,
                             is_responded = TRUE,
                             replied_at = COALESCE(replied_at, NOW()),
                             email_status = CASE
@@ -125,9 +127,22 @@ def cleanup_replied_leads(scope_user_id=None, dry_run: bool = False) -> dict:
                             updated_at = NOW()
                         WHERE id = %s
                         """,
-                        (target_followup_status, target_status, lead_id),
+                        (target_status, lead_id),
                     )
                     rowcount = cur.rowcount
+                    # Audit trail — permanent receipt of the deletion
+                    try:
+                        cur.execute(
+                            """INSERT INTO followup_deletions
+                               (lead_id, user_id, email, company_name, reply_intent,
+                                followup_status_before, followup_stage_before, jobs_deleted, reason)
+                               VALUES (%s, %s, %s, %s, %s, %s, %s, 0, %s)""",
+                            (lead_id, lead.get("user_id"), lead.get("email"), lead.get("company_name"),
+                             lead.get("reply_intent"), lead.get("followup_status"), lead.get("followup_stage") or 0,
+                             "REPLY_CLEANUP"),
+                        )
+                    except Exception as audit_err:
+                        logger.warning(f"Cleanup audit log failed for lead {lead_id}: {audit_err}")
                     conn.commit()
                 else:
                     rowcount = 1

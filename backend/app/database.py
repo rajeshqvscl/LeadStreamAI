@@ -948,6 +948,49 @@ def create_tables():
     cur.close()
     conn.close()
 
+    # ── followup_deletions Table (audit trail of hard-deleted follow-ups) ──
+    # Written whenever a reply (any type) triggers deletion of a lead's
+    # scheduled/pending follow-ups — queue jobs purged AND DB followup state
+    # hard-deleted. This is a permanent record: followups are never merely
+    # 'STOPPED', they are removed, and we keep the receipt.
+    cur = conn2 = None
+    try:
+        conn2 = get_db_connection()
+        cur = conn2.cursor()
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS followup_deletions (
+            id SERIAL PRIMARY KEY,
+            lead_id INTEGER NOT NULL,
+            user_id INTEGER,
+            email TEXT,
+            company_name TEXT,
+            reply_intent TEXT,
+            followup_status_before TEXT,
+            followup_stage_before INTEGER DEFAULT 0,
+            jobs_deleted INTEGER DEFAULT 0,
+            reason TEXT,
+            deleted_at TIMESTAMP DEFAULT NOW()
+        );
+        """)
+        conn2.commit()
+        try:
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_followup_deletions_lead
+                ON followup_deletions (lead_id);
+            """)
+            conn2.commit()
+        except psycopg2.Error:
+            conn2.rollback()
+    except psycopg2.Error as e:
+        if conn2:
+            conn2.rollback()
+        logger.warning(f"Could not create followup_deletions table: {e}")
+    finally:
+        if cur:
+            cur.close()
+        if conn2:
+            conn2.close()
+
     # Auto-sync family offices from Google Sheets on startup if table is empty
     try:
         import requests as req_lib
