@@ -2326,7 +2326,7 @@ def generate_email_internal(req: DraftRequest, user_id: str | None = None):
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
         if user_id and user_id.lower() != "admin":
-            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (req.lead_id, user_id))
+            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (req.lead_id, uid))
         elif is_admin_user(user_id):
             cur.execute("SELECT * FROM leads_raw WHERE id = %s", (req.lead_id,))
         else:
@@ -3966,8 +3966,9 @@ def refine_email_endpoint(draft_id: int, req: RefineRequest, user_id: str | None
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
+        uid = normalize_user_id(user_id)
         if user_id and user_id.lower() != "admin":
-            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (draft_id, user_id))
+            cur.execute("SELECT * FROM leads_raw WHERE id = %s AND user_id = %s", (draft_id, uid))
         elif is_admin_user(user_id):
             cur.execute("SELECT * FROM leads_raw WHERE id = %s", (draft_id,))
         else:
@@ -4228,9 +4229,10 @@ def reject_draft(draft_id: int, req: RejectRequest | None = None, user_id: str |
     conn = get_db_connection()
     cur = conn.cursor()
 
+    uid = normalize_user_id(user_id)
     if user_id and user_id.lower() != "admin":
         where_clause = "WHERE id = %s AND user_id = %s"
-        params = (draft_id, user_id)
+        params = (draft_id, uid)
     elif is_admin_user(user_id):
         where_clause = "WHERE id = %s"
         params = (draft_id,)
@@ -4259,11 +4261,12 @@ def schedule_email(draft_id: int, req: ScheduleRequest, user_id: str | None = He
         conn = get_db_connection()
         cur = conn.cursor()
 
+        uid = normalize_user_id(user_id)
         user_clause = ""
         params = [req.scheduled_at, draft_id]
         if user_id and user_id.lower() != "admin":
             user_clause = " AND user_id = %s"
-            params.append(user_id)
+            params.append(uid)
         elif is_admin_user(user_id):
             pass
         else:
@@ -4292,13 +4295,14 @@ def bulk_schedule_emails(req: BulkScheduleRequest, user_id: str | None = Header(
         if not req.lead_ids:
              return {"message": "No leads provided"}
 
+        uid = normalize_user_id(user_id)
         format_strings = ','.join(['%s'] * len(req.lead_ids))
         where_params = [req.scheduled_at] + list(req.lead_ids)
 
         user_clause = ""
         if user_id and user_id.lower() != "admin":
             user_clause = " AND user_id = %s"
-            where_params.append(user_id)
+            where_params.append(uid)
         elif is_admin_user(user_id):
             pass
         else:
@@ -4329,6 +4333,7 @@ def approve_bulk_domain_drafts(req: BulkDraftRequest, user_id: str | None = Head
         if not req.lead_ids:
             return {"message": "No leads provided"}
 
+        uid = normalize_user_id(user_id)
         format_strings = ','.join(['%s'] * len(req.lead_ids))
         if user_id and user_id.lower() != "admin":
             where_clause = f"WHERE id IN ({format_strings}) AND user_id = %s"
@@ -4458,7 +4463,7 @@ def send_approved_batch(user_id: str | None = Header(None, alias="X-User-Id")):
     params = []
     if user_id and user_id.lower() != "admin":
         where_clause += " AND user_id = %s"
-        params.append(user_id)
+        params.append(uid_val)
     elif is_admin_user(user_id):
         pass
     else:

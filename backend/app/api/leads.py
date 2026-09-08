@@ -1880,6 +1880,8 @@ def get_unique_companies(user_id: str | None = Header(None, alias="X-User-Id")):
     conn = get_db_connection()
     cur = conn.cursor()
 
+    from app.utils.auth_helpers import normalize_user_id
+    uid = normalize_user_id(user_id)
     is_admin = (_is_admin_user(conn, user_id) or str(user_id) == '1')
     query = "SELECT DISTINCT company_name FROM leads_raw lr WHERE company_name IS NOT NULL AND company_name != ''"
     params = []
@@ -1887,7 +1889,7 @@ def get_unique_companies(user_id: str | None = Header(None, alias="X-User-Id")):
     if not is_admin:
         if user_id:
             query += " AND user_id = %s"
-            params.append(user_id)
+            params.append(uid)
         else:
             query += " AND user_id IS NULL"
 

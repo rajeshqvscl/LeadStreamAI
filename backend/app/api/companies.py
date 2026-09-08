@@ -1369,6 +1369,25 @@ def generate_company_draft(row_id: int, template_name: str | None = None, auto_s
         else:
             cur.execute("UPDATE company_registry SET row_data = %s, _is_generated = TRUE, updated_at = NOW() WHERE id = %s AND user_id = %s", (json.dumps(data), row_id, uid))
         conn.commit()
+
+        # --- Also create lead in leads_raw so review queue can find it ---
+        try:
+            insert_lead(f_name, l_name, email, "", norm.get("linkedin", ""), company, "company_database", data, user_id=uid, user_name=sender_name)
+            cur.execute("SELECT id FROM leads_raw WHERE email = %s AND user_id = %s ORDER BY created_at DESC LIMIT 1", (email, uid))
+            _lead_row = cur.fetchone()
+            if _lead_row:
+                _lead_id = _lead_row['id'] if isinstance(_lead_row, dict) else _lead_row[0]
+                _full_draft = f"Subject: {draft.get('subject', 'Following up')}\n\n{draft.get('body', '')}"
+                cur.execute(
+                    "UPDATE leads_raw SET email_draft = %s, email_status = 'PENDING_APPROVAL', draft_template_used = %s, updated_at = NOW() WHERE id = %s",
+                    (_full_draft, template_name or 'standard', _lead_id)
+                )
+                conn.commit()
+                from app.api.drafts import invalidate_pending_drafts_cache
+                invalidate_pending_drafts_cache(str(uid))
+        except Exception as lead_err:
+            logger.warning(f"Failed to create lead for registry row {row_id}: {lead_err}")
+
         invalidate_companies_cache(str(uid))
 
         return {
@@ -1427,6 +1446,12 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: str | No
                     role_val = role_row['role'] if isinstance(role_row, dict) else role_row[0]
                     if role_val and str(role_val).upper() == 'ADMIN':
                         is_admin = True
+
+            sender_name = "the team"
+            if uid:
+                cur.execute("SELECT full_name, username FROM users WHERE id = %s", (uid,))
+                _u = cur.fetchone()
+                if _u: sender_name = _u['full_name'] or _u['username'] or "the team"
 
             if is_admin:
                 cur.execute(
@@ -1512,8 +1537,9 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: str | No
                     data = next((r['row_data'] for r in rows if r['id'] == rid), None)
                     if isinstance(data, str):
                         data = json.loads(data)
+                    draft_content = drafts_by_row.get(rid, {})
                     if isinstance(data, dict):
-                        data = {**data, "_draft": drafts_by_row.get(rid, {})}
+                        data = {**data, "_draft": draft_content}
                         if is_admin:
                             cur2.execute(
                                 "UPDATE company_registry SET row_data = %s, _is_generated = TRUE, updated_at = NOW() WHERE id = %s",
@@ -1524,6 +1550,51 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: str | No
                                 "UPDATE company_registry SET row_data = %s, _is_generated = TRUE, updated_at = NOW() WHERE id = %s AND user_id = %s",
                                 (json.dumps(data), rid, uid)
                             )
+                        # --- Create lead in leads_raw so review queue can find it ---
+                        try:
+                            norm_data = {str(k).lower().replace(" ", "").replace("-", "").replace("_", ""): v for k, v in data.items() if v}
+                            _email = (
+                                norm_data.get("email") or norm_data.get("emailaddress")
+                                or norm_data.get("workemail") or norm_data.get("primaryemail") or ""
+                            )
+                            if _email:
+                                _raw_name = (
+                                    norm_data.get("name") or norm_data.get("fullname")
+                                    or norm_data.get("person") or norm_data.get("personname")
+                                    or norm_data.get("contact") or norm_data.get("contactname") or ""
+                                )
+                                _parts = _raw_name.split(" ", 1)
+                                _f_name = _parts[0] if _parts else ""
+                                _l_name = _parts[1] if len(_parts) > 1 else ""
+                                _company = (
+                                    norm_data.get("companyname") or norm_data.get("company")
+                                    or norm_data.get("investorname") or norm_data.get("org")
+                                    or norm_data.get("firm") or norm_data.get("organization") or ""
+                                )
+                                insert_lead(
+                                    _f_name, _l_name, _email, "",
+                                    norm_data.get("linkedin", ""),
+                                    _company, "company_database", data,
+                                    user_id=uid, user_name=sender_name
+                                )
+                                # Fetch lead_id and set the draft
+                                cur2.execute(
+                                    "SELECT id FROM leads_raw WHERE email = %s AND user_id = %s ORDER BY created_at DESC LIMIT 1",
+                                    (_email, uid)
+                                )
+                                _lead_row = cur2.fetchone()
+                                if _lead_row:
+                                    _lead_id = _lead_row[0] if not isinstance(_lead_row, dict) else _lead_row['id']
+                                    _subject = draft_content.get("subject", "Following up")
+                                    _body = draft_content.get("body", "")
+                                    _full_draft = f"Subject: {_subject}\n\n{_body}" if _body else None
+                                    if _full_draft:
+                                        cur2.execute(
+                                            "UPDATE leads_raw SET email_draft = %s, email_status = 'PENDING_APPROVAL', draft_template_used = %s, updated_at = NOW() WHERE id = %s",
+                                            (_full_draft, template_type, _lead_id)
+                                        )
+                        except Exception as lead_err:
+                            logger.warning(f"Failed to create lead for registry row {rid}: {lead_err}")
                     else:
                         if is_admin:
                             cur2.execute(
@@ -1537,6 +1608,12 @@ def bulk_generate_company_drafts(req: BulkCompanyDraftRequest, user_id: str | No
                             )
                 conn2.commit()
                 cur2.close(); conn2.close()
+                # Invalidate review queue cache so new drafts appear immediately
+                try:
+                    from app.api.drafts import invalidate_pending_drafts_cache
+                    invalidate_pending_drafts_cache(str(uid))
+                except Exception:
+                    pass
 
             invalidate_companies_cache(str(uid))
             _bulk_company_progress[batch_id]["status"] = "done"
