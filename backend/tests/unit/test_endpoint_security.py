@@ -46,6 +46,32 @@ class TestAuthenticationRequired:
 
 
 # =============================================================================
+# SESSION IDENTITY INJECTION TESTS
+# =============================================================================
+
+class TestSessionIdentityInjection:
+    """The verified session must be authoritative even when the client omits
+    X-User-Id — a valid Bearer token alone is sufficient.
+
+    Regression: AuthMiddleware used to only rewrite an existing X-User-Id
+    header, so a client that sent just the token made every handler fall into
+    its ``user_id IS NULL`` branch and own-resource lookups 404'd (the CI
+    security-suite failures).
+    """
+
+    def test_bearer_token_alone_authenticates(self, client, user_a_token):
+        """No X-User-Id header — the middleware must inject the verified
+        session user id so the handler sees the authenticated identity."""
+        response = client.get(
+            "/api/auth/me",
+            headers={"Authorization": f"Bearer {user_a_token}"},
+        )
+        # 200 = session id injected and user resolved from the DB.
+        # Without injection this was 401 ("Authentication required").
+        assert response.status_code == 200
+
+
+# =============================================================================
 # LEAD OWNERSHIP TESTS
 # =============================================================================
 
@@ -219,7 +245,9 @@ class TestAdminEscalation:
 
     def test_normal_user_cannot_approve_user(self, client, user_a_token):
         """Normal user cannot approve other users."""
-        response = client.post(
+        # The one-click approval endpoint is GET-only (admin email link) —
+        # a non-admin hitting it must be denied, never approved.
+        response = client.get(
             "/api/auth/admin/approve-user/2",
             headers={"Authorization": f"Bearer {user_a_token}"},
         )

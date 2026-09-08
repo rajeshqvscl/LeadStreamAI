@@ -732,11 +732,24 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
             return JSONResponse(status_code=401, content={"detail": "Invalid or expired session. Please log in again."})
 
-        # Override any client-supplied X-User-Id with the verified session user
-        request.scope["headers"] = [
-            (k, v) if k.lower() != b"x-user-id" else (b"x-user-id", str(user_id).encode())
-            for k, v in request.scope["headers"]
-        ]
+        # Override any client-supplied X-User-Id with the verified session user,
+        # and INJECT the header when the client omitted it. The verified session
+        # id is authoritative either way, so a valid Bearer token alone is always
+        # sufficient — otherwise handlers fall into their `user_id IS NULL` branch
+        # and can never see the user's own rows (ownership checks broke for any
+        # API client that only sent the token).
+        uid_bytes = str(user_id).encode()
+        headers = []
+        found = False
+        for k, v in request.scope["headers"]:
+            if k.lower() == b"x-user-id":
+                headers.append((k, uid_bytes))
+                found = True
+            else:
+                headers.append((k, v))
+        if not found:
+            headers.append((b"x-user-id", uid_bytes))
+        request.scope["headers"] = headers
         request.state.user_id = str(user_id)
         return await call_next(request)
 
