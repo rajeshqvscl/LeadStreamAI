@@ -2,12 +2,16 @@
 import json
 import secrets
 
+import psycopg2.extras
+
 from app.database import get_db_connection
 
 
 def insert_lead(first_name, last_name, email, domain, linkedin, company, source, payload, fit_score=0, persona="OTHER", phone=None, user_id=None, user_name=None, lead_type="CLIENT", sector=None, intent_level="Warm", ai_score=85, system_confidence=90):
+    """Insert (or upsert) a lead. Returns the stored row as a plain dict, or
+    None when the lead was silently skipped (globally blacklisted email)."""
     conn = get_db_connection()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     # Global Blacklist Check: Prevent ingestion of opted-out leads
     # unless this is a manual re-creation — user explicitly wants to re-engage
@@ -72,6 +76,7 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
             email_status = NULL,
             created_at = CURRENT_TIMESTAMP,
             unsubscribe_token = COALESCE(leads_raw.unsubscribe_token, EXCLUDED.unsubscribe_token)
+        RETURNING *
     """
 
     _token = secrets.token_urlsafe(32)
@@ -81,11 +86,12 @@ def insert_lead(first_name, last_name, email, domain, linkedin, company, source,
         json.dumps(payload), fit_score, persona, phone, user_id, user_name, designation,
         lead_type, sector, intent_level, ai_score, system_confidence, _token
     ))
-
+    row = cur.fetchone()
 
     conn.commit()
     cur.close()
     conn.close()
+    return dict(row) if row else None
 
 def get_or_create_unsubscribe_token(lead_id: int, conn=None, cur=None) -> str:
     """Returns the existing unsubscribe_token for a lead, or generates a new secure one if missing."""

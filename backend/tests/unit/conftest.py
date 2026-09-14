@@ -32,10 +32,22 @@ import pytest
 from tests.conftest import db_reachable
 
 
+_SECURITY_SEED_CACHE: dict | None = None
+
+
 def seed_security_data() -> dict:
     """Seed users A/B + admin with sessions, plus leads & campaigns, and return
     a dict of ids/tokens. Plain function (not a fixture) so test files can
-    decide for themselves whether to skip vs. fall back to stub mode."""
+    decide for themselves whether to skip vs. fall back to stub mode.
+
+    Memoized per pytest process: seeding DELETES its namespace rows first
+    (``pytest-sec-*``), so a second call would invalidate lead/campaign IDs
+    already handed out to session-scoped fixtures earlier in the run.
+    """
+    global _SECURITY_SEED_CACHE
+    if _SECURITY_SEED_CACHE is not None:
+        return _SECURITY_SEED_CACHE
+
     import datetime
     import psycopg2
     import psycopg2.extras
@@ -148,7 +160,7 @@ def seed_security_data() -> dict:
         camp_b = cur.fetchone()[0]
         conn.commit()
 
-        return {
+        _SECURITY_SEED_CACHE = {
             "token_a": "pytest-sec-token-a",
             "token_b": "pytest-sec-token-b",
             "token_admin": "pytest-sec-token-admin",
@@ -163,6 +175,7 @@ def seed_security_data() -> dict:
             "campaign_a": camp_a,
             "campaign_b": camp_b,
         }
+        return _SECURITY_SEED_CACHE
     finally:
         cur.close()
         conn.close()

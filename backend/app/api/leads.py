@@ -1302,7 +1302,7 @@ def create_manual_lead(req: LeadCreate, user_id: str | None = Header(None, alias
 
     try:
         from app.models.lead import insert_lead
-        insert_lead(
+        created = insert_lead(
             req.first_name,
             req.last_name,
             req.email,
@@ -1317,7 +1317,12 @@ def create_manual_lead(req: LeadCreate, user_id: str | None = Header(None, alias
             user_id=normalize_user_id(user_id),
             user_name=get_user_name(user_id)
         )
-        return {"message": "Lead added to your pipeline successfully."}
+        if created is None:
+            # Globally blacklisted (unsubscribed) email — report clearly.
+            raise HTTPException(status_code=400, detail="Email is globally unsubscribed")
+        # Return the stored row so callers (tests, frontend) can read the
+        # created lead's id/email immediately after creation.
+        return created
 
     except Exception as e:
         logger.exception(f"Error creating lead: {str(e)}")
