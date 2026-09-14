@@ -103,16 +103,16 @@ def seed_security_data() -> dict:
         # One lead + one campaign per user (same ids used by every accessor)
         cur.execute(
             "INSERT INTO leads_raw (first_name, last_name, email, company_name, user_id, "
-            "email_status, pipeline_state, validation_status) "
-            "VALUES ('Sec', 'A', 'lead-a@pytest-security.local', 'Acme A', %s, 'PENDING', 'NEW', 'PENDING') "
+            "email_status, pipeline_state, validation_status, source, manual_entry) "
+            "VALUES ('Sec', 'A', 'lead-a@pytest-security.local', 'Acme A', %s, 'PENDING', 'NEW', 'PENDING', 'manual', TRUE) "
             "RETURNING id",
             (uid_a,),
         )
         lead_a = cur.fetchone()[0]
         cur.execute(
             "INSERT INTO leads_raw (first_name, last_name, email, company_name, user_id, "
-            "email_status, pipeline_state, validation_status) "
-            "VALUES ('Sec', 'B', 'lead-b@pytest-security.local', 'Acme B', %s, 'PENDING', 'NEW', 'PENDING') "
+            "email_status, pipeline_state, validation_status, source, manual_entry) "
+            "VALUES ('Sec', 'B', 'lead-b@pytest-security.local', 'Acme B', %s, 'PENDING', 'NEW', 'PENDING', 'manual', TRUE) "
             "RETURNING id",
             (uid_b,),
         )
@@ -122,24 +122,24 @@ def seed_security_data() -> dict:
         # collide with the plain lead_a used by ownership/isolation tests.
         cur.execute(
             "INSERT INTO leads_raw (first_name, last_name, email, company_name, user_id, "
-            "email_status, followup_status, pipeline_state, validation_status) "
-            "VALUES ('Sec', 'A-Sent', 'sent-a@pytest-security.local', 'Acme A', %s, 'SENT', 'ACTIVE', 'SENT', 'PENDING') "
+            "email_status, followup_status, pipeline_state, validation_status, source, manual_entry) "
+            "VALUES ('Sec', 'A-Sent', 'sent-a@pytest-security.local', 'Acme A', %s, 'SENT', 'ACTIVE', 'SENT', 'PENDING', 'manual', TRUE) "
             "RETURNING id",
             (uid_a,),
         )
         lead_sent_a = cur.fetchone()[0]
         cur.execute(
             "INSERT INTO leads_raw (first_name, last_name, email, company_name, user_id, "
-            "email_status, followup_status, pipeline_state, validation_status) "
-            "VALUES ('Sec', 'A-Active', 'active-a@pytest-security.local', 'Acme A', %s, 'PENDING', 'ACTIVE', 'NEW', 'PENDING') "
+            "email_status, followup_status, pipeline_state, validation_status, source, manual_entry) "
+            "VALUES ('Sec', 'A-Active', 'active-a@pytest-security.local', 'Acme A', %s, 'PENDING', 'ACTIVE', 'NEW', 'PENDING', 'manual', TRUE) "
             "RETURNING id",
             (uid_a,),
         )
         lead_active_a = cur.fetchone()[0]
         cur.execute(
             "INSERT INTO leads_raw (first_name, last_name, email, company_name, user_id, "
-            "email_status, pipeline_state, validation_status, is_unsubscribed) "
-            "VALUES ('Sec', 'A-Unsub', 'unsub-a@pytest-security.local', 'Acme A', %s, 'PENDING', 'NEW', 'PENDING', TRUE) "
+            "email_status, pipeline_state, validation_status, is_unsubscribed, source, manual_entry) "
+            "VALUES ('Sec', 'A-Unsub', 'unsub-a@pytest-security.local', 'Acme A', %s, 'PENDING', 'NEW', 'PENDING', TRUE, 'manual', TRUE) "
             "RETURNING id",
             (uid_a,),
         )

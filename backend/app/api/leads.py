@@ -1320,6 +1320,19 @@ def create_manual_lead(req: LeadCreate, user_id: str | None = Header(None, alias
         if created is None:
             # Globally blacklisted (unsubscribed) email — report clearly.
             raise HTTPException(status_code=400, detail="Email is globally unsubscribed")
+        # Invalidate the short-TTL leads-list cache for this user so the
+        # newly created lead shows up in the very next GET /api/leads.
+        if redis_available and redis_client:
+            try:
+                uid_norm = normalize_user_id(user_id)
+                for key in redis_client.scan_iter(f"leads:{uid_norm}:*"):
+                    redis_client.delete(key)
+                # Admins see all leads, so a create under any user must also
+                # clear the admin's cached list.
+                for key in redis_client.scan_iter("leads:1:*"):
+                    redis_client.delete(key)
+            except Exception as ce:
+                logger.warning(f"WARNING: leads cache invalidation error: {ce}")
         # Return the stored row so callers (tests, frontend) can read the
         # created lead's id/email immediately after creation.
         return created
