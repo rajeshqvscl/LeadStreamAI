@@ -51,8 +51,11 @@ def get_campaigns(limit=10, offset=0, active_only=False, user_id=None):
     cur.execute(query, params)
     rows = cur.fetchall()
 
-    # Add stats
-    for row in rows:
+    # Add stats. Convert DictRow -> dict first: DictRow rejects assigning
+    # keys that aren't existing columns (raises KeyError).
+    for i, row in enumerate(rows):
+        row = dict(row)
+        rows[i] = row
         cur.execute("SELECT COUNT(*) FROM recipients WHERE campaign_id = %s", (row['id'],))
         row['total_recipients'] = cur.fetchone()['count']
         cur.execute("SELECT COUNT(*) FROM campaign_events WHERE campaign_id = %s AND event_type = 'OPEN'", (row['id'],))
@@ -73,6 +76,7 @@ def get_campaign_by_id(campaign_id, user_id=None):
     row = cur.fetchone()
 
     if row:
+        row = dict(row)  # DictRow rejects assigning non-column keys (KeyError)
         cur.execute("SELECT COUNT(*) FROM recipients WHERE campaign_id = %s", (campaign_id,))
         row['total_recipients'] = cur.fetchone()['count']
         cur.execute("SELECT COUNT(*) FROM campaign_events WHERE campaign_id = %s AND event_type = 'OPEN'", (campaign_id,))
