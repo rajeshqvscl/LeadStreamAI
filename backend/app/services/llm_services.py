@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from pathlib import Path
 
 import structlog
@@ -107,7 +108,18 @@ class EmailGenerator:
     def generate_email(self, lead: dict, sender_name: str = "the team", sender_linkedin: str = "https://www.linkedin.com/company/qvscl/"):
         """Generates a hyper-personalized email using RAG data if available, else falls back to standard template."""
 
-        first_name = (lead.get('first_name') or lead.get('name') or "there").strip().capitalize()
+        first_name = (lead.get('first_name') or lead.get('name') or "").strip().capitalize()
+        # Fallback: extract name from email address
+        if not first_name or first_name.lower() == "there":
+            email = (lead.get('email') or "").strip()
+            if email and "@" in email:
+                local_part = email.split("@")[0]
+                if local_part and local_part not in ("info", "admin", "contact", "support", "hello", "team", "hr"):
+                    name_part = re.split(r'[._\-+]', local_part)[0]
+                    if name_part and name_part.isalpha() and len(name_part) > 1:
+                        first_name = name_part.capitalize()
+        if not first_name:
+            first_name = "there"
         rag_advice = lead.get('rag_advice')
 
         # If we have RAG Intelligence, use LLM to craft a personalized version

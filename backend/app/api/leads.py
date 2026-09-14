@@ -764,7 +764,7 @@ def get_lead_detail(lead_id: int, user_id: str | None = Header(None, alias="X-Us
 
     if lead.get("email_draft"):
         from app.api.drafts import heal_draft_content
-        lead["email_draft"] = heal_draft_content(lead["email_draft"], user_id, template_name=lead.get('draft_template_used'))
+        lead["email_draft"] = heal_draft_content(lead["email_draft"], user_id, template_name=lead.get('draft_template_used'), lead_email=lead.get('email'))
 
     # Enrich with payload if needed
     payload = lead.get("raw_payload")

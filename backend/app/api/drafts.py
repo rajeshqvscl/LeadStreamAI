@@ -1621,7 +1621,23 @@ def clean_first_name(lead: dict) -> str:
         parts = parts[1:]
 
     # Always return only the FIRST word (capitalize it)
-    return parts[0].capitalize() if parts else (raw_last.split()[0].capitalize() if raw_last else "there")
+    if parts:
+        return parts[0].capitalize()
+    if raw_last:
+        return raw_last.split()[0].capitalize()
+    
+    # Fallback: extract name from email address (e.g., ajay@rpsgcapital.vc → Ajay)
+    email = (lead.get("email") or "").strip()
+    if email and "@" in email:
+        local_part = email.split("@")[0]
+        # Skip common non-name prefixes
+        if local_part and local_part not in ("info", "admin", "contact", "support", "hello", "team", "hr"):
+            # Extract first part before dots/hyphens/underscores
+            name_part = re.split(r'[._\-+]', local_part)[0]
+            if name_part and name_part.isalpha() and len(name_part) > 1:
+                return name_part.capitalize()
+    
+    return "there"
 
 
 def get_sender_profile(user_id: str | None) -> dict:
@@ -2019,9 +2035,21 @@ def delete_signature(sig_id: int, user_id: str | None = Header(None, alias="X-Us
         cur.close()
         conn.close()
 
-def heal_draft_content(email_draft: str, user_id: str | None, profile: dict | None = None, template_name: str | None = None) -> str:
+def heal_draft_content(email_draft: str, user_id: str | None, profile: dict | None = None, template_name: str | None = None, lead_email: str | None = None) -> str:
     if not email_draft:
         return email_draft
+
+    # Fix "Dear there" / "Hi there" greetings by extracting name from lead_email
+    if lead_email and "@" in lead_email:
+        local_part = lead_email.split("@")[0]
+        if local_part and local_part not in ("info", "admin", "contact", "support", "hello", "team", "hr"):
+            name_part = re.split(r'[._\-+]', local_part)[0]
+            if name_part and name_part.isalpha() and len(name_part) > 1:
+                lead_name = name_part.capitalize()
+                # Replace "Dear there" / "Hi there" / "Hello there" with the extracted name
+                email_draft = re.sub(r'(Dear|Hi|Hello)\s+there\b', rf'\1 {lead_name}', email_draft, flags=re.IGNORECASE)
+                # Also fix "Dear there," (with comma)
+                email_draft = re.sub(r'(Dear|Hi|Hello)\s+there,', rf'\1 {lead_name},', email_draft, flags=re.IGNORECASE)
 
     # Resolve logged-in user details
     if profile is None:
@@ -3849,7 +3877,7 @@ def get_pending_drafts(page: int = 1, status: str | None = None, region: str | N
             draft_content = r["email_draft"] or ""
             template_name = r.get('draft_template_used')
             # Apply healing with pre-fetched profile
-            draft_content = heal_draft_content(draft_content, user_id, profile, template_name=template_name)
+            draft_content = heal_draft_content(draft_content, user_id, profile, template_name=template_name, lead_email=r.get('email'))
             # Normalize literal \\n to real newlines for consistent parsing
             draft_content = draft_content.replace("\\n", "\n").replace("\\r\\n", "\n")
 
@@ -4088,8 +4116,8 @@ def approve_draft(draft_id: int, req: ApproveRequest | None = None, user_id: str
 
         draft_content = lead.get('email_draft')
         template_name = lead.get('draft_template_used') if lead else None
-        draft_content = heal_draft_content(draft_content, user_id, template_name=template_name)
         email = lead.get('email')
+        draft_content = heal_draft_content(draft_content, user_id, template_name=template_name, lead_email=email)
         stored_cc = lead.get('cc_email')
 
         if not email:
@@ -4487,7 +4515,7 @@ def send_approved_batch(user_id: str | None = Header(None, alias="X-User-Id")):
         try:
             draft_content = lead['email_draft'] or ""
             template_name = lead.get('draft_template_used')
-            draft_content = heal_draft_content(draft_content, user_id, profile, template_name=template_name)
+            draft_content = heal_draft_content(draft_content, user_id, profile, template_name=template_name, lead_email=lead.get('email'))
 
             subject = "Following up"
             body = draft_content
@@ -4686,7 +4714,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: str | None = Header(None,
 
             draft_content = lead['email_draft'] or ""
             template_name = lead.get('draft_template_used')
-            draft_content = heal_draft_content(draft_content, user_id, profile, template_name=template_name)
+            draft_content = heal_draft_content(draft_content, user_id, profile, template_name=template_name, lead_email=lead.get('email'))
 
             subject = "Following up"
             body = draft_content
@@ -5034,7 +5062,7 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: str | None = Header(N
                     email_content = f"Subject: {subject}\n\n{body}"
                 else:
                     template_name = lead.get('draft_template_used')
-                    email_content = heal_draft_content(email_content, user_id, profile, template_name=template_name)
+                    email_content = heal_draft_content(email_content, user_id, profile, template_name=template_name, lead_email=lead.get('email'))
 
                 # Parse Subject and Body
                 subject = "Following up"
