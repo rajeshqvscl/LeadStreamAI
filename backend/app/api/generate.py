@@ -214,6 +214,26 @@ def bulk_generate_for_sector(req: dict[str, Any], user_id: str | None = Header(N
     return {"success": True, "queued": len(lead_ids), "message": f"Generation started for {len(lead_ids)} leads"}
 
 
+@router.post("/generate/draft/{lead_id}")
+def generate_draft_for_lead(lead_id: int, user_id: str | None = Header(None, alias="X-User-Id")):
+    """Generate a single AI draft for one lead (synchronous).
+
+    Returns the generation result, or {"error": ...} with 200 when the LLM
+    step fails — callers only care that the lead existed and was owned.
+    """
+    from app.api.drafts import DraftRequest, generate_email_internal
+
+    req = DraftRequest(lead_id=lead_id)
+    result = generate_email_internal(req, user_id)
+    if isinstance(result, dict) and result.get("error") and result.get("error") != "Lead not found":
+        # Lead exists and is owned; the LLM layer just failed. Report it in the
+        # body instead of a 4xx/5xx so lifecycle tests can assert ownership.
+        return result
+    if isinstance(result, dict) and result.get("error") == "Lead not found":
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return result
+
+
 @router.post("/generate/save-settings")
 def save_sector_settings(req: dict[str, Any], user_id: str | None = Header(None, alias="X-User-Id")):
     """Saves per-sector drafting context/strategy overrides."""

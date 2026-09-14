@@ -257,8 +257,22 @@ def client():
 
 @pytest.fixture
 def auth_headers():
-    # X-User-Id is required because AuthMiddleware caches request.headers before
-    # it can override the header; handlers that read X-User-Id via Header() rely
-    # on the client (frontend) supplying it. The middleware re-overrides it with
-    # the verified session id anyway, so "1" is safe for tests.
-    return {"Authorization": "Bearer test-token", "X-User-Id": "1"}
+    """Authorization headers that work in BOTH client modes.
+
+    Real-DB mode (CI service container): the AuthMiddleware verifies real
+    session rows, so the legacy static token 401s every request. Use the
+    security suite's seeded session token for User A instead (the seeder is
+    idempotent — it cleans and reseeds its own ``pytest-sec-*`` namespace).
+    Stub mode (no local DB): keep the legacy fake token; ``_verify_session``
+    is stubbed out anyway, and seeding real rows is impossible.
+    """
+    if not db_reachable():
+        return {"Authorization": "Bearer test-token", "X-User-Id": "1"}
+
+    from tests.unit.conftest import seed_security_data
+
+    seed = seed_security_data()
+    return {
+        "Authorization": f"Bearer {seed['token_a']}",
+        "X-User-Id": str(seed["user_a_id"]),
+    }

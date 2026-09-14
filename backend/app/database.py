@@ -268,6 +268,11 @@ def create_tables():
         ("pipeline_state", "TEXT DEFAULT 'NEW'"),
         # Soft-delete flag — prevents active operations on deleted leads
         ("is_deleted", "BOOLEAN DEFAULT FALSE"),
+        # Written by insert_lead() but previously only existed in prod —
+        # missing columns made lead creation fail with 400 on fresh DBs.
+        ("intent_level", "TEXT DEFAULT 'Warm'"),
+        ("ai_score", "INTEGER DEFAULT 85"),
+        ("system_confidence", "INTEGER DEFAULT 90"),
     ]
     # Skip ALTER TABLEs if all columns already exist (saves ~11s on Neon)
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'leads_raw'")
@@ -608,6 +613,9 @@ def create_tables():
         ("job_title", "TEXT"),
         ("phone", "TEXT"),
         ("linkedin_url", "TEXT"),
+        # Present in production via migration 001 but missing from the fresh-DB
+        # CREATE TABLE above — broke user registration on CI's clean database.
+        ("updated_at", "TIMESTAMP DEFAULT NOW()"),
     ]
     # Skip users ALTER TABLEs if all columns exist
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'users'")

@@ -12,6 +12,8 @@ Plus failure branch variants.
 import pytest
 from datetime import datetime, timedelta, timezone
 
+from tests.conftest import db_reachable
+
 
 class TestGoldenPath:
     """Complete happy path through the entire system."""
@@ -169,7 +171,10 @@ class TestFailureBranches:
         assert response.status_code == 404
 
     def test_invalid_token_rejected(self, client):
-        """Invalid token is rejected."""
+        """Invalid token is rejected (real-DB mode only — stub mode bypasses
+        session verification, so an invalid token cannot 401 there)."""
+        if not db_reachable():
+            pytest.skip("AuthMiddleware session check is stubbed without a DB")
         response = client.get(
             "/api/leads",
             headers={"Authorization": "Bearer invalid_token_12345"},
