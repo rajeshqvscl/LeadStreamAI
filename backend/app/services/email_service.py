@@ -1347,19 +1347,29 @@ def check_scheduled_emails():
             if not draft_content or not to_email:
                 continue
 
+            user_id = lead['user_id']
+
+            from app.api.drafts import heal_draft_content, inject_signature, get_sender_profile, markdown_to_html
+            from app.services.email_service import get_all_user_settings
+
+            template_name = lead.get('draft_template_used')
+            draft_content = heal_draft_content(draft_content, str(user_id) if user_id else None, template_name=template_name, lead_email=to_email)
+
             subject = "Following up"
             body = draft_content
-            if "Subject: " in draft_content:
-                parts = draft_content.split("\n\n", 1)
-                subject = parts[0].replace("Subject: ", "").strip()
-                body = parts[1].strip() if len(parts) > 1 else ""
+            first_line = draft_content.split("\n")[0].strip()
+            if first_line.startswith("Subject:"):
+                subject = first_line[len("Subject:"):].strip()
+                rest = draft_content.split("\n", 1)
+                body = rest[1].lstrip("\n").strip() if len(rest) > 1 else ""
+            else:
+                body = draft_content.strip()
+
+            sched_profile = get_sender_profile(str(user_id) if user_id else None)
+            body = inject_signature(body, sched_profile, lead_id)
 
             logger.info(f"Dispatching scheduled email to {to_email}")
 
-            # Fetch user ID to enable Gmail dispatch
-            user_id = lead['user_id']
-            from app.api.drafts import markdown_to_html
-            from app.services.email_service import get_all_user_settings
             _s = get_all_user_settings(user_id)
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
                 to_email=to_email,
@@ -1376,7 +1386,7 @@ def check_scheduled_emails():
                 lead_id=lead_id,
                 user_id=user_id,
                 cc=cc_email,
-                template_name=lead.get('draft_template_used'),
+                template_name=template_name,
                 signature_id=lead.get('draft_signature_id')
             )
 

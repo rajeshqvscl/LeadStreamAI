@@ -4519,10 +4519,13 @@ def send_approved_batch(user_id: str | None = Header(None, alias="X-User-Id")):
 
             subject = "Following up"
             body = draft_content
-            if "Subject: " in draft_content:
-                parts = draft_content.split("\n\n", 1)
-                subject = parts[0].replace("Subject: ", "").strip()
-                body = parts[1].strip() if len(parts) > 1 else ""
+            first_line = draft_content.split("\n")[0].strip()
+            if first_line.startswith("Subject:"):
+                subject = first_line[len("Subject:"):].strip()
+                rest = draft_content.split("\n", 1)
+                body = rest[1].lstrip("\n").strip() if len(rest) > 1 else ""
+            else:
+                body = draft_content.strip()
 
             # Handle SIG_START/SIG_END markers like the individual send path does
             # Build profile for sender info replacement
@@ -4718,10 +4721,30 @@ def send_selected_batch(req: BulkSendRequest, user_id: str | None = Header(None,
 
             subject = "Following up"
             body = draft_content
-            if "Subject: " in draft_content:
-                parts = draft_content.split("\n\n", 1)
-                subject = parts[0].replace("Subject: ", "").strip()
-                body = parts[1].strip() if len(parts) > 1 else ""
+            first_line = draft_content.split("\n")[0].strip()
+            if first_line.startswith("Subject:"):
+                subject = first_line[len("Subject:"):].strip()
+                rest = draft_content.split("\n", 1)
+                body = rest[1].lstrip("\n").strip() if len(rest) > 1 else ""
+            else:
+                body = draft_content.strip()
+
+            lead_profile = {
+                "full_name": lead_sender_name,
+                "job_title": "Analyst",
+                "phone": "8527083798",
+                "linkedin_url": "https://www.linkedin.com/company/qvscl/",
+                "signature": None,
+                "signature_mode": 'auto'
+            }
+            if owner_u:
+                lead_profile["job_title"] = owner_u.get('job_title') or lead_profile["job_title"]
+                lead_profile["phone"] = owner_u.get('phone') or lead_profile["phone"]
+                lead_profile["linkedin_url"] = owner_u.get('linkedin_url') or lead_profile["linkedin_url"]
+                lead_profile["signature"] = owner_u.get('signature')
+                lead_profile["signature_mode"] = owner_u.get('signature_mode') or 'custom'
+
+            body = inject_signature(body, lead_profile, lead['id'])
 
             from app.services.email_service import get_user_image_height, get_user_image_width
             success, error_msg, new_thread_id, new_rfc_message_id = send_email(
