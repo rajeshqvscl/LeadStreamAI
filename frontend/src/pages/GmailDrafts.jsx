@@ -161,6 +161,7 @@ const GmailDrafts = () => {
                         onClick={() => handleEditClick(draft)}
                         className="p-2 bg-white/5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-all border border-white/5 cursor-pointer"
                         title="Edit Draft"
+                        aria-label="Edit draft"
                       >
                         <Edit3 className="w-4 h-4" />
                       </button>
@@ -168,6 +169,7 @@ const GmailDrafts = () => {
                         onClick={() => handleSendDraft(draft.id)}
                         className="p-2 bg-blue-600/10 hover:bg-blue-600 rounded-lg text-blue-400 hover:text-white transition-all border border-blue-600/20 cursor-pointer"
                         title="Send Draft Now"
+                        aria-label="Send draft now"
                       >
                         <Send className="w-4 h-4" />
                       </button>
@@ -222,7 +224,7 @@ const GmailDrafts = () => {
           }`}>
             {notification.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
             <p className="text-[12px] font-bold tracking-tight">{notification.message}</p>
-            <button onClick={() => setNotification(null)} className="ml-4 p-1 hover:bg-white/10 rounded-lg transition-colors cursor-pointer">
+            <button onClick={() => setNotification(null)} className="ml-4 p-1 hover:bg-white/10 rounded-lg transition-colors cursor-pointer" aria-label="Close notification">
               <X className="w-4 h-4" />
             </button>
           </div>

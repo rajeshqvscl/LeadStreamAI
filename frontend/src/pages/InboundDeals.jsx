@@ -387,7 +387,7 @@ const InboundDeals = () => {
                     </div>
                   </div>
                 </div>
-                <button onClick={() => setSelectedDeal(null)} className="p-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-slate-400 hover:text-white transition-all cursor-pointer">
+                <button onClick={() => setSelectedDeal(null)} className="p-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-slate-400 hover:text-white transition-all cursor-pointer" aria-label="Close deal details">
                   <X className="w-5 h-5" />
                 </button>
               </div>

@@ -1144,6 +1144,7 @@ const Leads = () => {
                           onClick={() => handleAddLabelToSingle(lead.id)}
                           className="w-5 h-5 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors ml-1 border border-white/10"
                           title="Add Label"
+                          aria-label="Add label"
                         >
                           <Plus className="w-3 h-3" />
                         </button>
@@ -1154,18 +1155,21 @@ const Leads = () => {
                         <button
                           onClick={() => navigate(`/dashboard/leads/${lead.id}`)}
                           title="Edit Lead"
+                          aria-label="Edit lead"
                           className="p-2 hover:bg-blue-500/10 rounded-lg text-slate-500 hover:text-blue-400 transition-all shadow-sm cursor-pointer"
                         >
                           <Pencil className="w-5 h-5" />
                         </button>
                         <button
                           onClick={() => navigate(`/dashboard/leads/${lead.id}`)}
+                          aria-label="View lead"
                           className="p-2 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-all shadow-sm group cursor-pointer"
                         >
                           <ChevronRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleDeleteSingle(lead.id); }}
+                          aria-label="Delete lead"
                           className="p-2 hover:bg-rose-500/10 rounded-lg text-slate-500 hover:text-rose-400 transition-all shadow-sm cursor-pointer"
                         >
                           <Trash2 className="w-5 h-5" />
@@ -1208,6 +1212,7 @@ const Leads = () => {
                 disabled={pagination.page === 1}
                 onClick={() => setPagination(v => ({ ...v, page: v.page - 1 }))}
                 className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-800 border border-white/5 text-slate-400 disabled:opacity-20 translate-y-0 hover:-translate-y-0.5 transition-all cursor-pointer"
+                aria-label="Previous page"
               >
                 <ChevronLeft className="w-5 h-5" />
               </button>
@@ -1231,6 +1236,7 @@ const Leads = () => {
                 disabled={pagination.page === pagination.total_pages}
                 onClick={() => setPagination(v => ({ ...v, page: v.page + 1 }))}
                 className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-800 border border-white/5 text-slate-400 disabled:opacity-20 translate-y-0 hover:-translate-y-0.5 transition-all cursor-pointer"
+                aria-label="Next page"
               >
                 <ChevronRight className="w-5 h-5" />
               </button>
@@ -1246,7 +1252,7 @@ const Leads = () => {
           <h2 className="text-white font-bold text-lg flex items-center gap-2">
             <span className="text-xl">👥</span> Add New Target
           </h2>
-          <button onClick={() => setShowAddModal(false)} className="text-slate-500 hover:text-white transition-colors">
+          <button onClick={() => setShowAddModal(false)} className="text-slate-500 hover:text-white transition-colors" aria-label="Close">
             <X className="w-6 h-6" />
           </button>
         </div>
@@ -1432,6 +1438,7 @@ const Leads = () => {
             <button
               onClick={() => setNotification(null)}
               className="ml-4 p-1 hover:bg-white/10 rounded-lg transition-colors"
+              aria-label="Close notification"
             >
               <X className="w-4 h-4" />
             </button>
@@ -1537,7 +1544,7 @@ const Leads = () => {
                     Generating for <span className="text-white font-bold">{selectedLeads.size}</span> selected lead{selectedLeads.size > 1 ? 's' : ''}
                   </p>
                 </div>
-                <button onClick={() => setShowTemplatePicker(false)} className="text-slate-500 hover:text-white transition-colors cursor-pointer shrink-0">
+                <button onClick={() => setShowTemplatePicker(false)} className="text-slate-500 hover:text-white transition-colors cursor-pointer shrink-0" aria-label="Close">
                   <X className="w-5 h-5" />
                 </button>
               </div>

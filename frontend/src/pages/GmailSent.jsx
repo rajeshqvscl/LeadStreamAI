@@ -286,12 +286,14 @@ const GmailSent = () => {
                         <button 
                             onClick={() => fetchMessageDetail(selectedMessage.id)}
                             className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl transition-all text-slate-400 hover:text-white active:scale-95 border border-white/5 cursor-pointer"
+                            aria-label="Refresh message"
                         >
                             <RefreshCw size={20} className={isDetailLoading ? 'animate-spin' : ''} />
                         </button>
                         <button 
                             onClick={() => setSelectedMessage(null)}
                             className="p-3 bg-white/5 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-all cursor-pointer"
+                            aria-label="Close"
                         >
                             <X className="w-6 h-6" />
                         </button>

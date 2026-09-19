@@ -958,6 +958,7 @@ const BulkSearch = () => {
                           onClick={() => handleApproveDraftSingle(lead.id)}
                           disabled={processingId === lead.id}
                           title="Approve & Generate Draft"
+                          aria-label="Approve and generate draft"
                           className="p-1.5 rounded-lg bg-emerald-600/10 hover:bg-emerald-600 text-emerald-500 hover:text-white transition-all border border-emerald-600/20 cursor-pointer disabled:opacity-50"
                         >
                           {processingId === lead.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
@@ -966,6 +967,7 @@ const BulkSearch = () => {
                           onClick={() => navigate(`/dashboard/leads/${lead.id}`)}
                           disabled={processingId === lead.id}
                           title="Edit Lead"
+                          aria-label="Edit lead"
                           className="p-1.5 rounded-lg bg-blue-600/10 hover:bg-blue-600 text-blue-400 hover:text-white transition-all border border-blue-600/20 cursor-pointer disabled:opacity-50"
                         >
                           <Pencil className="w-3.5 h-3.5" />
@@ -974,6 +976,7 @@ const BulkSearch = () => {
                           onClick={() => openSinglePicker(lead.id)}
                           disabled={processingId === lead.id}
                           title="Generate Draft (choose template)"
+                          aria-label="Generate draft with template"
                           className="p-1.5 rounded-lg bg-indigo-600/10 hover:bg-indigo-600 text-indigo-400 hover:text-white transition-all border border-indigo-600/20 cursor-pointer disabled:opacity-50"
                         >
                           {processingId === lead.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
@@ -982,6 +985,7 @@ const BulkSearch = () => {
                           onClick={() => handleDeleteSingle(lead.id)}
                           disabled={processingId === lead.id}
                           title="Reject & Delete Lead"
+                          aria-label="Reject and delete lead"
                           className="p-1.5 rounded-lg bg-rose-600/10 hover:bg-rose-600 text-rose-500 hover:text-white transition-all border border-rose-600/20 cursor-pointer disabled:opacity-50"
                         >
                           <Trash2 className="w-3.5 h-3.5" />

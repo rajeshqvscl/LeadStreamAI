@@ -618,9 +618,14 @@ body {
    Remap low-contrast slate colors for readability
    ============================================= */
 .text-slate-600 { color: #94a3b8 !important; }
-.placeholder\:text-slate-600::placeholder { color: #94a3b8 !important; }
 .text-slate-500 { color: #94a3b8 !important; }
 .text-gray-500 { color: #9ca3af !important; }
+.placeholder\:text-slate-600::placeholder { color: #94a3b8 !important; }
+/* Override arbitrary hex values that bypass Tailwind utility classes */
+.text-\[\#475569\] { color: #94a3b8 !important; }
+.text-\[\#64748b\] { color: #94a3b8 !important; }
+.placeholder\:text-\[\#475569\]::placeholder { color: #94a3b8 !important; }
+.placeholder\:text-\[\#64748b\]::placeholder { color: #94a3b8 !important; }
 
 /* =============================================
    LIGHT MODE THEME
@@ -680,6 +685,8 @@ body {
 .light .text-slate-500 { color: #64748b !important; }
 .light .text-slate-600 { color: #475569 !important; }
 .light .text-gray-500 { color: #6b7280 !important; }
+.light .text-\[\#475569\] { color: #475569 !important; }
+.light .text-\[\#64748b\] { color: #64748b !important; }
 .light aside a { color: #475569 !important; }
 .light aside a:hover { background-color: rgba(0,0,0,0.04) !important; color: #1e293b !important; }
 .light aside a[class*="bg-blue-600"],

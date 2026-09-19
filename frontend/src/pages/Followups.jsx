@@ -762,6 +762,7 @@ const Followups = () => {
                       <button
                         onClick={(e) => { e.stopPropagation(); openLeadDetails(lead); }}
                         className="p-2.5 bg-[#1a2235] text-slate-400 rounded-xl border border-white/[0.05] hover:text-white hover:border-white/20 transition-all cursor-pointer"
+                        aria-label="View email"
                       >
                         <Mail className="w-4 h-4" />
                       </button>
@@ -847,7 +848,7 @@ const Followups = () => {
                   )}
                 </div>
               </div>
-              <button onClick={() => setIsModalOpen(false)} className="absolute top-8 right-8 p-2.5 rounded-xl bg-white/[0.03] hover:bg-white/[0.08] text-slate-500 hover:text-white transition-all cursor-pointer border border-white/[0.05]">
+              <button onClick={() => setIsModalOpen(false)} className="absolute top-8 right-8 p-2.5 rounded-xl bg-white/[0.03] hover:bg-white/[0.08] text-slate-500 hover:text-white transition-all cursor-pointer border border-white/[0.05]" aria-label="Close">
                 <X className="w-5 h-5" />
               </button>
             </div>

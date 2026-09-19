@@ -309,6 +309,7 @@ const TEMPLATES = [
                   onClick={handleNewSignature}
                   className="p-1 rounded-lg hover:bg-blue-500/20 text-blue-400 transition-all"
                   title="New Signature"
+                  aria-label="New Signature"
                 >
                   <Plus className="w-3.5 h-3.5" />
                 </button>
@@ -369,6 +370,7 @@ const TEMPLATES = [
                             onClick={e => { e.stopPropagation(); handleSetDefault(sig.id); }}
                             className="p-1 rounded hover:bg-amber-500/20 text-slate-500 hover:text-amber-400 transition-all"
                             title="Set as default"
+                            aria-label="Set as default"
                           >
                             <Star className="w-3 h-3" />
                           </button>
@@ -377,6 +379,7 @@ const TEMPLATES = [
                           onClick={e => { e.stopPropagation(); setEditingName(sig.id); setEditNameValue(sig.name); }}
                           className="p-1 rounded hover:bg-blue-500/20 text-slate-500 hover:text-blue-400 transition-all"
                           title="Rename"
+                          aria-label="Rename signature"
                         >
                           <Pencil className="w-3 h-3" />
                         </button>
@@ -385,6 +388,7 @@ const TEMPLATES = [
                           disabled={deletingId === sig.id}
                           className="p-1 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400 transition-all"
                           title="Delete"
+                          aria-label="Delete signature"
                         >
                           {deletingId === sig.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
                         </button>
@@ -407,7 +411,7 @@ const TEMPLATES = [
                     ) : null;
                   })()}
                 </div>
-                <button onClick={close} className="text-slate-500 hover:text-white transition-colors"><X className="w-4 h-4" /></button>
+                <button onClick={close} className="text-slate-500 hover:text-white transition-colors" aria-label="Close"><X className="w-4 h-4" /></button>
               </div>
               <div className="p-6 space-y-4 overflow-y-auto max-h-[calc(90vh-80px)]">
                 {/* Signature Name */}

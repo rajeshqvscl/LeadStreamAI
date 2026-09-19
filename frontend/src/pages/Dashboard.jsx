@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from '../services/api';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
 import { Link } from 'react-router-dom';
@@ -10,6 +10,38 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie, Legend
 } from 'recharts';
+
+const EMPTY_MESSAGES = {
+  ingested: ['No leads ingested yet', 'The system hasn\'t sourced any leads yet. Run a bulk search or enable AI discovery to populate your pipeline.'],
+  pipeline: ['No replies received', 'No leads have responded to your outreach yet. Follow up with leads in your pipeline to start conversations.'],
+  classified: ['No leads classified', 'AI classification hasn\'t processed any leads yet. Enable auto-classification in settings to analyze lead personas automatically.'],
+  pending: ['Approval queue is clear', 'No emails are pending your review. All caught up! New drafts will appear here once generated.'],
+  refined: ['No drafts generated', 'No email drafts have been created yet. Generate drafts for your leads to start your outreach campaigns.'],
+  unsubscribed: ['No unsubscribes recorded', 'Your unsubscribe list is clean. No leads have opted out of your communications.'],
+  outbound: ['No emails sent yet', 'Your outbound limit hasn\'t been used yet. Start sending emails to track your daily usage here.'],
+  followups: ['No follow-ups dispatched', 'No follow-up sequences have been triggered yet. They will appear here once scheduled.'],
+  open_rate_detail: ['No opens tracked yet', 'No email opens have been recorded. Ensure your emails include tracking pixels to measure open rates accurately.'],
+  click_rate_detail: ['No clicks tracked yet', 'No link clicks have been recorded. Add trackable links to your emails to measure engagement.'],
+  bounce_detail: ['No bounces detected', 'Your deliverability looks healthy! No emails have bounced back.'],
+  optouts_detail: ['No opt-outs recorded', 'No leads have opted out. Your email content is resonating well with your audience.'],
+  meeting_requests: ['No meeting requests', 'No leads have proposed a meeting time yet. Replies with meeting requests will appear here automatically.']
+};
+
+const CARD_TITLES = {
+  ingested: 'Total Ingested',
+  pipeline: 'Primary Pipeline',
+  classified: 'AI Processed',
+  pending: 'Approval Queue',
+  refined: 'Refined Emails',
+  unsubscribed: 'Unsubscribed',
+  outbound: 'Outbound Limit',
+  followups: 'Follow-ups Sent',
+  open_rate_detail: 'Open Rate',
+  click_rate_detail: 'Click Rate',
+  bounce_detail: 'Bounce',
+  optouts_detail: 'Opt-outs',
+  meeting_requests: 'Meeting Requests'
+};
 
 const Dashboard = () => {
   const [data, setData] = useState({
@@ -54,38 +86,6 @@ const Dashboard = () => {
   const [filterMonth, setFilterMonth] = useState(0);
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const [detailPage, setDetailPage] = useState(1);
-
-  const EMPTY_MESSAGES = {
-    ingested: ['No leads ingested yet', 'The system hasn\'t sourced any leads yet. Run a bulk search or enable AI discovery to populate your pipeline.'],
-    pipeline: ['No replies received', 'No leads have responded to your outreach yet. Follow up with leads in your pipeline to start conversations.'],
-    classified: ['No leads classified', 'AI classification hasn\'t processed any leads yet. Enable auto-classification in settings to analyze lead personas automatically.'],
-    pending: ['Approval queue is clear', 'No emails are pending your review. All caught up! New drafts will appear here once generated.'],
-    refined: ['No drafts generated', 'No email drafts have been created yet. Generate drafts for your leads to start your outreach campaigns.'],
-    unsubscribed: ['No unsubscribes recorded', 'Your unsubscribe list is clean. No leads have opted out of your communications.'],
-    outbound: ['No emails sent yet', 'Your outbound limit hasn\'t been used yet. Start sending emails to track your daily usage here.'],
-    followups: ['No follow-ups dispatched', 'No follow-up sequences have been triggered yet. They will appear here once scheduled.'],
-    open_rate_detail: ['No opens tracked yet', 'No email opens have been recorded. Ensure your emails include tracking pixels to measure open rates accurately.'],
-    click_rate_detail: ['No clicks tracked yet', 'No link clicks have been recorded. Add trackable links to your emails to measure engagement.'],
-    bounce_detail: ['No bounces detected', 'Your deliverability looks healthy! No emails have bounced back.'],
-    optouts_detail: ['No opt-outs recorded', 'No leads have opted out. Your email content is resonating well with your audience.'],
-    meeting_requests: ['No meeting requests', 'No leads have proposed a meeting time yet. Replies with meeting requests will appear here automatically.']
-  };
-
-  const CARD_TITLES = {
-    ingested: 'Total Ingested',
-    pipeline: 'Primary Pipeline',
-    classified: 'AI Processed',
-    pending: 'Approval Queue',
-    refined: 'Refined Emails',
-    unsubscribed: 'Unsubscribed',
-    outbound: 'Outbound Limit',
-    followups: 'Follow-ups Sent',
-    open_rate_detail: 'Open Rate',
-    click_rate_detail: 'Click Rate',
-    bounce_detail: 'Bounce',
-    optouts_detail: 'Opt-outs',
-    meeting_requests: 'Meeting Requests'
-  };
 
   const MONTHS = [
     { value: 0, label: 'All Months' },
@@ -291,7 +291,7 @@ const Dashboard = () => {
   const [dashboardMonth, setDashboardMonth] = useState(0);
   const [dashboardYear, setDashboardYear] = useState(new Date().getFullYear());
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       const params = {};
       if (dashboardMonth > 0) params.month = dashboardMonth;
@@ -313,7 +313,7 @@ const Dashboard = () => {
         .then(gmailRes => setData(prev => ({ ...prev, inboxMessages: gmailRes.data.messages || [] })))
         .catch(err => console.error('Gmail sync error:', err));
     }
-  };
+  }, [dashboardMonth, dashboardYear, user.google_linked_at]);
 
   // Sync user profile if coming back from successful Gmail link
   useEffect(() => {
@@ -346,7 +346,7 @@ const Dashboard = () => {
     checkParams();
   }, []);
 
-  const fetchVelocity = async () => {
+  const fetchVelocity = useCallback(async () => {
     if (!isAdmin) return;
     try {
       const response = await axios.get('/api/admin/velocity', { params: { period } });
@@ -354,17 +354,17 @@ const Dashboard = () => {
     } catch (err) {
       console.error('Velocity fetch error:', err);
     }
-  };
+  }, [isAdmin, period]);
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 10000); // High-frequency 10s polling for real-time Command Center
+    const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
-  }, [isAdmin, dashboardMonth, dashboardYear]);
+  }, [fetchData]);
 
   useEffect(() => {
     fetchVelocity();
-  }, [isAdmin, period]);
+  }, [fetchVelocity]);
 
   const _triggerReport = async () => {
     setSendingReport(true);
@@ -954,11 +954,13 @@ const Dashboard = () => {
                             onClick={() => fetchMessageDetail(selectedMsg.id)}
                             className="p-4 bg-white/5 hover:bg-white/10 rounded-2xl transition-all text-slate-400 hover:text-white active:scale-95 border border-white/5 cursor-pointer"
                             title="Reload Message Content"
+                            aria-label="Reload message content"
                         >
                             <RefreshCw size={20} className={loadingDetail ? 'animate-spin' : ''} />
                         </button>
                         <button 
                             onClick={() => setSelectedMsg(null)}
+                            aria-label="Close message"
                             className="p-4 bg-rose-500/10 hover:bg-rose-500/20 rounded-2xl transition-all text-rose-500 hover:text-rose-400 active:scale-95 shadow-xl border border-rose-500/10 cursor-pointer"
                         >
                             <X size={20} />
@@ -1079,7 +1081,7 @@ const Dashboard = () => {
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <button onClick={closeCardDetail} className="p-4 bg-rose-500/10 hover:bg-rose-500/20 rounded-2xl transition-all text-rose-500 hover:text-rose-400 active:scale-95 shadow-xl border border-rose-500/10 cursor-pointer">
+                <button onClick={closeCardDetail} aria-label="Close details" className="p-4 bg-rose-500/10 hover:bg-rose-500/20 rounded-2xl transition-all text-rose-500 hover:text-rose-400 active:scale-95 shadow-xl border border-rose-500/10 cursor-pointer">
                   <X size={20} />
                 </button>
               </div>

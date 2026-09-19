@@ -506,6 +506,7 @@ const Signatures = () => {
                           onClick={e => { e.stopPropagation(); handleSetDefault(sig.id); }}
                           className="p-1.5 rounded hover:bg-amber-500/20 text-slate-500 hover:text-amber-400 transition-all"
                           title="Set as default"
+                          aria-label="Set as default"
                         >
                           <Star className="w-3 h-3" />
                         </button>
@@ -514,6 +515,7 @@ const Signatures = () => {
                         onClick={e => { e.stopPropagation(); setEditingName(sig.id); setEditNameValue(sig.name); }}
                         className="p-1.5 rounded hover:bg-blue-500/20 text-slate-500 hover:text-blue-400 transition-all"
                         title="Rename"
+                        aria-label="Rename signature"
                       >
                         <Pencil className="w-3 h-3" />
                       </button>
@@ -522,6 +524,7 @@ const Signatures = () => {
                         disabled={deletingId === sig.id}
                         className="p-1.5 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400 transition-all"
                         title="Delete"
+                        aria-label="Delete signature"
                       >
                         {deletingId === sig.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
                       </button>

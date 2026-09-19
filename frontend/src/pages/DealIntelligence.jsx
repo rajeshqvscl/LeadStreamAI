@@ -598,6 +598,7 @@ return (
               onClick={() => setDarkMode(!darkMode)}
               className="p-2 rounded-lg hover:bg-white/5 transition-colors"
               title="Toggle Dark Mode"
+              aria-label="Toggle dark mode"
             >
               {darkMode ? <span className="text-slate-400">☀️</span> : <span className="text-slate-400">🌙</span>}
             </button>
@@ -618,6 +619,7 @@ return (
                 <button 
                   onClick={() => setShowSyncPanel(false)} 
                   className="text-slate-500 hover:text-white cursor-pointer p-1"
+                  aria-label="Close sync panel"
                 >×</button>
               </div>
               

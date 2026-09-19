@@ -316,12 +316,14 @@ const Inbox = () => {
                                     onClick={() => fetchMessageDetail(selectedMsg.id)}
                                     className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl transition-all text-slate-400 hover:text-white active:scale-95 border border-white/5 cursor-pointer"
                                     title="Reload Message Content"
+                                    aria-label="Reload message content"
                                 >
                                     <RefreshCw size={18} className={loadingDetail ? 'animate-spin' : ''} />
                                 </button>
                                 <button 
                                     onClick={() => setSelectedMsg(null)}
                                     className="p-3 bg-rose-500/10 hover:bg-rose-500/20 rounded-2xl transition-all text-rose-500 hover:text-rose-400 active:scale-95 shadow-xl cursor-pointer border border-rose-500/10"
+                                    aria-label="Close"
                                 >
                                     <X size={20} />
                                 </button>

@@ -121,7 +121,7 @@ const UploadScreenshotModal = ({ isOpen, onClose, onSaved }) => {
               </h2>
               <p className="text-slate-500 text-[11px] font-medium">Upload screenshot/PDF/DOCX — AI extracts template + follow-ups</p>
             </div>
-            <button onClick={handleClose} className="text-slate-500 hover:text-white transition-colors cursor-pointer"><X className="w-5 h-5" /></button>
+            <button onClick={handleClose} className="text-slate-500 hover:text-white transition-colors cursor-pointer" aria-label="Close"><X className="w-5 h-5" /></button>
           </div>
 
           {error && <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center gap-2 text-red-400 text-sm"><AlertCircle className="w-4 h-4 shrink-0" />{error}</div>}

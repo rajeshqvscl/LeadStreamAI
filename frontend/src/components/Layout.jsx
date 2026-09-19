@@ -72,8 +72,8 @@ const Layout = () => {
     fetchStats();
     fetchStatus();
     
-    const statsInterval = setInterval(fetchStats, 15000);
-    const statusInterval = setInterval(fetchStatus, 12000); // Poll status every 12s
+    const statsInterval = setInterval(fetchStats, 60000);
+    const statusInterval = setInterval(fetchStatus, 60000);
     
     return () => {
       clearInterval(statsInterval);
@@ -341,6 +341,7 @@ const Layout = () => {
             onClick={toggleTheme}
             className="w-9 h-9 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-[16px] transition-all cursor-pointer shrink-0"
             title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            aria-label={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
           >
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>
@@ -437,6 +438,7 @@ const Layout = () => {
                   onClick={() => setIsMinimized(true)}
                   className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-all cursor-pointer border border-white/5"
                   title="Minimize Panel"
+                  aria-label="Minimize Panel"
                 >
                   <span className="text-[16px] leading-none">»</span>
                 </button>

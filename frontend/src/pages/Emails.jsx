@@ -785,7 +785,7 @@ const Emails = () => {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2 items-center">
-                      <button onClick={() => navigate(`/dashboard/emails/${email.id}/edit`)} className="p-2 rounded bg-white/5 hover:bg-white/10 text-slate-300 transition-all cursor-pointer" title="Edit/View Draft">
+                      <button onClick={() => navigate(`/dashboard/emails/${email.id}/edit`)} className="p-2 rounded bg-white/5 hover:bg-white/10 text-slate-300 transition-all cursor-pointer" title="Edit/View Draft" aria-label="Edit draft">
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
                       
@@ -796,10 +796,11 @@ const Emails = () => {
                             disabled={sendingId === email.id}
                             className={`p-2 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-all cursor-pointer ${sendingId === email.id ? 'opacity-50' : ''}`} 
                             title="Approve & Send"
+                            aria-label="Approve and send"
                           >
                             {sendingId === email.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                           </button>
-                          <button onClick={() => handleReject(email.id)} className="p-2 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-all cursor-pointer" title="Reject Draft">
+                          <button onClick={() => handleReject(email.id)} className="p-2 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-all cursor-pointer" title="Reject Draft" aria-label="Reject draft">
                             <X className="w-3.5 h-3.5" />
                           </button>
                         </>
@@ -812,6 +813,7 @@ const Emails = () => {
                         }} 
                         className="p-2 rounded bg-white/5 hover:bg-white/10 text-slate-400 transition-all cursor-pointer" 
                         title="Archive Draft"
+                        aria-label="Archive draft"
                       >
                         <Archive className="w-3.5 h-3.5" />
                       </button>
@@ -823,6 +825,7 @@ const Emails = () => {
                         }} 
                         className="p-2 rounded bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 transition-all cursor-pointer" 
                         title="Mark as Sent"
+                        aria-label="Mark as sent"
                       >
                         <Send className="w-3.5 h-3.5" />
                       </button>
@@ -831,6 +834,7 @@ const Emails = () => {
                         onClick={() => handleDelete(email.id)} 
                         className="p-2 rounded bg-red-500/10 hover:bg-red-500/20 text-red-500 transition-all cursor-pointer" 
                         title="Delete Lead & Draft"
+                        aria-label="Delete lead and draft"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -1038,6 +1042,7 @@ const Emails = () => {
                 onClick={() => setSelectedIds([])}
                 className="ml-4 p-2 text-slate-500 hover:text-white transition-colors cursor-pointer"
                 title="Deselect All"
+                aria-label="Deselect all"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1098,7 +1103,7 @@ const Emails = () => {
                   <p className="text-slate-500 text-[11px] font-black uppercase tracking-[2px]">Generating for {selectedIds.length} selected items</p>
                 </div>
               </div>
-              <button onClick={() => setShowTemplatePicker(false)} className="p-2 hover:bg-white/5 rounded-full text-slate-500 transition-colors">
+              <button onClick={() => setShowTemplatePicker(false)} className="p-2 hover:bg-white/5 rounded-full text-slate-500 transition-colors" aria-label="Close">
                 <X className="w-6 h-6" />
               </button>
             </div>
@@ -1238,7 +1243,7 @@ const Emails = () => {
           <div className={`flex items-center gap-3 px-6 py-4 rounded-2xl shadow-2xl border backdrop-blur-md ${notification.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'
             }`}>
             <p className="text-[12px] font-bold tracking-tight">{notification.message}</p>
-            <button onClick={() => setNotification(null)} className="ml-4 p-1 hover:bg-white/10 rounded-lg transition-colors cursor-pointer">
+            <button onClick={() => setNotification(null)} className="ml-4 p-1 hover:bg-white/10 rounded-lg transition-colors cursor-pointer" aria-label="Close notification">
               <X className="w-4 h-4" />
             </button>
           </div>

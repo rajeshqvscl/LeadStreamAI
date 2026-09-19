@@ -305,6 +305,7 @@ const ToolButton = ({ icon: Icon, title, onClick, active, className = '' }) => (
   <button
     type="button"
     title={title}
+    aria-label={title}
     onMouseDown={e => { e.preventDefault(); onClick?.(); }}
     className={`p-1.5 rounded-md hover:bg-gray-200 text-gray-500 hover:text-gray-900 transition-all ${active ? 'bg-blue-500/20 text-blue-600 border border-blue-500/30' : ''} ${className}`}
   >
@@ -1217,6 +1218,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
             ref={textColorBtnRef}
             onMouseDown={e => { e.preventDefault(); setShowTextColors(!showTextColors); setShowBgColors(false); }}
             className={`p-1.5 rounded-md hover:bg-gray-200 text-gray-500 hover:text-gray-900 transition-all relative ${showTextColors ? 'bg-blue-500/20 text-blue-600' : ''}`}
+            aria-label="Text Color"
           >
             <Palette className="w-3.5 h-3.5" />
           </button>
@@ -1246,6 +1248,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
             onMouseDown={e => { e.preventDefault(); setShowBgColors(!showBgColors); setShowTextColors(false); }}
             className={`p-1.5 rounded-md hover:bg-gray-200 text-gray-500 hover:text-gray-900 transition-all relative ${showBgColors ? 'bg-blue-500/20 text-blue-600' : ''}`}
             style={{ background: 'linear-gradient(135deg, transparent 50%, #ffd70020 50%)' }}
+            aria-label="Highlight Color"
           >
             <span className="text-[11px] font-bold leading-none" style={{ textShadow: '0 0 2px rgba(255,215,0,0.5)' }}>H</span>
           </button>
@@ -1272,6 +1275,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
           title="Attach File"
           onMouseDown={e => { e.preventDefault(); handleFileUpload(); }}
           className={`p-1.5 rounded-md transition-all ${uploading ? 'text-blue-500 animate-pulse' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-200'}`}
+          aria-label="Attach File"
         >
           <Paperclip className="w-3.5 h-3.5" />
         </button>
@@ -1300,6 +1304,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
           title={showSource ? 'Rich Text View' : 'Source View'}
           onMouseDown={e => { e.preventDefault(); toggleSource(); }}
           className={`p-1.5 rounded-md transition-all ${showSource ? 'bg-blue-500/20 text-blue-600 border border-blue-500/30' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-200'}`}
+          aria-label={showSource ? 'Rich Text View' : 'Source View'}
         >
           {showSource ? <Eye className="w-3.5 h-3.5" /> : <Code className="w-3.5 h-3.5" />}
         </button>

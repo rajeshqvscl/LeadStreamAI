@@ -53,7 +53,7 @@ export function Toast({ toast, onClose }) {
         <span className={`text-[12px] font-bold ${c.text}`}>
           {toast.message}
         </span>
-        <button onClick={onClose} className="ml-2 text-slate-500 hover:text-white transition-colors cursor-pointer">
+        <button onClick={onClose} className="ml-2 text-slate-500 hover:text-white transition-colors cursor-pointer" aria-label="Close">
           <X className="w-3.5 h-3.5" />
         </button>
       </div>

@@ -113,7 +113,8 @@ const ReminderPanel = () => {
       {/* Floating Bell */}
       <button onClick={() => setShowAlerts(true)}
         className="fixed bottom-20 right-6 z-[300] w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 border border-white/10 shadow-2xl flex items-center justify-center hover:scale-105 transition-all cursor-pointer group"
-        title="Reminders">
+        title="Reminders"
+        aria-label="Reminders">
         <Bell className="w-5 h-5 text-white" />
         {(reminders.length > 0 || urgent.pending_followups_count > 0 || urgent.pending_drafts_count > 0) && (
           <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-rose-500 text-[9px] font-black text-white flex items-center justify-center shadow-lg">
@@ -134,11 +135,13 @@ const ReminderPanel = () => {
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => setShowAdd(true)}
-                  className="p-2.5 bg-blue-500/10 hover:bg-blue-500/20 rounded-xl text-blue-400 transition-all cursor-pointer border border-blue-500/20">
+                  className="p-2.5 bg-blue-500/10 hover:bg-blue-500/20 rounded-xl text-blue-400 transition-all cursor-pointer border border-blue-500/20"
+                  aria-label="Add reminder">
                   <Plus className="w-4 h-4" />
                 </button>
                 <button onClick={() => setShowAlerts(false)}
-                  className="p-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-slate-400 transition-all cursor-pointer">
+                  className="p-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-slate-400 transition-all cursor-pointer"
+                  aria-label="Close reminders">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -155,7 +158,8 @@ const ReminderPanel = () => {
                   <div key={r.id} className="flex items-center justify-between py-2 border-b border-rose-500/10 last:border-0">
                     <span className="text-xs font-bold text-white truncate">{r.title}</span>
                     <button onClick={() => handleComplete(r.id)}
-                      className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-lg text-emerald-400 transition-all cursor-pointer">
+                      className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-lg text-emerald-400 transition-all cursor-pointer"
+                      aria-label="Complete reminder">
                       <Check className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -253,11 +257,13 @@ const ReminderPanel = () => {
                       </div>
                       <div className="flex items-center gap-1 shrink-0 ml-2">
                         <button onClick={() => handleComplete(r.id)}
-                          className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-lg text-emerald-400 opacity-0 group-hover:opacity-100 transition-all cursor-pointer">
+                          className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-lg text-emerald-400 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+                          aria-label="Complete reminder">
                           <Check className="w-3.5 h-3.5" />
                         </button>
                         <button onClick={() => handleDelete(r.id)}
-                          className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 rounded-lg text-rose-400 opacity-0 group-hover:opacity-100 transition-all cursor-pointer">
+                          className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 rounded-lg text-rose-400 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+                          aria-label="Delete reminder">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
@@ -278,7 +284,8 @@ const ReminderPanel = () => {
                 <div className="bg-[#131722] border border-white/10 rounded-[32px] w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
                   <div className="p-8 border-b border-white/5 flex items-center justify-between">
                     <h3 className="text-base font-black text-white uppercase tracking-widest">New Reminder</h3>
-                    <button onClick={() => setShowAdd(false)} className="p-2 bg-white/5 hover:bg-white/10 rounded-xl text-slate-400 transition-all cursor-pointer">
+                    <button onClick={() => setShowAdd(false)} className="p-2 bg-white/5 hover:bg-white/10 rounded-xl text-slate-400 transition-all cursor-pointer"
+                      aria-label="Close">
                       <X className="w-4 h-4" />
                     </button>
                   </div>

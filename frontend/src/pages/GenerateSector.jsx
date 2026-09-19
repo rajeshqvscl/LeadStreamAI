@@ -208,7 +208,7 @@ const GenerateSector = () => {
           <div className="card w-full max-w-md bg-slate-900 border-white/10 shadow-2xl">
             <div className="p-6 border-b border-white/5 flex justify-between items-center">
               <h3 className="text-white font-black uppercase tracking-tight">Add New Sector</h3>
-              <button className="text-slate-500 hover:text-white" onClick={() => setShowAddModal(false)}>✕</button>
+              <button className="text-slate-500 hover:text-white" onClick={() => setShowAddModal(false)} aria-label="Close">✕</button>
             </div>
             <div className="p-6 space-y-6">
               <div className="space-y-1.5">

@@ -113,7 +113,7 @@ const DraftTemplatePicker = ({ isOpen, onClose, selectedCount, onGenerate }) => 
                 Generating for <span className="text-white font-bold">{selectedCount}</span> selected item{selectedCount !== 1 ? 's' : ''}
               </p>
             </div>
-            <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors cursor-pointer">
+            <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors cursor-pointer" aria-label="Close">
               <X className="w-5 h-5" />
             </button>
           </div>

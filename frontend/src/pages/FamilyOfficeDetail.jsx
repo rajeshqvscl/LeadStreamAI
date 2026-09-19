@@ -301,10 +301,10 @@ const FamilyOfficeDetail = () => {
               
               <div className="flex items-center gap-6">
                 <div className="flex items-center gap-3">
-                  <button className="p-3 rounded-xl bg-slate-800 border border-white/5 text-slate-400 hover:text-white hover:border-blue-500/30 transition-all">
+                  <button className="p-3 rounded-xl bg-slate-800 border border-white/5 text-slate-400 hover:text-white hover:border-blue-500/30 transition-all" aria-label="Send email">
                     <Mail className="w-4 h-4" />
                   </button>
-                  <button className="p-3 rounded-xl bg-slate-800 border border-white/5 text-slate-400 hover:text-white hover:border-blue-500/30 transition-all">
+                  <button className="p-3 rounded-xl bg-slate-800 border border-white/5 text-slate-400 hover:text-white hover:border-blue-500/30 transition-all" aria-label="Open external link">
                     <ExternalLink className="w-4 h-4" />
                   </button>
                 </div>

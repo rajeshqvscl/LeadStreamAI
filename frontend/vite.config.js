@@ -21,19 +21,22 @@ export default defineConfig({
     historyApiFallback: true,
   },
   optimizeDeps: {
-    include: ['html2canvas', 'jspdf'],
-    exclude: ['pdfjs-dist', 'xlsx', 'mammoth', 'dompurify'],
+    exclude: ['pdfjs-dist', 'xlsx', 'mammoth', 'dompurify', 'html2canvas', 'jspdf'],
   },
   build: {
     target: 'es2020',
     chunkSizeWarningLimit: 1000,
     cssMinify: 'esbuild',
+    modulePreload: { polyfill: false },
     rollupOptions: {
       external: ['pdfjs-dist/build/pdf.worker.min.mjs'],
       output: {
         manualChunks: (id) => {
           if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
+            if (id.includes('react-router')) {
+              return 'vendor-router';
+            }
+            if (id.includes('react') || id.includes('react-dom')) {
               return 'vendor-react';
             }
             if (id.includes('lucide-react') || id.includes('date-fns') || id.includes('clsx')) {
@@ -65,12 +68,10 @@ export default defineConfig({
             }
             return 'vendor-other';
           }
-          // Split large app pages into separate chunks
           if (id.includes('/pages/')) {
             const pageName = id.split('/pages/')[1].split('/')[0].replace('.jsx', '');
             return `page-${pageName}`;
           }
-          // Put api.js in its own chunk
           if (id.includes('/services/api.js')) {
             return 'vendor-api';
           }

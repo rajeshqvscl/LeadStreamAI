@@ -762,12 +762,14 @@ const EditEmail = () => {
                   <button
                     type="button"
                     title="Edit Signature"
+                    aria-label="Edit Signature"
                     onClick={() => setShowSigEditor(true)}
                     className="w-7 h-7 flex items-center justify-center rounded bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
                   ><Pen className="w-3.5 h-3.5" /></button>
                   <button
                     type="button"
                     title="Insert Signature"
+                    aria-label="Insert Signature"
                     onClick={handleInsertSignature}
                     className="w-7 h-7 flex items-center justify-center rounded bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
                   ><FileText className="w-3.5 h-3.5" /></button>

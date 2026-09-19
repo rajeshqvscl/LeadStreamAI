@@ -1212,10 +1212,11 @@ const AdminDashboard = () => {
                           }}
                           className="p-2 hover:bg-indigo-500/10 rounded-lg transition-colors text-indigo-400" 
                           title="Analyze Intelligence"
+                          aria-label="Analyze intelligence"
                         >
                           <Zap className="w-4 h-4" />
                         </button>
-                        <button className="p-2 hover:bg-white/5 rounded-lg transition-colors text-slate-500 hover:text-white">
+                        <button className="p-2 hover:bg-white/5 rounded-lg transition-colors text-slate-500 hover:text-white" aria-label="More options">
                           <MoreHorizontal className="w-4 h-4" />
                         </button>
                       </div>
@@ -1680,7 +1681,7 @@ const AdminDashboard = () => {
                 >
                   Direct Connect <ArrowUpRight className="w-4 h-4" />
                 </button>
-                <button className="px-6 py-4 bg-white/5 hover:bg-white/10 text-white border border-white/10 rounded-2xl transition-all">
+                <button className="px-6 py-4 bg-white/5 hover:bg-white/10 text-white border border-white/10 rounded-2xl transition-all" aria-label="More options">
                   <MoreHorizontal className="w-5 h-5" />
                 </button>
               </div>

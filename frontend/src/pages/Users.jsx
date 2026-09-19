@@ -308,6 +308,7 @@ const Users = () => {
                         onClick={() => handleOpenDrawer(user)}
                         className="p-2 rounded-lg bg-slate-900 border border-white/5 hover:bg-blue-500/20 hover:text-blue-400 transition-all text-slate-500"
                         title="Update Policy"
+                        aria-label="Update policy"
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
@@ -317,6 +318,7 @@ const Users = () => {
                           onClick={() => handleDelete(user.id)}
                           className="p-2 rounded-lg bg-slate-900 border border-white/5 hover:bg-orange-500/20 hover:text-orange-400 transition-all text-slate-500"
                           title="Suspend Access"
+                          aria-label="Suspend access"
                         >
                           <AlertCircle className="w-4 h-4" />
                         </button>
@@ -326,6 +328,7 @@ const Users = () => {
                             onClick={() => handleResume(user.id)}
                             className="p-2 rounded-lg bg-slate-900 border border-white/5 hover:bg-emerald-500/20 hover:text-emerald-400 transition-all text-slate-500"
                             title="Resume Access"
+                            aria-label="Resume access"
                           >
                             <Play className="w-4 h-4" />
                           </button>
@@ -333,6 +336,7 @@ const Users = () => {
                             onClick={() => handleHardDelete(user.id)}
                             className="p-2 rounded-lg bg-slate-900 border border-white/5 hover:bg-red-500/20 hover:text-red-400 transition-all text-slate-500"
                             title="Delete Record Permanently"
+                            aria-label="Delete record permanently"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -360,7 +364,7 @@ const Users = () => {
                 </h2>
                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Identity & Access Management</p>
               </div>
-              <button onClick={() => setShowDrawer(false)} className="text-slate-500 hover:text-white transition-colors">
+              <button onClick={() => setShowDrawer(false)} className="text-slate-500 hover:text-white transition-colors" aria-label="Close">
                 <X className="w-6 h-6" />
               </button>
             </div>

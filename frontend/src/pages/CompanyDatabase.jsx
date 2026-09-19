@@ -694,7 +694,7 @@ const CompanyDatabase = () => {
                 <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-0.5">Registry ID: {selectedCompany.id}</p>
               </div>
             </div>
-            <button onClick={() => setIsDrawerOpen(false)} className="p-2 hover:bg-white/5 rounded-lg transition-colors text-slate-500 hover:text-white">
+            <button onClick={() => setIsDrawerOpen(false)} className="p-2 hover:bg-white/5 rounded-lg transition-colors text-slate-500 hover:text-white" aria-label="Close">
               <PanelRightClose className="w-5 h-5" />
             </button>
           </div>
@@ -996,7 +996,7 @@ const CompanyDatabase = () => {
         <div className={`mb-6 p-4 rounded-2xl border flex items-center gap-4 animate-in slide-in-from-top-4 ${notification.type === 'error' ? 'bg-red-500/10 border-red-500/20 text-red-500' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500'}`}>
           {notification.type === 'error' ? <AlertCircle className="w-5 h-5 shrink-0" /> : <CheckCircle2 className="w-5 h-5 shrink-0" />}
           <span className="text-[11px] font-black uppercase tracking-widest leading-relaxed">{notification.message}</span>
-          <button onClick={() => setNotification(null)} className="ml-auto opacity-40 hover:opacity-100 transition-opacity"><X className="w-4 h-4" /></button>
+          <button onClick={() => setNotification(null)} className="ml-auto opacity-40 hover:opacity-100 transition-opacity" aria-label="Close notification"><X className="w-4 h-4" /></button>
         </div>
       )}
 
@@ -1109,6 +1109,7 @@ const CompanyDatabase = () => {
                         onClick={() => handleEditClick(company)}
                         className="p-2.5 rounded-xl bg-slate-500/10 hover:bg-white/10 text-slate-400 transition-all group/btn"
                         title="Edit Detailed Metadata"
+                        aria-label="Edit detailed metadata"
                       >
                         <Pencil className="w-4 h-4 group-hover/btn:scale-110 transition-transform" />
                       </button>
@@ -1117,6 +1118,7 @@ const CompanyDatabase = () => {
                         disabled={processingId === company.id}
                         className="p-2.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 transition-all group/btn"
                         title="Generate Draft"
+                        aria-label="Generate draft"
                       >
                         {processingId === company.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 group-hover/btn:scale-110 transition-transform" />}
                       </button>
@@ -1125,6 +1127,7 @@ const CompanyDatabase = () => {
                           onClick={() => setViewDraftCompany(company)}
                           className="p-2.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 transition-all group/btn"
                           title="View Generated Draft"
+                          aria-label="View generated draft"
                         >
                           <Eye className="w-4 h-4 group-hover/btn:scale-110 transition-transform" />
                         </button>
@@ -1134,6 +1137,7 @@ const CompanyDatabase = () => {
                         disabled={processingId === company.id}
                         className="p-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-all group/btn"
                         title="Mark as Sent in Pipeline"
+                        aria-label="Mark as sent in pipeline"
                       >
                         {processingId === company.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4 group-hover/btn:scale-110 transition-transform" />}
                       </button>
@@ -1222,7 +1226,7 @@ const CompanyDatabase = () => {
                 </button>
               ))}
               
-              <button className="px-5 h-full flex items-center justify-center text-slate-700 hover:text-white transition-colors cursor-not-allowed border-l border-white/5" title="Add Tab (Read Only)">
+              <button className="px-5 h-full flex items-center justify-center text-slate-700 hover:text-white transition-colors cursor-not-allowed border-l border-white/5" title="Add Tab (Read Only)" aria-label="Add tab (read only)">
                 <Plus className="w-4.5 h-4.5" />
               </button>
             </div>
@@ -1255,6 +1259,7 @@ const CompanyDatabase = () => {
               disabled={currentPage === 1 || isLoading}
               onClick={() => handlePageChange(currentPage - 1)}
               className="p-2.5 rounded-xl hover:bg-white/5 text-slate-400 disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
+              aria-label="Previous page"
             >
               <ChevronDown className="w-5 h-5 rotate-90" />
             </button>
@@ -1268,6 +1273,7 @@ const CompanyDatabase = () => {
               disabled={currentPage === totalPages || isLoading}
               onClick={() => handlePageChange(currentPage + 1)}
               className="p-2.5 rounded-xl hover:bg-white/5 text-slate-400 disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
+              aria-label="Next page"
             >
               <ChevronDown className="w-5 h-5 -rotate-90" />
             </button>
@@ -1295,7 +1301,7 @@ const CompanyDatabase = () => {
                 {viewDraftCompany['Company Name'] || viewDraftCompany['company'] || viewDraftCompany['name'] || 'Company'} — saved in Company Database (not in lead pipeline)
               </p>
             </div>
-            <button onClick={() => setViewDraftCompany(null)} className="text-slate-500 hover:text-white transition-colors cursor-pointer">
+            <button onClick={() => setViewDraftCompany(null)} className="text-slate-500 hover:text-white transition-colors cursor-pointer" aria-label="Close draft viewer">
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -1370,6 +1376,7 @@ const CompanyDatabase = () => {
                 onClick={() => setSelectedIds([])}
                 className="p-2 text-slate-500 hover:text-white transition-colors cursor-pointer"
                 title="Deselect All"
+                aria-label="Deselect all"
               >
                 <X className="w-4 h-4" />
               </button>

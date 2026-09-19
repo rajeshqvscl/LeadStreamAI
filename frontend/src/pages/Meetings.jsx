@@ -178,7 +178,7 @@ const Meetings = () => {
                 className="bg-slate-900/40 backdrop-blur-md border border-slate-800 rounded-2xl py-3 pl-12 pr-6 text-sm w-full lg:w-80 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/40 transition-all placeholder:text-slate-600 relative z-10"
               />
             </div>
-            <button className="p-3 bg-slate-900/40 backdrop-blur-md border border-slate-800 rounded-2xl hover:bg-slate-800 transition-all hover:border-slate-700 active:scale-95">
+            <button className="p-3 bg-slate-900/40 backdrop-blur-md border border-slate-800 rounded-2xl hover:bg-slate-800 transition-all hover:border-slate-700 active:scale-95" aria-label="Filter">
               <Filter className="w-5 h-5 text-slate-400" />
             </button>
           </div>
@@ -226,6 +226,7 @@ const Meetings = () => {
               <button 
                 onClick={() => setSelectedIds(new Set())}
                 className="p-2.5 hover:bg-slate-800 rounded-xl text-slate-500 hover:text-white transition-colors"
+                aria-label="Deselect all"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -386,6 +387,7 @@ const Meetings = () => {
                             <button 
                               onClick={(e) => { e.stopPropagation(); toggleDropdown(meeting.id); }}
                               className="p-2.5 bg-slate-900/50 hover:bg-slate-800 rounded-xl border border-slate-800 transition-all cursor-pointer group/more"
+                              aria-label="More options"
                             >
                               <MoreVertical className="w-5 h-5 text-slate-500 group-hover/more:text-white transition-colors" />
                             </button>
@@ -482,7 +484,7 @@ const Meetings = () => {
                   <h4 className="text-3xl font-black text-white uppercase italic tracking-tight">{selectedMeeting.lead_name || 'Anonymous Alpha'}</h4>
                   <p className="text-blue-500 font-black text-[10px] uppercase tracking-[0.2em] mt-1">{selectedMeeting.company_name || 'Venture Entity'}</p>
                 </div>
-                <button onClick={() => setSelectedMeeting(null)} className="p-3 hover:bg-slate-800 rounded-2xl text-slate-500 hover:text-white transition-all cursor-pointer">
+                <button onClick={() => setSelectedMeeting(null)} className="p-3 hover:bg-slate-800 rounded-2xl text-slate-500 hover:text-white transition-all cursor-pointer" aria-label="Close">
                   <X className="w-6 h-6" />
                 </button>
               </div>
