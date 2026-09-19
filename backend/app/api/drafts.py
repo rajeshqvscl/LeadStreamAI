@@ -4117,7 +4117,7 @@ def approve_draft(draft_id: int, req: ApproveRequest | None = None, user_id: str
         draft_content = lead.get('email_draft')
         template_name = lead.get('draft_template_used') if lead else None
         email = lead.get('email')
-        draft_content = heal_draft_content(draft_content, user_id, template_name=template_name, lead_email=email)
+        draft_content = heal_draft_content(draft_content, uid, template_name=template_name, lead_email=email)
         stored_cc = lead.get('cc_email')
 
         if not email:
@@ -4240,7 +4240,8 @@ def approve_draft(draft_id: int, req: ApproveRequest | None = None, user_id: str
             conn.close()
             return {"status": "sent", "message": f"Success: Email dispatched to {email}"}
         else:
-            conn.rollback()
+            _mark_send_failed(cur, draft_id, error_msg, sender_name)
+            conn.commit()
             cur.close()
             conn.close()
             raise HTTPException(status_code=400, detail=f"Outreach dispatch failed: {error_msg}")
@@ -4706,6 +4707,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: str | None = Header(None,
             lead_sender_email = sender_email
             lead_sender_name = sender_name
             lead_owner_id = lead.get('user_id')
+            owner_u = None
             if lead_owner_id:
                 cur.execute("SELECT email, full_name, username, google_refresh_token FROM users WHERE id = %s", (lead_owner_id,))
                 owner_u = cur.fetchone()
@@ -4717,7 +4719,7 @@ def send_selected_batch(req: BulkSendRequest, user_id: str | None = Header(None,
 
             draft_content = lead['email_draft'] or ""
             template_name = lead.get('draft_template_used')
-            draft_content = heal_draft_content(draft_content, user_id, profile, template_name=template_name, lead_email=lead.get('email'))
+            draft_content = heal_draft_content(draft_content, lead_uid or user_id, profile, template_name=template_name, lead_email=lead.get('email'))
 
             subject = "Following up"
             body = draft_content
@@ -5030,9 +5032,10 @@ def send_bulk_domain_emails(req: BulkSendRequest, user_id: str | None = Header(N
         if not req.lead_ids:
             return {"message": "No leads provided"}
 
-        if not check_daily_email_limit(user_id, len(req.lead_ids)):        cur.close()
-        conn.close()
-        raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily outreach limit. Please wait for the daily reset.")
+        if not check_daily_email_limit(user_id, len(req.lead_ids)):
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=400, detail="Daily Limit Exceeded: Sending this batch would exceed your daily outreach limit. Please wait for the daily reset.")
 
         # 1. Fetch User Data
         uid = normalize_user_id(user_id)
