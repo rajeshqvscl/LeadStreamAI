@@ -3,7 +3,7 @@ import axios from '../services/api';
 import { Link } from 'react-router-dom';
 import {
   Users, CheckSquare, Rocket, BarChart3, Sparkles, Activity,
-  Mail, Loader2, Zap, Clock, Globe, Target, CheckCircle2, XCircle
+  Mail, Loader2, Zap, Clock, Globe, Target, CheckCircle2, XCircle, FileText, ShieldAlert
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
