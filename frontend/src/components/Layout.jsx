@@ -3,6 +3,19 @@ import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
 import ReminderPanel from './ReminderPanel';
 import { useTheme } from '../contexts/ThemeContext';
 
+// Clock apne component me isolated hai — har second sirf ye re-render hota hai,
+// poori Layout/ActivePage nahi (main-thread tasks kam)
+const LiveClock = () => {
+  const [time, setTime] = useState(() => new Date().toLocaleTimeString('en-US', { hour12: false }));
+  useEffect(() => {
+    const interval = setInterval(() => setTime(new Date().toLocaleTimeString('en-US', { hour12: false })), 1000);
+    return () => clearInterval(interval);
+  }, []);
+  return (
+    <div className="text-[14px] font-black text-white font-mono min-w-[80px]">{time}</div>
+  );
+};
+
 const Layout = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -13,7 +26,6 @@ const Layout = () => {
   const activeStatus = searchParams.get('status');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
-  const [time, setTime] = useState('');
   const [totalLeads, setTotalLeads] = useState(0);
   const [totalCompanies, setTotalCompanies] = useState(0);
   const [todaySent, setTodaySent] = useState(0);
@@ -28,13 +40,6 @@ const Layout = () => {
       setSearchQuery('');
     }
   }, [location.search]);
-
-  useEffect(() => {
-    const updateTime = () => setTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -314,7 +319,7 @@ const Layout = () => {
             {showSystemMatrix && (
               <div className="flex items-center gap-2.5 animate-in fade-in slide-in-from-left duration-300">
                 <div className="w-px h-4 bg-white/10" />
-                <div className="text-[14px] font-black text-white font-mono min-w-[80px]">{time}</div>
+                <LiveClock />
                 <div className="inline-flex items-center px-1.5 py-0.5 border border-green-500/20 rounded-[4px] text-[8px] font-bold text-green-500 bg-green-500/10 tracking-[0.5px]">SYNCED</div>
               </div>
             )}

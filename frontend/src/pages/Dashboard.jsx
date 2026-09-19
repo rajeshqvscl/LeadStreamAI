@@ -1,15 +1,14 @@
-import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import axios from '../services/api';
 import { Link } from 'react-router-dom';
 import {
   Users, CheckSquare, Rocket, BarChart3, Sparkles, Activity,
   Mail, Loader2, Zap, Clock, Globe, Target, CheckCircle2, XCircle, FileText, ShieldAlert
 } from 'lucide-react';
-import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie, Legend
-} from 'recharts';
 
+// Charts lazy-load hote hain — recharts initial bundle se door rehta hai (TBT/unused JS)
+const VelocityChart = React.lazy(() => import('../components/DashboardCharts').then(m => ({ default: m.VelocityChart })));
+const ProductivityChart = React.lazy(() => import('../components/DashboardCharts').then(m => ({ default: m.ProductivityChart })));
 const MessageDrawer = React.lazy(() => import('../components/MessageDrawer'));
 const CardDetailDrawer = React.lazy(() => import('../components/CardDetailDrawer'));
 
@@ -399,8 +398,7 @@ const Dashboard = () => {
                 Connect your account to enable AI-powered sentiment analysis and automated meeting scheduling for every lead reply.
               </p>
               {user.google_linked_at && (
-                  <div className="mt-2 space-y-1">
-                    <div className="text-[9px] font-black text-blue-500/80 uppercase tracking-widest flex items-center gap-2">
+                  <div className="mt-2 space-y-1">                      <div className="text-[9px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-2">
                       <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
                       Connected: {user.google_email || 'Verified Account'}
                     </div>
@@ -709,21 +707,9 @@ const Dashboard = () => {
             </div>
           </div>
           <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={velocity}>
-                <defs>
-                  <linearGradient id="colorLeads" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
-                <XAxis dataKey="day" stroke="#475569" fontSize={10} axisLine={false} tickLine={false} />
-                <YAxis stroke="#475569" fontSize={10} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '11px' }} />
-                <Area name="Leads Generated" type="monotone" dataKey="leads" stroke="#3b82f6" fillOpacity={1} fill="url(#colorLeads)" strokeWidth={3} />
-              </AreaChart>
-            </ResponsiveContainer>
+            <Suspense fallback={<div className="h-full w-full rounded-2xl bg-white/5 animate-pulse" />}>
+              <VelocityChart data={velocity} />
+            </Suspense>
           </div>
         </div>
       </div>
@@ -765,24 +751,9 @@ const Dashboard = () => {
         </div>
 
         <div className="h-[340px] w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={productivity} barGap={4} barCategoryGap="30%">
-              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
-              <XAxis dataKey="name" stroke="#475569" fontSize={11} axisLine={false} tickLine={false} />
-              <YAxis stroke="#475569" fontSize={10} axisLine={false} tickLine={false} />
-              <Tooltip
-                cursor={{ fill: '#ffffff04' }}
-                contentStyle={{ backgroundColor: '#0d1117', border: '1px solid #ffffff15', borderRadius: '12px', fontSize: '12px' }}
-                formatter={(value, name) => [value, name]}
-              />
-              <Legend
-                wrapperStyle={{ paddingTop: '20px', fontSize: '10px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '2px' }}
-              />
-              <Bar name="Leads Generated" dataKey="leads" fill="#3b82f6" radius={[6, 6, 0, 0]} maxBarSize={40} />
-              <Bar name="Emails Sent" dataKey="outreach" fill="#8b5cf6" radius={[6, 6, 0, 0]} maxBarSize={40} />
-              <Bar name="Credits Used (RR)" dataKey="credits" fill="#ef4444" radius={[6, 6, 0, 0]} maxBarSize={40} />
-            </BarChart>
-          </ResponsiveContainer>
+          <Suspense fallback={<div className="h-full w-full rounded-2xl bg-white/5 animate-pulse" />}>
+            <ProductivityChart data={productivity} />
+          </Suspense>
         </div>
       </div>
     </div>
@@ -800,16 +771,67 @@ const Dashboard = () => {
           <p className="text-slate-400 text-lg max-w-[600px] relative z-10">
             Loading your pipeline analytics...
           </p>
+          {/* Month/Year filter placeholder */}
+          <div className="flex items-center gap-3 mt-6 relative z-10">
+            <div className="h-4 bg-white/5 rounded w-16"></div>
+            <div className="h-10 bg-white/5 rounded w-24"></div>
+            <div className="h-4 bg-white/5 rounded w-10"></div>
+            <div className="h-10 bg-white/5 rounded w-20"></div>
+          </div>
         </div>
         {/* Stats Skeleton */}
         <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-6 mb-10">
           {[...Array(8)].map((_, i) => (
             <div key={i} className="bg-[#151a26] border border-white/5 rounded-3xl p-6 animate-pulse">
               <div className="h-4 bg-white/5 rounded w-20 mb-4"></div>
-              <div className="h-8 bg-white/5 rounded w-16 mb-2"></div>
+              <div className="h-10 bg-white/5 rounded w-16 mb-2"></div>
               <div className="h-3 bg-white/5 rounded w-24"></div>
             </div>
           ))}
+        </div>
+        {/* Reserved space for Gmail Connect + Engagement Pulse — real sections ke heights se match karta hai (CLS fix) */}
+        <div className="space-y-8 mb-10">
+          <div className="p-8 rounded-[32px] border bg-[#151a26] border-white/5 animate-pulse">
+            <div className="flex flex-col md:flex-row items-center gap-6">
+              <div className="w-16 h-16 rounded-2xl bg-white/5 shrink-0"></div>
+              <div className="flex-1 w-full space-y-3">
+                <div className="h-3 bg-white/5 rounded w-48"></div>
+                <div className="h-6 bg-white/5 rounded w-72"></div>
+                <div className="h-4 bg-white/5 rounded w-80"></div>
+              </div>
+              <div className="h-14 w-40 rounded-2xl bg-white/5 shrink-0"></div>
+            </div>
+          </div>
+          <div className="bg-[#151a26] border border-white/5 rounded-[32px] overflow-hidden animate-pulse">
+            <div className="flex items-center justify-between p-8 border-b border-white/5">
+              <div className="h-4 bg-white/5 rounded w-64"></div>
+              <div className="h-3 bg-white/5 rounded w-40"></div>
+            </div>
+            <div className="p-8 grid grid-cols-2 md:grid-cols-4 gap-8">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="text-center">
+                  <div className="h-3 bg-white/5 rounded w-20 mx-auto mb-3"></div>
+                  <div className="h-12 bg-white/5 rounded w-16 mx-auto mb-2"></div>
+                  <div className="h-3 bg-white/5 rounded w-24 mx-auto"></div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        {/* Reserved space for Activity Stream + Persona */}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(350px,1fr))] gap-6 mb-10">
+          <div className="bg-[#151a26] border border-white/5 rounded-3xl p-6 h-[450px] animate-pulse"></div>
+          <div className="bg-[#151a26] border border-white/5 rounded-3xl p-6 h-[450px] animate-pulse"></div>
+        </div>
+        {/* Reserved space for Reports */}
+        <div className="bg-[#151a26] border border-white/10 rounded-[32px] overflow-hidden">
+          <div className="px-10 py-8 border-b border-white/5">
+            <div className="h-5 bg-white/5 rounded w-40"></div>
+          </div>
+          <div className="p-10 grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="bg-white/5 rounded-[24px] h-[250px] animate-pulse"></div>
+            <div className="bg-white/5 rounded-[24px] h-[250px] animate-pulse"></div>
+          </div>
         </div>
       </div>
     );
@@ -830,12 +852,12 @@ const Dashboard = () => {
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
-            <span className={`text-[10px] font-black uppercase tracking-[5px] ${toast.type === 'success' ? 'text-emerald-500/60' : 'text-rose-500/60'}`}>Intelligence Update</span>
+            <span className={`text-[10px] font-black uppercase tracking-[5px] ${toast.type === 'success' ? 'text-emerald-500' : 'text-rose-500'}`}>Intelligence Update</span>
             <span className="text-[16px] font-black tracking-tight text-white leading-tight drop-shadow-sm">{toast.message}</span>
           </div>
 
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 w-[80%] h-[1px] bg-white/5 overflow-hidden rounded-full">
-            <div className={`h-full bg-current shadow-[0_0_10px_currentColor] transition-all duration-[5000ms] ease-linear animate-toast-glow`}></div>
+            <div className={`h-full w-full bg-current shadow-[0_0_10px_currentColor] animate-toast-glow`}></div>
           </div>
           <div className={`absolute inset-0 rounded-[32px] pointer-events-none border border-white/5 ${toast.type === 'success' ? 'group-hover:border-emerald-500/20' : 'group-hover:border-rose-500/20'} transition-colors`}></div>
         </div>

@@ -8,9 +8,10 @@ const nonBlockingCSS = () => ({
       /<link rel="stylesheet"([^>]*href="\/assets\/[^"]*"[^>]*)>/g,
       '<link rel="preload"$1 as="style" onload="this.onload=null;this.rel=\'stylesheet\'"><noscript><link rel="stylesheet"$1></noscript>'
     )
-    // Remove modulepreload for non-critical page chunks (keep only rolldown-runtime, vendor-react, and current page)
+    // Remove modulepreload for non-critical page chunks
+    // (keep only rolldown-runtime, vendor-react, vendor-router — entry ke static deps — and Dashboard page)
     result = result.replace(
-      /<link rel="modulepreload"[^>]*href="\/assets\/(?:page-(?!Dashboard)|vendor-(?!react)|vendor-other)[^"]*"[^>]*>\n?/g,
+      /<link rel="modulepreload"[^>]*href="\/assets\/(?:page-(?!Dashboard)|vendor-(?!react|router))[^"]*"[^>]*>\n?/g,
       ''
     )
     return result
