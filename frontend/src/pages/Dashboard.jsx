@@ -394,10 +394,11 @@ const Dashboard = () => {
           Your pipeline is soaring. AI discovery has identified <span className="text-blue-400 font-extrabold underline decoration-blue-500/50">{data.total_leads}</span> targets today.
         </p>
         {/* Month/Year Filter */}
-        <div className="flex items-center gap-4 mt-6 relative z-10">
+          <div className="flex items-center gap-4 mt-6 relative z-10">
           <div className="flex items-center gap-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Month</label>
+            <label htmlFor="dashboard-month" className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Month</label>
             <select
+              id="dashboard-month"
               aria-label="Select month"
               value={dashboardMonth}
               onChange={(e) => setDashboardMonth(parseInt(e.target.value))}
@@ -412,8 +413,9 @@ const Dashboard = () => {
             </select>
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Year</label>
+            <label htmlFor="dashboard-year" className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Year</label>
             <select
+              id="dashboard-year"
               aria-label="Select year"
               value={dashboardYear}
               onChange={(e) => setDashboardYear(parseInt(e.target.value))}

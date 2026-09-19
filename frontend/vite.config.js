@@ -1,8 +1,18 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+const nonBlockingCSS = () => ({
+  name: 'non-blocking-css',
+  transformIndexHtml(html) {
+    return html.replace(
+      /<link rel="stylesheet"([^>]*href="\/assets\/[^"]*"[^>]*)>/g,
+      '<link rel="preload"$1 as="style" onload="this.onload=null;this.rel=\'stylesheet\'"><noscript><link rel="stylesheet"$1></noscript>'
+    )
+  }
+})
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), nonBlockingCSS()],
   base: '/',
   server: {
     proxy: {
@@ -15,7 +25,9 @@ export default defineConfig({
     exclude: ['pdfjs-dist', 'xlsx', 'mammoth', 'dompurify'],
   },
   build: {
+    target: 'es2020',
     chunkSizeWarningLimit: 1000,
+    cssMinify: 'esbuild',
     rollupOptions: {
       external: ['pdfjs-dist/build/pdf.worker.min.mjs'],
       output: {
