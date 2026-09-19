@@ -614,6 +614,18 @@ body {
 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
 
 /* =============================================
+   TOAST GLOW ANIMATION
+   ============================================= */
+@keyframes toast-glow {
+  0% { width: 0%; opacity: 0.2; }
+  20% { opacity: 1; }
+  100% { width: 100%; opacity: 0.1; }
+}
+.animate-toast-glow {
+  animation: toast-glow 5000ms linear forwards;
+}
+
+/* =============================================
    DARK MODE CONTRAST FIXES (WCAG AA 4.5:1)
    Remap low-contrast slate colors for readability
    ============================================= */

@@ -4,10 +4,16 @@ import react from '@vitejs/plugin-react'
 const nonBlockingCSS = () => ({
   name: 'non-blocking-css',
   transformIndexHtml(html) {
-    return html.replace(
+    let result = html.replace(
       /<link rel="stylesheet"([^>]*href="\/assets\/[^"]*"[^>]*)>/g,
       '<link rel="preload"$1 as="style" onload="this.onload=null;this.rel=\'stylesheet\'"><noscript><link rel="stylesheet"$1></noscript>'
     )
+    // Remove modulepreload for non-critical page chunks (keep only rolldown-runtime, vendor-react, and current page)
+    result = result.replace(
+      /<link rel="modulepreload"[^>]*href="\/assets\/(?:page-(?!Dashboard)|vendor-(?!react)|vendor-other)[^"]*"[^>]*>\n?/g,
+      ''
+    )
+    return result
   }
 })
 

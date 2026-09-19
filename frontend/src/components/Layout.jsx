@@ -327,6 +327,7 @@ const Layout = () => {
             <input 
               type="text" 
               placeholder="Search leads..." 
+              aria-label="Search leads"
               className="bg-transparent border-none text-[13px] text-[#e2e8f0] w-full outline-none placeholder:text-[#64748b]"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -346,12 +347,14 @@ const Layout = () => {
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>
           <div className="relative">
-            <div
+            <button
               className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-[12px] font-bold text-white cursor-pointer border-2 border-transparent transition-all hover:border-blue-500"
               onClick={() => setDropdownOpen(!dropdownOpen)}
+              aria-label="User menu"
+              aria-expanded={dropdownOpen}
             >
               {getInitials(user.full_name)}
-            </div>
+            </button>
             {dropdownOpen && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setDropdownOpen(false)}></div>
@@ -404,12 +407,12 @@ const Layout = () => {
       {/* Right Side Task Drawer */}
       <div className={`fixed top-[64px] right-0 bottom-0 bg-[#0f172a]/95 backdrop-blur-2xl border-l border-white/5 z-[2000] transition-all duration-500 shadow-[-20px_0_50px_rgba(0,0,0,0.5)] flex flex-col ${tasks.length > 0 ? (isMinimized ? 'w-[70px] translate-x-0' : 'w-[380px] translate-x-0') : 'w-[380px] translate-x-full'}`}>
         {isMinimized ? (
-          <div className="flex flex-col items-center py-6 h-full cursor-pointer hover:bg-white/[0.03] transition-colors" onClick={() => setIsMinimized(false)}>
+          <button className="flex flex-col items-center py-6 h-full cursor-pointer hover:bg-white/[0.03] transition-colors" onClick={() => setIsMinimized(false)} aria-label="Expand task panel">
             <div className="flex flex-col items-center gap-6">
               <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-500 animate-pulse">
-                <span className="text-[18px]">⚡</span>
+                <span className="text-[18px]" aria-hidden="true">⚡</span>
               </div>
-              <div className="h-px w-8 bg-white/10" />
+              <div className="h-px w-8 bg-white/10" aria-hidden="true" />
               <div className="[writing-mode:vertical-lr] text-[10px] font-black uppercase tracking-[3px] text-slate-500 whitespace-nowrap">
                 System Dispatch
               </div>
@@ -418,10 +421,10 @@ const Layout = () => {
                 <span className="text-[8px] font-bold text-slate-600 uppercase">Active</span>
               </div>
             </div>
-            <div className="mt-auto mb-6 w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-slate-400 hover:text-white transition-colors">
+            <div className="mt-auto mb-6 w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-slate-400 hover:text-white transition-colors" aria-hidden="true">
               <span className="text-[18px]">«</span>
             </div>
-          </div>
+          </button>
         ) : (
           <>
             <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
