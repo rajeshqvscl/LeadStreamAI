@@ -171,6 +171,7 @@ const AdminAuditLogs = () => {
 
         <div className="flex items-center gap-3">
           <select
+            aria-label="Filter by user"
             value={filters.user_id}
             onChange={(e) => { setFilters({ ...filters, user_id: e.target.value }); setPagination(p => ({ ...p, page: 1 })); }}
             className="bg-white/[0.03] border border-white/5 rounded-xl py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest focus:outline-none focus:border-indigo-500/50 cursor-pointer"
@@ -182,6 +183,7 @@ const AdminAuditLogs = () => {
           </select>
 
           <select
+            aria-label="Filter by action"
             value={filters.action}
             onChange={(e) => { setFilters({ ...filters, action: e.target.value }); setPagination(p => ({ ...p, page: 1 })); }}
             className="bg-white/[0.03] border border-white/5 rounded-xl py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest focus:outline-none focus:border-indigo-500/50 cursor-pointer"

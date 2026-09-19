@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
 import { Download, FileText, LayoutGrid } from 'lucide-react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 
@@ -94,6 +92,10 @@ const MisReportPage = () => {
     if (!reportRef.current) return;
     setDownloading(true);
     try {
+      const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+        import('html2canvas'),
+        import('jspdf')
+      ]);
       const pages = reportRef.current.querySelectorAll('[data-page]');
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pageW = 210;
@@ -202,19 +204,22 @@ const MisReportPage = () => {
       <div className="print:hidden fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-4">
           <button onClick={() => navigate(-1)} className="text-gray-500 hover:text-gray-700 text-sm font-medium">&larr; Back</button>
-          <span className="text-gray-300">|</span>
+          <span className="text-gray-500">|</span>
           <select value={selYear} onChange={e => setSelYear(Number(e.target.value))}
+            aria-label="Select year"
             className="text-sm font-semibold text-gray-700 bg-gray-100 border border-gray-200 rounded-lg px-2 py-1">
             {years.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
           <select value={selMonth} onChange={e => setSelMonth(Number(e.target.value))}
+            aria-label="Select month"
             className="text-sm font-semibold text-gray-700 bg-gray-100 border border-gray-200 rounded-lg px-2 py-1">
             {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
           </select>
           {isAdmin && (
             <>
-              <span className="text-gray-300">|</span>
+              <span className="text-gray-500">|</span>
               <select value={viewUser} onChange={e => setViewUser(e.target.value)}
+                aria-label="Select user"
                 className="text-sm font-semibold text-gray-700 bg-gray-100 border border-gray-200 rounded-lg px-2 py-1 max-w-[190px]">
                 <option value="all">All Users</option>
                 {userList.map(u => (
@@ -223,7 +228,7 @@ const MisReportPage = () => {
               </select>
             </>
           )}
-          <span className="text-gray-300">|</span>
+          <span className="text-gray-500">|</span>
           <span className="text-gray-700 font-bold text-sm">MIS Report — {monthLabel}</span>
         </div>
         <div className="flex items-center gap-2">
@@ -697,9 +702,9 @@ const MisReportPage = () => {
           <div className="border-t-2 border-indigo-600 pt-6">
             <h3 className="text-lg font-bold text-gray-800 mb-2">LeadStreamAI</h3>
             <p className="text-sm text-gray-500">Automated Management Information System Report</p>
-            <p className="text-sm text-gray-400 mt-1">Generated on {new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+            <p className="text-sm text-gray-500 mt-1">Generated on {new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
           </div>
-          <div className="mt-8 text-xs text-gray-400">
+          <div className="mt-8 text-xs text-gray-500">
             <p>This report is computer-generated and does not require a signature. Data is based on system records as of the generation date.</p>
             <p className="mt-1">Confidential — For internal management use only.</p>
           </div>

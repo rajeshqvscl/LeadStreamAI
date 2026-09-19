@@ -614,6 +614,15 @@ body {
 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
 
 /* =============================================
+   DARK MODE CONTRAST FIXES (WCAG AA 4.5:1)
+   Remap low-contrast slate colors for readability
+   ============================================= */
+.text-slate-600 { color: #94a3b8 !important; }
+.placeholder\:text-slate-600::placeholder { color: #94a3b8 !important; }
+.text-slate-500 { color: #94a3b8 !important; }
+.text-gray-500 { color: #9ca3af !important; }
+
+/* =============================================
    LIGHT MODE THEME
    ============================================= */
 
@@ -668,7 +677,7 @@ body {
 .light .text-white { color: #1e293b !important; }
 .light .text-slate-300 { color: #334155 !important; }
 .light .text-slate-400 { color: #64748b !important; }
-.light .text-slate-500 { color: #94a3b8 !important; }
+.light .text-slate-500 { color: #64748b !important; }
 .light aside a { color: #475569 !important; }
 .light aside a:hover { background-color: rgba(0,0,0,0.04) !important; color: #1e293b !important; }
 .light aside a[class*="bg-blue-600"],

@@ -1199,6 +1199,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
         <ToolButton icon={Table} title="Insert Table" onClick={handleInsertTable} />
         <div className="w-px h-4 bg-gray-300 mx-1" />
         <select
+          aria-label="Select heading level"
           onChange={handleHeading}
           defaultValue=""
           className="bg-white border border-gray-200 rounded-md px-1.5 py-1 text-[10px] text-gray-600 cursor-pointer outline-none focus:border-blue-500/50 appearance-none"
@@ -1276,6 +1277,7 @@ const ToolbarTextarea = ({ value, onChange, rows, placeholder, className, readOn
         </button>
         <div className="w-px h-4 bg-gray-300 mx-1" />
         <select
+          aria-label="Select font family"
           onChange={handleFontChange}
           defaultValue=""
           className="bg-white border border-gray-200 rounded-md px-1.5 py-1 text-[10px] text-gray-600 cursor-pointer outline-none focus:border-blue-500/50 appearance-none"

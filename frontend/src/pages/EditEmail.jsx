@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ChevronLeft, Sparkles, Loader2, Save, Wand2, Type, Briefcase, BarChart3, Smile, CheckCircle2, AlertCircle, Send, Link as LinkIcon, FileText, List, RotateCcw, Bold, Italic, Heading, Image, Paperclip, Palette, Pen } from 'lucide-react';
-import DatePicker from 'react-datepicker';
+const DatePicker = lazy(() => import('react-datepicker'));
 import 'react-datepicker/dist/react-datepicker.css';
 import api from '../services/api';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
@@ -867,6 +867,7 @@ const EditEmail = () => {
                 {showDatePicker && (
                   <div className="flex items-center gap-3 p-4 bg-[#0a0f1a] border border-blue-500/30 rounded-lg animate-in slide-in-from-top-2 shadow-[0_0_15px_rgba(59,130,246,0.1)]">
                     <span className="text-slate-400 font-bold text-[11px] uppercase tracking-wider">Send At:</span>
+                    <Suspense fallback={<div className="bg-[#131722] border border-[#ffffff10] rounded px-3 py-2 text-slate-500 text-[13px] w-[220px]">Loading...</div>}>
                     <DatePicker
                       selected={scheduledAt}
                       onChange={(date) => setScheduledAt(date)}
@@ -880,6 +881,7 @@ const EditEmail = () => {
                       wrapperClassName="w-auto"
                       minDate={new Date()}
                     />
+                    </Suspense>
                     <button
                       onClick={handleSchedule}
                       disabled={!scheduledAt || isSaving}

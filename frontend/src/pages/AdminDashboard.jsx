@@ -578,6 +578,7 @@ const AdminDashboard = () => {
           </div>
 
           <select
+            aria-label="Export time range"
             value={exportRange}
             onChange={(e) => setExportRange(e.target.value)}
             className="bg-white/5 hover:bg-white/10 border border-white/10 text-white text-[10px] font-black uppercase tracking-widest rounded-xl px-3 py-3 focus:outline-none focus:border-indigo-500/50 transition-all appearance-none cursor-pointer"
@@ -690,6 +691,7 @@ const AdminDashboard = () => {
 
         <div className="flex items-center gap-3">
           <select
+            aria-label="Filter by type"
             value={filters.type}
             onChange={(e) => setFilters({ ...filters, type: e.target.value })}
             className="bg-white/[0.03] border border-white/5 rounded-xl py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest focus:outline-none focus:border-indigo-500/50"
@@ -700,6 +702,7 @@ const AdminDashboard = () => {
           </select>
 
           <select
+            aria-label="Chart time range"
             value={chartRange}
             onChange={(e) => {
               const val = e.target.value;
@@ -717,6 +720,7 @@ const AdminDashboard = () => {
           </select>
 
           <select
+            aria-label="Filter by status"
             value={filters.status}
             onChange={(e) => setFilters({ ...filters, status: e.target.value })}
             className="bg-white/[0.03] border border-white/5 rounded-xl py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest focus:outline-none focus:border-indigo-500/50"
@@ -730,6 +734,7 @@ const AdminDashboard = () => {
           </select>
 
           <select
+            aria-label="Filter by owner"
             value={filters.owner}
             onChange={(e) => {
               const val = e.target.value;
@@ -744,6 +749,7 @@ const AdminDashboard = () => {
           </select>
 
           <select
+            aria-label="Filter by sector"
             value={filters.sector}
             onChange={(e) => setFilters({ ...filters, sector: e.target.value })}
             className="bg-white/[0.03] border border-white/5 rounded-xl py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest focus:outline-none focus:border-indigo-500/50"

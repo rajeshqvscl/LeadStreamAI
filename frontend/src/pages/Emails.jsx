@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Eye, Edit3, Loader2, Send, ChevronLeft, ChevronRight, X, Archive, CheckCircle2, Sparkles, History, User, Globe, Calendar, Trash2, AlertCircle, Square, Star, Check, Bot } from 'lucide-react';
-import DatePicker from 'react-datepicker';
+const DatePicker = lazy(() => import('react-datepicker'));
 import 'react-datepicker/dist/react-datepicker.css';
 import api from '../services/api';
 import SignaturePicker from '../components/SignaturePicker';
@@ -563,6 +563,7 @@ const Emails = () => {
               className="appearance-none bg-[#0f121b] border border-[#ffffff10] rounded-md px-3 py-1.5 pr-8 text-[10px] font-bold text-slate-300 uppercase tracking-widest outline-none focus:border-blue-500/50"
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
+              aria-label="Filter by status"
             >
               <option value="">STATUS: All Stages</option>
               <option value="PENDING_APPROVAL">STATUS: Pending</option>
@@ -581,6 +582,7 @@ const Emails = () => {
               className="appearance-none bg-[#0f121b] border border-[#ffffff10] rounded-md px-3 py-1.5 pr-8 text-[10px] font-bold text-slate-300 uppercase tracking-widest outline-none focus:border-blue-500/50 cursor-pointer"
               value={filterRegion}
               onChange={(e) => setFilterRegion(e.target.value)}
+              aria-label="Filter by region"
             >
               <option value="">REGION: All Regions</option>
               <option value="US">US / Canada</option>
@@ -595,6 +597,7 @@ const Emails = () => {
               className="appearance-none bg-[#0f121b] border border-[#ffffff10] rounded-md px-3 py-1.5 pr-8 text-[10px] font-bold text-slate-300 uppercase tracking-widest outline-none focus:border-blue-500/50 cursor-pointer"
               value={filterGeo}
               onChange={(e) => setFilterGeo(e.target.value)}
+              aria-label="Filter by geo"
             >
               <option value="">GEO: Global Coverage</option>
               <option value="Tier1">Tier 1 Markets</option>
@@ -935,6 +938,7 @@ const Emails = () => {
               <p className="text-slate-500 text-[11px] font-black uppercase tracking-[2px]">Select dispatch time for {selectedIds.length} drafts.</p>
             </div>
             
+            <Suspense fallback={<div className="w-full bg-[#131722] border border-white/10 rounded-2xl p-4 text-slate-500 text-[13px]">Loading...</div>}>
             <DatePicker
               selected={scheduledAt}
               onChange={(date) => setScheduledAt(date)}
@@ -948,6 +952,7 @@ const Emails = () => {
               wrapperClassName="w-full"
               minDate={new Date()}
             />
+            </Suspense>
             
             <div className="flex flex-col gap-3">
               <button 

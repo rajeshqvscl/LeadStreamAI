@@ -1068,6 +1068,7 @@ const Dashboard = () => {
             <div className="px-8 py-4 border-b border-white/5 flex items-center gap-3">
               <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Filter by Month:</span>
               <select
+                aria-label="Filter by month"
                 value={filterMonth}
                 onChange={(e) => handleMonthFilter(Number(e.target.value))}
                 className="bg-[#0f121b] border border-[#ffffff10] rounded-md px-3 py-1.5 text-[10px] font-bold text-slate-300 uppercase tracking-widest outline-none focus:border-blue-500/50"
@@ -1077,6 +1078,7 @@ const Dashboard = () => {
                 ))}
               </select>
               <select
+                aria-label="Filter by year"
                 value={filterYear}
                 onChange={(e) => {
                   setFilterYear(Number(e.target.value));

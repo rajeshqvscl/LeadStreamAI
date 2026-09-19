@@ -841,6 +841,7 @@ const Leads = () => {
           <span className="text-[9px] font-extrabold text-[#475569] uppercase tracking-widest">Role:</span>
           <select
             name="persona"
+            aria-label="Filter by persona"
             className="bg-transparent text-[#e2e8f0] text-[11px] font-bold outline-none cursor-pointer appearance-none"
             value={filters.persona}
             onChange={handleFilterChange}
@@ -854,6 +855,7 @@ const Leads = () => {
           <span className="text-[9px] font-extrabold text-[#475569] uppercase tracking-widest">Company:</span>
           <select
             name="company"
+            aria-label="Filter by company"
             className="bg-transparent text-[#e2e8f0] text-[11px] font-bold outline-none cursor-pointer appearance-none max-w-[120px]"
             value={filters.company}
             onChange={handleFilterChange}
@@ -867,6 +869,7 @@ const Leads = () => {
           <span className="text-[9px] font-extrabold text-[#475569] uppercase tracking-widest">Status:</span>
           <select
             name="status"
+            aria-label="Filter by status"
             className="bg-transparent text-[#e2e8f0] text-[11px] font-bold outline-none cursor-pointer appearance-none"
             value={filters.status}
             onChange={handleFilterChange}
@@ -880,6 +883,7 @@ const Leads = () => {
           <span className="text-[9px] font-extrabold text-[#475569] uppercase tracking-widest">Source:</span>
           <select
             name="source"
+            aria-label="Filter by source"
             className="bg-transparent text-[#e2e8f0] text-[11px] font-bold outline-none cursor-pointer appearance-none min-w-[100px]"
             value={filters.source}
             onChange={handleFilterChange}
@@ -1182,6 +1186,7 @@ const Leads = () => {
           <span className="flex items-center gap-1.5 mr-4">
             <span className="text-[10px] text-slate-500 uppercase tracking-wider">Rows:</span>
             <select
+              aria-label="Rows per page"
               value={pageSize}
               onChange={(e) => {
                 const newSize = parseInt(e.target.value);

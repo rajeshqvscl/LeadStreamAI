@@ -522,10 +522,12 @@ const Metrics = () => {
             ))}
             <div className="w-px h-6 bg-white/10" />
             <select value={selYear} onChange={e => { setSelYear(Number(e.target.value)); const {start, end} = getMonthRange(Number(e.target.value), selMonth); setDateFrom(start); setDateTo(end); setRange('all'); }}
+              aria-label="Select year"
               className="bg-[#111521] border border-white/5 rounded-lg px-3 py-2 text-[10px] text-slate-300 font-mono focus:outline-none focus:border-indigo-500/50">
               {(() => { const y = []; for (let i = _now.getFullYear() - 2; i <= _now.getFullYear(); i++) y.push(i); return y; })().map(y => <option key={y} value={y}>{y}</option>)}
             </select>
             <select value={selMonth} onChange={e => { setSelMonth(Number(e.target.value)); const {start, end} = getMonthRange(selYear, Number(e.target.value)); setDateFrom(start); setDateTo(end); setRange('all'); }}
+              aria-label="Select month"
               className="bg-[#111521] border border-white/5 rounded-lg px-3 py-2 text-[10px] text-slate-300 font-mono focus:outline-none focus:border-indigo-500/50">
               {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
             </select>
@@ -536,6 +538,7 @@ const Metrics = () => {
             </div>
             <div className="w-px h-6 bg-white/10" />
             <select value={filterStatus} disabled={onlySent} onChange={e => { setFilterStatus(e.target.value); setOnlySent(false); }}
+              aria-label="Filter by status"
               className="bg-[#111521] border border-white/5 rounded-lg px-3 py-2 text-[10px] text-slate-300 font-mono focus:outline-none focus:border-indigo-500/50 disabled:opacity-30">
               <option value="">ALL STATUS</option>
               <option value="BOUNCED">BOUNCED</option>

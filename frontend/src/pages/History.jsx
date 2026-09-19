@@ -179,6 +179,7 @@ const History = () => {
           <div className="px-4 py-2 border-r border-white/5 flex items-center gap-3">
             <User className="w-3.5 h-3.5 text-blue-500/60" />
             <select 
+              aria-label="Filter by user"
               value={filters.target_user_id}
               onChange={(e) => {
                 setFilters(f => ({ ...f, target_user_id: e.target.value }));
@@ -197,6 +198,7 @@ const History = () => {
         <div className="px-4 py-2 border-r border-white/5 flex items-center gap-3">
           <Zap className="w-3.5 h-3.5 text-amber-500/60" />
           <select 
+            aria-label="Filter by action type"
             value={filters.action_type}
             onChange={(e) => {
               setFilters(f => ({ ...f, action_type: e.target.value }));

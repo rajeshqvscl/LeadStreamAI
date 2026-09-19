@@ -8,7 +8,8 @@ import {
   Network, History as HistoryIcon, TrendingUp, Building2
 } from 'lucide-react';
 import api from '../services/api';
-import ReactMarkdown from 'react-markdown';
+import { lazy, Suspense } from 'react';
+const ReactMarkdown = lazy(() => import('react-markdown'));
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie,
   XAxis, YAxis, CartesianGrid, Tooltip, Cell, Legend
@@ -582,6 +583,7 @@ return (
             </div>
             <div className="flex items-center gap-2 px-3 py-1 bg-white/5 border border-white/10 rounded-xl">
               <select 
+                aria-label="Select pitch mode"
                 value={pitchMode}
                 onChange={(e) => setPitchMode(e.target.value)}
                 className="bg-transparent text-white text-[10px] font-bold focus:outline-none cursor-pointer"
@@ -1090,7 +1092,9 @@ return (
                             <button onClick={() => setComparisonReport(null)} className="text-[10px] font-black text-slate-500 uppercase tracking-widest hover:text-white transition-colors">Close Report</button>
                         </div>
                         <div className="prose prose-invert max-w-none prose-sm">
-                            <ReactMarkdown>{comparisonReport}</ReactMarkdown>
+                            <Suspense fallback={<div className="text-xs text-slate-400">Loading...</div>}>
+                                <ReactMarkdown>{comparisonReport}</ReactMarkdown>
+                            </Suspense>
                         </div>
                     </div>
                 ) : selectedDeal?.rag_advice ? (

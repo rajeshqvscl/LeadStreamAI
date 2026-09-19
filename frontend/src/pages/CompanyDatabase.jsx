@@ -852,6 +852,7 @@ const CompanyDatabase = () => {
 
                 <div className="relative group/select flex-1">
                   <select
+                    aria-label="Select tab"
                     value={selectedTab === 'ALL_TABS' ? '' : (selectedTab || '')}
                     onChange={(e) => setSelectedTab(e.target.value)}
                     className="w-full h-10 appearance-none bg-white/5 border border-white/10 rounded-xl px-4 pr-10 text-[10px] font-black text-slate-300 uppercase tracking-widest focus:outline-none focus:border-emerald-500/30 transition-all cursor-pointer"
@@ -1172,6 +1173,7 @@ const CompanyDatabase = () => {
                 <span className="flex items-center gap-1.5">
                   <span className="text-[8px] text-slate-600 uppercase tracking-wider">Rows:</span>
                   <select
+                    aria-label="Rows per page"
                     value={pageSize}
                     onChange={(e) => {
                       const newSize = parseInt(e.target.value);

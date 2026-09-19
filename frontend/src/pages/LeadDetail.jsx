@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   ChevronLeft, Linkedin, Trash2, UserMinus,
@@ -7,7 +7,7 @@ import {
   MapPin, Building2, User, Check, ChevronDown,
   ShieldAlert, FileText, Zap, Brain
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+const ReactMarkdown = lazy(() => import('react-markdown'));
 import api from '../services/api';
 
 const COMPANY_OPTIONS = [
@@ -641,7 +641,9 @@ const LeadDetail = () => {
                     prose-p:text-[13px] prose-p:text-slate-300 prose-p:leading-relaxed
                     prose-li:text-[13px] prose-li:text-slate-400
                   ">
-                    <ReactMarkdown>{lead.rag_intelligence.deep_report}</ReactMarkdown>
+                    <Suspense fallback={<div className="text-xs text-slate-400">Loading...</div>}>
+                        <ReactMarkdown>{lead.rag_intelligence.deep_report}</ReactMarkdown>
+                    </Suspense>
                   </div>
                 </div>
               )}

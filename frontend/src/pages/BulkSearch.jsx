@@ -793,6 +793,7 @@ const BulkSearch = () => {
             <span className="text-[9px] font-extrabold text-[#475569] uppercase tracking-widest">Role:</span>
             <select
               name="persona"
+              aria-label="Filter by role"
               className="bg-transparent text-[#e2e8f0] text-[11px] font-bold outline-none cursor-pointer appearance-none pr-4"
               value={filters.persona}
               onChange={handleFilterChange}
@@ -809,6 +810,7 @@ const BulkSearch = () => {
             <span className="text-[9px] font-extrabold text-[#475569] uppercase tracking-widest">Status:</span>
             <select
               name="status"
+              aria-label="Filter by status"
               className="bg-transparent text-[#e2e8f0] text-[11px] font-bold outline-none cursor-pointer appearance-none pr-4"
               value={filters.status}
               onChange={handleFilterChange}

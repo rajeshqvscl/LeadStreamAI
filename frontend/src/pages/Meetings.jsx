@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import axios from '../services/api';
-import DatePicker from 'react-datepicker';
+const DatePicker = lazy(() => import('react-datepicker'));
 import "react-datepicker/dist/react-datepicker.css";
 import { 
   Calendar as CalendarIcon, 
@@ -554,6 +554,7 @@ const Meetings = () => {
               <div className="relative group">
                 <label className="block text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] mb-3">Target Coordinate (Local Time)</label>
                 <div className="relative">
+                  <Suspense fallback={<div className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-5 py-4 text-sm text-slate-500">Loading...</div>}>
                   <DatePicker
                     ref={datePickerRef}
                     selected={newMeetingDate}
@@ -586,6 +587,7 @@ const Meetings = () => {
                       </button>
                     </div>
                   </DatePicker>
+                  </Suspense>
                 </div>
               </div>
               <div className="flex gap-4 pt-4">
