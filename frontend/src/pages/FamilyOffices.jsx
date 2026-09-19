@@ -193,7 +193,7 @@ const FamilyOffices = () => {
               <div className="space-y-1.5">
                 <label className="text-[10px] font-black text-blue-500 uppercase tracking-widest ml-1">Target Office</label>
                 <div className="relative">
-                  <select name="office_id" className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50 appearance-none cursor-pointer">
+                  <select name="office_id" aria-label="Select target office" className="w-full bg-black/40 border border-white/10 rounded-xl py-2.5 px-4 text-sm text-white focus:outline-none focus:border-blue-500/50 appearance-none cursor-pointer">
                     <option value="">— Select Profile —</option>
                     {offices.map((o, idx) => <option key={o.id || `opt-${idx}`} value={o.id}>{o.name}</option>)}
                   </select>

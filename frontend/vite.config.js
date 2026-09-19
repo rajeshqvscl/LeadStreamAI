@@ -12,7 +12,7 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: ['html2canvas', 'jspdf'],
-    exclude: ['pdfjs-dist', 'xlsx', 'mammoth', 'dompurify', 'papaparse'],
+    exclude: ['pdfjs-dist', 'xlsx', 'mammoth', 'dompurify'],
   },
   build: {
     chunkSizeWarningLimit: 1000,
@@ -33,10 +33,10 @@ export default defineConfig({
             if (id.includes('html2canvas') || id.includes('jspdf')) {
               return 'vendor-pdf';
             }
-            if (id.includes('react-hook-form') || id.includes('react-quill') || id.includes('react-datepicker')) {
+            if (id.includes('react-datepicker')) {
               return 'vendor-forms';
             }
-            if (id.includes('xlsx') || id.includes('papaparse')) {
+            if (id.includes('xlsx')) {
               return 'vendor-excel';
             }
             if (id.includes('mammoth')) {

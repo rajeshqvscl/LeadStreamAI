@@ -306,6 +306,7 @@ const ReminderPanel = () => {
                       <div>
                         <label className="block text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Priority</label>
                         <select value={form.priority} onChange={(e) => setForm(f => ({ ...f, priority: e.target.value }))}
+                          aria-label="Priority"
                           className="w-full bg-[#0b0f19] border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50">
                           {PRIORITIES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
                         </select>

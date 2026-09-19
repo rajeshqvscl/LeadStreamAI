@@ -678,6 +678,8 @@ body {
 .light .text-slate-300 { color: #334155 !important; }
 .light .text-slate-400 { color: #64748b !important; }
 .light .text-slate-500 { color: #64748b !important; }
+.light .text-slate-600 { color: #475569 !important; }
+.light .text-gray-500 { color: #6b7280 !important; }
 .light aside a { color: #475569 !important; }
 .light aside a:hover { background-color: rgba(0,0,0,0.04) !important; color: #1e293b !important; }
 .light aside a[class*="bg-blue-600"],

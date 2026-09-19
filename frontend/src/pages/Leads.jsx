@@ -1329,6 +1329,7 @@ const Leads = () => {
             <div className="form-group">
               <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Target Persona</label>
               <select
+                aria-label="Target persona"
                 className="form-control cursor-pointer"
                 value={newLeadData.persona}
                 onChange={e => setNewLeadData({ ...newLeadData, persona: e.target.value })}

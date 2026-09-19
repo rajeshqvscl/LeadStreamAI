@@ -386,7 +386,7 @@ const Dashboard = () => {
     <div className="max-w-[1400px] mx-auto px-4 py-8">
       {/* Welcome Section */}
       <div className="bg-gradient-to-br from-blue-600/15 to-purple-500/15 border border-white/10 rounded-[32px] py-[60px] px-10 mb-10 flex flex-col justify-center items-center text-center shadow-[0_20px_40px_rgba(0,0,0,0.3)] relative overflow-hidden">
-        <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]"></div>
+        <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[url('/patterns/carbon-fibre.png')]"></div>
         <h1 className="text-[44px] font-black mb-3 tracking-tight text-white relative z-10">
           Welcome back, <span className="bg-gradient-to-r from-purple-400 to-blue-400 text-transparent bg-clip-text italic">{displayName}</span>
         </h1>
@@ -398,6 +398,7 @@ const Dashboard = () => {
           <div className="flex items-center gap-2">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Month</label>
             <select
+              aria-label="Select month"
               value={dashboardMonth}
               onChange={(e) => setDashboardMonth(parseInt(e.target.value))}
               className="bg-[#131722] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500/30 cursor-pointer"
@@ -413,6 +414,7 @@ const Dashboard = () => {
           <div className="flex items-center gap-2">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Year</label>
             <select
+              aria-label="Select year"
               value={dashboardYear}
               onChange={(e) => setDashboardYear(parseInt(e.target.value))}
               className="bg-[#131722] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500/30 cursor-pointer"
@@ -864,9 +866,27 @@ const Dashboard = () => {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh]">
-        <Loader2 className="w-12 h-12 text-blue-500 animate-spin mb-4" />
-        <p className="text-slate-400 font-black tracking-[4px] uppercase text-[10px]">Syncing Workspace Analytics...</p>
+      <div className="max-w-[1400px] mx-auto px-4 py-8">
+        {/* Welcome Section - renders immediately for LCP */}
+        <div className="bg-gradient-to-br from-blue-600/15 to-purple-500/15 border border-white/10 rounded-[32px] py-[60px] px-10 mb-10 flex flex-col justify-center items-center text-center shadow-[0_20px_40px_rgba(0,0,0,0.3)] relative overflow-hidden">
+          <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[url('/patterns/carbon-fibre.png')]"></div>
+          <h1 className="text-[44px] font-black mb-3 tracking-tight text-white relative z-10">
+            Welcome back, <span className="bg-gradient-to-r from-purple-400 to-blue-400 text-transparent bg-clip-text italic">{displayName}</span>
+          </h1>
+          <p className="text-slate-400 text-lg max-w-[600px] relative z-10">
+            Loading your pipeline analytics...
+          </p>
+        </div>
+        {/* Stats Skeleton */}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-6 mb-10">
+          {[...Array(8)].map((_, i) => (
+            <div key={i} className="bg-[#151a26] border border-white/5 rounded-3xl p-6 animate-pulse">
+              <div className="h-4 bg-white/5 rounded w-20 mb-4"></div>
+              <div className="h-8 bg-white/5 rounded w-16 mb-2"></div>
+              <div className="h-3 bg-white/5 rounded w-24"></div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

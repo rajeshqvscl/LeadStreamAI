@@ -169,6 +169,7 @@ const Settings = () => {
                 Font Family
               </label>
               <select
+                aria-label="Email font family"
                 value={prefs.email_font}
                 onChange={e => handleChange('email_font', e.target.value)}
                 className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500/50 outline-none appearance-none"
@@ -218,6 +219,7 @@ const Settings = () => {
                 Default Mode
               </label>
               <select
+                aria-label="Default signature mode"
                 value={prefs.signature_mode}
                 onChange={e => handleChange('signature_mode', e.target.value)}
                 className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:border-purple-500/50 outline-none appearance-none"
@@ -231,6 +233,7 @@ const Settings = () => {
                 Signature Font
               </label>
               <select
+                aria-label="Signature font"
                 value={prefs.signature_font}
                 onChange={e => handleChange('signature_font', e.target.value)}
                 className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:border-purple-500/50 outline-none appearance-none"
@@ -290,6 +293,7 @@ const Settings = () => {
                 Team
               </label>
               <select
+                aria-label="Team"
                 value={prefs.team}
                 onChange={e => handleChange('team', e.target.value)}
                 className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:border-amber-500/50 outline-none appearance-none"

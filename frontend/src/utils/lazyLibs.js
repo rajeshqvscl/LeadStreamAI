@@ -29,11 +29,6 @@ export const LazyXLSX = {
   XLSX: lazy(() => import('xlsx').then(m => ({ default: m.default }))),
 };
 
-// Papa Parse - lazy loaded
-export const LazyPapa = {
-  Papa: lazy(() => import('papaparse').then(m => ({ default: m.default }))),
-};
-
 // React Markdown - lazy loaded
 export const LazyMarkdown = {
   ReactMarkdown: lazy(() => import('react-markdown').then(m => ({ default: m.default }))),
@@ -54,19 +49,9 @@ export const LazyDOMPurify = {
   DOMPurify: lazy(() => import('dompurify').then(m => ({ default: m.default }))),
 };
 
-// React Quill - lazy loaded
-export const LazyQuill = {
-  ReactQuill: lazy(() => import('react-quill').then(m => ({ default: m.default }))),
-};
-
 // React Dropzone - lazy loaded
 export const LazyDropzone = {
   useDropzone: lazy(() => import('react-dropzone').then(m => ({ default: m.useDropzone }))),
-};
-
-// Sanitize HTML - lazy loaded
-export const LazySanitize = {
-  sanitizeHtml: lazy(() => import('../utils/sanitizeHtml').then(m => ({ default: m.sanitizeHtml }))),
 };
 
 // PDF.js - already handled via pdfWorker.js

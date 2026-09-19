@@ -159,7 +159,7 @@ const GenerateSector = () => {
                   <div className="space-y-4 pt-6 border-t border-white/5 mt-auto">
                     <div className="space-y-1.5">
                       <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-1">Apply Campaign</label>
-                      <select className="form-control text-xs bg-black/20 border-white/10 rounded-xl appearance-none">
+                      <select aria-label="Apply campaign" className="form-control text-xs bg-black/20 border-white/10 rounded-xl appearance-none">
                         <option value="">No Global Campaign</option>
                         {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
@@ -168,7 +168,7 @@ const GenerateSector = () => {
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
                         <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-1">Batch Limit</label>
-                        <select className="form-control text-xs bg-black/20 border-white/10 rounded-xl appearance-none">
+                        <select aria-label="Batch limit" className="form-control text-xs bg-black/20 border-white/10 rounded-xl appearance-none">
                           <option value="10">10 Leads</option>
                           <option value="25">25 Leads</option>
                           <option value="50">50 Leads</option>

@@ -934,6 +934,7 @@ const CompanyDatabase = () => {
             <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Status</label>
             <div className="relative group/select">
               <select
+                aria-label="Filter by status"
                 className="w-full appearance-none bg-[#0d1117] border border-white/5 rounded-xl px-4 py-2.5 text-[11px] text-white focus:outline-none focus:border-blue-500/30 transition-all cursor-pointer"
                 value={columnFilters['generated'] || ''}
                 onChange={(e) => {
@@ -956,6 +957,7 @@ const CompanyDatabase = () => {
                 <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">{header.replace(/_/g, ' ')}</label>
                 <div className="relative group/select">
                   <select
+                    aria-label={`Filter by ${header.replace(/_/g, ' ')}`}
                     className="w-full appearance-none bg-[#0d1117] border border-white/5 rounded-xl px-4 py-2.5 text-[11px] text-white focus:outline-none focus:border-blue-500/30 transition-all cursor-pointer"
                     value={columnFilters[header] || ''}
                     onChange={(e) => {
